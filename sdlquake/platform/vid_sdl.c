@@ -45,7 +45,6 @@ static SDL_Texture  *sdl_texture  = NULL;
 #define VID_HEIGHT 200
 
 static byte vid_buffer[VID_WIDTH * VID_HEIGHT];
-static byte con_buffer[VID_WIDTH * VID_HEIGHT];
 
 // ---------------------------------------------------------------------------
 // Palette helpers
@@ -124,7 +123,7 @@ void VID_Init(unsigned char *palette)
     vid.colormap   = host_colormap;
     vid.fullbright = 256 - LittleLong(*((int *)vid.colormap + 2048));
     vid.buffer     = vid_buffer;
-    vid.conbuffer  = con_buffer;
+    vid.conbuffer  = vid_buffer; // same framebuffer — Draw_Character writes here
     vid.conwidth   = VID_WIDTH;
     vid.conheight  = VID_HEIGHT;
     vid.conrowbytes = VID_WIDTH;
