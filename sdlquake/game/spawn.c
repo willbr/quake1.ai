@@ -20,6 +20,9 @@ void spawn_info_player_deathmatch(edict_t *e);
 void spawn_info_player_coop(edict_t *e);
 void spawn_trigger_changelevel(edict_t *e);
 
+// ai.c
+void spawn_path_corner(edict_t *e);
+
 // items.c
 void spawn_noclass(edict_t *e);
 void spawn_item_health(edict_t *e);
@@ -55,6 +58,8 @@ static const spawn_entry_t s_spawns[] = {
     { "info_player_deathmatch",  spawn_info_player_deathmatch },
     { "info_player_coop",        spawn_info_player_coop     },
     { "trigger_changelevel",     spawn_trigger_changelevel  },
+    // ai.c
+    { "path_corner",                  spawn_path_corner                     },
     // items.c
     { "noclass",                          spawn_noclass                         },
     { "item_health",                      spawn_item_health                     },
