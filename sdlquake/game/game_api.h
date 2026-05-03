@@ -55,7 +55,7 @@ typedef struct {
     float    framecount;
     edict_t *newmis;         // set by launch_spike after spawning
 
-    // map name (set at level load)
+    // map name (set at level load; points to persistent sv.name, not a temp buffer)
     const char *mapname;
 } game_globals_t;
 
@@ -63,7 +63,6 @@ typedef struct {
 // engine_api_t — functions the engine exposes to the game DLL.
 // ---------------------------------------------------------------------------
 typedef struct engine_api_s {
-    // Phase 3 (unchanged)
     void   (*Con_Print)(const char *msg);
     void   (*Cvar_SetValue)(const char *name, float value);
     float  (*Cvar_VariableValue)(const char *name);
