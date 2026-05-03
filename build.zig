@@ -12,6 +12,10 @@ pub fn build(b: *std.Build) void {
         "-std=gnu89",
         "-fcommon",
         "-w",
+        // Original engine code intentionally relies on float->int truncation and
+        // other patterns that are UB by the C standard but well-defined on x86.
+        // Suppress UBSan so these don't panic at runtime.
+        "-fno-sanitize=undefined",
     };
     const platform_c_flags: []const []const u8 = &.{
         "-DSDLQUAKE",
