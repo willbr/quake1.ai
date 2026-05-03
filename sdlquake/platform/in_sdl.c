@@ -93,6 +93,9 @@ void IN_ProcessEvents(void)
                 break;
             }
 
+            // Overlay open — all other keys go to ImGui only.
+            if (ImguiLayer_IsOpen()) break;
+
             qboolean down = (ev.key.type == SDL_EVENT_KEY_DOWN);
             int qkey = sdl_scancode_to_quake(ev.key.scancode);
             if (qkey == -1)
