@@ -1,0 +1,25 @@
+name: CI
+on:
+  push:
+    tags:
+      - '**'
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  packages: write
+  contents: write
+
+jobs:
+  linux:
+    uses: ./.github/workflows/ci-linux.yml
+    secrets: inherit
+
+  macos:
+    uses: ./.github/workflows/ci-macos.yml
+    secrets: inherit
+
+  windows:
+    uses: ./.github/workflows/ci-windows.yml
+    secrets: inherit

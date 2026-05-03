@@ -1,0 +1,52 @@
+diff --git a/engine/common/fs.c b/engine/common/fs.c
+index 68b59d1b9..412d01bb7 100644
+--- a/engine/common/fs.c
++++ b/engine/common/fs.c
+@@ -466,7 +466,7 @@ static searchpath_t *gameonly_gamedir;
+ 
+ char	com_gamepath[MAX_OSPATH];	//c:\games\quake
+ char	com_homepath[MAX_OSPATH];	//c:\users\foo\my docs\fte\quake
+-qboolean	com_homepathenabled;
++qboolean	com_homepathenabled = true;
+ static qboolean	com_homepathusable;	//com_homepath is safe, even if not enabled.
+ 
+ //char	com_configdir[MAX_OSPATH];	//homedir/fte/configs
+@@ -2527,20 +2527,21 @@ static const char *FS_GetCleanPath(const char *pattern, qboolean silent, char *o
+ 		if (*s == ':')
+ 		{
+ 			if (s == pattern+1 && (s[1] == '/' || s[1] == '\\'))
+-				Con_ThrottlePrintf(&throttletimer, 0, "Error: absolute path in filename %s\n", pattern);
+-			else
++				Con_ThrottlePrintf(&throttletimer, 0, "Warning: absolute path in filename %s\n", pattern);
++			else {
+ 				Con_ThrottlePrintf(&throttletimer, 0, "Error: alternative data stream in filename %s\n", pattern);
+-			return NULL;
++				return NULL;
++			}
+ 		}
+ 		else if (*s == '\\' || *s == '/' || !*s)
+ 		{	//end of segment
+ 			if (o == seg)
+ 			{
+-				if (o == outbuf)
+-				{
+-					Con_ThrottlePrintf(&throttletimer, 0, "Error: absolute path in filename %s\n", pattern);
+-					return NULL;
+-				}
++				// if (o == outbuf)
++				// {
++				// 	Con_ThrottlePrintf(&throttletimer, 0, "Error: absolute path in filename %s\n", pattern);
++				// 	return NULL;
++				// }
+ 				if (!*s)
+ 				{
+ 					*o++ = '\0';
+@@ -2987,7 +2988,7 @@ vfsfile_t *QDECL FS_OpenVFS(const char *filename, const char *mode, enum fs_rela
+ 			}
+ 			else
+ 			{
+-				if (!try_snprintf(fullname, sizeof(fullname), "%s%s/%s", com_homepath, gamedirfile, filename))
++				if (!try_snprintf(fullname, sizeof(fullname), "%s/%s", com_homepath, filename))
+ 					return NULL;
+ 				if (*mode == 'w')
+ 					COM_CreatePath(fullname);
