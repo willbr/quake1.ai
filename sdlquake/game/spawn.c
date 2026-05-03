@@ -63,6 +63,11 @@ void spawn_func_door_secret(edict_t *e);
 // buttons.c
 void spawn_func_button(edict_t *e);
 
+// plats.c
+void spawn_func_plat(edict_t *e);
+void spawn_func_train(edict_t *e);
+void spawn_misc_teleporttrain(edict_t *e);
+
 // triggers.c
 void spawn_trigger_multiple(edict_t *e);
 void spawn_trigger_once(edict_t *e);
@@ -151,6 +156,10 @@ static const spawn_entry_t s_spawns[] = {
     { "func_door_secret",             spawn_func_door_secret                },
     // buttons.c
     { "func_button",                  spawn_func_button                     },
+    // plats.c
+    { "func_plat",                    spawn_func_plat                       },
+    { "func_train",                   spawn_func_train                      },
+    { "misc_teleporttrain",           spawn_misc_teleporttrain              },
     // triggers.c
     { "trigger_multiple",             spawn_trigger_multiple                },
     { "trigger_once",                 spawn_trigger_once                    },
