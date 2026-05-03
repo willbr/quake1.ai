@@ -67,6 +67,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/platform/snd_sdl.c",
         "sdlquake/platform/net_sdl.c",
         "sdlquake/mcp/mcp_server.c",
+        "sdlquake/engine/hotreload.c",
     };
 
     // ---------------------------------------------------------------------------
@@ -91,6 +92,8 @@ pub fn build(b: *std.Build) void {
     // Platform stubs come first so our winquake.h / mgraph.h shadow the originals.
     mod.addIncludePath(b.path("sdlquake/platform"));
     mod.addIncludePath(b.path("sdlquake/mcp"));
+    mod.addIncludePath(b.path("sdlquake/engine"));
+    mod.addIncludePath(b.path("sdlquake/game"));
     mod.addIncludePath(b.path(wq_dir));
 
     // ---------------------------------------------------------------------------
@@ -101,6 +104,34 @@ pub fn build(b: *std.Build) void {
     mod.addLibraryPath(b.path(sdl3_dir ++ "/lib/x64"));
     mod.linkSystemLibrary("SDL3", .{});
     mod.linkSystemLibrary("ws2_32", .{});  // Winsock for net_dgrm.c (inet_ntoa/inet_addr)
+
+    // ---------------------------------------------------------------------------
+    // Game DLL (hot-reloadable)
+    // ---------------------------------------------------------------------------
+    const game_mod = b.createModule(.{
+        .target    = target,
+        .optimize  = optimize,
+        .link_libc = true,
+    });
+    game_mod.addIncludePath(b.path("sdlquake/game"));
+    game_mod.addIncludePath(b.path("sdlquake/engine"));
+    game_mod.addCSourceFiles(.{
+        .files = &.{"sdlquake/game/game_main.c"},
+        .flags = &.{ "-std=c11", "-fno-strict-aliasing", "-w" },
+    });
+    const game_lib = b.addLibrary(.{
+        .name        = "game",
+        .root_module = game_mod,
+        .linkage     = .dynamic,
+    });
+
+    // Install game.dll alongside quake.exe (part of the default build).
+    const game_install = b.addInstallArtifact(game_lib, .{});
+    b.getInstallStep().dependOn(&game_install.step);
+
+    // `zig build game` rebuilds only the game DLL — fast hot-reload iteration.
+    const game_step = b.step("game", "Rebuild game.dll only (hot-reload iteration)");
+    game_step.dependOn(&game_install.step);
 
     // ---------------------------------------------------------------------------
     // Executable

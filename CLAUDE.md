@@ -22,7 +22,9 @@ This project is a port of the original WinQuake (1996 software renderer) from Wi
 - `Quake-master/WinQuake/` — upstream WinQuake source, **never modify**. Used as-is by `build.zig` (`wq_dir`).
 - `sdlquake/platform/` — SDL3 platform layer; these are the files we own and edit.
 - `sdlquake/vendor/SDL3-3.4.8/` — vendored SDL3 headers + pre-built `.dll`/`.lib` for x64 Windows.
-- `sdlquake/mcp/` — MCP server (Phase 2, in progress).
+- `sdlquake/mcp/` — MCP server (Phase 2, complete).
+- `sdlquake/engine/` — engine-side hot-reload machinery (Phase 3).
+- `sdlquake/game/` — hot-reloadable game DLL source (Phase 3).
 
 ### Platform layer files
 
@@ -54,17 +56,34 @@ Platform files (`sdlquake/platform/*.c`) omit `-std=gnu89` (they're written in m
 
 Fixed 320×200 resolution. Each frame: Quake's software renderer writes 8-bit palette indices into `vid.buffer`. `VID_Update()` expands to 32-bit ARGB via `d_8to24table` and uploads to an `SDL_TEXTUREACCESS_STREAMING` texture, then presents. `SDL_SetRenderLogicalPresentation` with `INTEGER_SCALE` keeps pixels crisp at any window size.
 
-### MCP server (Phase 2, in progress)
+### MCP server (Phase 2)
 
-Planned: `sdlquake/mcp/mcp_server.c` — stdio JSON-RPC 2.0. A background thread reads stdin, parses with `jsmn` (single-header tokenizer), and pushes requests to a queue. The main loop calls `MCP_Frame()` each frame to drain the queue and write responses to stdout. All game-state access happens on the main thread to avoid races. Enabled with `--mcp` flag. MVP tools: `get_player_state`, `list_entities`, `set_cvar`.
+`sdlquake/mcp/mcp_server.c` — stdio JSON-RPC 2.0. A background thread reads stdin line-by-line and pushes to a mutex-protected queue. The main loop calls `MCP_Frame()` each frame to drain and respond. All game-state access on the main thread. Enabled with `--mcp` flag. Tools: `get_player_state`, `list_entities`, `set_cvar`. See `.mcp.json` for Claude Code integration.
+
+### Hot-reload game DLL (Phase 3)
+
+`sdlquake/engine/hotreload.c` + `sdlquake/game/` — `game_api_t` ABI separates game logic from the engine. `HotReload_Frame()` polls `zig-out/bin/game.dll` mtime every ~1 s; on change it copies the DLL to `game_loaded.dll` (so zig can overwrite the original), unloads the old copy, loads the new one, and calls `game_api->init()` again. The fast iteration workflow is `zig build game` in a separate terminal.
+
+`game_api.h` defines two vtable structs:
+- `engine_api_t` — functions the engine exposes (Con_Print, Cvar_SetValue, Cvar_VariableValue, Sys_FloatTime)
+- `game_api_t` — functions the DLL exposes (version, init, shutdown, server_frame)
+
+Bump `GAME_API_VERSION` in `game_api.h` whenever the struct layout changes; the loader rejects mismatched DLLs.
+
+### Build commands
+
+```sh
+zig build run -- +map e1m1    # build everything (engine + game.dll) and run
+zig build game                # rebuild only game.dll (fast hot-reload iteration)
+```
 
 ### Phases
 
 | Phase | Status | Goal |
 |---|---|---|
 | 1 | ✅ done | SDL3 port + Zig build |
-| 2 | in progress | MCP server |
-| 3 | planned | Hot-reload (`game_api_t` ABI, `game.dll`) |
+| 2 | ✅ done | MCP server |
+| 3 | ✅ done | Hot-reload (`game_api_t` ABI, `game.dll`) |
 | 4 | planned | cimgui overlay + SQLite |
 | 5 | planned | In-game 3D map editor + QuakeC → C |
 

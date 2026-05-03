@@ -7,6 +7,7 @@
 #include <errno.h>
 
 #include "mcp_server.h"
+#include "hotreload.h"
 
 #ifdef _WIN32
 #include <direct.h>
@@ -210,6 +211,7 @@ int main(int argc, char **argv)
 
     Sys_Printf("Host_Init\n");
     Host_Init(&parms);
+    HotReload_Init();
 
     double oldtime = Sys_FloatTime();
     while (1)
@@ -217,6 +219,7 @@ int main(int argc, char **argv)
         double newtime = Sys_FloatTime();
         double dt = newtime - oldtime;
         Host_Frame(dt);
+        HotReload_Frame((float)dt);
         if (mcp_active)
             MCP_Frame();
         oldtime = newtime;

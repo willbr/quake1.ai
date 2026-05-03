@@ -1,0 +1,148 @@
+// hotreload.c -- hot-reloadable game DLL loader
+//
+// Strategy:
+//   - game.dll is compiled by `zig build game` into zig-out/bin/
+//   - On first call to HotReload_Init(), the DLL is copied to
+//     game_loaded.dll and that copy is loaded.  Keeping a separate
+//     copy lets zig overwrite game.dll while we're running.
+//   - HotReload_Frame() checks game.dll's mtime every ~1 s.
+//     When it changes, the old DLL is unloaded, the new one copied
+//     and loaded, and game_api->init() is called again.
+//   - All DLL calls happen on the main thread — no locking needed.
+
+#include <SDL3/SDL.h>
+#include <stdio.h>
+
+#include "game_api.h"
+#include "hotreload.h"
+
+// Paths relative to the working directory (project root when using zig build run).
+#define GAME_DLL_SRC  "zig-out/bin/game.dll"
+#define GAME_DLL_LOAD "zig-out/bin/game_loaded.dll"
+
+// Forward-declare the Quake engine functions we wrap for the game DLL.
+void  Con_Printf(char *fmt, ...);
+void  Cvar_Set(char *var_name, char *value);
+float Cvar_VariableValue(char *var_name);
+double Sys_FloatTime(void);
+
+// ---------------------------------------------------------------------------
+// Engine API passed into game DLL
+// ---------------------------------------------------------------------------
+
+static void engine_con_print(const char *msg)
+{
+    Con_Printf("%s", msg);
+}
+
+static void engine_cvar_set_value(const char *name, float value)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%g", value);
+    Cvar_Set((char *)name, buf);
+}
+
+static float engine_cvar_variable_value(const char *name)
+{
+    return Cvar_VariableValue((char *)name);
+}
+
+static engine_api_t engine_funcs = {
+    engine_con_print,
+    engine_cvar_set_value,
+    engine_cvar_variable_value,
+    Sys_FloatTime,
+};
+
+// ---------------------------------------------------------------------------
+// DLL state
+// ---------------------------------------------------------------------------
+
+static SDL_SharedObject *game_so    = NULL;
+static game_api_t       *game_api_g = NULL;
+static SDL_Time          dll_mtime  = 0;
+
+static SDL_Time get_mtime(const char *path)
+{
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(path, &info)) return 0;
+    return info.modify_time;
+}
+
+static void do_unload(void)
+{
+    if (game_api_g) { game_api_g->shutdown(); game_api_g = NULL; }
+    if (game_so)    { SDL_UnloadObject(game_so); game_so = NULL; }
+}
+
+static void do_load(void)
+{
+    do_unload();
+
+    // Copy so zig can overwrite game.dll while game_loaded.dll stays mapped.
+    if (!SDL_CopyFile(GAME_DLL_SRC, GAME_DLL_LOAD))
+    {
+        Con_Printf("hotreload: copy failed: %s\n", SDL_GetError());
+        return;
+    }
+
+    game_so = SDL_LoadObject(GAME_DLL_LOAD);
+    if (!game_so)
+    {
+        Con_Printf("hotreload: load failed: %s\n", SDL_GetError());
+        return;
+    }
+
+    Game_GetAPI_fn get_api =
+        (Game_GetAPI_fn)(void *)SDL_LoadFunction(game_so, "Game_GetAPI");
+    if (!get_api)
+    {
+        Con_Printf("hotreload: Game_GetAPI not found\n");
+        SDL_UnloadObject(game_so); game_so = NULL;
+        return;
+    }
+
+    game_api_t *api = get_api();
+    if (!api || api->version != GAME_API_VERSION)
+    {
+        Con_Printf("hotreload: ABI version mismatch (want %d)\n", GAME_API_VERSION);
+        SDL_UnloadObject(game_so); game_so = NULL;
+        return;
+    }
+
+    game_api_g = api;
+    game_api_g->init(&engine_funcs);
+    dll_mtime = get_mtime(GAME_DLL_SRC);
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+#define RELOAD_CHECK_INTERVAL 60   // frames between mtime polls (~1 s at 60 fps)
+
+void HotReload_Init(void)
+{
+    SDL_Time t = get_mtime(GAME_DLL_SRC);
+    if (t != 0) do_load();
+}
+
+void HotReload_Frame(float dt)
+{
+    static int counter = 0;
+    if (++counter >= RELOAD_CHECK_INTERVAL)
+    {
+        counter = 0;
+        SDL_Time t = get_mtime(GAME_DLL_SRC);
+        if (t != 0 && t != dll_mtime)
+            do_load();
+    }
+
+    if (game_api_g)
+        game_api_g->server_frame(dt);
+}
+
+void HotReload_Shutdown(void)
+{
+    do_unload();
+}
