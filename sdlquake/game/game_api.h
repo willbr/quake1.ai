@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 3
+#define GAME_API_VERSION 4
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -18,6 +18,10 @@ typedef float vec3_t[3];
 typedef struct {
     float    time;
     float    frametime;
+    float    force_retouch;  // decremented each frame; triggers full entity retouch
+    float    deathmatch;
+    float    coop;
+    float    teamplay;
     edict_t *self;
     edict_t *other;
     edict_t *world;

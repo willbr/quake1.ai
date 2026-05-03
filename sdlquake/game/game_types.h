@@ -20,6 +20,7 @@ typedef void (*painfn_t)(edict_t *self, edict_t *attacker, float damage);
 // This struct is embedded as edict_t.v in the engine's edict_t definition.
 // IMPORTANT: The layout of the engine's edict_t shell (free, area, leafnums,
 // baseline, freetime) is NOT changed. Only entvars_t v changes.
+// Canonical VM field reference: Quake-master/WinQuake/progdefs.q1
 // ---------------------------------------------------------------------------
 typedef struct entvars_s {
     // Identity
@@ -96,7 +97,7 @@ typedef struct entvars_s {
     float   axhitme, show_hostile, jump_flag, swim_flag;
     float   air_finished, bubble_count;
     float   walkframe;
-    int     flags;
+    float   flags;
 
     // Monster AI
     float   speed, lefty, search_time, attack_state;
@@ -109,9 +110,6 @@ typedef struct entvars_s {
     float   light_lev, style;
     float   cnt, count;
     float   sounds, volume, distance, waitmin, waitmax;
-
-    // Doors / triggers
-    float   aflag2;
 } entvars_t;
 
 #endif // GAME_TYPES_H
