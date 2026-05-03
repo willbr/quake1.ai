@@ -112,4 +112,29 @@ typedef struct entvars_s {
     float   sounds, volume, distance, waitmin, waitmax;
 } entvars_t;
 
+// ---------------------------------------------------------------------------
+// edict_t -- engine entity allocation block.
+// Shell layout must match progs.h in the engine exactly.
+// At NATIVE_GAME=1 cutover, the engine is recompiled against this header
+// so both sides share the same struct definition.
+// ---------------------------------------------------------------------------
+#define MAX_ENT_LEAFS 16
+
+typedef struct link_s { struct link_s *prev, *next; } link_t;
+
+typedef struct {
+    vec3_t  origin, angles;
+    int     modelindex, frame, colormap, skin, effects;
+} entity_state_t;
+
+struct edict_s {
+    int            free;
+    link_t         area;
+    int            num_leafs;
+    short          leafnums[MAX_ENT_LEAFS];
+    entity_state_t baseline;
+    float          freetime;
+    entvars_t      v;
+};
+
 #endif // GAME_TYPES_H
