@@ -63,6 +63,20 @@ void spawn_func_door_secret(edict_t *e);
 // buttons.c
 void spawn_func_button(edict_t *e);
 
+// triggers.c
+void spawn_trigger_multiple(edict_t *e);
+void spawn_trigger_once(edict_t *e);
+void spawn_trigger_relay(edict_t *e);
+void spawn_trigger_secret(edict_t *e);
+void spawn_trigger_counter(edict_t *e);
+void spawn_info_teleport_destination(edict_t *e);
+void spawn_trigger_teleport(edict_t *e);
+void spawn_trigger_setskill(edict_t *e);
+void spawn_trigger_onlyregistered(edict_t *e);
+void spawn_trigger_hurt(edict_t *e);
+void spawn_trigger_push(edict_t *e);
+void spawn_trigger_monsterjump(edict_t *e);
+
 // items.c
 void spawn_noclass(edict_t *e);
 void spawn_item_health(edict_t *e);
@@ -137,6 +151,19 @@ static const spawn_entry_t s_spawns[] = {
     { "func_door_secret",             spawn_func_door_secret                },
     // buttons.c
     { "func_button",                  spawn_func_button                     },
+    // triggers.c
+    { "trigger_multiple",             spawn_trigger_multiple                },
+    { "trigger_once",                 spawn_trigger_once                    },
+    { "trigger_relay",                spawn_trigger_relay                   },
+    { "trigger_secret",               spawn_trigger_secret                  },
+    { "trigger_counter",              spawn_trigger_counter                 },
+    { "info_teleport_destination",    spawn_info_teleport_destination       },
+    { "trigger_teleport",             spawn_trigger_teleport                },
+    { "trigger_setskill",             spawn_trigger_setskill                },
+    { "trigger_onlyregistered",       spawn_trigger_onlyregistered          },
+    { "trigger_hurt",                 spawn_trigger_hurt                    },
+    { "trigger_push",                 spawn_trigger_push                    },
+    { "trigger_monsterjump",          spawn_trigger_monsterjump             },
     // items.c
     { "noclass",                          spawn_noclass                         },
     { "item_health",                      spawn_item_health                     },
