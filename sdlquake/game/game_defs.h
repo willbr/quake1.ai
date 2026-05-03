@@ -140,6 +140,12 @@
 #define EF_BRIGHTLIGHT 4
 #define EF_DIMLIGHT    8
 
+// update types (client.qc parm_update)
+#define UPDATE_GENERAL 0
+#define UPDATE_STATIC  1
+#define UPDATE_BINARY  2
+#define UPDATE_TEMP    3
+
 // attack state (monster AI)
 #define AS_STRAIGHT 1
 #define AS_SLIDING  2
