@@ -165,6 +165,7 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/buttons.c",
             "sdlquake/game/triggers.c",
             "sdlquake/game/plats.c",
+            "sdlquake/game/monsters.c",
         },
         .flags = &.{ "-std=c11", "-fno-strict-aliasing", "-w" },
     });
