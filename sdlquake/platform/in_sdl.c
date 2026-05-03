@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include "quakedef.h"
 #include "winquake.h"
+#include "imgui_layer.h"
 
 // Winsock lib is not used in our SDL net layer
 qboolean winsock_lib_initialized = false;
@@ -72,6 +73,9 @@ void IN_ProcessEvents(void)
     SDL_Event ev;
     while (SDL_PollEvent(&ev))
     {
+        // Feed every event to ImGui before Quake sees it.
+        ImguiLayer_ProcessEvent(&ev);
+
         switch (ev.type)
         {
         case SDL_EVENT_QUIT:
@@ -81,6 +85,14 @@ void IN_ProcessEvents(void)
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP:
         {
+            // F12 toggles the dev overlay; don't pass to Quake.
+            if (ev.key.scancode == SDL_SCANCODE_F12)
+            {
+                if (ev.key.type == SDL_EVENT_KEY_DOWN)
+                    ImguiLayer_Toggle();
+                break;
+            }
+
             qboolean down = (ev.key.type == SDL_EVENT_KEY_DOWN);
             int qkey = sdl_scancode_to_quake(ev.key.scancode);
             if (qkey == -1)
@@ -98,7 +110,8 @@ void IN_ProcessEvents(void)
         }
 
         case SDL_EVENT_MOUSE_MOTION:
-            if (mouse_active)
+            // Don't accumulate game mouse when overlay is open (mouse is free).
+            if (mouse_active && !ImguiLayer_IsOpen())
             {
                 mouse_dx += (int)ev.motion.xrel;
                 mouse_dy += (int)ev.motion.yrel;

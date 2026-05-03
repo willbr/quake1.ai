@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include "quakedef.h"
 #include "winquake.h"
+#include "imgui_layer.h"
 
 // ---------------------------------------------------------------------------
 // Globals that Win32 platform files normally define
@@ -133,6 +134,8 @@ void VID_Init(unsigned char *palette)
 
     build_palette(palette);
 
+    ImguiLayer_Init(sdl_window, sdl_renderer);
+
     // Allocate z-buffer and surface cache from the hunk (as vid_win.c does)
     {
         extern short *d_pzbuffer;
@@ -150,6 +153,7 @@ void VID_Init(unsigned char *palette)
 
 void VID_Shutdown(void)
 {
+    ImguiLayer_Shutdown();
     if (sdl_texture)  { SDL_DestroyTexture(sdl_texture);   sdl_texture  = NULL; }
     if (sdl_renderer) { SDL_DestroyRenderer(sdl_renderer); sdl_renderer = NULL; }
     if (sdl_window)   { SDL_DestroyWindow(sdl_window);     sdl_window   = NULL; }
@@ -179,6 +183,7 @@ void VID_Update(vrect_t *rects)
     SDL_UnlockTexture(sdl_texture);
     SDL_RenderClear(sdl_renderer);
     SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
+    ImguiLayer_Render();
     SDL_RenderPresent(sdl_renderer);
 }
 

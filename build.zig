@@ -68,15 +68,24 @@ pub fn build(b: *std.Build) void {
         "sdlquake/platform/net_sdl.c",
         "sdlquake/mcp/mcp_server.c",
         "sdlquake/engine/hotreload.c",
+        "sdlquake/engine/imgui_layer.c",
+    };
+
+    const imgui_dir = "sdlquake/vendor/imgui-1.92.8";
+    const imgui_cpp_flags: []const []const u8 = &.{
+        "-std=c++17",
+        "-fno-strict-aliasing",
+        "-w",
     };
 
     // ---------------------------------------------------------------------------
     // Root module (Zig 0.16: C files / includes / libs live on the Module)
     // ---------------------------------------------------------------------------
     const mod = b.createModule(.{
-        .target    = target,
-        .optimize  = optimize,
-        .link_libc = true,
+        .target      = target,
+        .optimize    = optimize,
+        .link_libc   = true,
+        .link_libcpp = true,
     });
 
     mod.addCSourceFiles(.{
@@ -88,6 +97,27 @@ pub fn build(b: *std.Build) void {
         .files = platform_files,
         .flags = platform_c_flags,
     });
+
+    // imgui Quake-state shim (includes quakedef.h, needs SDLQUAKE defined)
+    mod.addCSourceFiles(.{
+        .files = &.{"sdlquake/engine/imgui_support.c"},
+        .flags = platform_c_flags,
+    });
+
+    // Dear ImGui core + SDL3/SDL_Renderer backends + our C++ bridge (no logic)
+    mod.addCSourceFiles(.{
+        .files = &.{
+            imgui_dir ++ "/imgui.cpp",
+            imgui_dir ++ "/imgui_draw.cpp",
+            imgui_dir ++ "/imgui_tables.cpp",
+            imgui_dir ++ "/imgui_widgets.cpp",
+            imgui_dir ++ "/backends/imgui_impl_sdl3.cpp",
+            imgui_dir ++ "/backends/imgui_impl_sdlrenderer3.cpp",
+            "sdlquake/engine/imgui_bridge.cpp",
+        },
+        .flags = imgui_cpp_flags,
+    });
+    mod.addIncludePath(b.path(imgui_dir));
 
     // Platform stubs come first so our winquake.h / mgraph.h shadow the originals.
     mod.addIncludePath(b.path("sdlquake/platform"));
