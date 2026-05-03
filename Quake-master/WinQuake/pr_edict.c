@@ -903,19 +903,19 @@ to call ED_CallSpawnFunctions () to let the objects initialize themselves.
 ================
 */
 void ED_LoadFromFile (char *data)
-{	
+{
 	edict_t		*ent;
 	int			inhibit;
 	dfunction_t	*func;
-	
+
 	ent = NULL;
 	inhibit = 0;
 	pr_global_struct->time = sv.time;
-	
+
 // parse ents
 	while (1)
 	{
-// parse the opening brace	
+// parse the opening brace
 		data = COM_Parse (data);
 		if (!data)
 			break;
@@ -933,7 +933,7 @@ void ED_LoadFromFile (char *data)
 		{
 			if (((int)ent->v.spawnflags & SPAWNFLAG_NOT_DEATHMATCH))
 			{
-				ED_Free (ent);	
+				ED_Free (ent);
 				inhibit++;
 				continue;
 			}
@@ -942,7 +942,7 @@ void ED_LoadFromFile (char *data)
 				|| (current_skill == 1 && ((int)ent->v.spawnflags & SPAWNFLAG_NOT_MEDIUM))
 				|| (current_skill >= 2 && ((int)ent->v.spawnflags & SPAWNFLAG_NOT_HARD)) )
 		{
-			ED_Free (ent);	
+			ED_Free (ent);
 			inhibit++;
 			continue;
 		}
@@ -971,7 +971,7 @@ void ED_LoadFromFile (char *data)
 
 		pr_global_struct->self = EDICT_TO_PROG(ent);
 		PR_ExecuteProgram (func - pr_functions);
-	}	
+	}
 
 	Con_DPrintf ("%i entities inhibited\n", inhibit);
 }
@@ -1057,6 +1057,13 @@ void PR_LoadProgs (void)
 
 	for (i=0 ; i<progs->numglobals ; i++)
 		((int *)pr_globals)[i] = LittleLong (((int *)pr_globals)[i]);
+
+	// Allocate temp string buffer inside hunk so pr_string_temp - pr_strings
+	// fits in a 32-bit string_t on x64 (static BSS addresses would not).
+	{
+		extern char *pr_string_temp;
+		pr_string_temp = Hunk_AllocName (128, "strtmp");
+	}
 }
 
 

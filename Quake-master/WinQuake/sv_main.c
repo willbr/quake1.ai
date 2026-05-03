@@ -1135,12 +1135,12 @@ void SV_SpawnServer (char *server)
 		return;
 	}
 	sv.models[1] = sv.worldmodel;
-	
+
 //
 // clear world interaction links
 //
 	SV_ClearWorld ();
-	
+
 	sv.sound_precache[0] = pr_strings;
 
 	sv.model_precache[0] = pr_strings;
@@ -1153,11 +1153,11 @@ void SV_SpawnServer (char *server)
 
 //
 // load the rest of the entities
-//	
+//
 	ent = EDICT_NUM(0);
 	memset (&ent->v, 0, progs->entityfields * 4);
 	ent->free = false;
-	ent->v.model = sv.worldmodel->name - pr_strings;
+	ent->v.model = ED_NewString(sv.worldmodel->name) - pr_strings;
 	ent->v.modelindex = 1;		// world model
 	ent->v.solid = SOLID_BSP;
 	ent->v.movetype = MOVETYPE_PUSH;
@@ -1167,21 +1167,21 @@ void SV_SpawnServer (char *server)
 	else
 		pr_global_struct->deathmatch = deathmatch.value;
 
-	pr_global_struct->mapname = sv.name - pr_strings;
+	pr_global_struct->mapname = ED_NewString(sv.name) - pr_strings;
 #ifdef QUAKE2
 	pr_global_struct->startspot = sv.startspot - pr_strings;
 #endif
 
 // serverflags are for cross level information (sigils)
 	pr_global_struct->serverflags = svs.serverflags;
-	
+
 	ED_LoadFromFile (sv.worldmodel->entities);
 
 	sv.active = true;
 
 // all setup is completed, any further precache statements are errors
 	sv.state = ss_active;
-	
+
 // run two frames to allow everything to settle
 	host_frametime = 0.1;
 	SV_Physics ();

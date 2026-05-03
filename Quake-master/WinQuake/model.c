@@ -1001,12 +1001,12 @@ void Mod_MakeHull0 (void)
 	dclipnode_t *out;
 	int			i, j, count;
 	hull_t		*hull;
-	
-	hull = &loadmodel->hulls[0];	
-	
+
+	hull = &loadmodel->hulls[0];
+
 	in = loadmodel->nodes;
 	count = loadmodel->numnodes;
-	out = Hunk_AllocName ( count*sizeof(*out), loadname);	
+	out = Hunk_AllocName ( count*sizeof(*out), loadname);
 
 	hull->clipnodes = out;
 	hull->firstclipnode = 0;
@@ -1161,7 +1161,6 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 		((int *)header)[i] = LittleLong ( ((int *)header)[i]);
 
 // load into heap
-	
 	Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
 	Mod_LoadEdges (&header->lumps[LUMP_EDGES]);
 	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);
@@ -1177,12 +1176,10 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES]);
 	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
 	Mod_LoadSubmodels (&header->lumps[LUMP_MODELS]);
-
 	Mod_MakeHull0 ();
-	
 	mod->numframes = 2;		// regular and alternate animation
 	mod->flags = 0;
-	
+
 //
 // set up the submodels (FIXME: this is confusing)
 //
@@ -1196,14 +1193,14 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 			mod->hulls[j].firstclipnode = bm->headnode[j];
 			mod->hulls[j].lastclipnode = mod->numclipnodes-1;
 		}
-		
+
 		mod->firstmodelsurface = bm->firstface;
 		mod->nummodelsurfaces = bm->numfaces;
-		
+
 		VectorCopy (bm->maxs, mod->maxs);
 		VectorCopy (bm->mins, mod->mins);
 		mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
-		
+
 		mod->numleafs = bm->visleafs;
 
 		if (i < mod->numsubmodels-1)

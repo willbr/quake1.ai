@@ -933,7 +933,9 @@ void R_EdgeDrawing (void)
 	}
 
 	if (!(r_drawpolys | r_drawculledpolys))
+	{
 		R_ScanEdges ();
+	}
 }
 
 

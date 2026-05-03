@@ -920,13 +920,15 @@ void PF_dprint (void)
 	Con_DPrintf ("%s",PF_VarString(0));
 }
 
-char	pr_string_temp[128];
+// Hunk-allocated so the offset from pr_strings fits in a 32-bit string_t on x64.
+// Initialised in PR_LoadProgs.
+char	*pr_string_temp;
 
 void PF_ftos (void)
 {
 	float	v;
 	v = G_FLOAT(OFS_PARM0);
-	
+
 	if (v == (int)v)
 		sprintf (pr_string_temp, "%d",(int)v);
 	else
