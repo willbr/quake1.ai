@@ -60,6 +60,9 @@ void spawn_misc_noisemaker(edict_t *e);
 void spawn_func_door(edict_t *e);
 void spawn_func_door_secret(edict_t *e);
 
+// buttons.c
+void spawn_func_button(edict_t *e);
+
 // items.c
 void spawn_noclass(edict_t *e);
 void spawn_item_health(edict_t *e);
@@ -132,6 +135,8 @@ static const spawn_entry_t s_spawns[] = {
     // doors.c
     { "func_door",                    spawn_func_door                       },
     { "func_door_secret",             spawn_func_door_secret                },
+    // buttons.c
+    { "func_button",                  spawn_func_button                     },
     // items.c
     { "noclass",                          spawn_noclass                         },
     { "item_health",                      spawn_item_health                     },
