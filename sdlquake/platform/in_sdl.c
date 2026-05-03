@@ -191,8 +191,14 @@ void IN_Move(usercmd_t *cmd)
         return;
 
     extern cvar_t sensitivity, m_pitch, m_yaw;
+    extern void V_StopPitchDrift(void);
+
     cl.viewangles[YAW]   -= m_yaw.value   * dx * sensitivity.value;
-    cl.viewangles[PITCH] += m_pitch.value  * dy * sensitivity.value;
+    if (dy)
+    {
+        V_StopPitchDrift();   // prevent view.c auto-centering from fighting mouse
+        cl.viewangles[PITCH] += m_pitch.value * dy * sensitivity.value;
+    }
 
     // Clamp pitch
     if (cl.viewangles[PITCH] > 80)  cl.viewangles[PITCH] = 80;
