@@ -19,8 +19,8 @@ WinQuake — Carmack's 1996 software-rendered Quake — rebuilt on a foundation 
 | Phase | Status | Goal |
 |---|---|---|
 | 1 | ✅ done | SDL3 port + Zig build |
-| 2 | in progress | MCP server |
-| 3 | planned | Hot-reload core (`game_api_t` ABI, `game.dll`) |
+| 2 | ✅ done | MCP server |
+| 3 | ✅ done | Hot-reload core (`game_api_t` ABI, `game.dll`) |
 | 4 | planned | cimgui dev overlay + SQLite |
 | 5 | planned | In-game 3D map editor + QuakeC → C |
 
@@ -29,13 +29,8 @@ WinQuake — Carmack's 1996 software-rendered Quake — rebuilt on a foundation 
 Requires Zig 0.16 and original Quake data files (`pak0.pak`, `pak1.pak`) in `id1/`. SDL3 is vendored.
 
 ```sh
-zig build run
-```
-
-Or to load a specific map:
-
-```sh
-zig build run -- +map e1m1
+zig build run -- +map e1m1   # build everything and run
+zig build game               # rebuild only game.dll (hot-reload iteration)
 ```
 
 ## MCP
