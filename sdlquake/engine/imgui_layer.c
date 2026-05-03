@@ -78,6 +78,32 @@ static void draw_cvars(void)
     IG_End();
 }
 
+static void draw_console(void)
+{
+    static int auto_scroll = 1;
+
+    IG_SetNextWindowSize(600, 300, IG_Cond_Once);
+    IG_SetNextWindowPos(10, 500, IG_Cond_Once);
+    if (!IG_Begin("Console", NULL, IG_WF_None)) { IG_End(); return; }
+
+    IG_Checkbox("Auto-scroll", &auto_scroll);
+
+    int total = ImguiSupport_GetNumConsoleLines();
+    int show  = total < 200 ? total : 200;
+    char buf[128];
+    int i;
+    for (i = show - 1; i >= 0; i--)
+    {
+        if (ImguiSupport_GetConsoleLine(i, buf, (int)sizeof(buf)) > 0)
+            IG_TextUnformatted(buf);
+    }
+
+    if (auto_scroll)
+        IG_SetScrollHereY(1.0f);
+
+    IG_End();
+}
+
 static void draw_entities(void)
 {
     char buf[64];
@@ -180,6 +206,7 @@ void ImguiLayer_Render(void)
     draw_perf();
     draw_cvars();
     draw_entities();
+    draw_console();
 
     IG_Render();
     IG_ImplSDLRenderer3_RenderDrawData(s_renderer);

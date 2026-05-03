@@ -43,6 +43,16 @@ int  IG_InputText(const char *label, char *buf, int buf_size, int flags)
 {
     return ImGui::InputText(label, buf, (size_t)buf_size, flags) ? 1 : 0;
 }
+int  IG_Checkbox(const char *label, int *v)
+{
+    bool b = (*v != 0);
+    bool changed = ImGui::Checkbox(label, &b);
+    *v = b ? 1 : 0;
+    return changed ? 1 : 0;
+}
+
+// Scroll
+void IG_SetScrollHereY(float ratio) { ImGui::SetScrollHereY(ratio); }
 
 // Tables
 int IG_BeginTable(const char *id, int cols, int flags, float ow, float oh)

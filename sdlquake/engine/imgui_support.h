@@ -20,6 +20,10 @@ int         ImguiSupport_GetNumEdicts(void);
 void        ImguiSupport_GetEdict(int i, const char **classname,
                                   float *x, float *y, float *z);
 
+// Console log (circular buffer; from_bottom=0 is most recent line)
+int         ImguiSupport_GetNumConsoleLines(void);
+int         ImguiSupport_GetConsoleLine(int from_bottom, char *buf, int buf_size);
+
 #ifdef __cplusplus
 }
 #endif

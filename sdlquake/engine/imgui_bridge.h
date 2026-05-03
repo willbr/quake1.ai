@@ -74,6 +74,10 @@ void  IG_SetNextWindowSize(float w, float h, int cond);
 void  IG_TextUnformatted(const char *text);
 void  IG_SetNextItemWidth(float w);
 int   IG_InputText(const char *label, char *buf, int buf_size, int flags);
+int   IG_Checkbox(const char *label, int *v);
+
+// Scroll
+void  IG_SetScrollHereY(float ratio);
 
 // Tables
 int   IG_BeginTable(const char *id, int cols, int flags,
