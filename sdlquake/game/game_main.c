@@ -35,7 +35,9 @@ static void game_client_postthink(edict_t *client)              { (void)client; 
 static void game_client_kill(edict_t *client)                   { (void)client; }
 static void game_set_new_parms(void)                            { }
 static void game_set_change_parms(edict_t *client)              { (void)client; }
-static void game_entity_spawn(edict_t *e, const char *classname){ (void)e; (void)classname; }
+
+// Defined in spawn.c — classname dispatch table
+void game_entity_spawn(edict_t *e, const char *classname);
 
 static game_api_t s_api = {
     GAME_API_VERSION,

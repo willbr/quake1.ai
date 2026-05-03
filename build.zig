@@ -146,7 +146,10 @@ pub fn build(b: *std.Build) void {
     game_mod.addIncludePath(b.path("sdlquake/game"));
     game_mod.addIncludePath(b.path("sdlquake/engine"));
     game_mod.addCSourceFiles(.{
-        .files = &.{"sdlquake/game/game_main.c"},
+        .files = &.{
+            "sdlquake/game/game_main.c",
+            "sdlquake/game/spawn.c",
+        },
         .flags = &.{ "-std=c11", "-fno-strict-aliasing", "-w" },
     });
     const game_lib = b.addLibrary(.{
