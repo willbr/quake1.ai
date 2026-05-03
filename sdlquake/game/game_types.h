@@ -4,7 +4,7 @@
 #ifndef GAME_TYPES_H
 #define GAME_TYPES_H
 
-#include "../engine/game_api.h"
+#include "game_api.h"
 
 // ---------------------------------------------------------------------------
 // Callback signatures — match the C function pointer fields in entvars_t.
