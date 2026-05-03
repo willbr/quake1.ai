@@ -117,7 +117,9 @@ void VID_Init(unsigned char *palette)
     vid.width      = VID_WIDTH;
     vid.height     = VID_HEIGHT;
     vid.rowbytes   = VID_WIDTH;
-    vid.aspect     = (float)VID_WIDTH / (float)VID_HEIGHT;
+    // Match original formula from vid_win.c: pixel aspect for 4:3 CRT at this res
+    // (200/320)*(320/240) = 0.8333 for 320x200, keeps weapon/HUD layout correct
+    vid.aspect     = ((float)VID_HEIGHT / (float)VID_WIDTH) * (320.0f / 240.0f);
     vid.numpages   = 1;
     vid.colormap   = host_colormap;
     vid.fullbright = 256 - LittleLong(*((int *)vid.colormap + 2048));
