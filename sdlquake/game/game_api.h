@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 2
+#define GAME_API_VERSION 3
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -159,7 +159,8 @@ typedef struct game_api_s {
     void  (*client_connect)(edict_t *client);
     void  (*client_disconnect)(edict_t *client);
     void  (*put_client_in_server)(edict_t *client);
-    void  (*client_think)(edict_t *client);   // process usercmd
+    void  (*client_prethink)(edict_t *client);
+    void  (*client_postthink)(edict_t *client);
     void  (*client_kill)(edict_t *client);
 
     // Level transitions

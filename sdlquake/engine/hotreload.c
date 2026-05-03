@@ -58,9 +58,10 @@ static engine_api_t engine_funcs = {
 // DLL state
 // ---------------------------------------------------------------------------
 
-static SDL_SharedObject *game_so    = NULL;
-static game_api_t       *game_api_g = NULL;
-static SDL_Time          dll_mtime  = 0;
+static SDL_SharedObject *game_so      = NULL;
+static game_api_t       *game_api_g   = NULL;
+static SDL_Time          dll_mtime    = 0;
+static game_globals_t    game_globals = {0};
 
 static SDL_Time get_mtime(const char *path)
 {
@@ -112,7 +113,7 @@ static void do_load(void)
 
     game_api_g = api;
     Con_Printf("hotreload: game.dll reloaded\n");
-    game_api_g->init(&engine_funcs);
+    game_api_g->init(&engine_funcs, &game_globals);
     dll_mtime = get_mtime(GAME_DLL_SRC);
 }
 
@@ -130,6 +131,7 @@ void HotReload_Init(void)
 
 void HotReload_Frame(float dt)
 {
+    (void)dt;
     static int counter = 0;
     if (++counter >= RELOAD_CHECK_INTERVAL)
     {
@@ -140,7 +142,7 @@ void HotReload_Frame(float dt)
     }
 
     if (game_api_g)
-        game_api_g->server_frame(dt);
+        game_api_g->start_frame();
 }
 
 void HotReload_Shutdown(void)
