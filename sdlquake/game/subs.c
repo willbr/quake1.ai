@@ -197,7 +197,7 @@ void SUB_AttackFinished(float normal)
         g->self->v.attack_finished = g->time + normal;
 }
 
-// Weak stub — overridden by the real visible() in combat.c (Task 9).
+// Weak stub — overridden by the real visible() in ai.c (Task 16).
 __attribute__((weak)) int visible(edict_t *targ) { (void)targ; return 1; }
 
 void SUB_CheckRefire(thinkfn_t thinkst)
