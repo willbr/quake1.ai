@@ -39,6 +39,8 @@ void IG_SetNextWindowSize(float w, float h, int cond)
 // Widgets
 void IG_TextUnformatted(const char *text) { ImGui::TextUnformatted(text); }
 void IG_SetNextItemWidth(float w)         { ImGui::SetNextItemWidth(w); }
+int  IG_IsItemHovered(void)              { return ImGui::IsItemHovered() ? 1 : 0; }
+void IG_SetTooltip(const char *text)     { ImGui::SetTooltip("%s", text); }
 int  IG_InputText(const char *label, char *buf, int buf_size, int flags)
 {
     return ImGui::InputText(label, buf, (size_t)buf_size, flags) ? 1 : 0;

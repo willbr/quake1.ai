@@ -29,6 +29,9 @@ void        ImguiSupport_ExecCommand(const char *cmd);
 // Returns 1 on match, 0 if no match found.
 int         ImguiSupport_TabComplete(const char *partial, char *out, int out_size);
 
+// Returns a human-readable description for a cvar name, or NULL if unknown.
+const char *ImguiSupport_CvarDescription(const char *name);
+
 #ifdef __cplusplus
 }
 #endif

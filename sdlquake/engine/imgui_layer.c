@@ -64,6 +64,11 @@ static void draw_cvars(void)
             IG_TableNextRow();
             IG_TableSetColumnIndex(0);
             IG_TextUnformatted(name);
+            if (IG_IsItemHovered())
+            {
+                const char *desc = ImguiSupport_CvarDescription(name);
+                if (desc) IG_SetTooltip(desc);
+            }
             IG_TableSetColumnIndex(1);
 
             snprintf(value_buf, sizeof(value_buf), "%s", ImguiSupport_CvarString(cv));
