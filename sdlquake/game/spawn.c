@@ -9,10 +9,12 @@
 typedef struct { const char *classname; void (*fn)(edict_t *); } spawn_entry_t;
 
 // Forward declarations — added as files are ported
-// (none yet)
+void spawn_worldspawn(edict_t *e);
+void spawn_bodyque(edict_t *e);
 
 static const spawn_entry_t s_spawns[] = {
-    // populated in later tasks
+    { "worldspawn", spawn_worldspawn },
+    { "bodyque",    spawn_bodyque    },
     { NULL, NULL }
 };
 

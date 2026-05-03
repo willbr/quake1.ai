@@ -24,9 +24,11 @@ static void game_init(engine_api_t *engine, game_globals_t *globals)
 static void game_shutdown(void) { }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Stub entry points — replaced file-by-file as QC files are ported.
 // ---------------------------------------------------------------------------
-static void game_start_frame(void)                              { }
+void StartFrame(void);   // world.c
+static void game_start_frame(void) { StartFrame(); }
 static void game_client_connect(edict_t *client)                { (void)client; }
 static void game_client_disconnect(edict_t *client)             { (void)client; }
 static void game_put_client_in_server(edict_t *client)          { (void)client; }
