@@ -21,7 +21,7 @@ WinQuake — Carmack's 1996 software-rendered Quake — rebuilt on a foundation 
 | 1 | ✅ done | SDL3 port + Zig build |
 | 2 | ✅ done | MCP server |
 | 3 | ✅ done | Hot-reload core (`game_api_t` ABI, `game.dll`) |
-| 4 | planned | cimgui dev overlay + SQLite |
+| 4 | planned | cimgui dev overlay |
 | 5 | planned | In-game 3D map editor + QuakeC → C |
 
 ## Building

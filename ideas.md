@@ -61,3 +61,7 @@
 * think of something to do with mouse2
 * cat vs mouse, add more monsters vs monsters
 
+* more particle effects
+* permanent damage to a level
+* more axes stuff, throw it? god of war style?
+

@@ -84,7 +84,7 @@ zig build game                # rebuild only game.dll (fast hot-reload iteration
 | 1 | ✅ done | SDL3 port + Zig build |
 | 2 | ✅ done | MCP server |
 | 3 | ✅ done | Hot-reload (`game_api_t` ABI, `game.dll`) |
-| 4 | planned | cimgui overlay + SQLite |
+| 4 | planned | cimgui dev overlay |
 | 5 | planned | In-game 3D map editor + QuakeC → C |
 
 ## Reference data
