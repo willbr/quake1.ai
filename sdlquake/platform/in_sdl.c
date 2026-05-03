@@ -121,6 +121,7 @@ void IN_ProcessEvents(void)
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
         {
+            if (ImguiLayer_IsOpen()) break;
             qboolean down = (ev.button.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
             int btn = 0;
             switch (ev.button.button)
@@ -134,6 +135,7 @@ void IN_ProcessEvents(void)
         }
 
         case SDL_EVENT_MOUSE_WHEEL:
+            if (ImguiLayer_IsOpen()) break;
             if (ev.wheel.y > 0)
             {
                 Key_Event(K_MWHEELUP, true);
