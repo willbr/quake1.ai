@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "quake": {
+      "command": "zig-out/bin/quake",
+      "args": ["--mcp", "+map", "e1m1"]
+    }
+  }
+}

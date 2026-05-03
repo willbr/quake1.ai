@@ -66,6 +66,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/platform/in_sdl.c",
         "sdlquake/platform/snd_sdl.c",
         "sdlquake/platform/net_sdl.c",
+        "sdlquake/mcp/mcp_server.c",
     };
 
     // ---------------------------------------------------------------------------
@@ -89,6 +90,7 @@ pub fn build(b: *std.Build) void {
 
     // Platform stubs come first so our winquake.h / mgraph.h shadow the originals.
     mod.addIncludePath(b.path("sdlquake/platform"));
+    mod.addIncludePath(b.path("sdlquake/mcp"));
     mod.addIncludePath(b.path(wq_dir));
 
     // ---------------------------------------------------------------------------

@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <errno.h>
 
+#include "mcp_server.h"
+
 #ifdef _WIN32
 #include <direct.h>
 #define mkdir(p,m) _mkdir(p)
@@ -107,8 +109,9 @@ void Sys_Printf(char *fmt, ...)
     va_start(argptr, fmt);
     vsnprintf(text, sizeof(text), fmt, argptr);
     va_end(argptr);
-    fputs(text, stdout);
-    fflush(stdout);
+    // In MCP mode stdout carries JSON-RPC; redirect engine logs to stderr.
+    fputs(text, mcp_active ? stderr : stdout);
+    fflush(mcp_active ? stderr : stdout);
 }
 
 void Sys_Quit(void)
@@ -190,6 +193,9 @@ int main(int argc, char **argv)
 
     isDedicated = (COM_CheckParm("-dedicated") != 0);
 
+    if (COM_CheckParm("--mcp"))
+        MCP_Init();
+
     parms.memsize = MINIMUM_MEMORY;
     {
         // give it 16 MB by default, or whatever -heapsize says
@@ -211,6 +217,8 @@ int main(int argc, char **argv)
         double newtime = Sys_FloatTime();
         double dt = newtime - oldtime;
         Host_Frame(dt);
+        if (mcp_active)
+            MCP_Frame();
         oldtime = newtime;
     }
 
