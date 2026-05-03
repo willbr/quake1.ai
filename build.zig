@@ -160,6 +160,7 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/weapons.c",
             "sdlquake/game/fight.c",
             "sdlquake/game/ai.c",
+            "sdlquake/game/misc.c",
         },
         .flags = &.{ "-std=c11", "-fno-strict-aliasing", "-w" },
     });

@@ -40,10 +40,10 @@ static void s_explode3(edict_t *self);
 static void s_explode4(edict_t *self);
 static void s_explode5(edict_t *self);
 static void s_explode6(edict_t *self);
-static void BecomeExplosion(void);
+void BecomeExplosion(void);
 static void GrenadeExplode(edict_t *self);
 static void spike_touch(edict_t *self, edict_t *other);
-static void superspike_touch(edict_t *self, edict_t *other);
+void superspike_touch(edict_t *self, edict_t *other);
 static void wall_velocity(vec3_t out);
 static float crandom(void);
 static void TraceAttack(float damage, vec3_t dir);
@@ -314,7 +314,7 @@ static void s_explode6(edict_t *self) { g->self=self; self->v.frame=5; self->v.n
 
 static void SUB_NullTouch(edict_t *self, edict_t *other) { (void)self; (void)other; }
 
-static void BecomeExplosion(void) {
+void BecomeExplosion(void) {
     edict_t *self     = g->self;
     self->v.movetype  = MOVETYPE_NONE;
     self->v.velocity[0] = self->v.velocity[1] = self->v.velocity[2] = 0;
@@ -562,7 +562,7 @@ static void spike_touch(edict_t *self, edict_t *other) {
     eng->ED_Free(self);
 }
 
-static void superspike_touch(edict_t *self, edict_t *other) {
+void superspike_touch(edict_t *self, edict_t *other) {
     g->self = self; g->other = other;
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;

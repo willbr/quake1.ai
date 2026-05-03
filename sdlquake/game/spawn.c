@@ -23,6 +23,39 @@ void spawn_trigger_changelevel(edict_t *e);
 // ai.c
 void spawn_path_corner(edict_t *e);
 
+// misc.c
+void spawn_info_null(edict_t *e);
+void spawn_info_notnull(edict_t *e);
+void spawn_light(edict_t *e);
+void spawn_light_fluoro(edict_t *e);
+void spawn_light_fluorospark(edict_t *e);
+void spawn_light_globe(edict_t *e);
+void spawn_light_torch_small_walltorch(edict_t *e);
+void spawn_light_flame_large_yellow(edict_t *e);
+void spawn_light_flame_small_yellow(edict_t *e);
+void spawn_light_flame_small_white(edict_t *e);
+void spawn_misc_fireball(edict_t *e);
+void spawn_misc_explobox(edict_t *e);
+void spawn_misc_explobox2(edict_t *e);
+void spawn_trap_spikeshooter(edict_t *e);
+void spawn_trap_shooter(edict_t *e);
+void spawn_air_bubbles(edict_t *e);
+void spawn_viewthing(edict_t *e);
+void spawn_func_wall(edict_t *e);
+void spawn_func_illusionary(edict_t *e);
+void spawn_func_episodegate(edict_t *e);
+void spawn_func_bossgate(edict_t *e);
+void spawn_ambient_suck_wind(edict_t *e);
+void spawn_ambient_drone(edict_t *e);
+void spawn_ambient_flouro_buzz(edict_t *e);
+void spawn_ambient_drip(edict_t *e);
+void spawn_ambient_comp_hum(edict_t *e);
+void spawn_ambient_thunder(edict_t *e);
+void spawn_ambient_light_buzz(edict_t *e);
+void spawn_ambient_swamp1(edict_t *e);
+void spawn_ambient_swamp2(edict_t *e);
+void spawn_misc_noisemaker(edict_t *e);
+
 // items.c
 void spawn_noclass(edict_t *e);
 void spawn_item_health(edict_t *e);
@@ -60,6 +93,38 @@ static const spawn_entry_t s_spawns[] = {
     { "trigger_changelevel",     spawn_trigger_changelevel  },
     // ai.c
     { "path_corner",                  spawn_path_corner                     },
+    // misc.c
+    { "info_null",                    spawn_info_null                       },
+    { "info_notnull",                 spawn_info_notnull                    },
+    { "light",                        spawn_light                           },
+    { "light_fluoro",                 spawn_light_fluoro                    },
+    { "light_fluorospark",            spawn_light_fluorospark               },
+    { "light_globe",                  spawn_light_globe                     },
+    { "light_torch_small_walltorch",  spawn_light_torch_small_walltorch     },
+    { "light_flame_large_yellow",     spawn_light_flame_large_yellow        },
+    { "light_flame_small_yellow",     spawn_light_flame_small_yellow        },
+    { "light_flame_small_white",      spawn_light_flame_small_white         },
+    { "misc_fireball",                spawn_misc_fireball                   },
+    { "misc_explobox",                spawn_misc_explobox                   },
+    { "misc_explobox2",               spawn_misc_explobox2                  },
+    { "trap_spikeshooter",            spawn_trap_spikeshooter               },
+    { "trap_shooter",                 spawn_trap_shooter                    },
+    { "air_bubbles",                  spawn_air_bubbles                     },
+    { "viewthing",                    spawn_viewthing                       },
+    { "func_wall",                    spawn_func_wall                       },
+    { "func_illusionary",             spawn_func_illusionary                },
+    { "func_episodegate",             spawn_func_episodegate                },
+    { "func_bossgate",                spawn_func_bossgate                   },
+    { "ambient_suck_wind",            spawn_ambient_suck_wind               },
+    { "ambient_drone",                spawn_ambient_drone                   },
+    { "ambient_flouro_buzz",          spawn_ambient_flouro_buzz             },
+    { "ambient_drip",                 spawn_ambient_drip                    },
+    { "ambient_comp_hum",             spawn_ambient_comp_hum                },
+    { "ambient_thunder",              spawn_ambient_thunder                 },
+    { "ambient_light_buzz",           spawn_ambient_light_buzz              },
+    { "ambient_swamp1",               spawn_ambient_swamp1                  },
+    { "ambient_swamp2",               spawn_ambient_swamp2                  },
+    { "misc_noisemaker",              spawn_misc_noisemaker                 },
     // items.c
     { "noclass",                          spawn_noclass                         },
     { "item_health",                      spawn_item_health                     },
