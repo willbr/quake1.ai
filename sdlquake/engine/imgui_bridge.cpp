@@ -51,8 +51,9 @@ int  IG_Checkbox(const char *label, int *v)
     return changed ? 1 : 0;
 }
 
-// Scroll
-void IG_SetScrollHereY(float ratio) { ImGui::SetScrollHereY(ratio); }
+// Scroll / focus
+void IG_SetScrollHereY(float ratio)      { ImGui::SetScrollHereY(ratio); }
+void IG_SetKeyboardFocusHere(int offset) { ImGui::SetKeyboardFocusHere(offset); }
 
 // Tables
 int IG_BeginTable(const char *id, int cols, int flags, float ow, float oh)

@@ -60,6 +60,17 @@ void ImguiSupport_GetEdict(int i, const char **classname,
     *z = e->v.origin[2];
 }
 
+void ImguiSupport_ExecCommand(const char *cmd)
+{
+    char buf[256];
+    int len;
+    for (len = 0; cmd[len] && len < (int)sizeof(buf) - 2; len++)
+        buf[len] = cmd[len];
+    buf[len++] = '\n';
+    buf[len]   = '\0';
+    Cbuf_AddText(buf);
+}
+
 int ImguiSupport_GetNumConsoleLines(void)
 {
     if (!con_text || con_linewidth <= 0 || con_totallines <= 0) return 0;

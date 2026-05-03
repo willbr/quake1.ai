@@ -23,6 +23,7 @@ void        ImguiSupport_GetEdict(int i, const char **classname,
 // Console log (circular buffer; from_bottom=0 is most recent line)
 int         ImguiSupport_GetNumConsoleLines(void);
 int         ImguiSupport_GetConsoleLine(int from_bottom, char *buf, int buf_size);
+void        ImguiSupport_ExecCommand(const char *cmd);
 
 #ifdef __cplusplus
 }

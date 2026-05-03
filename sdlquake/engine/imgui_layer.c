@@ -80,7 +80,9 @@ static void draw_cvars(void)
 
 static void draw_console(void)
 {
-    static int auto_scroll = 1;
+    static int  auto_scroll = 1;
+    static char input_buf[256];
+    static int  reclaim_focus = 0;
 
     IG_SetNextWindowSize(600, 300, IG_Cond_Once);
     IG_SetNextWindowPos(10, 500, IG_Cond_Once);
@@ -88,6 +90,7 @@ static void draw_console(void)
 
     IG_Checkbox("Auto-scroll", &auto_scroll);
 
+    /* Log area — leave room for the input line at the bottom. */
     int total = ImguiSupport_GetNumConsoleLines();
     int show  = total < 200 ? total : 200;
     char buf[128];
@@ -100,6 +103,25 @@ static void draw_console(void)
 
     if (auto_scroll)
         IG_SetScrollHereY(1.0f);
+
+    /* Input line. */
+    IG_SetNextItemWidth(-1);
+    if (IG_InputText("##cmd", input_buf, (int)sizeof(input_buf),
+                     IG_ITF_EnterReturnsTrue))
+    {
+        if (input_buf[0] != '\0')
+        {
+            ImguiSupport_ExecCommand(input_buf);
+            input_buf[0]  = '\0';
+            auto_scroll   = 1;
+        }
+        reclaim_focus = 1;
+    }
+    if (reclaim_focus)
+    {
+        IG_SetKeyboardFocusHere(-1);
+        reclaim_focus = 0;
+    }
 
     IG_End();
 }
