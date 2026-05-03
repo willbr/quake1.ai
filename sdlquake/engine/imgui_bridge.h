@@ -76,9 +76,16 @@ void  IG_SetNextItemWidth(float w);
 int   IG_InputText(const char *label, char *buf, int buf_size, int flags);
 int   IG_Checkbox(const char *label, int *v);
 
+// Child windows
+int   IG_BeginChild(const char *id, float w, float h, int child_flags, int window_flags);
+void  IG_EndChild(void);
+
 // Scroll / focus
 void  IG_SetScrollHereY(float ratio);
 void  IG_SetKeyboardFocusHere(int offset);
+
+// Layout queries
+float IG_GetFrameHeightWithSpacing(void);
 
 // Tables
 int   IG_BeginTable(const char *id, int cols, int flags,

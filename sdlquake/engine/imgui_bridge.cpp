@@ -51,9 +51,20 @@ int  IG_Checkbox(const char *label, int *v)
     return changed ? 1 : 0;
 }
 
+// Child windows
+int  IG_BeginChild(const char *id, float w, float h, int child_flags, int window_flags)
+{
+    return ImGui::BeginChild(id, ImVec2(w, h),
+        (ImGuiChildFlags)child_flags, (ImGuiWindowFlags)window_flags) ? 1 : 0;
+}
+void IG_EndChild(void) { ImGui::EndChild(); }
+
 // Scroll / focus
 void IG_SetScrollHereY(float ratio)      { ImGui::SetScrollHereY(ratio); }
 void IG_SetKeyboardFocusHere(int offset) { ImGui::SetKeyboardFocusHere(offset); }
+
+// Layout queries
+float IG_GetFrameHeightWithSpacing(void) { return ImGui::GetFrameHeightWithSpacing(); }
 
 // Tables
 int IG_BeginTable(const char *id, int cols, int flags, float ow, float oh)

@@ -88,9 +88,13 @@ static void draw_console(void)
     IG_SetNextWindowPos(10, 500, IG_Cond_Once);
     if (!IG_Begin("Console", NULL, IG_WF_None)) { IG_End(); return; }
 
+    /* Checkbox pinned above the scroll region. */
     IG_Checkbox("Auto-scroll", &auto_scroll);
 
-    /* Log area — leave room for the input line at the bottom. */
+    /* Scrollable log: negative height reserves space for the input line. */
+    float footer = IG_GetFrameHeightWithSpacing();
+    IG_BeginChild("##log", 0, -footer, 0, 0);
+
     int total = ImguiSupport_GetNumConsoleLines();
     int show  = total < 200 ? total : 200;
     char buf[128];
@@ -100,11 +104,12 @@ static void draw_console(void)
         if (ImguiSupport_GetConsoleLine(i, buf, (int)sizeof(buf)) > 0)
             IG_TextUnformatted(buf);
     }
-
     if (auto_scroll)
         IG_SetScrollHereY(1.0f);
 
-    /* Input line. */
+    IG_EndChild();
+
+    /* Input line — always visible at the bottom. */
     IG_SetNextItemWidth(-1);
     if (IG_InputText("##cmd", input_buf, (int)sizeof(input_buf),
                      IG_ITF_EnterReturnsTrue))
@@ -112,8 +117,8 @@ static void draw_console(void)
         if (input_buf[0] != '\0')
         {
             ImguiSupport_ExecCommand(input_buf);
-            input_buf[0]  = '\0';
-            auto_scroll   = 1;
+            input_buf[0] = '\0';
+            auto_scroll  = 1;
         }
         reclaim_focus = 1;
     }
