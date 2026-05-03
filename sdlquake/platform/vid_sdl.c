@@ -145,11 +145,9 @@ void VID_Shutdown(void)
 // Frame update: expand 8-bit -> 32-bit, upload, present
 // ---------------------------------------------------------------------------
 
-static int vid_update_count = 0;
 void VID_Update(vrect_t *rects)
 {
     if (!sdl_texture) return;
-    if (++vid_update_count == 1) fputs("VID_Update: first frame\n", stderr);
 
     void *pixels;
     int pitch;
