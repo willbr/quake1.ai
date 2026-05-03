@@ -1,8 +1,9 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const target   = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const target      = b.standardTargetOptions(.{});
+    const optimize    = b.standardOptimizeOption(.{});
+    const native_game = b.option(bool, "native_game", "Route game logic through game.dll instead of VM") orelse false;
 
     // Engine files are K&R/C89 era; gnu89 + fcommon matches original MSVC tentative-definition behaviour.
     const engine_c_flags: []const []const u8 = &.{
@@ -87,6 +88,7 @@ pub fn build(b: *std.Build) void {
         .link_libc   = true,
         .link_libcpp = true,
     });
+    mod.addCMacro("NATIVE_GAME", if (native_game) "1" else "0");
 
     mod.addCSourceFiles(.{
         .root  = b.path(wq_dir),
