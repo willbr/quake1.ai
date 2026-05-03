@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "hotreload.h"
 
 server_t		sv;
 server_static_t	svs;
@@ -284,7 +285,12 @@ void SV_ConnectClient (int clientnum)
 	else
 	{
 	// call the progs to get default spawn parms for the new client
+#if NATIVE_GAME
+		if (g_game_api)
+			g_game_api->set_new_parms();
+#else
 		PR_ExecuteProgram (pr_global_struct->SetNewParms);
+#endif
 		for (i=0 ; i<NUM_SPAWN_PARMS ; i++)
 			client->spawn_parms[i] = (&pr_global_struct->parm1)[i];
 	}
@@ -1025,7 +1031,12 @@ void SV_SaveSpawnparms (void)
 
 	// call the progs to get default spawn parms for the new client
 		pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
+#if NATIVE_GAME
+		if (g_game_api)
+			g_game_api->set_change_parms(host_client->edict);
+#else
 		PR_ExecuteProgram (pr_global_struct->SetChangeParms);
+#endif
 		for (j=0 ; j<NUM_SPAWN_PARMS ; j++)
 			host_client->spawn_parms[j] = (&pr_global_struct->parm1)[j];
 	}

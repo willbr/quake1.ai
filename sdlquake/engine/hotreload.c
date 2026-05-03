@@ -62,8 +62,8 @@ static engine_api_t engine_funcs = {
 // DLL state
 // ---------------------------------------------------------------------------
 
-static SDL_SharedObject *game_so      = NULL;
-static game_api_t       *game_api_g   = NULL;
+static SDL_SharedObject *game_so  = NULL;
+game_api_t              *g_game_api = NULL;  // exposed for NATIVE_GAME dispatch guards
 static SDL_Time          dll_mtime    = 0;
 // game_globals is passed to the game DLL's init() and used for all entity
 // lifecycle calls. The engine must write world/time/frametime into it before
@@ -79,7 +79,7 @@ static SDL_Time get_mtime(const char *path)
 
 static void do_unload(void)
 {
-    if (game_api_g) { game_api_g->shutdown(); game_api_g = NULL; }
+    if (g_game_api) { g_game_api->shutdown(); g_game_api = NULL; }
     if (game_so)    { SDL_UnloadObject(game_so); game_so = NULL; }
 }
 
@@ -118,9 +118,9 @@ static void do_load(void)
         return;
     }
 
-    game_api_g = api;
+    g_game_api = api;
     Con_Printf("hotreload: game.dll reloaded\n");
-    game_api_g->init(&engine_funcs, &game_globals);
+    g_game_api->init(&engine_funcs, &game_globals);
     dll_mtime = get_mtime(GAME_DLL_SRC);
 }
 
@@ -148,8 +148,8 @@ void HotReload_Frame(float dt)
             do_load();
     }
 
-    if (game_api_g)
-        game_api_g->start_frame();
+    if (g_game_api)
+        g_game_api->start_frame();
 }
 
 void HotReload_Shutdown(void)

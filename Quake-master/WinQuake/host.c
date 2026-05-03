@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "hotreload.h"
 #include "r_local.h"
 
 /*
@@ -361,7 +362,12 @@ void SV_DropClient (qboolean crash)
 		// this will set the body to a dead frame, among other things
 			saveSelf = pr_global_struct->self;
 			pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
+#if NATIVE_GAME
+			if (g_game_api)
+				g_game_api->client_disconnect(host_client->edict);
+#else
 			PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
+#endif
 			pr_global_struct->self = saveSelf;
 		}
 

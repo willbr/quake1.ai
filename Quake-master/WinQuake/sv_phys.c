@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_phys.c
 
 #include "quakedef.h"
+#include "hotreload.h"
 
 /*
 
@@ -139,7 +140,12 @@ qboolean SV_RunThink (edict_t *ent)
 	pr_global_struct->time = thinktime;
 	pr_global_struct->self = EDICT_TO_PROG(ent);
 	pr_global_struct->other = EDICT_TO_PROG(sv.edicts);
+#if NATIVE_GAME
+	if (g_game_api)
+		g_game_api->entity_think(ent);
+#else
 	PR_ExecuteProgram (ent->v.think);
+#endif
 	return !ent->free;
 }
 
@@ -162,14 +168,24 @@ void SV_Impact (edict_t *e1, edict_t *e2)
 	{
 		pr_global_struct->self = EDICT_TO_PROG(e1);
 		pr_global_struct->other = EDICT_TO_PROG(e2);
+#if NATIVE_GAME
+		if (g_game_api)
+			g_game_api->entity_touch(e1, e2);
+#else
 		PR_ExecuteProgram (e1->v.touch);
+#endif
 	}
-	
+
 	if (e2->v.touch && e2->v.solid != SOLID_NOT)
 	{
 		pr_global_struct->self = EDICT_TO_PROG(e2);
 		pr_global_struct->other = EDICT_TO_PROG(e1);
+#if NATIVE_GAME
+		if (g_game_api)
+			g_game_api->entity_touch(e2, e1);
+#else
 		PR_ExecuteProgram (e2->v.touch);
+#endif
 	}
 
 	pr_global_struct->self = old_self;
@@ -735,7 +751,12 @@ void SV_Physics_Pusher (edict_t *ent)
 		pr_global_struct->time = sv.time;
 		pr_global_struct->self = EDICT_TO_PROG(ent);
 		pr_global_struct->other = EDICT_TO_PROG(sv.edicts);
+#if NATIVE_GAME
+		if (g_game_api)
+			g_game_api->entity_think(ent);
+#else
 		PR_ExecuteProgram (ent->v.think);
+#endif
 		if (ent->free)
 			return;
 	}
@@ -1066,8 +1087,13 @@ void SV_Physics_Client (edict_t	*ent, int num)
 //	
 	pr_global_struct->time = sv.time;
 	pr_global_struct->self = EDICT_TO_PROG(ent);
+#if NATIVE_GAME
+	if (g_game_api)
+		g_game_api->client_prethink(ent);
+#else
 	PR_ExecuteProgram (pr_global_struct->PlayerPreThink);
-	
+#endif
+
 //
 // do a move
 //
@@ -1127,7 +1153,12 @@ void SV_Physics_Client (edict_t	*ent, int num)
 
 	pr_global_struct->time = sv.time;
 	pr_global_struct->self = EDICT_TO_PROG(ent);
+#if NATIVE_GAME
+	if (g_game_api)
+		g_game_api->client_postthink(ent);
+#else
 	PR_ExecuteProgram (pr_global_struct->PlayerPostThink);
+#endif
 }
 
 //============================================================================
@@ -1513,7 +1544,12 @@ void SV_Physics (void)
 	pr_global_struct->self = EDICT_TO_PROG(sv.edicts);
 	pr_global_struct->other = EDICT_TO_PROG(sv.edicts);
 	pr_global_struct->time = sv.time;
+#if NATIVE_GAME
+	if (g_game_api)
+		g_game_api->start_frame();
+#else
 	PR_ExecuteProgram (pr_global_struct->StartFrame);
+#endif
 
 //SV_CheckAllEnts ();
 

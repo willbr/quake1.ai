@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_edict.c -- entity dictionary
 
 #include "quakedef.h"
+#include "hotreload.h"
 
 dprograms_t		*progs;
 dfunction_t		*pr_functions;
@@ -970,7 +971,12 @@ void ED_LoadFromFile (char *data)
 		}
 
 		pr_global_struct->self = EDICT_TO_PROG(ent);
+#if NATIVE_GAME
+		if (g_game_api)
+			g_game_api->entity_spawn(ent, pr_strings + ent->v.classname);
+#else
 		PR_ExecuteProgram (func - pr_functions);
+#endif
 	}
 
 	Con_DPrintf ("%i entities inhibited\n", inhibit);

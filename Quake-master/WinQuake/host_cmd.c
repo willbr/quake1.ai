@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "hotreload.h"
 
 extern cvar_t	pausable;
 
@@ -1205,7 +1206,12 @@ void Host_Kill_f (void)
 	
 	pr_global_struct->time = sv.time;
 	pr_global_struct->self = EDICT_TO_PROG(sv_player);
+#if NATIVE_GAME
+	if (g_game_api)
+		g_game_api->client_kill(sv_player);
+#else
 	PR_ExecuteProgram (pr_global_struct->ClientKill);
+#endif
 }
 
 
@@ -1319,12 +1325,22 @@ void Host_Spawn_f (void)
 
 		pr_global_struct->time = sv.time;
 		pr_global_struct->self = EDICT_TO_PROG(sv_player);
+#if NATIVE_GAME
+		if (g_game_api)
+			g_game_api->client_connect(sv_player);
+#else
 		PR_ExecuteProgram (pr_global_struct->ClientConnect);
+#endif
 
 		if ((Sys_FloatTime() - host_client->netconnection->connecttime) <= sv.time)
 			Sys_Printf ("%s entered the game\n", host_client->name);
 
-		PR_ExecuteProgram (pr_global_struct->PutClientInServer);	
+#if NATIVE_GAME
+		if (g_game_api)
+			g_game_api->put_client_in_server(sv_player);
+#else
+		PR_ExecuteProgram (pr_global_struct->PutClientInServer);
+#endif
 	}
 
 
