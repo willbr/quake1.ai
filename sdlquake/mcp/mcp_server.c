@@ -225,6 +225,14 @@ static void tool_get_player_state(const char *id_json)
             oz = player->v.origin[2];
         }
     }
+    else
+    {
+        // Demo playback: server edicts unavailable; use the render viewpoint
+        extern refdef_t r_refdef;
+        ox = r_refdef.vieworg[0];
+        oy = r_refdef.vieworg[1];
+        oz = r_refdef.vieworg[2];
+    }
 
     char raw[256];
     snprintf(raw, sizeof(raw),
