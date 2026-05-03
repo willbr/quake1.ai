@@ -111,6 +111,7 @@ static void do_load(void)
     }
 
     game_api_g = api;
+    Con_Printf("hotreload: game.dll reloaded\n");
     game_api_g->init(&engine_funcs);
     dll_mtime = get_mtime(GAME_DLL_SRC);
 }
