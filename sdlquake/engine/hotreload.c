@@ -7,7 +7,8 @@
 //     copy lets zig overwrite game.dll while we're running.
 //   - HotReload_Frame() checks game.dll's mtime every ~1 s.
 //     When it changes, the old DLL is unloaded, the new one copied
-//     and loaded, and game_api->init() is called again.
+//     and loaded, and game_api->init(engine, globals) is called again with
+//     both the engine API and game globals.
 //   - All DLL calls happen on the main thread — no locking needed.
 
 #include <SDL3/SDL.h>
@@ -47,6 +48,9 @@ static float engine_cvar_variable_value(const char *name)
     return Cvar_VariableValue((char *)name);
 }
 
+// Only the 4 Phase-3 slots below are populated.
+// The remaining 52 slots are NULL and will cause a crash if called.
+// Task 7 fills them in when NATIVE_GAME dispatch is wired into the engine.
 static engine_api_t engine_funcs = {
     engine_con_print,
     engine_cvar_set_value,
@@ -61,6 +65,9 @@ static engine_api_t engine_funcs = {
 static SDL_SharedObject *game_so      = NULL;
 static game_api_t       *game_api_g   = NULL;
 static SDL_Time          dll_mtime    = 0;
+// game_globals is passed to the game DLL's init() and used for all entity
+// lifecycle calls. The engine must write world/time/frametime into it before
+// calling any game entry point. Task 7 adds those writes.
 static game_globals_t    game_globals = {0};
 
 static SDL_Time get_mtime(const char *path)

@@ -38,10 +38,10 @@ Apply these rules when translating every `.qc` file to `.c`.
 | `stuffcmd(e, s)` | `eng->SV_StuffCmd(e, s)` |
 | `localcmd(s)` | `eng->Cbuf_AddText(s)` |
 | `makevectors(a)` | `eng->MakeVectors(a)` then read `g->v_forward/up/right` |
-| `normalize(v)` | `eng->VectorNormalize(v)` |
+| `normalize(v)` | `eng->VectorNormalize(v, out)  // out is a vec3_t[3]` |
 | `vlen(v)` | `eng->VectorLength(v)` |
 | `vectoyaw(v)` | `eng->VectorToYaw(v)` |
-| `vectoangles(v)` | `eng->VectorToAngles(v)` |
+| `vectoangles(v)` | `eng->VectorToAngles(v, out)  // out is a vec3_t[3]` |
 | `random()` | `eng->Random()` |
 | `fabs(f)` | `eng->FAbsF(f)` |
 | `walkmove(y, d)` | `eng->SV_WalkMove(g->self, y, d)` |
@@ -51,7 +51,7 @@ Apply these rules when translating every `.qc` file to `.c`.
 | `checkclient()` | `eng->ED_CheckClient()` |
 | `nextent(e)` | `eng->ED_Next(e)` |
 | `ChangeYaw()` | `eng->SV_ChangeYaw(g->self)` |
-| `aim(e, spd)` | `eng->SV_Aim(e, spd)` |
+| `aim(e, spd)` | `eng->SV_Aim(e, spd, out)  // out is a vec3_t[3]` |
 | `particle(o,d,c,n)` | `eng->SV_Particle(o,d,c,n)` |
 | `lightstyle(n, s)` | `eng->SV_LightStyle(n, s)` |
 | `makestatic(e)` | `eng->SV_MakeStatic(e)` |
