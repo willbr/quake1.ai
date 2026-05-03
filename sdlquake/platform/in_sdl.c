@@ -179,28 +179,23 @@ void IN_Commands(void) {}
 
 void IN_Move(usercmd_t *cmd)
 {
+    extern void V_StopPitchDrift(void);
+    extern cvar_t sensitivity, m_pitch, m_yaw;
+
     if (!mouse_active)
         return;
 
-    // Apply simple filter if enabled
+    // Keep nodrift=true every frame so V_DriftPitch never overrides mouse pitch,
+    // including the re-trigger that fires after walking forward for v_centermove seconds.
+    V_StopPitchDrift();
+
     int dx = mouse_dx, dy = mouse_dy;
     mouse_dx = 0;
     mouse_dy = 0;
 
-    if (!dx && !dy)
-        return;
+    cl.viewangles[YAW]   -= m_yaw.value  * dx * sensitivity.value;
+    cl.viewangles[PITCH] += m_pitch.value * dy * sensitivity.value;
 
-    extern cvar_t sensitivity, m_pitch, m_yaw;
-    extern void V_StopPitchDrift(void);
-
-    cl.viewangles[YAW]   -= m_yaw.value   * dx * sensitivity.value;
-    if (dy)
-    {
-        V_StopPitchDrift();   // prevent view.c auto-centering from fighting mouse
-        cl.viewangles[PITCH] += m_pitch.value * dy * sensitivity.value;
-    }
-
-    // Clamp pitch
     if (cl.viewangles[PITCH] > 80)  cl.viewangles[PITCH] = 80;
     if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
 }
