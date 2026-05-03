@@ -40,20 +40,21 @@ static void draw_cvars(void)
     char value_buf[128];
     char id_buf[144];
 
-    IG_SetNextWindowSize(400, 480, IG_Cond_Once);
+    IG_SetNextWindowSize(700, 480, IG_Cond_Once);
     IG_SetNextWindowPos(200, 10, IG_Cond_Once);
     if (!IG_Begin("Cvars", NULL, IG_WF_None)) { IG_End(); return; }
 
     IG_SetNextItemWidth(200);
     IG_InputText("filter", filter, (int)sizeof(filter), IG_WF_None);
 
-    if (IG_BeginTable("##cvt", 2,
+    if (IG_BeginTable("##cvt", 3,
             IG_TF_Borders | IG_TF_ScrollY | IG_TF_RowBg | IG_TF_Resizable,
             0, -1))
     {
         IG_TableSetupScrollFreeze(0, 1);
-        IG_TableSetupColumn("Name",  IG_TCF_WidthStretch, 0);
-        IG_TableSetupColumn("Value", IG_TCF_WidthStretch, 0);
+        IG_TableSetupColumn("Name",        IG_TCF_WidthFixed,   140);
+        IG_TableSetupColumn("Value",       IG_TCF_WidthFixed,   100);
+        IG_TableSetupColumn("Description", IG_TCF_WidthStretch, 0);
         IG_TableHeadersRow();
 
         for (void *cv = ImguiSupport_GetCvarList(); cv; cv = ImguiSupport_CvarNext(cv))
@@ -64,11 +65,6 @@ static void draw_cvars(void)
             IG_TableNextRow();
             IG_TableSetColumnIndex(0);
             IG_TextUnformatted(name);
-            if (IG_IsItemHovered())
-            {
-                const char *desc = ImguiSupport_CvarDescription(name);
-                if (desc) IG_SetTooltip(desc);
-            }
             IG_TableSetColumnIndex(1);
 
             snprintf(value_buf, sizeof(value_buf), "%s", ImguiSupport_CvarString(cv));
@@ -77,6 +73,10 @@ static void draw_cvars(void)
             if (IG_InputText(id_buf, value_buf, (int)sizeof(value_buf),
                     IG_ITF_EnterReturnsTrue))
                 ImguiSupport_CvarSet(name, value_buf);
+            IG_TableSetColumnIndex(2);
+
+            const char *desc = ImguiSupport_CvarDescription(name);
+            if (desc) IG_TextUnformatted(desc);
         }
         IG_EndTable();
     }

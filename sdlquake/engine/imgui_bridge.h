@@ -84,8 +84,6 @@ void  IG_SetNextWindowSize(float w, float h, int cond);
 // Widgets
 void  IG_TextUnformatted(const char *text);
 void  IG_SetNextItemWidth(float w);
-int   IG_IsItemHovered(void);
-void  IG_SetTooltip(const char *text);
 int   IG_InputText(const char *label, char *buf, int buf_size, int flags);
 int   IG_InputTextWithCompletion(const char *label, char *buf, int buf_size,
                                  int extra_flags, IG_CompletionCallback cb);
