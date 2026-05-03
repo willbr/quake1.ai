@@ -112,6 +112,7 @@ typedef struct entvars_s {
     float   sounds, volume, distance, waitmin, waitmax;
     float   dmgtime;   // water/lava damage timer (client.qc)
     float   healamount, healtype; // item_health fields (items.qc)
+    float   hit_z;                // spike projectile hit z-offset (weapons.qc)
 } entvars_t;
 
 // ---------------------------------------------------------------------------

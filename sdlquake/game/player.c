@@ -184,6 +184,9 @@ static void player_stand1_think(edict_t *self)
 }
 void player_stand1(edict_t *self) { player_stand1_think(self); }
 
+static void player_run_think(edict_t *self);
+void player_run(edict_t *self) { player_run_think(self); }
+
 static void player_run_think(edict_t *self)
 {
     FRAME_STEP(FR_ROCKRUN1, player_run_think);
