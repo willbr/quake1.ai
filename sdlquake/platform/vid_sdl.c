@@ -74,9 +74,22 @@ void VID_ShiftPalette(unsigned char *palette) { build_palette(palette); }
 
 void VID_Init(unsigned char *palette)
 {
-    // Create window — start at 2× scale so it's not tiny on modern screens
+    // Pick the largest integer scale that fits the usable desktop area
+    int scale = 3; // fallback
+    {
+        SDL_DisplayID display = SDL_GetPrimaryDisplay();
+        SDL_Rect usable;
+        if (SDL_GetDisplayUsableBounds(display, &usable))
+        {
+            int sx = usable.w / VID_WIDTH;
+            int sy = usable.h / VID_HEIGHT;
+            scale = sx < sy ? sx : sy;
+            if (scale < 1) scale = 1;
+        }
+    }
+
     sdl_window = SDL_CreateWindow("quake1.ai",
-        VID_WIDTH * 2, VID_HEIGHT * 2,
+        VID_WIDTH * scale, VID_HEIGHT * scale,
         SDL_WINDOW_RESIZABLE);
     if (!sdl_window)
         Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
