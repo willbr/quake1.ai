@@ -110,6 +110,7 @@ typedef struct entvars_s {
     float   light_lev, style;
     float   cnt, count;
     float   sounds, volume, distance, waitmin, waitmax;
+    float   dmgtime;   // water/lava damage timer (client.qc)
 } entvars_t;
 
 // ---------------------------------------------------------------------------

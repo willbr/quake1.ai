@@ -25,18 +25,28 @@ static void game_shutdown(void) { }
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// Stub entry points — replaced file-by-file as QC files are ported.
 // ---------------------------------------------------------------------------
-void StartFrame(void);   // world.c
-static void game_start_frame(void) { StartFrame(); }
-static void game_client_connect(edict_t *client)                { (void)client; }
-static void game_client_disconnect(edict_t *client)             { (void)client; }
-static void game_put_client_in_server(edict_t *client)          { (void)client; }
-static void game_client_prethink(edict_t *client)               { (void)client; }
-static void game_client_postthink(edict_t *client)              { (void)client; }
-static void game_client_kill(edict_t *client)                   { (void)client; }
-static void game_set_new_parms(void)                            { }
-static void game_set_change_parms(edict_t *client)              { (void)client; }
+// Entry points — wired to ported QC functions as files are added.
+// ---------------------------------------------------------------------------
+void StartFrame(void);                              // world.c
+void ClientConnect(edict_t *);                      // client.c
+void ClientDisconnect(edict_t *);
+void PutClientInServer(edict_t *);
+void PlayerPreThink(edict_t *);
+void PlayerPostThink(edict_t *);
+void ClientKill(edict_t *);
+void SetNewParms(void);
+void SetChangeParms(edict_t *);
+
+static void game_start_frame(void)                 { StartFrame(); }
+static void game_client_connect(edict_t *c)        { ClientConnect(c); }
+static void game_client_disconnect(edict_t *c)     { ClientDisconnect(c); }
+static void game_put_client_in_server(edict_t *c)  { PutClientInServer(c); }
+static void game_client_prethink(edict_t *c)       { PlayerPreThink(c); }
+static void game_client_postthink(edict_t *c)      { PlayerPostThink(c); }
+static void game_client_kill(edict_t *c)           { ClientKill(c); }
+static void game_set_new_parms(void)               { SetNewParms(); }
+static void game_set_change_parms(edict_t *c)      { SetChangeParms(c); }
 
 // Defined in spawn.c — classname dispatch table
 void game_entity_spawn(edict_t *e, const char *classname);
