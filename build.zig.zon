@@ -1,0 +1,13 @@
+.{
+    .fingerprint = 0xf71b20c48396072c,
+    .name = .quake1ai,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.14.0",
+    .paths = .{"."},
+    // SDL3 must be installed on the system.
+    // Windows: download SDL3-devel from https://github.com/libsdl-org/SDL/releases
+    //          and add the include/ and lib/ paths to your environment, or
+    //          install via: winget install libsdl-org.sdl
+    // Linux:   sudo apt install libsdl3-dev   (or equivalent)
+    // macOS:   brew install sdl3
+}
