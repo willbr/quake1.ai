@@ -43,6 +43,30 @@ int  IG_InputText(const char *label, char *buf, int buf_size, int flags)
 {
     return ImGui::InputText(label, buf, (size_t)buf_size, flags) ? 1 : 0;
 }
+
+static int completion_trampoline(ImGuiInputTextCallbackData *data)
+{
+    IG_CompletionData cd;
+    cd.buf          = data->Buf;
+    cd.buf_text_len = data->BufTextLen;
+    cd.buf_size     = data->BufSize;
+    cd.buf_dirty    = 0;
+    cd.cursor_pos   = data->CursorPos;
+    ((IG_CompletionCallback)data->UserData)(&cd);
+    if (cd.buf_dirty) {
+        data->BufTextLen = cd.buf_text_len;
+        data->CursorPos  = cd.cursor_pos;
+        data->BufDirty   = true;
+    }
+    return 0;
+}
+int  IG_InputTextWithCompletion(const char *label, char *buf, int buf_size,
+                                int extra_flags, IG_CompletionCallback cb)
+{
+    return ImGui::InputText(label, buf, (size_t)buf_size,
+        extra_flags | ImGuiInputTextFlags_CallbackCompletion,
+        completion_trampoline, (void *)cb) ? 1 : 0;
+}
 int  IG_Checkbox(const char *label, int *v)
 {
     bool b = (*v != 0);

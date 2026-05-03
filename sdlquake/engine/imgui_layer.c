@@ -78,6 +78,21 @@ static void draw_cvars(void)
     IG_End();
 }
 
+static void tab_complete_cb(IG_CompletionData *data)
+{
+    char completed[256];
+    if (!ImguiSupport_TabComplete(data->buf, completed, (int)sizeof(completed)))
+        return;
+    int len, i;
+    for (len = 0; completed[len]; len++) {}
+    if (len >= data->buf_size) len = data->buf_size - 1;
+    for (i = 0; i < len; i++) data->buf[i] = completed[i];
+    data->buf[len]     = '\0';
+    data->buf_text_len = len;
+    data->cursor_pos   = len;
+    data->buf_dirty    = 1;
+}
+
 static void draw_console(void)
 {
     static int  auto_scroll = 1;
@@ -109,10 +124,10 @@ static void draw_console(void)
 
     IG_EndChild();
 
-    /* Input line — always visible at the bottom. */
+    /* Input line — always visible at the bottom. Tab completes. */
     IG_SetNextItemWidth(-1);
-    if (IG_InputText("##cmd", input_buf, (int)sizeof(input_buf),
-                     IG_ITF_EnterReturnsTrue))
+    if (IG_InputTextWithCompletion("##cmd", input_buf, (int)sizeof(input_buf),
+                                   IG_ITF_EnterReturnsTrue, tab_complete_cb))
     {
         if (input_buf[0] != '\0')
         {

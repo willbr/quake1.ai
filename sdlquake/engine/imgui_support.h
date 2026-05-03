@@ -25,6 +25,10 @@ int         ImguiSupport_GetNumConsoleLines(void);
 int         ImguiSupport_GetConsoleLine(int from_bottom, char *buf, int buf_size);
 void        ImguiSupport_ExecCommand(const char *cmd);
 
+// Tab completion: writes first command/cvar match + trailing space into out.
+// Returns 1 on match, 0 if no match found.
+int         ImguiSupport_TabComplete(const char *partial, char *out, int out_size);
+
 #ifdef __cplusplus
 }
 #endif

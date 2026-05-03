@@ -41,7 +41,18 @@
 // ---------------------------------------------------------------------------
 // ImGuiInputTextFlags subset
 // ---------------------------------------------------------------------------
-#define IG_ITF_EnterReturnsTrue (1<<6)
+#define IG_ITF_EnterReturnsTrue    (1<<6)
+#define IG_ITF_CallbackCompletion  (1<<18)
+
+// Opaque callback data passed to IG_InputTextWithCompletion.
+typedef struct {
+    char *buf;
+    int   buf_text_len;
+    int   buf_size;
+    int   buf_dirty;
+    int   cursor_pos;
+} IG_CompletionData;
+typedef void (*IG_CompletionCallback)(IG_CompletionData *data);
 
 // ---------------------------------------------------------------------------
 // API
@@ -74,6 +85,8 @@ void  IG_SetNextWindowSize(float w, float h, int cond);
 void  IG_TextUnformatted(const char *text);
 void  IG_SetNextItemWidth(float w);
 int   IG_InputText(const char *label, char *buf, int buf_size, int flags);
+int   IG_InputTextWithCompletion(const char *label, char *buf, int buf_size,
+                                 int extra_flags, IG_CompletionCallback cb);
 int   IG_Checkbox(const char *label, int *v);
 
 // Child windows

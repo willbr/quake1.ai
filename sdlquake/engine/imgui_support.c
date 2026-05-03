@@ -71,6 +71,22 @@ void ImguiSupport_ExecCommand(const char *cmd)
     Cbuf_AddText(buf);
 }
 
+int ImguiSupport_TabComplete(const char *partial, char *out, int out_size)
+{
+    char *match = Cmd_CompleteCommand((char *)partial);
+    if (!match)
+        match = Cvar_CompleteVariable((char *)partial);
+    if (!match)
+        return 0;
+
+    int len;
+    for (len = 0; match[len] && len < out_size - 2; len++)
+        out[len] = match[len];
+    out[len++] = ' ';  /* append space, matching original Quake behaviour */
+    out[len]   = '\0';
+    return 1;
+}
+
 int ImguiSupport_GetNumConsoleLines(void)
 {
     if (!con_text || con_linewidth <= 0 || con_totallines <= 0) return 0;
