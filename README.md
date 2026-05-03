@@ -8,11 +8,10 @@ WinQuake — Carmack's 1996 software-rendered Quake — rebuilt on a foundation 
 
 - **SDL3** replaces Win32/DirectX, so it runs everywhere
 - **Zig** build system replaces MSVC project files
-- **MCP server** — run with `--mcp` and Claude Code can call tools to read game state, spawn entities, move brushes, and reshape levels in real time
+- **MCP server** — run with `--mcp` and Claude Code can call tools to read game state and set cvars in real time
 - **Hot-reload** splits the engine and game at a C ABI boundary; edit game logic and reload in ~1s without restarting
-- **cimgui** gives an in-game ImGui overlay for inspecting entities, editing cvars, and watching perf
-- **SQLite** replaces `.sav` files and `config.cfg` — everything is in `quake.db`
-- **In-game 3D map editor** — press Tab, click a wall to select its brush, drag to move it, hit Recompile; the BSP rebuilds in the background and reloads while you stay in the game
+- **Dear ImGui overlay** — press F12 for a live dev overlay: perf stats, filterable cvar editor with descriptions, entity table, and a console with tab-completion and command input
+- **In-game 3D map editor** — planned: press Tab, click a wall to select its brush, drag to move it, hit Recompile; the BSP rebuilds in the background and reloads while you stay in the game
 
 ## Phases
 
@@ -20,8 +19,8 @@ WinQuake — Carmack's 1996 software-rendered Quake — rebuilt on a foundation 
 |---|---|---|
 | 1 | ✅ done | SDL3 port + Zig build |
 | 2 | ✅ done | MCP server |
-| 3 | ✅ done | Hot-reload core (`game_api_t` ABI, `game.dll`) |
-| 4 | planned | cimgui dev overlay |
+| 3 | ✅ done | Hot-reload (`game_api_t` ABI, `game.dll`) |
+| 4 | ✅ done | Dear ImGui dev overlay |
 | 5 | planned | In-game 3D map editor + QuakeC → C |
 
 ## Building
@@ -32,6 +31,17 @@ Requires Zig 0.16 and original Quake data files (`pak0.pak`, `pak1.pak`) in `id1
 zig build run -- +map e1m1   # build everything and run
 zig build game               # rebuild only game.dll (hot-reload iteration)
 ```
+
+## Dev overlay (F12)
+
+Press **F12** in-game to open the ImGui overlay. All keyboard and mouse input is captured by the overlay while it is open.
+
+| Panel | Description |
+|---|---|
+| Perf | FPS and frame time |
+| Cvars | Filterable table of all cvars with descriptions; edit values inline and press Enter to apply |
+| Entities | Live table of all active edicts (classname, origin) |
+| Console | Scrolling console log with a command input box; Tab completes commands and cvar names |
 
 ## MCP
 
@@ -48,9 +58,7 @@ Add to your Claude Code MCP config (`.mcp.json` in the project root):
 }
 ```
 
-Available tools (Phase 2 MVP): `get_player_state`, `list_entities`, `set_cvar`.
-
-Later phases add: `spawn_entity`, `reload_map`, `query_db`, `get_brush_list`, `move_brush`, `enter_edit_mode`.
+Available tools: `get_player_state`, `list_entities`, `set_cvar`.
 
 ## Source
 
