@@ -10,7 +10,8 @@ void HotReload_Shutdown(void);
 // Exposed for #if NATIVE_GAME dispatch guards in engine files.
 #if NATIVE_GAME
 #include "game_api.h"
-extern game_api_t *g_game_api;
+extern game_api_t    *g_game_api;
+extern game_globals_t game_globals;
 #endif
 
 #endif // HOTRELOAD_H

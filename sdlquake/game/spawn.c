@@ -82,6 +82,26 @@ void spawn_trigger_hurt(edict_t *e);
 void spawn_trigger_push(edict_t *e);
 void spawn_trigger_monsterjump(edict_t *e);
 
+// monsters
+void spawn_monster_fish(edict_t *e);
+void spawn_monster_tarbaby(edict_t *e);
+void spawn_monster_soldier(edict_t *e);
+void spawn_monster_dog(edict_t *e);
+void spawn_monster_enforcer(edict_t *e);
+void spawn_monster_knight(edict_t *e);
+void spawn_monster_demon(edict_t *e);
+void spawn_monster_demon1(edict_t *e);
+void spawn_monster_zombie(edict_t *e);
+void spawn_monster_ogre(edict_t *e);
+void spawn_monster_ogre_marksman(edict_t *e);
+void spawn_monster_wizard(edict_t *e);
+void spawn_monster_hell_knight(edict_t *e);
+void spawn_monster_shalrath(edict_t *e);
+void spawn_monster_shambler(edict_t *e);
+void spawn_monster_boss(edict_t *e);
+void spawn_event_lightning(edict_t *e);
+void spawn_monster_oldone(edict_t *e);
+
 // items.c
 void spawn_noclass(edict_t *e);
 void spawn_item_health(edict_t *e);
@@ -173,6 +193,25 @@ static const spawn_entry_t s_spawns[] = {
     { "trigger_hurt",                 spawn_trigger_hurt                    },
     { "trigger_push",                 spawn_trigger_push                    },
     { "trigger_monsterjump",          spawn_trigger_monsterjump             },
+    // monsters
+    { "monster_fish",              spawn_monster_fish              },
+    { "monster_tarbaby",           spawn_monster_tarbaby           },
+    { "monster_soldier",           spawn_monster_soldier           },
+    { "monster_dog",               spawn_monster_dog               },
+    { "monster_enforcer",          spawn_monster_enforcer          },
+    { "monster_knight",            spawn_monster_knight            },
+    { "monster_demon",             spawn_monster_demon             },
+    { "monster_demon1",            spawn_monster_demon1            },
+    { "monster_zombie",            spawn_monster_zombie            },
+    { "monster_ogre",              spawn_monster_ogre              },
+    { "monster_ogre_marksman",     spawn_monster_ogre_marksman     },
+    { "monster_wizard",            spawn_monster_wizard            },
+    { "monster_hell_knight",       spawn_monster_hell_knight       },
+    { "monster_shalrath",          spawn_monster_shalrath          },
+    { "monster_shambler",          spawn_monster_shambler          },
+    { "monster_boss",              spawn_monster_boss              },
+    { "event_lightning",           spawn_event_lightning           },
+    { "monster_oldone",            spawn_monster_oldone            },
     // items.c
     { "noclass",                          spawn_noclass                         },
     { "item_health",                      spawn_item_health                     },

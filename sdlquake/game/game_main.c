@@ -12,8 +12,12 @@ game_globals_t *g;
 // The entity's function pointer is invoked if non-NULL.
 // (Requires complete edict_t definition; wired up in Task 7.)
 // ---------------------------------------------------------------------------
-static void game_entity_think(edict_t *e) { (void)e; }
-static void game_entity_touch(edict_t *e, edict_t *other) { (void)e; (void)other; }
+static void game_entity_think(edict_t *e) {
+    if (e->v.think) e->v.think(e);
+}
+static void game_entity_touch(edict_t *e, edict_t *other) {
+    if (e->v.touch) e->v.touch(e, other);
+}
 
 static void game_init(engine_api_t *engine, game_globals_t *globals)
 {

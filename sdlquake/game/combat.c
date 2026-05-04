@@ -6,6 +6,8 @@
 #include <math.h>
 #include <string.h>
 
+extern void SUB_Remove(edict_t *e);
+
 extern engine_api_t   *eng;
 extern game_globals_t *g;
 
@@ -224,4 +226,59 @@ void T_BeamDamage(edict_t *attacker, float damage)
         }
         head = head->v.chain;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Gib helpers (player.qc: ThrowGib / ThrowHead / VelocityForDamage)
+// ---------------------------------------------------------------------------
+static void VelocityForDamage(float dm, vec3_t out) {
+    out[0] = 100.0f * (eng->Random()*2.0f - 1.0f);
+    out[1] = 100.0f * (eng->Random()*2.0f - 1.0f);
+    out[2] = 200.0f + 100.0f * eng->Random();
+    float scale;
+    if      (dm > -50.0f)  scale = 0.7f;
+    else if (dm > -200.0f) scale = 2.0f;
+    else                   scale = 10.0f;
+    out[0] *= scale; out[1] *= scale; out[2] *= scale;
+}
+
+void ThrowGib(const char *gibname, float dm) {
+    edict_t *self = g->self;
+    edict_t *n = eng->ED_Alloc();
+    n->v.origin[0] = self->v.origin[0];
+    n->v.origin[1] = self->v.origin[1];
+    n->v.origin[2] = self->v.origin[2];
+    eng->SV_SetModel(n, gibname);
+    vec3_t zero = {0,0,0};
+    eng->SV_SetSize(n, zero, zero);
+    VelocityForDamage(dm, n->v.velocity);
+    n->v.movetype = MOVETYPE_BOUNCE;
+    n->v.solid    = SOLID_NOT;
+    n->v.avelocity[0] = eng->Random()*600.0f;
+    n->v.avelocity[1] = eng->Random()*600.0f;
+    n->v.avelocity[2] = eng->Random()*600.0f;
+    n->v.think     = SUB_Remove;
+    n->v.ltime     = g->time;
+    n->v.nextthink = g->time + 10.0f + eng->Random()*10.0f;
+    n->v.frame     = 0;
+    n->v.flags     = 0;
+}
+
+void ThrowHead(const char *gibname, float dm) {
+    edict_t *self = g->self;
+    eng->SV_SetModel(self, gibname);
+    self->v.frame       = 0;
+    self->v.nextthink   = -1.0f;
+    self->v.movetype    = MOVETYPE_BOUNCE;
+    self->v.takedamage  = DAMAGE_NO;
+    self->v.solid       = SOLID_NOT;
+    self->v.view_ofs[0] = 0; self->v.view_ofs[1] = 0; self->v.view_ofs[2] = 8;
+    vec3_t mins = {-16,-16,0}, maxs = {16,16,56};
+    eng->SV_SetSize(self, mins, maxs);
+    VelocityForDamage(dm, self->v.velocity);
+    self->v.origin[2] -= 24.0f;
+    self->v.flags = (float)((int)self->v.flags & ~FL_ONGROUND);
+    self->v.avelocity[0] = 0;
+    self->v.avelocity[1] = (eng->Random()*2.0f - 1.0f) * 600.0f;
+    self->v.avelocity[2] = 0;
 }

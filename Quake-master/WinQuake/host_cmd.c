@@ -680,7 +680,11 @@ void Host_Loadgame_f (void)
 		{	// parse an edict
 
 			ent = EDICT_NUM(entnum);
+#if NATIVE_GAME
+			memset (&ent->v, 0, sizeof(entvars_t));
+#else
 			memset (&ent->v, 0, progs->entityfields * 4);
+#endif
 			ent->free = false;
 			ED_ParseEdict (start, ent);
 	
@@ -937,7 +941,11 @@ void Host_Name_f (void)
 		if (Q_strcmp(host_client->name, newName) != 0)
 			Con_Printf ("%s renamed to %s\n", host_client->name, newName);
 	Q_strcpy (host_client->name, newName);
+#if NATIVE_GAME
+	host_client->edict->v.netname = host_client->name;
+#else
 	host_client->edict->v.netname = ED_NewString(host_client->name) - pr_strings;
+#endif
 	
 // send notification to all clients
 	
@@ -1236,11 +1244,19 @@ void Host_Pause_f (void)
 
 		if (sv.paused)
 		{
-			SV_BroadcastPrintf ("%s paused the game\n", pr_strings + sv_player->v.netname);
+	#if NATIVE_GAME
+		SV_BroadcastPrintf ("%s paused the game\n", sv_player->v.netname ? sv_player->v.netname : "");
+#else
+		SV_BroadcastPrintf ("%s paused the game\n", pr_strings + sv_player->v.netname);
+#endif
 		}
 		else
 		{
-			SV_BroadcastPrintf ("%s unpaused the game\n",pr_strings + sv_player->v.netname);
+	#if NATIVE_GAME
+		SV_BroadcastPrintf ("%s unpaused the game\n", sv_player->v.netname ? sv_player->v.netname : "");
+#else
+		SV_BroadcastPrintf ("%s unpaused the game\n",pr_strings + sv_player->v.netname);
+#endif
 		}
 
 	// send notification to all clients
@@ -1311,10 +1327,18 @@ void Host_Spawn_f (void)
 		// set up the edict
 		ent = host_client->edict;
 
+#if NATIVE_GAME
+		memset (&ent->v, 0, sizeof(entvars_t));
+#else
 		memset (&ent->v, 0, progs->entityfields * 4);
+#endif
 		ent->v.colormap = NUM_FOR_EDICT(ent);
 		ent->v.team = (host_client->colors & 15) + 1;
+#if NATIVE_GAME
+		ent->v.netname = host_client->name;
+#else
 		ent->v.netname = ED_NewString(host_client->name) - pr_strings;
+#endif
 
 		// copy spawn parms out of the client_t
 
@@ -1691,7 +1715,11 @@ edict_t	*FindViewthing (void)
 	for (i=0 ; i<sv.num_edicts ; i++)
 	{
 		e = EDICT_NUM(i);
+#if NATIVE_GAME
+		if (!strcmp (e->v.classname ? e->v.classname : "", "viewthing") )
+#else
 		if ( !strcmp (pr_strings + e->v.classname, "viewthing") )
+#endif
 			return e;
 	}
 	Con_Printf ("No viewthing on map\n");

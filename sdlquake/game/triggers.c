@@ -281,7 +281,7 @@ static void teleport_touch(edict_t *self, edict_t *other) {
     spawn_tfog(other->v.origin);
 
     edict_t *t = eng->ED_Find(g->world, "targetname", self->v.target);
-    if (!t)
+    if (t == g->world)
         eng->Host_Error("trigger_teleport: couldn't find target");
 
     eng->MakeVectors(t->v.mangle);

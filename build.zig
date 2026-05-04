@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
         "model.c",
         "net_dgrm.c", "net_loop.c", "net_main.c", "net_vcr.c",
         "nonintel.c",
-        "pr_cmds.c", "pr_edict.c", "pr_exec.c",
+        "pr_edict.c",
         "r_aclip.c", "r_alias.c", "r_bsp.c", "r_draw.c", "r_edge.c",
         "r_efrag.c", "r_light.c", "r_main.c", "r_misc.c", "r_part.c",
         "r_sky.c", "r_sprite.c", "r_surf.c", "r_vars.c",
@@ -61,6 +61,12 @@ pub fn build(b: *std.Build) void {
         "cd_null.c",
     };
 
+    // QC VM interpreter and builtins — only needed for NATIVE_GAME=0
+    const pr_vm_files: []const []const u8 = &.{
+        "pr_cmds.c",
+        "pr_exec.c",
+    };
+
     const platform_files: []const []const u8 = &.{
         "sdlquake/platform/sys_sdl.c",
         "sdlquake/platform/vid_sdl.c",
@@ -69,6 +75,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/platform/net_sdl.c",
         "sdlquake/mcp/mcp_server.c",
         "sdlquake/engine/hotreload.c",
+        "sdlquake/engine/sv_bridge.c",
         "sdlquake/engine/imgui_layer.c",
     };
 
@@ -95,6 +102,13 @@ pub fn build(b: *std.Build) void {
         .files = engine_files,
         .flags = engine_c_flags,
     });
+    if (!native_game) {
+        mod.addCSourceFiles(.{
+            .root  = b.path(wq_dir),
+            .files = pr_vm_files,
+            .flags = engine_c_flags,
+        });
+    }
     mod.addCSourceFiles(.{
         .files = platform_files,
         .flags = platform_c_flags,
@@ -166,6 +180,21 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/triggers.c",
             "sdlquake/game/plats.c",
             "sdlquake/game/monsters.c",
+            "sdlquake/game/monster_fish.c",
+            "sdlquake/game/monster_tarbaby.c",
+            "sdlquake/game/monster_soldier.c",
+            "sdlquake/game/monster_dog.c",
+            "sdlquake/game/monster_enforcer.c",
+            "sdlquake/game/monster_knight.c",
+            "sdlquake/game/monster_demon.c",
+            "sdlquake/game/monster_zombie.c",
+            "sdlquake/game/monster_ogre.c",
+            "sdlquake/game/monster_wizard.c",
+            "sdlquake/game/monster_hknight.c",
+            "sdlquake/game/monster_shalrath.c",
+            "sdlquake/game/monster_shambler.c",
+            "sdlquake/game/monster_boss.c",
+            "sdlquake/game/monster_oldone.c",
         },
         .flags = &.{ "-std=c11", "-fno-strict-aliasing", "-w" },
     });

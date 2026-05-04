@@ -26,7 +26,7 @@ extern void SetMovedir(edict_t *e);
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
-static void door_go_down(edict_t *self);
+void door_go_down(edict_t *self);
 static void door_go_up(edict_t *self);
 static void door_fire(edict_t *self);
 static void door_use(edict_t *self, edict_t *activator);
@@ -73,7 +73,7 @@ static void door_hit_bottom(edict_t *self) {
     self->v.state = STATE_BOTTOM;
 }
 
-static void door_go_down(edict_t *self) {
+void door_go_down(edict_t *self) {
     g->self = self;
     eng->SV_StartSound(self, CHAN_VOICE, self->v.noise2, 1, ATTN_NORM);
     if (self->v.max_health) {
@@ -255,7 +255,7 @@ static void LinkDoors(edict_t *self) {
         if (cur->v.message && *cur->v.message) starte->v.message = cur->v.message;
 
         t = eng->ED_Find(t, "classname", cur->v.classname);
-        if (!t) {
+        if (t == g->world) {
             // End of chain — loop it back
             cur->v.enemy = starte;
             g->self = starte;

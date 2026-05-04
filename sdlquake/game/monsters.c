@@ -72,18 +72,18 @@ static void walkmonster_start_go(edict_t *self) {
     if (self->v.target) {
         self->v.goalentity = self->v.movetarget =
             eng->ED_Find(g->world, "targetname", self->v.target);
-        if (self->v.goalentity)
+        if (self->v.goalentity != g->world)
             self->v.ideal_yaw = eng->VectorToYaw(
                 (vec3_t){ self->v.goalentity->v.origin[0] - self->v.origin[0],
                           self->v.goalentity->v.origin[1] - self->v.origin[1],
                           self->v.goalentity->v.origin[2] - self->v.origin[2] });
-        if (!self->v.movetarget) {
+        if (self->v.movetarget == g->world) {
             eng->Con_DPrintf("Monster can't find target at ");
             eng->Con_DPrintf(eng->VToS(self->v.origin));
             eng->Con_DPrintf("\n");
         }
         // QC bug: th_stand() always runs (else only guards pausetime assignment)
-        if (self->v.movetarget && self->v.movetarget->v.classname &&
+        if (self->v.movetarget != g->world && self->v.movetarget->v.classname &&
             strcmp(self->v.movetarget->v.classname, "path_corner") == 0)
             self->v.th_walk(self);
         else
@@ -125,13 +125,13 @@ static void flymonster_start_go(edict_t *self) {
     if (self->v.target) {
         self->v.goalentity = self->v.movetarget =
             eng->ED_Find(g->world, "targetname", self->v.target);
-        if (!self->v.movetarget) {
+        if (self->v.movetarget == g->world) {
             eng->Con_DPrintf("Monster can't find target at ");
             eng->Con_DPrintf(eng->VToS(self->v.origin));
             eng->Con_DPrintf("\n");
         }
         // QC bug: th_stand() always runs (else only guards pausetime assignment)
-        if (self->v.movetarget && self->v.movetarget->v.classname &&
+        if (self->v.movetarget != g->world && self->v.movetarget->v.classname &&
             strcmp(self->v.movetarget->v.classname, "path_corner") == 0)
             self->v.th_walk(self);
         else
@@ -171,12 +171,12 @@ static void swimmonster_start_go(edict_t *self) {
     if (self->v.target) {
         self->v.goalentity = self->v.movetarget =
             eng->ED_Find(g->world, "targetname", self->v.target);
-        if (!self->v.movetarget) {
+        if (self->v.movetarget == g->world) {
             eng->Con_DPrintf("Monster can't find target at ");
             eng->Con_DPrintf(eng->VToS(self->v.origin));
             eng->Con_DPrintf("\n");
         }
-        if (self->v.goalentity)
+        if (self->v.goalentity != g->world)
             self->v.ideal_yaw = eng->VectorToYaw(
                 (vec3_t){ self->v.goalentity->v.origin[0] - self->v.origin[0],
                           self->v.goalentity->v.origin[1] - self->v.origin[1],

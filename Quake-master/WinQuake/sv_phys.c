@@ -99,12 +99,20 @@ void SV_CheckVelocity (edict_t *ent)
 	{
 		if (IS_NAN(ent->v.velocity[i]))
 		{
+	#if NATIVE_GAME
+			Con_Printf ("Got a NaN velocity on %s\n", ent->v.classname ? ent->v.classname : "");
+#else
 			Con_Printf ("Got a NaN velocity on %s\n", pr_strings + ent->v.classname);
+#endif
 			ent->v.velocity[i] = 0;
 		}
 		if (IS_NAN(ent->v.origin[i]))
 		{
+#if NATIVE_GAME
+			Con_Printf ("Got a NaN origin on %s\n", ent->v.classname ? ent->v.classname : "");
+#else
 			Con_Printf ("Got a NaN origin on %s\n", pr_strings + ent->v.classname);
+#endif
 			ent->v.origin[i] = 0;
 		}
 		if (ent->v.velocity[i] > sv_maxvelocity.value)
@@ -141,8 +149,12 @@ qboolean SV_RunThink (edict_t *ent)
 	pr_global_struct->self = EDICT_TO_PROG(ent);
 	pr_global_struct->other = EDICT_TO_PROG(sv.edicts);
 #if NATIVE_GAME
-	if (g_game_api)
+	if (g_game_api) {
+		game_globals.time  = thinktime;
+		game_globals.self  = ent;
+		game_globals.other = sv.edicts;
 		g_game_api->entity_think(ent);
+	}
 #else
 	PR_ExecuteProgram (ent->v.think);
 #endif
@@ -169,8 +181,12 @@ void SV_Impact (edict_t *e1, edict_t *e2)
 		pr_global_struct->self = EDICT_TO_PROG(e1);
 		pr_global_struct->other = EDICT_TO_PROG(e2);
 #if NATIVE_GAME
-		if (g_game_api)
+		if (g_game_api) {
+			game_globals.time  = sv.time;
+			game_globals.self  = e1;
+			game_globals.other = e2;
 			g_game_api->entity_touch(e1, e2);
+		}
 #else
 		PR_ExecuteProgram (e1->v.touch);
 #endif
@@ -181,8 +197,12 @@ void SV_Impact (edict_t *e1, edict_t *e2)
 		pr_global_struct->self = EDICT_TO_PROG(e2);
 		pr_global_struct->other = EDICT_TO_PROG(e1);
 #if NATIVE_GAME
-		if (g_game_api)
+		if (g_game_api) {
+			game_globals.time  = sv.time;
+			game_globals.self  = e2;
+			game_globals.other = e1;
 			g_game_api->entity_touch(e2, e1);
+		}
 #else
 		PR_ExecuteProgram (e2->v.touch);
 #endif
@@ -300,7 +320,11 @@ int SV_FlyMove (edict_t *ent, float time, trace_t *steptrace)
 			if (trace.ent->v.solid == SOLID_BSP)
 			{
 				ent->v.flags =	(int)ent->v.flags | FL_ONGROUND;
+#if NATIVE_GAME
+				ent->v.groundentity = trace.ent;
+#else
 				ent->v.groundentity = EDICT_TO_PROG(trace.ent);
+#endif
 			}
 		}
 		if (!trace.plane.normal[2])
@@ -556,9 +580,16 @@ void SV_PushMove (edict_t *pusher, float movetime)
 			{
 				pr_global_struct->self = EDICT_TO_PROG(pusher);
 				pr_global_struct->other = EDICT_TO_PROG(check);
+#if NATIVE_GAME
+				game_globals.self  = pusher;
+				game_globals.other = check;
+				game_globals.time  = sv.time;
+				pusher->v.blocked(pusher, check);
+#else
 				PR_ExecuteProgram (pusher->v.blocked);
+#endif
 			}
-			
+
 		// move back any entities we already moved
 			for (i=0 ; i<num_moved ; i++)
 			{
@@ -566,10 +597,10 @@ void SV_PushMove (edict_t *pusher, float movetime)
 				SV_LinkEdict (moved_edict[i], false);
 			}
 			return;
-		}	
+		}
 	}
 
-	
+
 }
 
 #ifdef QUAKE2
@@ -689,9 +720,16 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 			{
 				pr_global_struct->self = EDICT_TO_PROG(pusher);
 				pr_global_struct->other = EDICT_TO_PROG(check);
+#if NATIVE_GAME
+				game_globals.self  = pusher;
+				game_globals.other = check;
+				game_globals.time  = sv.time;
+				pusher->v.blocked(pusher, check);
+#else
 				PR_ExecuteProgram (pusher->v.blocked);
+#endif
 			}
-			
+
 		// move back any entities we already moved
 			for (i=0 ; i<num_moved ; i++)
 			{
@@ -752,8 +790,12 @@ void SV_Physics_Pusher (edict_t *ent)
 		pr_global_struct->self = EDICT_TO_PROG(ent);
 		pr_global_struct->other = EDICT_TO_PROG(sv.edicts);
 #if NATIVE_GAME
-		if (g_game_api)
+		if (g_game_api) {
+			game_globals.time  = sv.time;
+			game_globals.self  = ent;
+			game_globals.other = sv.edicts;
 			g_game_api->entity_think(ent);
+		}
 #else
 		PR_ExecuteProgram (ent->v.think);
 #endif
@@ -1056,7 +1098,11 @@ void SV_WalkMove (edict_t *ent)
 		if (ent->v.solid == SOLID_BSP)
 		{
 			ent->v.flags =	(int)ent->v.flags | FL_ONGROUND;
+#if NATIVE_GAME
+			ent->v.groundentity = downtrace.ent;
+#else
 			ent->v.groundentity = EDICT_TO_PROG(downtrace.ent);
+#endif
 		}
 	}
 	else
@@ -1088,8 +1134,12 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	pr_global_struct->time = sv.time;
 	pr_global_struct->self = EDICT_TO_PROG(ent);
 #if NATIVE_GAME
-	if (g_game_api)
+	if (g_game_api) {
+		game_globals.time  = sv.time;
+		game_globals.self  = ent;
+		game_globals.other = sv.edicts;
 		g_game_api->client_prethink(ent);
+	}
 #else
 	PR_ExecuteProgram (pr_global_struct->PlayerPreThink);
 #endif
@@ -1154,8 +1204,12 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	pr_global_struct->time = sv.time;
 	pr_global_struct->self = EDICT_TO_PROG(ent);
 #if NATIVE_GAME
-	if (g_game_api)
+	if (g_game_api) {
+		game_globals.time  = sv.time;
+		game_globals.self  = ent;
+		game_globals.other = sv.edicts;
 		g_game_api->client_postthink(ent);
+	}
 #else
 	PR_ExecuteProgram (pr_global_struct->PlayerPostThink);
 #endif
@@ -1361,7 +1415,11 @@ void SV_Physics_Toss (edict_t *ent)
 #endif
 		{
 			ent->v.flags = (int)ent->v.flags | FL_ONGROUND;
+#if NATIVE_GAME
+			ent->v.groundentity = trace.ent;
+#else
 			ent->v.groundentity = EDICT_TO_PROG(trace.ent);
+#endif
 			VectorCopy (vec3_origin, ent->v.velocity);
 			VectorCopy (vec3_origin, ent->v.avelocity);
 		}
@@ -1545,8 +1603,14 @@ void SV_Physics (void)
 	pr_global_struct->other = EDICT_TO_PROG(sv.edicts);
 	pr_global_struct->time = sv.time;
 #if NATIVE_GAME
-	if (g_game_api)
+	if (g_game_api) {
+		game_globals.time      = sv.time;
+		game_globals.frametime = host_frametime;
+		game_globals.world     = sv.edicts;
+		game_globals.self      = sv.edicts;
+		game_globals.other     = sv.edicts;
 		g_game_api->start_frame();
+	}
 #else
 	PR_ExecuteProgram (pr_global_struct->StartFrame);
 #endif

@@ -869,7 +869,9 @@ void Host_Init (quakeparms_t *parms)
 	Key_Init ();
 	Con_Init ();	
 	M_Init ();	
+#if !NATIVE_GAME
 	PR_Init ();
+#endif
 	Mod_Init ();
 	NET_Init ();
 	SV_Init ();

@@ -127,28 +127,36 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink)
 		{
 			VectorAdd (ent->v.origin, move, neworg);
 			enemy = PROG_TO_EDICT(ent->v.enemy);
+#if NATIVE_GAME
+			/* In NATIVE_GAME, NULL enemy == no enemy (VM used sv.edicts offset 0). */
+			if (i == 0 && enemy && enemy != sv.edicts)
+#else
 			if (i == 0 && enemy != sv.edicts)
+#endif
 			{
-				dz = ent->v.origin[2] - PROG_TO_EDICT(ent->v.enemy)->v.origin[2];
+				dz = ent->v.origin[2] - enemy->v.origin[2];
 				if (dz > 40)
 					neworg[2] -= 8;
 				if (dz < 30)
 					neworg[2] += 8;
 			}
 			trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, neworg, false, ent);
-	
+
 			if (trace.fraction == 1)
 			{
 				if ( ((int)ent->v.flags & FL_SWIM) && SV_PointContents(trace.endpos) == CONTENTS_EMPTY )
 					return false;	// swim monster left water
-	
+
 				VectorCopy (trace.endpos, ent->v.origin);
 				if (relink)
 					SV_LinkEdict (ent, true);
 				return true;
 			}
-			
+#if NATIVE_GAME
+			if (!enemy || enemy == sv.edicts)
+#else
 			if (enemy == sv.edicts)
+#endif
 				break;
 		}
 		
@@ -209,7 +217,11 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink)
 //		Con_Printf ("back on ground\n"); 
 		ent->v.flags = (int)ent->v.flags & ~FL_PARTIALGROUND;
 	}
+#if NATIVE_GAME
+	ent->v.groundentity = trace.ent;
+#else
 	ent->v.groundentity = EDICT_TO_PROG(trace.ent);
+#endif
 
 // the move is ok
 	if (relink)
@@ -229,14 +241,36 @@ facing it.
 
 ======================
 */
+#if NATIVE_GAME
+/* Inline implementation — pr_cmds.c not compiled in NATIVE_GAME=1 */
+static void do_changeyaw (edict_t *ent)
+{
+	float current, ideal, move, speed;
+	current = anglemod( ent->v.angles[1] );
+	ideal   = ent->v.ideal_yaw;
+	speed   = ent->v.yaw_speed;
+	if (current == ideal) return;
+	move = ideal - current;
+	if (ideal > current) { if (move >= 180)  move -= 360; }
+	else                 { if (move <= -180) move += 360; }
+	if (move > 0) { if (move > speed)  move = speed; }
+	else          { if (move < -speed) move = -speed; }
+	ent->v.angles[1] = anglemod (current + move);
+}
+#else
 void PF_changeyaw (void);
+#endif
 qboolean SV_StepDirection (edict_t *ent, float yaw, float dist)
 {
 	vec3_t		move, oldorigin;
 	float		delta;
-	
+
 	ent->v.ideal_yaw = yaw;
+#if NATIVE_GAME
+	do_changeyaw(ent);
+#else
 	PF_changeyaw();
+#endif
 	
 	yaw = yaw*M_PI*2 / 360;
 	move[0] = cos(yaw)*dist;
@@ -390,6 +424,39 @@ SV_MoveToGoal
 
 ======================
 */
+#if NATIVE_GAME
+// In NATIVE_GAME=1, SV_MoveToGoal is called directly by the game DLL with
+// an edict and distance parameter, rather than through the QC VM stack.
+void SV_MoveToGoal (edict_t *ent, float dist)
+{
+	edict_t		*goal;
+#ifdef QUAKE2
+	edict_t		*enemy;
+#endif
+
+	goal = ent->v.goalentity;
+
+	if ( !( (int)ent->v.flags & (FL_ONGROUND|FL_FLY|FL_SWIM) ) )
+		return;
+
+// if the next step hits the enemy, return immediately
+#ifdef QUAKE2
+	enemy = ent->v.enemy;
+	if (enemy != sv.edicts &&  SV_CloseEnough (ent, enemy, dist) )
+#else
+	/* NATIVE_GAME: NULL enemy means "no enemy" (VM used sv.edicts/offset-0). */
+	if ( ent->v.enemy && ent->v.enemy != sv.edicts &&  SV_CloseEnough (ent, goal, dist) )
+#endif
+		return;
+
+// bump around...
+	if ( (rand()&3)==1 ||
+	!SV_StepDirection (ent, ent->v.ideal_yaw, dist))
+	{
+		SV_NewChaseDir (ent, goal, dist);
+	}
+}
+#else  /* NATIVE_GAME=0 — QC VM builtin version */
 void SV_MoveToGoal (void)
 {
 	edict_t		*ent, *goal;
@@ -424,4 +491,5 @@ void SV_MoveToGoal (void)
 		SV_NewChaseDir (ent, goal, dist);
 	}
 }
+#endif /* NATIVE_GAME */
 

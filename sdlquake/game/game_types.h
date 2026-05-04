@@ -123,12 +123,20 @@ typedef struct entvars_s {
 // ---------------------------------------------------------------------------
 #define MAX_ENT_LEAFS 16
 
+// link_t may already be defined by common.h (engine context)
+#ifndef LINK_T_DEFINED
+#define LINK_T_DEFINED
 typedef struct link_s { struct link_s *prev, *next; } link_t;
+#endif
 
+// entity_state_t may already be defined by server.h (engine context)
+#ifndef ENTITY_STATE_T_DEFINED
+#define ENTITY_STATE_T_DEFINED
 typedef struct {
     vec3_t  origin, angles;
     int     modelindex, frame, colormap, skin, effects;
 } entity_state_t;
+#endif
 
 struct edict_s {
     int            free;

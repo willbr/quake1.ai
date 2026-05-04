@@ -27,6 +27,11 @@ server_static_t	svs;
 
 char	localmodels[MAX_MODELS][5];			// inline model names for precache
 
+#if NATIVE_GAME
+/* In NATIVE_GAME=1, pr_cmds.c is not compiled, so sv_aim is defined here. */
+cvar_t  sv_aim = {"sv_aim", "0.93"};
+#endif
+
 //============================================================================
 
 /*
@@ -193,7 +198,7 @@ void SV_SendServerinfo (client_t *client)
 	char			message[2048];
 
 	MSG_WriteByte (&client->message, svc_print);
-	sprintf (message, "%c\nVERSION %4.2f SERVER (%i CRC)", 2, VERSION, pr_crc);
+	sprintf (message, "%c\nVERSION %4.2f SERVER (%i CRC)", 2, VERSION, (int)pr_crc);
 	MSG_WriteString (&client->message,message);
 
 	MSG_WriteByte (&client->message, svc_serverinfo);
@@ -205,7 +210,11 @@ void SV_SendServerinfo (client_t *client)
 	else
 		MSG_WriteByte (&client->message, GAME_COOP);
 
+#if NATIVE_GAME
+	sprintf (message, "%s", sv.edicts->v.message ? sv.edicts->v.message : "");
+#else
 	sprintf (message, pr_strings+sv.edicts->v.message);
+#endif
 
 	MSG_WriteString (&client->message,message);
 
@@ -457,7 +466,11 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 		if (ent != clent)	// clent is ALLWAYS sent
 		{
 // ignore ents without visible models
-			if (!ent->v.modelindex || !pr_strings[ent->v.model])
+	#if NATIVE_GAME
+		if (!ent->v.modelindex || !ent->v.model || !ent->v.model[0])
+#else
+		if (!ent->v.modelindex || !pr_strings[ent->v.model])
+#endif
 				continue;
 
 			for (i=0 ; i < ent->num_leafs ; i++)
@@ -692,7 +705,11 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	if (bits & SU_ARMOR)
 		MSG_WriteByte (msg, ent->v.armorvalue);
 	if (bits & SU_WEAPON)
-		MSG_WriteByte (msg, SV_ModelIndex(pr_strings+ent->v.weaponmodel));
+	#if NATIVE_GAME
+	MSG_WriteByte (msg, SV_ModelIndex((char *)ent->v.weaponmodel));
+#else
+	MSG_WriteByte (msg, SV_ModelIndex(pr_strings+ent->v.weaponmodel));
+#endif
 	
 	MSG_WriteShort (msg, ent->v.health);
 	MSG_WriteByte (msg, ent->v.currentammo);
@@ -958,8 +975,13 @@ void SV_CreateBaseline (void)
 		else
 		{
 			svent->baseline.colormap = 0;
+#if NATIVE_GAME
+			svent->baseline.modelindex =
+				SV_ModelIndex((char *)svent->v.model);
+#else
 			svent->baseline.modelindex =
 				SV_ModelIndex(pr_strings + svent->v.model);
+#endif
 		}
 		
 	//
@@ -1152,9 +1174,13 @@ void SV_SpawnServer (char *server)
 //
 	SV_ClearWorld ();
 
+#if NATIVE_GAME
+	sv.sound_precache[0] = "";
+	sv.model_precache[0] = "";
+#else
 	sv.sound_precache[0] = pr_strings;
-
 	sv.model_precache[0] = pr_strings;
+#endif
 	sv.model_precache[1] = sv.modelname;
 	for (i=1 ; i<sv.worldmodel->numsubmodels ; i++)
 	{
@@ -1166,13 +1192,29 @@ void SV_SpawnServer (char *server)
 // load the rest of the entities
 //
 	ent = EDICT_NUM(0);
+#if NATIVE_GAME
+	memset (&ent->v, 0, sizeof(entvars_t));
+#else
 	memset (&ent->v, 0, progs->entityfields * 4);
+#endif
 	ent->free = false;
+#if NATIVE_GAME
+	ent->v.model = ED_NewString(sv.worldmodel->name);
+#else
 	ent->v.model = ED_NewString(sv.worldmodel->name) - pr_strings;
+#endif
 	ent->v.modelindex = 1;		// world model
 	ent->v.solid = SOLID_BSP;
 	ent->v.movetype = MOVETYPE_PUSH;
 
+#if NATIVE_GAME
+	game_globals.coop        = coop.value;
+	game_globals.deathmatch  = coop.value ? 0 : deathmatch.value;
+	game_globals.mapname     = sv.name;
+	game_globals.serverflags = svs.serverflags;
+	game_globals.world       = sv.edicts;
+	pr_global_struct->serverflags = svs.serverflags;
+#else
 	if (coop.value)
 		pr_global_struct->coop = coop.value;
 	else
@@ -1185,6 +1227,7 @@ void SV_SpawnServer (char *server)
 
 // serverflags are for cross level information (sigils)
 	pr_global_struct->serverflags = svs.serverflags;
+#endif
 
 	ED_LoadFromFile (sv.worldmodel->entities);
 
