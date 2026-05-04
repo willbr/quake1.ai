@@ -88,6 +88,14 @@ zig build game                # rebuild only game.dll (fast hot-reload iteration
 | 5 | ✅ done | QuakeC → C (port progs to hot-reloadable game.dll) |
 | 6 | planned | Port Wolf3D & Doom1 guns into Quake (sprites, sounds, behaviour) |
 | 7 | planned | In-game 3D map editor |
+| 8 | planned | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust) |
+
+### Phase 8 references
+
+- Design spec: `docs/superpowers/specs/2026-05-04-immersive-sim-systems-design.md`
+- Implementation plan (M1+M2+M2.5 only — AI substrate): `docs/superpowers/plans/2026-05-04-immersive-sim-m1-m2-ai-substrate.md`
+- Future plans (M3 Blink/Gust, M4 wind, M5 light, M6 retrofit, M7 bespoke map) not yet written.
+- All sim code lives in `sdlquake/game/sim/` inside the hot-reloadable `game.dll` (Approach 1 from the spec). M1+M2+M2.5 require no `engine_api_t` changes for the sim layer itself; one ABI bump for imgui debug-panel data hooks.
 
 ## Reference data
 
