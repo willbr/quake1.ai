@@ -3,3 +3,5 @@ zig-out/
 quake.db
 id1/pak*.pak
 .superpowers/
+crash_*.txt
+test_*.txt
