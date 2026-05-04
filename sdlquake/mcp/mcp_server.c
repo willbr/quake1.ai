@@ -277,7 +277,11 @@ static void tool_list_entities(const char *id_json)
         {
             edict_t *e = (edict_t *)((byte *)sv.edicts + i * pr_edict_size);
             if (e->free) continue;
+#if NATIVE_GAME
+            const char *cn = e->v.classname;
+#else
             const char *cn = pr_strings + e->v.classname;
+#endif
             if (!cn || !cn[0]) continue;
 
             if (!first) { if (p < end) *p++ = ','; }

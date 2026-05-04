@@ -1,5 +1,22 @@
+* decals for the enviroment, gunshots etc
+    * bullet holds
+    * blood
+    * dirt & grime, scratches
+* wind
+    * blows smoke
+    * blows plants
+    * blows rain
+* mouse support for the default menu
+* rebuilt menu in imgui?
+* uncapped framerate, with fixed physics
+* custom hud
+* colour lights
+* fog
+* texture filtering
 * window resize, indipendent of the rendering size
-
+* increased engine limits
+* bsp2 support?
+* model interpolation
 * hot reloading
 * cimgui
 * sqlite for everything
