@@ -3,6 +3,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "weapons_phase6.h"
 #include <string.h>
 #include <math.h>
 
@@ -79,6 +80,8 @@ void W_Precache(void) {
     eng->PrecacheSound("weapons/grenade.wav");
     eng->PrecacheSound("weapons/bounce.wav");
     eng->PrecacheSound("weapons/shotgn2.wav");
+
+    Phase6_PrecacheCommon();
 }
 
 static float crandom(void) {
@@ -651,6 +654,13 @@ void W_SetCurrentAmmo(void) {
     edict_t *self = g->self;
     player_run(self);
 
+    // Phase 6 takes precedence: when weapon2 is set, set the sprite viewmodel
+    // and skip the rest of Quake's IT_* / ammo-icon logic.
+    if (self->v.weapon2 != 0) {
+        W_SetCurrentAmmo_Phase6((int)self->v.weapon2);
+        return;
+    }
+
     int items = (int)self->v.items;
     items &= ~(IT_SHELLS | IT_NAILS | IT_ROCKETS | IT_CELLS);
     self->v.items = (float)items;
@@ -730,6 +740,16 @@ static int W_CheckNoAmmo(void) {
 // ---------------------------------------------------------------------------
 static void W_Attack(void) {
     edict_t *self = g->self;
+
+    // Phase 6: route through the parallel dispatch when a Phase 6 weapon is
+    // active. The Phase 6 fire functions handle their own ammo + sound + anim.
+    if (self->v.weapon2 != 0) {
+        eng->MakeVectors(self->v.v_angle);
+        self->v.show_hostile = g->time + 1;
+        W_Attack_Phase6();
+        return;
+    }
+
     if (!W_CheckNoAmmo()) return;
 
     eng->MakeVectors(self->v.v_angle);
@@ -794,7 +814,8 @@ static void W_ChangeWeapon(void) {
     if (!(it & (int)fl)) { eng->SV_SPrint(self, 0, "no weapon.\n"); return; }
     if (am)               { eng->SV_SPrint(self, 0, "not enough ammo.\n"); return; }
 
-    self->v.weapon = fl;
+    self->v.weapon  = fl;
+    self->v.weapon2 = 0;   // back to Quake roster
     W_SetCurrentAmmo();
 }
 
@@ -853,6 +874,8 @@ static void ImpulseCommands(void) {
     if (imp == 9)   CheatCommand();
     if (imp == 10)  CycleWeaponCommand();
     if (imp == 11)  ServerflagsCommand();
+    if (imp >= 12 && imp <= 21) Phase6_ChangeWeapon(imp);   // Wolf3D + Doom1 roster
+    if (imp == 100) Phase6_CheatGiveAll();
     if (imp == 255) QuadCheat();
     self->v.impulse = 0;
 }

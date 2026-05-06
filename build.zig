@@ -172,6 +172,8 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/player.c",
             "sdlquake/game/items.c",
             "sdlquake/game/weapons.c",
+            "sdlquake/game/weapons_phase6.c",
+            "sdlquake/game/player_phase6.c",
             "sdlquake/game/fight.c",
             "sdlquake/game/ai.c",
             "sdlquake/game/misc.c",
@@ -196,7 +198,15 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/monster_boss.c",
             "sdlquake/game/monster_oldone.c",
         },
-        .flags = &.{ "-std=c11", "-fno-strict-aliasing", "-w" },
+        .flags = &.{
+            "-std=c11",
+            "-fno-strict-aliasing",
+            "-w",
+            // Game DLL was ported from QuakeC, which itself uses float→int
+            // casts that are UB by the standard but well-defined on x86. Same
+            // rationale as the engine (see engine_c_flags above).
+            "-fno-sanitize=undefined",
+        },
     });
     const game_lib = b.addLibrary(.{
         .name        = "game",

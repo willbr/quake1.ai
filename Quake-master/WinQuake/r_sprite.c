@@ -341,6 +341,7 @@ void R_DrawViewModelSprite (entity_t *e)
 	mspriteframe_t *frame;
 	int             frame_idx;
 	int             sx, sy;
+	int             vp_x, vp_y, vp_w, vp_h;
 
 	if (!e->model || e->model->type != mod_sprite)
 		return;
@@ -360,8 +361,15 @@ void R_DrawViewModelSprite (entity_t *e)
 	if (!frame)
 		return;
 
-	sx = ((int)vid.width  - frame->width)  / 2;
-	sy =  (int)vid.height - frame->height;
+	// Anchor inside the 3D viewport so we don't draw into the status bar
+	// zone (R_RenderView only writes to vrect; Sbar_Draw owns everything below).
+	vp_x = r_refdef.vrect.x;
+	vp_y = r_refdef.vrect.y;
+	vp_w = r_refdef.vrect.width;
+	vp_h = r_refdef.vrect.height;
+
+	sx = vp_x + (vp_w - frame->width) / 2;
+	sy = vp_y +  vp_h - frame->height;
 	R_BlitSpriteScreen (sx, sy, frame);
 }
 

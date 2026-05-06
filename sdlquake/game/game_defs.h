@@ -78,6 +78,21 @@
 #define IT_SUIT             2097152
 #define IT_QUAD             4194304
 
+// Phase 6 weapons live in a separate items2 bitfield + weapon2 selector,
+// so the existing 8-weapon Quake roster stays untouched. See
+// docs/superpowers/plans/2026-05-04-immersive-sim-m1-m2-ai-substrate.md
+// (the *Phase 6* plan, despite the file name) for the full spec.
+#define IT2_DOOM_FIST       (1 << 0)
+#define IT2_DOOM_PISTOL     (1 << 1)
+#define IT2_DOOM_SHOTGUN    (1 << 2)
+#define IT2_DOOM_CHAINGUN   (1 << 3)
+#define IT2_DOOM_ROCKET     (1 << 4)
+#define IT2_DOOM_CHAINSAW   (1 << 5)
+#define IT2_WOLF_KNIFE      (1 << 6)
+#define IT2_WOLF_PISTOL     (1 << 7)
+#define IT2_WOLF_MACHINEGUN (1 << 8)
+#define IT2_WOLF_CHAINGUN   (1 << 9)
+
 // point contents
 #define CONTENT_EMPTY  (-1)
 #define CONTENT_SOLID  (-2)
