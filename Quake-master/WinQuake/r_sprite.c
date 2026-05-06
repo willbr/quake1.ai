@@ -280,6 +280,94 @@ mspriteframe_t *R_GetSpriteframe (msprite_t *psprite)
 
 /*
 ================
+R_BlitSpriteScreen
+
+PHASE 6 PATCH: paletted screen-space blit with transparent-pixel skip.
+No world-space transform, no perspective, no z-buffer — just copy a
+sprite frame's pixels straight into vid.buffer at (sx, sy). Bytes equal
+to TRANSPARENT_COLOR (0xFF) are skipped. Caller is responsible for
+clipping; this function returns silently if the sprite would extend
+past the framebuffer.
+
+Modeled on draw.c:Draw_TransPic (which does the same thing for HUD pics).
+================
+*/
+void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame)
+{
+	int		w, h, u, v;
+	byte	*dest, *source, tbyte;
+
+	if (r_pixbytes != 1)
+		return;		// 16-bit color path not supported for viewmodel sprites yet
+
+	w = frame->width;
+	h = frame->height;
+	if (w <= 0 || h <= 0)
+		return;
+
+	if (sx < 0 || sy < 0 ||
+		sx + w > (int)vid.width || sy + h > (int)vid.height)
+		return;		// off-screen — skip rather than crash
+
+	source = (byte *)&frame->pixels[0];
+	dest   = vid.buffer + sy * vid.rowbytes + sx;
+
+	for (v = 0; v < h; v++)
+	{
+		for (u = 0; u < w; u++)
+		{
+			if ((tbyte = source[u]) != TRANSPARENT_COLOR)
+				dest[u] = tbyte;
+		}
+		dest   += vid.rowbytes;
+		source += w;
+	}
+}
+
+
+/*
+================
+R_DrawViewModelSprite
+
+PHASE 6 PATCH: route a held-weapon entity whose model is a sprite (.spr)
+through screen-space blit instead of the world-space sprite renderer.
+Anchors the sprite bottom-center; the status bar overlays its lower
+portion the same way it does the 3D MDL viewmodel.
+================
+*/
+void R_DrawViewModelSprite (entity_t *e)
+{
+	msprite_t      *psprite;
+	mspriteframe_t *frame;
+	int             frame_idx;
+	int             sx, sy;
+
+	if (!e->model || e->model->type != mod_sprite)
+		return;
+
+	psprite = e->model->cache.data;
+	if (!psprite)
+		return;
+
+	frame_idx = e->frame;
+	if (frame_idx < 0 || frame_idx >= psprite->numframes)
+		frame_idx = 0;
+
+	if (psprite->frames[frame_idx].type != SPR_SINGLE)
+		return;		// animation-group viewmodels not supported (no Phase 6 weapon needs it)
+
+	frame = psprite->frames[frame_idx].frameptr;
+	if (!frame)
+		return;
+
+	sx = ((int)vid.width  - frame->width)  / 2;
+	sy =  (int)vid.height - frame->height;
+	R_BlitSpriteScreen (sx, sy, frame);
+}
+
+
+/*
+================
 R_DrawSprite
 ================
 */

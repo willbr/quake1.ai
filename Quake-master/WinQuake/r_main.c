@@ -626,6 +626,15 @@ void R_DrawViewModel (void)
 	if (!currententity->model)
 		return;
 
+	// PHASE 6 PATCH: 2D sprite viewmodels (.spr) use a screen-anchored blit
+	// instead of the world-space alias-model path. This is what makes Phase 6's
+	// extracted Wolf3D / Doom1 weapon sprites appear in the player's hand.
+	if (currententity->model->type == mod_sprite)
+	{
+		R_DrawViewModelSprite (currententity);
+		return;
+	}
+
 	VectorCopy (currententity->origin, r_entorigin);
 	VectorSubtract (r_origin, r_entorigin, modelorg);
 

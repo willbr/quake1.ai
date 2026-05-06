@@ -130,6 +130,8 @@ extern	vec3_t			r_worldmodelorg;
 
 
 void R_DrawSprite (void);
+void R_DrawViewModelSprite (entity_t *e);		// PHASE 6: 2D viewmodel sprite path
+void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame);
 void R_RenderFace (msurface_t *fa, int clipflags);
 void R_RenderPoly (msurface_t *fa, int clipflags);
 void R_RenderBmodelFace (bedge_t *pedges, msurface_t *psurf);
