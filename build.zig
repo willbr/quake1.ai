@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target      = b.standardTargetOptions(.{});
     const optimize    = b.standardOptimizeOption(.{});
-    const native_game = b.option(bool, "native_game", "Route game logic through game.dll instead of VM") orelse false;
+    const native_game = b.option(bool, "native_game", "Route game logic through game.dll instead of VM") orelse true;
 
     // Engine files are K&R/C89 era; gnu89 + fcommon matches original MSVC tentative-definition behaviour.
     const engine_c_flags: []const []const u8 = &.{

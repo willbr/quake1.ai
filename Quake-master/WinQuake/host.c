@@ -878,6 +878,11 @@ void Host_Init (quakeparms_t *parms)
 
 	Con_Printf ("Exe: "__TIME__" "__DATE__"\n");
 	Con_Printf ("%4.1f megabyte heap\n",parms->memsize/ (1024*1024.0));
+#if NATIVE_GAME
+	Con_Printf ("Game: native C (game.dll)\n");
+#else
+	Con_Printf ("Game: QuakeC VM (progs.dat)\n");
+#endif
 	
 	R_InitTextures ();		// needed even for dedicated servers
  
