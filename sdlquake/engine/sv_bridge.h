@@ -22,6 +22,8 @@ struct edict_s   *svb_edicts(void);
 int               svb_num_edicts(void);
 const char       *svb_model_precache(int i);
 void              svb_set_model_precache(int i, const char *s);
+/* Fills mins/maxs from sv.models[i].  Returns 1 on success, 0 if no such model. */
+int               svb_model_bounds(int i, float *mins, float *maxs);
 const char       *svb_sound_precache(int i);
 void              svb_set_sound_precache(int i, const char *s);
 void              svb_set_lightstyle(int i, const char *s);

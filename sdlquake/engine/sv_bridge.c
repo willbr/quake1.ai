@@ -22,6 +22,17 @@ int        svb_num_edicts(void)         { return sv.num_edicts; }
 const char *svb_model_precache(int i)   { return sv.model_precache[i]; }
 void svb_set_model_precache(int i, const char *s) { sv.model_precache[i] = (char *)s; }
 
+int svb_model_bounds(int i, float *mins, float *maxs)
+{
+    model_t *mod;
+    if (i < 0 || i >= MAX_MODELS) return 0;
+    mod = sv.models[i];
+    if (!mod) return 0;
+    mins[0] = mod->mins[0]; mins[1] = mod->mins[1]; mins[2] = mod->mins[2];
+    maxs[0] = mod->maxs[0]; maxs[1] = mod->maxs[1]; maxs[2] = mod->maxs[2];
+    return 1;
+}
+
 const char *svb_sound_precache(int i)   { return sv.sound_precache[i]; }
 void svb_set_sound_precache(int i, const char *s) { sv.sound_precache[i] = (char *)s; }
 

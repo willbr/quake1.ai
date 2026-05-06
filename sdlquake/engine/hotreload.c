@@ -253,22 +253,32 @@ static void engine_sv_setorigin(edict_t *e, float *org)
     SV_LinkEdict(e, 0);
 }
 
-static void engine_sv_setmodel(edict_t *e, const char *m)
-{
-    int i;
-    for (i = 0; svb_model_precache(i); i++) {
-        if (!strcmp(svb_model_precache(i), m)) break;
-    }
-    e->v.model      = m;
-    e->v.modelindex = (float)i;
-}
-
 static void engine_sv_setsize(edict_t *e, float *mn, float *mx)
 {
     e->v.mins[0] = mn[0]; e->v.mins[1] = mn[1]; e->v.mins[2] = mn[2];
     e->v.maxs[0] = mx[0]; e->v.maxs[1] = mx[1]; e->v.maxs[2] = mx[2];
     e->v.size[0] = mx[0]-mn[0]; e->v.size[1] = mx[1]-mn[1]; e->v.size[2] = mx[2]-mn[2];
     SV_LinkEdict(e, 0);
+}
+
+static void engine_sv_setmodel(edict_t *e, const char *m)
+{
+    int i;
+    float mins[3], maxs[3];
+    for (i = 0; svb_model_precache(i); i++) {
+        if (!strcmp(svb_model_precache(i), m)) break;
+    }
+    e->v.model      = m;
+    e->v.modelindex = (float)i;
+    // Mirror PF_setmodel: derive entity bbox from the model's bounds so BSP
+    // submodels (doors/plats/buttons/trains) get proper mins/maxs/size and
+    // SV_LinkEdict places them in the right leafs — otherwise movers stay
+    // stuck in the solid leaf and never get sent to clients.
+    if (!svb_model_bounds(i, mins, maxs)) {
+        mins[0] = mins[1] = mins[2] = 0;
+        maxs[0] = maxs[1] = maxs[2] = 0;
+    }
+    engine_sv_setsize(e, mins, maxs);
 }
 
 static int engine_sv_droptofloor(edict_t *e)
