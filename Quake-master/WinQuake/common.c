@@ -1413,14 +1413,14 @@ int COM_FindFile (char *filename, int *handle, FILE **file)
 				}
 		}
 		else
-		{               
+		{
 	// check a file in the directory tree
-			if (!static_registered)
-			{       // if not a registered version, don't ever go beyond base
-				if ( strchr (filename, '/') || strchr (filename,'\\'))
-					continue;
-			}
-			
+			// PHASE6 PATCH: removed shareware-era restriction that blocked
+			// loose-file lookups containing '/' when running on shareware
+			// PAK0 only. The restriction was 1996 copy-protection; we need
+			// loose-file subdirs (id1/sound/phase6/*.wav, id1/progs/v_*.spr)
+			// to work for the build-time-extracted Wolf3D + Doom1 assets.
+
 			sprintf (netpath, "%s/%s",search->filename, filename);
 			
 			findtime = Sys_FileTime (netpath);
