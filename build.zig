@@ -231,4 +231,22 @@ pub fn build(b: *std.Build) void {
     run.step.dependOn(b.getInstallStep());
     if (b.args) |args| run.addArgs(args);
     b.step("run", "Build and run Quake").dependOn(&run.step);
+
+    // ---------------------------------------------------------------------------
+    // Phase 6 asset extractor: zig build extract
+    //   Reads wolf3d-data/ and doom-data/, writes loose .spr/.wav into id1/.
+    // ---------------------------------------------------------------------------
+    const extract_mod = b.createModule(.{
+        .root_source_file = b.path("tools/extract_phase6/extract.zig"),
+        .target           = b.graph.host,
+        .optimize         = optimize,
+    });
+    const extract_exe = b.addExecutable(.{
+        .name        = "extract_phase6",
+        .root_module = extract_mod,
+    });
+    const extract_run = b.addRunArtifact(extract_exe);
+    extract_run.setCwd(b.path(""));
+    if (b.args) |args| extract_run.addArgs(args);
+    b.step("extract", "Extract Wolf3D + Doom1 weapon assets into id1/").dependOn(&extract_run.step);
 }
