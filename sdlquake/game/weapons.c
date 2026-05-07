@@ -840,6 +840,18 @@ static void CycleWeaponCommand(void) {
     edict_t *self = g->self;
     int it = (int)self->v.items;
     self->v.impulse = 0;
+
+    // Phase 6 weapon active? Exit to a Quake weapon and stop.
+    // (Without this guard the loop spins forever -- none of the IT_* branches
+    // below match weapon == 0, so weapon stays 0 and the it & 0 == 0 check
+    // never lets us exit.)
+    if ((int)self->v.weapon == 0) {
+        self->v.weapon  = IT_AXE;
+        self->v.weapon2 = 0;
+        W_SetCurrentAmmo();
+        return;
+    }
+
     while (1) {
         int am = 0;
         int w  = (int)self->v.weapon;
@@ -859,6 +871,15 @@ static void CycleWeaponReverseCommand(void) {
     edict_t *self = g->self;
     int it = (int)self->v.items;
     self->v.impulse = 0;
+
+    // Phase 6 weapon active? Exit to a Quake weapon and stop.
+    if ((int)self->v.weapon == 0) {
+        self->v.weapon  = IT_AXE;
+        self->v.weapon2 = 0;
+        W_SetCurrentAmmo();
+        return;
+    }
+
     while (1) {
         int am = 0;
         int w  = (int)self->v.weapon;
