@@ -224,6 +224,47 @@ static void dog_dieb7(edict_t *e) { FRAME(e,DOG_DEATHB7,dog_dieb8); }
 static void dog_dieb8(edict_t *e) { FRAME(e,DOG_DEATHB8,dog_dieb9); }
 static void dog_dieb9(edict_t *e) { FRAME(e,DOG_DEATHB9,dog_dieb9); }
 
+// Attack decision (ports CheckDogMelee, CheckDogJump, DogCheckAttack from dog.qc).
+// Overrides the weak stub in ai.c so CheckAnyAttack dispatches here for monster_dog.
+extern float enemy_range;
+
+static int CheckDogMelee(void) {
+    if ((int)enemy_range == RANGE_MELEE) {
+        g->self->v.attack_state = AS_MELEE;
+        return 1;
+    }
+    return 0;
+}
+
+static int CheckDogJump(void) {
+    edict_t *self = g->self;
+    edict_t *en   = self->v.enemy;
+    if (self->v.origin[2] + self->v.mins[2] >
+        en->v.origin[2] + en->v.mins[2] + 0.75f * en->v.size[2])
+        return 0;
+    if (self->v.origin[2] + self->v.maxs[2] <
+        en->v.origin[2] + en->v.mins[2] + 0.25f * en->v.size[2])
+        return 0;
+    float dx = en->v.origin[0] - self->v.origin[0];
+    float dy = en->v.origin[1] - self->v.origin[1];
+    float d  = sqrtf(dx*dx + dy*dy);
+    if (d < 80)  return 0;
+    if (d > 150) return 0;
+    return 1;
+}
+
+int DogCheckAttack(void) {
+    if (CheckDogMelee()) {
+        g->self->v.attack_state = AS_MELEE;
+        return 1;
+    }
+    if (CheckDogJump()) {
+        g->self->v.attack_state = AS_MISSILE;
+        return 1;
+    }
+    return 0;
+}
+
 static void dog_die_cb(edict_t *self) {
     g->self = self;
     if (self->v.health < -35) {
