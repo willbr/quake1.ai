@@ -77,8 +77,9 @@ const doom_chgg_frames  = [_]DoomFrameSpec{
     .{ .lump = "CHGGB0", .flash = "CHGFB0" },
 };
 const doom_misg_frames  = [_]DoomFrameSpec{
-    .{ .lump = "MISGA0", .flash = "MISFA0" },
-    .{ .lump = "MISGB0" },
+    .{ .lump = "MISGA0" },                         // 0: idle / lowered pose
+    .{ .lump = "MISGB0", .flash = "MISFA0" },      // 1: fire (flash composited on launcher pose)
+    .{ .lump = "MISGB0" },                         // 2: settle (no flash)
 };
 const doom_sawg_frames  = [_]DoomFrameSpec{
     .{ .lump = "SAWGA0" },

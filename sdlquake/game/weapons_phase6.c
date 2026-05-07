@@ -18,6 +18,8 @@ extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float
 extern void T_RadiusDamage(edict_t *bomb, edict_t *attacker, float rad, edict_t *ignore);
 extern void SpawnBlood(vec3_t org, vec3_t vel, float damage);
 extern void player_run(edict_t *self);
+extern void BecomeExplosion(void);
+extern void SUB_Remove(edict_t *self);
 
 // ---------------------------------------------------------------------------
 // Local helpers — separate from weapons.c's static multi-damage state so
@@ -411,11 +413,105 @@ void DoomShotgun_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
+// Doom rocket launcher -- A_FireMissile from p_pspr.c
+//   damage  = 20..160 direct (random per Doom MT_ROCKET base damage)
+//   splash  = 128 unit radius (vs Quake's 120)
+//   speed   = 660 ups (Doom MT_ROCKET ~700 fracunits/s, rounded down)
+//   ammo    = 1 rocket per shot
+//   refire  = 27 tics (8+12+7 settle) ~= 0.771 s
+//   sound   = sfx_rlaunc (= phase6/doom_rlaunch.wav)
+//   notes   = no shambler-resistance multiplier, no random Z gib bonus
+// ---------------------------------------------------------------------------
+#define DOOMROCKET_CHAIN_S  (27.0f * (1.0f / 35.0f))   // 8-tic flash hold + 12-tic fire + 7-tic settle
+
+// Doom MT_ROCKET: 660 ups, 128 splash, 20-160 direct damage, no gibbing
+// bonus, no shambler resistance multiplier. Fired by W_FirePhase6_DoomRocket
+// via DoomRocket_DoFire on the second chain step.
+static void DoomRocket_Touch(edict_t *self, edict_t *other) {
+    g->self = self; g->other = other;
+    if (other == self->v.owner) return;
+    if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) {
+        eng->ED_Free(self);
+        return;
+    }
+
+    if (other->v.health) {
+        // Doom direct hit: 20 + (rnd & 63) -- a 20..83 minimum, plus the
+        // rocket's per-mobj damage*8 base. We approximate to 20..160.
+        float damg = 20.0f + (float)(rand_byte() & 63) + (float)(rand_byte() & 63);
+        T_Damage(other, self, self->v.owner, damg);
+    }
+    T_RadiusDamage(self, self->v.owner, 128, other);
+
+    // Pull back a bit so the explosion graphic doesn't z-fight the wall
+    // (same trick as Quake's T_MissileTouch).
+    float vlen = eng->VectorLength(self->v.velocity) + 0.0001f;
+    self->v.origin[0] -= 8 * (self->v.velocity[0] / vlen);
+    self->v.origin[1] -= 8 * (self->v.velocity[1] / vlen);
+    self->v.origin[2] -= 8 * (self->v.velocity[2] / vlen);
+
+    eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
+    eng->MSG_WriteByte(MSG_BROADCAST, TE_EXPLOSION);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+
+    BecomeExplosion();
+}
+
+void W_FirePhase6_DoomRocket(void) {
+    edict_t *self = g->self;
+    if (self->v.ammo_rockets < 1) return;
+    // 8+12 tics = 0.571s for the chain; A_ReFire at the end has 0 tics so
+    // refire is gated purely by attack_finished (we add a small extra
+    // 7-tic settle so the player feels the rocket's weight).
+    self->v.attack_finished = g->time + DOOMROCKET_CHAIN_S;
+    player_doomrocket1(self);
+}
+
+void DoomRocket_DoFire(edict_t *self) {
+    if (self->v.ammo_rockets < 1) return;
+
+    eng->SV_StartSound(self, CHAN_WEAPON, "phase6/doom_rlaunch.wav", 1, ATTN_NORM);
+    self->v.punchangle[0] = -2;
+    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
+    self->v.ammo_rockets -= 1;
+    self->v.currentammo   = self->v.ammo_rockets;
+
+    edict_t *missile = eng->ED_Alloc();
+    missile->v.owner    = self;
+    missile->v.movetype = MOVETYPE_FLYMISSILE;
+    missile->v.solid    = SOLID_BBOX;
+    missile->v.classname = "rocket";  // distinct from "rocket" Quake too uses; cosmetic
+
+    eng->MakeVectors(self->v.v_angle);
+    eng->SV_Aim(self, 1000, missile->v.velocity);
+    // 660 ups -- matches Doom MT_ROCKET (700 fracunits/s in source, rounded
+    // down for tactile feel).
+    missile->v.velocity[0] *= 660.0f;
+    missile->v.velocity[1] *= 660.0f;
+    missile->v.velocity[2] *= 660.0f;
+    eng->VectorToAngles(missile->v.velocity, missile->v.angles);
+
+    missile->v.touch     = DoomRocket_Touch;
+    missile->v.nextthink = g->time + 5;
+    missile->v.think     = SUB_Remove;
+    eng->SV_SetModel(missile, "progs/missile.mdl");
+    vec3_t mzero = {0,0,0};
+    eng->SV_SetSize(missile, mzero, mzero);
+    vec3_t morg = {
+        self->v.origin[0] + g->v_forward[0]*8,
+        self->v.origin[1] + g->v_forward[1]*8,
+        self->v.origin[2] + g->v_forward[2]*8 + 16
+    };
+    eng->SV_SetOrigin(missile, morg);
+}
+
+// ---------------------------------------------------------------------------
 // Stubs for not-yet-implemented Phase 6 weapons (Phase D/E/F).
 // They just return so dispatch is safe even if a weapon flag is granted
 // before its fire function is written.
 // ---------------------------------------------------------------------------
-void W_FirePhase6_DoomRocket   (void) {}
 void W_FirePhase6_WolfKnife    (void) {}
 void W_FirePhase6_WolfPistol   (void) {}
 void W_FirePhase6_WolfMG       (void) {}
