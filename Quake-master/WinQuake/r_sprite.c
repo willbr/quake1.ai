@@ -313,9 +313,10 @@ void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame, byte palette_id)
 
 	source   = (byte *)&frame->pixels[0];
 	dest     = vid.buffer       + sy * vid.rowbytes + sx;
-	// vid_palette_id is sized to VID_WIDTH * VID_HEIGHT and stride-equivalent
-	// to vid.buffer at fixed-resolution mode (vid.rowbytes == VID_WIDTH).
-	pal_dest = vid_palette_id   + sy * vid.rowbytes + sx;
+	// vid_palette_id is sized VID_WIDTH * VID_HEIGHT, stride = vid.width
+	// (independent of vid.rowbytes, which strides vid.buffer and could differ
+	// in the future if rowbytes gains alignment padding).
+	pal_dest = vid_palette_id   + sy * vid.width + sx;
 
 	for (v = 0; v < h; v++)
 	{
@@ -328,7 +329,7 @@ void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame, byte palette_id)
 			}
 		}
 		dest     += vid.rowbytes;
-		pal_dest += vid.rowbytes;
+		pal_dest += vid.width;
 		source   += w;
 	}
 }
