@@ -60,11 +60,10 @@ const doom_pung_frames  = [_]DoomFrameSpec{
     .{ .lump = "PUNGD0" },
 };
 const doom_pisg_frames  = [_]DoomFrameSpec{
-    .{ .lump = "PISGA0" },
-    .{ .lump = "PISGB0", .flash = "PISFA0" },
-    .{ .lump = "PISGC0" },
-    .{ .lump = "PISGD0" },
-    .{ .lump = "PISGE0" },
+    .{ .lump = "PISGA0" },                       // 0: idle / pre-fire hold
+    .{ .lump = "PISGB0", .flash = "PISFA0" },    // 1: fire (composited PISFA0 flash)
+    .{ .lump = "PISGC0" },                       // 2: smoke
+    .{ .lump = "PISGB0" },                       // 3: recoil settle (no flash)
 };
 const doom_shtg_frames  = [_]DoomFrameSpec{
     .{ .lump = "SHTGA0" },
