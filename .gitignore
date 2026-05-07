@@ -12,3 +12,4 @@ test_*.txt
 id1/progs/v_wolf*.spr
 id1/progs/v_doom*.spr
 id1/sound/phase6/
+id1/gfx/palette_doom.lmp

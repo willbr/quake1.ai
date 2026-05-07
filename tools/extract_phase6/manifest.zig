@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const Dir = std.Io.Dir;
 const Allocator = std.mem.Allocator;
 
 const palette_mod = @import("quake_palette.zig");
@@ -174,6 +175,25 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
     var w = try doom_wad.Wad.open(io, allocator, "doom-data/DOOM1.WAD");
     defer w.deinit(allocator);
     const doom_pal = try w.loadPlaypal0();
+
+    // Phase 6 palette switching: write Doom's PLAYPAL palette 0 as a
+    // 768-byte LMP that the engine loads at startup into vid_lut[1].
+    {
+        const out_path = "id1/gfx/palette_doom.lmp";
+        try Dir.cwd().createDirPath(io, "id1/gfx");
+        var bytes: [768]u8 = undefined;
+        var i: usize = 0;
+        while (i < 256) : (i += 1) {
+            bytes[i * 3 + 0] = doom_pal[i][0];
+            bytes[i * 3 + 1] = doom_pal[i][1];
+            bytes[i * 3 + 2] = doom_pal[i][2];
+        }
+        const f = try Dir.cwd().createFile(io, out_path, .{});
+        defer f.close(io);
+        try f.writePositionalAll(io, &bytes, 0);
+        std.debug.print("  wrote {s} (768 bytes)\n", .{out_path});
+    }
+
     const doom_remap = buildRemap8(doom_pal, quake_pal);
 
     for (doom_sprite_sets) |set| {
