@@ -227,23 +227,24 @@ void Phase6_PrecacheCommon(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Impulse mapping — 12..21 → IT2_* flags, 100 = give all (Phase G1 cheat).
+// Impulse mapping — 30..39 → IT2_* flags, 100 = give all (Phase G1 cheat).
+// (Impulse 12 is reserved for stock-Quake "previous weapon".)
 // ---------------------------------------------------------------------------
 void Phase6_ChangeWeapon(int impulse) {
     edict_t *self = g->self;
 
     int flag = 0;
     switch (impulse) {
-        case 12: flag = IT2_DOOM_FIST;      break;
-        case 13: flag = IT2_DOOM_PISTOL;    break;
-        case 14: flag = IT2_DOOM_SHOTGUN;   break;
-        case 15: flag = IT2_DOOM_CHAINGUN;  break;
-        case 16: flag = IT2_DOOM_ROCKET;    break;
-        case 17: flag = IT2_DOOM_CHAINSAW;  break;
-        case 18: flag = IT2_WOLF_KNIFE;     break;
-        case 19: flag = IT2_WOLF_PISTOL;    break;
-        case 20: flag = IT2_WOLF_MACHINEGUN;break;
-        case 21: flag = IT2_WOLF_CHAINGUN;  break;
+        case 30: flag = IT2_DOOM_FIST;      break;
+        case 31: flag = IT2_DOOM_PISTOL;    break;
+        case 32: flag = IT2_DOOM_SHOTGUN;   break;
+        case 33: flag = IT2_DOOM_CHAINGUN;  break;
+        case 34: flag = IT2_DOOM_ROCKET;    break;
+        case 35: flag = IT2_DOOM_CHAINSAW;  break;
+        case 36: flag = IT2_WOLF_KNIFE;     break;
+        case 37: flag = IT2_WOLF_PISTOL;    break;
+        case 38: flag = IT2_WOLF_MACHINEGUN;break;
+        case 39: flag = IT2_WOLF_CHAINGUN;  break;
         default: return;
     }
 

@@ -59,6 +59,7 @@ static int  W_CheckNoAmmo(void);
 static void W_ChangeWeapon(void);
 static void CheatCommand(void);
 static void CycleWeaponCommand(void);
+static void CycleWeaponReverseCommand(void);
 static void ServerflagsCommand(void);
 static void QuadCheat(void);
 static void ImpulseCommands(void);
@@ -854,6 +855,25 @@ static void CycleWeaponCommand(void) {
     }
 }
 
+static void CycleWeaponReverseCommand(void) {
+    edict_t *self = g->self;
+    int it = (int)self->v.items;
+    self->v.impulse = 0;
+    while (1) {
+        int am = 0;
+        int w  = (int)self->v.weapon;
+        if      (w == IT_LIGHTNING)        { self->v.weapon = IT_ROCKET_LAUNCHER;  if (self->v.ammo_rockets< 1) am=1; }
+        else if (w == IT_ROCKET_LAUNCHER)  { self->v.weapon = IT_GRENADE_LAUNCHER; if (self->v.ammo_rockets< 1) am=1; }
+        else if (w == IT_GRENADE_LAUNCHER) { self->v.weapon = IT_SUPER_NAILGUN;    if (self->v.ammo_nails  < 2) am=1; }
+        else if (w == IT_SUPER_NAILGUN)    { self->v.weapon = IT_NAILGUN;          if (self->v.ammo_nails  < 1) am=1; }
+        else if (w == IT_NAILGUN)          { self->v.weapon = IT_SUPER_SHOTGUN;    if (self->v.ammo_shells < 2) am=1; }
+        else if (w == IT_SUPER_SHOTGUN)    { self->v.weapon = IT_SHOTGUN;          if (self->v.ammo_shells < 1) am=1; }
+        else if (w == IT_SHOTGUN)          { self->v.weapon = IT_AXE; }
+        else if (w == IT_AXE)              { self->v.weapon = IT_LIGHTNING;        if (self->v.ammo_cells  < 1) am=1; }
+        if ((it & (int)self->v.weapon) && am == 0) { W_SetCurrentAmmo(); return; }
+    }
+}
+
 static void ServerflagsCommand(void) {
     g->serverflags = g->serverflags * 2 + 1;
 }
@@ -874,7 +894,8 @@ static void ImpulseCommands(void) {
     if (imp == 9)   CheatCommand();
     if (imp == 10)  CycleWeaponCommand();
     if (imp == 11)  ServerflagsCommand();
-    if (imp >= 12 && imp <= 21) Phase6_ChangeWeapon(imp);   // Wolf3D + Doom1 roster
+    if (imp == 12)  CycleWeaponReverseCommand();
+    if (imp >= 30 && imp <= 39) Phase6_ChangeWeapon(imp);   // Wolf3D + Doom1 roster
     if (imp == 100) Phase6_CheatGiveAll();
     if (imp == 255) QuadCheat();
     self->v.impulse = 0;

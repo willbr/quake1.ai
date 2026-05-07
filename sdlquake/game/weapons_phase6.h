@@ -38,7 +38,7 @@ void W_FirePhase6_WolfMG        (void);
 void W_FirePhase6_WolfChaingun  (void);
 
 // ---------------------------------------------------------------------------
-// Impulse mapping (12..21 → IT2_*) + give-all cheat (impulse 100)
+// Impulse mapping (30..39 → IT2_*) + give-all cheat (impulse 100)
 // ---------------------------------------------------------------------------
 void Phase6_ChangeWeapon (int impulse);
 void Phase6_CheatGiveAll (void);
