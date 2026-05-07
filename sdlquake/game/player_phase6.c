@@ -385,3 +385,35 @@ static void player_wolfpistol5_think(edict_t *self) {
 void player_wolfpistol1(edict_t *self) {
     player_wolfpistol1_think(self);
 }
+
+// ---------------------------------------------------------------------------
+// Wolf3D MG -- 12-tic per-shot loop, 2-step chain (fire frame + post-fire).
+// Wolf3D's 4-step attackinfo collapses to a 2-step here that reloops via
+// attack_finished while button0 held.
+// Frame layout in v_wolfmg.spr:
+//   0 = idle (not used)
+//   1 = pre-fire (only on first press)
+//   2 = fire pose with flash
+//   3 = post-fire
+//   4 = recover (only on release)
+// ---------------------------------------------------------------------------
+
+static void player_wolfmg2_think(edict_t *self);
+static void player_wolfmg3_think(edict_t *self);
+
+static void player_wolfmg1_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY,     2, WOLF_6_TIC, player_wolfmg2_think);
+    WolfMG_DoFire(self);
+}
+static void player_wolfmg2_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 3, WOLF_6_TIC, player_wolfmg3_think);
+}
+static void player_wolfmg3_think(edict_t *self) {
+    g->self = self;
+    g->self->v.weaponframe = 0;
+    player_run(self);
+}
+
+void player_wolfmg1(edict_t *self) {
+    player_wolfmg1_think(self);
+}

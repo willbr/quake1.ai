@@ -56,6 +56,7 @@ void player_doomshotgun1  (edict_t *self);
 void player_doomrocket1   (edict_t *self);
 void player_wolfknife1    (edict_t *self);
 void player_wolfpistol1   (edict_t *self);
+void player_wolfmg1       (edict_t *self);
 
 // ---------------------------------------------------------------------------
 // Deferred-fire callbacks. Heavy actions (sound, damage, EF_MUZZLEFLASH,
@@ -71,5 +72,6 @@ void DoomShotgun_DoFire   (edict_t *self);
 void DoomRocket_DoFire    (edict_t *self);
 void WolfKnife_DoHit      (edict_t *self);
 void WolfPistol_DoFire    (edict_t *self);
+void WolfMG_DoFire        (edict_t *self);
 
 #endif // WEAPONS_PHASE6_H
