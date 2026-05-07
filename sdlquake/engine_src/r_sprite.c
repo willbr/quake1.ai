@@ -400,6 +400,19 @@ void R_DrawViewModelSprite (entity_t *e)
 	if (!e->model || e->model->type != mod_sprite)
 		return;
 
+	// PHASE 6: skip the screen-space viewmodel sprite when the menu or console
+	// is up. R_BlitSpriteScreen tags vid_palette_id with the model's palette
+	// slot (1 = Doom for v_doom*.spr). Menu / console / chat overdraws write
+	// Quake-palette indices into vid.buffer at the same pixels but never touch
+	// vid_palette_id, so VID_Update dispatches the new pixels through the wrong
+	// LUT. Easiest fix: don't paint the viewmodel sprite while an overlay is up
+	// -- the player isn't actively aiming, and the overlay paints over a clean
+	// (palette_id == 0) region.
+	if (key_dest != key_game)
+		return;
+	if (scr_con_current > 0)
+		return;
+
 	psprite = e->model->cache.data;
 	if (!psprite)
 		return;
