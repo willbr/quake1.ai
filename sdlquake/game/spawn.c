@@ -196,7 +196,7 @@ static const spawn_entry_t s_spawns[] = {
     // monsters
     { "monster_fish",              spawn_monster_fish              },
     { "monster_tarbaby",           spawn_monster_tarbaby           },
-    { "monster_soldier",           spawn_monster_soldier           },
+    { "monster_army",              spawn_monster_soldier           },
     { "monster_dog",               spawn_monster_dog               },
     { "monster_enforcer",          spawn_monster_enforcer          },
     { "monster_knight",            spawn_monster_knight            },
