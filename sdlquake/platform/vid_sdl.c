@@ -5,6 +5,7 @@
 #include "quakedef.h"
 #include "winquake.h"
 #include "imgui_layer.h"
+#include "r_bbox.h"
 
 // ---------------------------------------------------------------------------
 // Globals that Win32 platform files normally define
@@ -135,6 +136,7 @@ void VID_Init(unsigned char *palette)
     build_palette(palette);
 
     ImguiLayer_Init(sdl_window, sdl_renderer);
+    RBBox_Init();
 
     // Allocate z-buffer and surface cache from the hunk (as vid_win.c does)
     {
@@ -166,6 +168,8 @@ void VID_Shutdown(void)
 void VID_Update(vrect_t *rects)
 {
     if (!sdl_texture) return;
+
+    RBBox_Draw();
 
     void *pixels;
     int pitch;

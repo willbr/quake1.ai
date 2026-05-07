@@ -78,6 +78,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/hotreload.c",
         "sdlquake/engine/sv_bridge.c",
         "sdlquake/engine/imgui_layer.c",
+        "sdlquake/engine/r_bbox.c",
     };
 
     const imgui_dir = "sdlquake/vendor/imgui-1.92.8";

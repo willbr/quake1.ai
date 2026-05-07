@@ -198,6 +198,7 @@ static const struct { const char *name; const char *desc; } s_cvar_descs[] = {
     { "r_speeds",             "Print BSP traversal stats to console each frame" },
     { "r_fullbright",         "Ignore lightmaps; draw everything at full brightness (0/1)" },
     { "r_drawentities",       "Draw monsters, items, and other entities (0/1)" },
+    { "r_drawbboxes",         "Debug: entity bounding boxes. 0=off, 0.25=light, 0.5=half, 1=opaque" },
     { "r_drawviewmodel",      "Draw the player weapon model (0/1)" },
     { "r_shadows",            "Draw blob shadows under entities (0/1)" },
     { "r_wateralpha",         "Water surface opacity (0=invisible, 1=opaque)" },
