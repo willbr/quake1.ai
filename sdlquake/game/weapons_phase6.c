@@ -370,11 +370,51 @@ void DoomChaingun_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
+// Doom shotgun -- A_FireShotgun from p_pspr.c
+//   damage  = 7 pellets, each 5*(P_Random%3+1) = 5/10/15 (same as pistol)
+//   ammo    = 1 shell per shot
+//   refire  = 44 tics (8 chain steps + 7-tic A_ReFire) ~= 1.257 s
+//   sound   = sfx_shotgn (= phase6/doom_shotgn.wav)
+//   spread  = 7 pellets in a horizontal fan (0.07/0.01) -- tighter than
+//             Doom's 0.7 rad to suit Quake combat ranges
+// ---------------------------------------------------------------------------
+#define DOOMSGUN_CHAIN_S  (44.0f * (1.0f / 35.0f))   // 9 chain states (3+7+5+5+4+5+5+3+7) -- last 7-tic state is folded as refire delay
+
+void W_FirePhase6_DoomShotgun(void) {
+    edict_t *self = g->self;
+    if (self->v.ammo_shells < 1) return;
+    // 3+7+5+5+4+5+5+3 = 37 tics for chain steps, plus 7 tic A_ReFire delay
+    // = 44 tics total. Use 44 tics for attack_finished so refire holds the
+    // standard Doom shotgun 1.257s lockout.
+    self->v.attack_finished = g->time + DOOMSGUN_CHAIN_S;
+    player_doomshotgun1(self);
+}
+
+void DoomShotgun_DoFire(edict_t *self) {
+    if (self->v.ammo_shells < 1) return;
+
+    eng->SV_StartSound(self, CHAN_WEAPON, "phase6/doom_shotgn.wav", 1, ATTN_NORM);
+    self->v.punchangle[0] = -2;
+    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
+    self->v.ammo_shells -= 1;
+    self->v.currentammo  = self->v.ammo_shells;
+
+    vec3_t aim;
+    eng->SV_Aim(self, 100000, aim);
+    // 7 pellets, each 5/10/15 damage. Doom uses ~0.7 rad horizontal spread
+    // (very wide); we use 0.07 for a tighter cone since Quake's combat
+    // distances are larger than Doom's typical 4-tile shotgun range.
+    for (int i = 0; i < 7; i++) {
+        int dmg = 5 * ((rand_byte() % 3) + 1);
+        p6_fire_bullet((float)dmg, aim, 0.07f, 0.01f);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Stubs for not-yet-implemented Phase 6 weapons (Phase D/E/F).
 // They just return so dispatch is safe even if a weapon flag is granted
 // before its fire function is written.
 // ---------------------------------------------------------------------------
-void W_FirePhase6_DoomShotgun  (void) {}
 void W_FirePhase6_DoomRocket   (void) {}
 void W_FirePhase6_WolfKnife    (void) {}
 void W_FirePhase6_WolfPistol   (void) {}

@@ -52,6 +52,7 @@ void player_doompistol1   (edict_t *self);
 void player_doomfist1     (edict_t *self);
 void player_doomsaw1      (edict_t *self);
 void player_doomchaingun1 (edict_t *self);
+void player_doomshotgun1  (edict_t *self);
 
 // ---------------------------------------------------------------------------
 // Deferred-fire callbacks. Heavy actions (sound, damage, EF_MUZZLEFLASH,
@@ -63,5 +64,6 @@ void DoomPistol_DoFire    (edict_t *self);
 void DoomFist_DoFire      (edict_t *self);
 void DoomSaw_DoFire       (edict_t *self);
 void DoomChaingun_DoFire  (edict_t *self);
+void DoomShotgun_DoFire   (edict_t *self);
 
 #endif // WEAPONS_PHASE6_H
