@@ -372,6 +372,12 @@ portion the same way it does the 3D MDL viewmodel.
 #define DOOM_BOB_MAX        16.0f
 #define DOOM_BOB_REF_SPEED  320.0f
 
+// Bob phase accumulator. Advanced only when !cl.paused so the gun freezes
+// during pause/console; r_doom_bob_last_time is updated unconditionally so
+// resuming doesn't integrate the entire pause duration on the first frame.
+static float  r_doom_bob_phase     = 0.0f;
+static double r_doom_bob_last_time = 0.0;
+
 static float R_DoomViewBobAmount (void)
 {
 	float vx = cl.velocity[0];
@@ -389,7 +395,7 @@ void R_DrawViewModelSprite (entity_t *e)
 	int             frame_idx;
 	int             sx, sy;
 	int             vp_x, vp_y, vp_w, vp_h;
-	float           bob, angle;
+	float           bob;
 
 	if (!e->model || e->model->type != mod_sprite)
 		return;
@@ -425,12 +431,16 @@ void R_DrawViewModelSprite (entity_t *e)
 	sx = vp_x + (vp_w - frame->width) / 2;
 	sy = vp_y +  vp_h - frame->height;
 
+	if (!cl.paused)
+		r_doom_bob_phase += (float)((cl.time - r_doom_bob_last_time)
+		                            * (2.0 * M_PI / DOOM_BOB_PERIOD));
+	r_doom_bob_last_time = cl.time;
+
 	bob = R_DoomViewBobAmount ();
 	if (bob > 0.0f)
 	{
-		angle = cl.time * (2.0f * M_PI / DOOM_BOB_PERIOD);
-		sx += (int)(bob * cos (angle));
-		sy += (int)(bob * fabs (sin (angle)));
+		sx += (int)(bob * cos (r_doom_bob_phase));
+		sy += (int)(bob * fabs (sin (r_doom_bob_phase)));
 	}
 
 	R_BlitSpriteScreen (sx, sy, frame, e->model->palette_id);
