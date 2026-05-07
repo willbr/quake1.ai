@@ -262,6 +262,13 @@ static void knight_die(edict_t *self) {
         kn_dieb1(self);
 }
 
+// External overrides for the weak stubs in fight.c. CheckAttack's monster_knight
+// special-case (fight.c:55-57) calls these by name to pick between melee and
+// running attack — without overrides it dispatched to no-op stubs and the
+// knight froze on contact.
+void knight_atk1(edict_t *self)    { kn_atk1(self); }
+void knight_runatk1(edict_t *self) { kn_runatk1(self); }
+
 // ---------------------------------------------------------------------------
 // Spawn
 // ---------------------------------------------------------------------------

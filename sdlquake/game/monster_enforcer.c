@@ -73,7 +73,11 @@ static void Laser_Touch(edict_t *self, edict_t *other) {
     eng->ED_Free(self);
 }
 
-static void LaunchLaser(edict_t *owner, vec3_t org, vec3_t vec) {
+// Non-static, 2-arg signature matches QC. Uses g->self as owner so trap_shooter
+// (misc.c spikeshooter_use) and enforcer_fire share the same implementation.
+// Overrides the weak stub in misc.c.
+void LaunchLaser(vec3_t org, vec3_t vec) {
+    edict_t *owner = g->self;
     eng->SV_StartSound(owner, CHAN_WEAPON, "enforcer/enfire.wav", 1, ATTN_NORM);
     // normalize vec
     float len = sqrtf(vec[0]*vec[0]+vec[1]*vec[1]+vec[2]*vec[2]);
@@ -112,7 +116,8 @@ static void enforcer_fire(edict_t *e) {
         e->v.enemy->v.origin[1] - e->v.origin[1],
         e->v.enemy->v.origin[2] - e->v.origin[2]
     };
-    LaunchLaser(e, org, vec);
+    g->self = e;  // ensure g->self is the enforcer, since LaunchLaser uses it as owner
+    LaunchLaser(org, vec);
 }
 
 // Forward declarations

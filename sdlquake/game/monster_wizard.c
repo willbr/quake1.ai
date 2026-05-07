@@ -24,6 +24,7 @@ extern void launch_spike(vec3_t org, vec3_t dir);
 // fight.c globals
 extern int enemy_vis;
 extern float enemy_range;
+extern float enemy_yaw;
 
 // Frame indices
 // hover1-15: 0-14
@@ -68,6 +69,70 @@ static void WizardAttackFinished(void) {
         e->v.attack_state = AS_SLIDING;
         e->v.think = wz_side1;
     }
+}
+
+// Attack decision -- ported from wizard.qc:107 WizardCheckAttack.
+// Overrides the weak stub in ai.c so CheckAnyAttack dispatches here for monster_wizard.
+int WizardCheckAttack(void) {
+    edict_t *self = g->self;
+    edict_t *targ = self->v.enemy;
+
+    if (g->time < self->v.attack_finished) return 0;
+    if (!enemy_vis)                        return 0;
+
+    if ((int)enemy_range == RANGE_FAR) {
+        if ((int)self->v.attack_state != AS_STRAIGHT) {
+            self->v.attack_state = AS_STRAIGHT;
+            wz_run1(self);
+        }
+        return 0;
+    }
+
+    // Line-of-sight check from eyes to enemy eyes.
+    vec3_t spot1 = {
+        self->v.origin[0] + self->v.view_ofs[0],
+        self->v.origin[1] + self->v.view_ofs[1],
+        self->v.origin[2] + self->v.view_ofs[2]
+    };
+    vec3_t spot2 = {
+        targ->v.origin[0] + targ->v.view_ofs[0],
+        targ->v.origin[1] + targ->v.view_ofs[1],
+        targ->v.origin[2] + targ->v.view_ofs[2]
+    };
+    eng->SV_Traceline(spot1, spot2, 0, self);
+
+    if (g->trace_ent != targ) {
+        // No clear shot — straight-line approach.
+        if ((int)self->v.attack_state != AS_STRAIGHT) {
+            self->v.attack_state = AS_STRAIGHT;
+            wz_run1(self);
+        }
+        return 0;
+    }
+
+    float chance = 0;
+    if      ((int)enemy_range == RANGE_MELEE) chance = 0.9f;
+    else if ((int)enemy_range == RANGE_NEAR)  chance = 0.6f;
+    else if ((int)enemy_range == RANGE_MID)   chance = 0.2f;
+
+    if (eng->Random() < chance) {
+        self->v.attack_state = AS_MISSILE;
+        return 1;
+    }
+
+    if ((int)enemy_range == RANGE_MID) {
+        if ((int)self->v.attack_state != AS_STRAIGHT) {
+            self->v.attack_state = AS_STRAIGHT;
+            wz_run1(self);
+        }
+    } else {
+        if ((int)self->v.attack_state != AS_SLIDING) {
+            self->v.attack_state = AS_SLIDING;
+            wz_side1(self);
+        }
+    }
+
+    return 0;
 }
 
 // Stand (hover in place)

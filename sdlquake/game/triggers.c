@@ -209,7 +209,8 @@ static void play_teleport(edict_t *self) {
     eng->ED_Free(self);
 }
 
-static void spawn_tfog(vec3_t org) {
+// Non-static: also overrides the weak stub in client.c so DM/coop respawn fog fires.
+void spawn_tfog(vec3_t org) {
     edict_t *s     = eng->ED_Alloc();
     s->v.origin[0] = org[0];
     s->v.origin[1] = org[1];
@@ -241,7 +242,8 @@ static void tdeath_touch(edict_t *self, edict_t *other) {
         T_Damage(other, self, self, 50000);
 }
 
-static void spawn_tdeath(vec3_t org, edict_t *death_owner) {
+// Non-static: also overrides the weak stub in client.c so spawn-on-spawn telefrag works.
+void spawn_tdeath(vec3_t org, edict_t *death_owner) {
     edict_t *death   = eng->ED_Alloc();
     death->v.classname = "teledeath";
     death->v.movetype  = MOVETYPE_NONE;

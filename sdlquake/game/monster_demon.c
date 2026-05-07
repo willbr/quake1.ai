@@ -24,6 +24,7 @@ extern void SUB_Remove(edict_t *e);
 
 // fight.c
 extern float enemy_range;
+extern int   enemy_vis;
 
 // Frame indices
 // stand1-13: 0-12
@@ -232,6 +233,50 @@ static void demon_die(edict_t *self) {
         return;
     }
     dm_die1(self);
+}
+
+// Attack decision (ports CheckDemonMelee, CheckDemonJump, DemonCheckAttack from demon.qc).
+// Overrides the weak stub in fight.c so CheckAnyAttack dispatches here for monster_demon1.
+static int CheckDemonMelee(void) {
+    if ((int)enemy_range == RANGE_MELEE) {
+        g->self->v.attack_state = AS_MELEE;
+        return 1;
+    }
+    return 0;
+}
+
+static int CheckDemonJump(void) {
+    edict_t *self = g->self;
+    edict_t *en   = self->v.enemy;
+
+    if (self->v.origin[2] + self->v.mins[2] >
+        en->v.origin[2] + en->v.mins[2] + 0.75f * en->v.size[2])
+        return 0;
+    if (self->v.origin[2] + self->v.maxs[2] <
+        en->v.origin[2] + en->v.mins[2] + 0.25f * en->v.size[2])
+        return 0;
+
+    float dx = en->v.origin[0] - self->v.origin[0];
+    float dy = en->v.origin[1] - self->v.origin[1];
+    float d  = sqrtf(dx*dx + dy*dy);
+
+    if (d < 100) return 0;
+    if (d > 200 && eng->Random() < 0.9f) return 0;
+    return 1;
+}
+
+int DemonCheckAttack(void) {
+    edict_t *self = g->self;
+    if (CheckDemonMelee()) {
+        self->v.attack_state = AS_MELEE;
+        return 1;
+    }
+    if (CheckDemonJump()) {
+        self->v.attack_state = AS_MISSILE;
+        eng->SV_StartSound(self, CHAN_VOICE, "demon/djump.wav", 1, ATTN_NORM);
+        return 1;
+    }
+    return 0;
 }
 
 // Jump touch handler

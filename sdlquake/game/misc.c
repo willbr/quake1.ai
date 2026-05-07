@@ -296,7 +296,7 @@ void spawn_trap_shooter(edict_t *e) {
 // ---------------------------------------------------------------------------
 // air_bubbles / bubble system
 // ---------------------------------------------------------------------------
-static void bubble_bob(edict_t *self);
+void bubble_bob(edict_t *self);  // non-static: overrides weak stub in player.c
 
 static void bubble_remove(edict_t *self, edict_t *other) {
     g->self  = self;
@@ -330,7 +330,7 @@ static void bubble_split(edict_t *self) {
         eng->ED_Free(self);
 }
 
-static void bubble_bob(edict_t *self) {
+void bubble_bob(edict_t *self) {
     g->self = self;
     self->v.cnt += 1;
     if ((int)self->v.cnt == 4) {

@@ -74,21 +74,27 @@ static void t_movetarget(edict_t *self_e, edict_t *other_e) {
     if (monster->v.classname && strcmp(monster->v.classname, "monster_ogre") == 0)
         eng->SV_StartSound(monster, CHAN_VOICE, "ogre/ogdrag.wav", 1, ATTN_IDLE);
 
-    edict_t *next = eng->ED_Find(g->world, "targetname", corner->v.target);
+    edict_t *next = corner->v.target
+        ? eng->ED_Find(g->world, "targetname", corner->v.target)
+        : g->world;
     monster->v.goalentity = monster->v.movetarget = next;
 
-    if (!next) {
-        monster->v.pausetime = g->time + 999999;
-        if (monster->v.th_stand) monster->v.th_stand(monster);
-        return;
-    }
-
+    // Compute ideal_yaw before the end-of-path check (matches QC order). If next
+    // is world, this points at (0,0,0) — harmless since we immediately stand.
     vec3_t diff = {
         next->v.origin[0] - monster->v.origin[0],
         next->v.origin[1] - monster->v.origin[1],
         next->v.origin[2] - monster->v.origin[2]
     };
     monster->v.ideal_yaw = eng->VectorToYaw(diff);
+
+    // engine_ed_find returns g->world (not NULL) on no-match; check accordingly.
+    // Without this, monsters at end-of-path kept walking toward world origin.
+    if (next == g->world) {
+        monster->v.pausetime = g->time + 999999;
+        if (monster->v.th_stand) monster->v.th_stand(monster);
+        return;
+    }
 }
 
 // ---------------------------------------------------------------------------
