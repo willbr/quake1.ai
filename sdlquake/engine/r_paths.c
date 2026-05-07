@@ -183,4 +183,25 @@ void RPaths_Draw(void)
             }
         }
     }
+
+    if (what & 2)
+    {
+        int i;
+        for (i = 1; i < sv.num_edicts; i++)
+        {
+            edict_t *ed = EDICT_NUM(i);
+            edict_t *goal;
+
+            if (ed->free) continue;
+            if (!((int)ed->v.flags & FL_MONSTER)) continue;
+            if (ed->v.health <= 0) continue;       // skip corpses
+
+            goal = ed->v.goalentity;
+            if (!goal || goal == sv.edicts) continue;   // null or world
+            if (goal == ed) continue;                    // self-loop
+            if (goal->free) continue;
+
+            draw_edge_with_arrows(ed->v.origin, goal->v.origin, PATHS_COLOR_LIVE);
+        }
+    }
 }
