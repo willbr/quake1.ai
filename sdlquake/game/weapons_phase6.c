@@ -16,10 +16,6 @@ extern void T_RadiusDamage(edict_t *bomb, edict_t *attacker, float rad, edict_t 
 extern void SpawnBlood(vec3_t org, vec3_t vel, float damage);
 extern void player_run(edict_t *self);
 
-// W_BestWeapon lives in weapons.c — falls back to Quake roster on dry ammo.
-extern float W_BestWeapon(void);
-extern void  W_SetCurrentAmmo(void);
-
 // ---------------------------------------------------------------------------
 // Local helpers — separate from weapons.c's static multi-damage state so
 // Phase 6 fire functions can interleave with Quake's without mutual stomping.

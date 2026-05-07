@@ -32,13 +32,11 @@ extern void player_run(edict_t *self);
 
 // ---------------------------------------------------------------------------
 // Doom pistol -- S_PISTOL1..S_PISTOL4 (4/6/4/5 tics ≈ 0.114/0.171/0.114/0.143 s).
-// Frame layout in v_doompistol.spr (after extractor cutover):
+// Frame layout in v_doompistol.spr:
 //   0 = PISGA0 (idle / pre-fire pose)
 //   1 = PISGB0 + PISFA0 composited (recoil pose with muzzle flash)
 //   2 = PISGC0 (smoke pose)
-//   3 = PISGB0 no flash (recoil-settle pose)   ← Task 4 makes this PISGB0;
-//                                                until then, the SPR has PISGD0
-//                                                here (an unused-by-Doom alt pose).
+//   3 = PISGB0 no flash (recoil-settle pose)
 // ---------------------------------------------------------------------------
 
 static void player_doompistol2_think(edict_t *self);
