@@ -62,11 +62,14 @@ typedef struct { float data[3]; } _vec3_hack; // avoid conflict with vec3_t type
 typedef unsigned char byte;
 typedef int qboolean;
 
+// Must match world.h's plane_t exactly — NOT model.h's mplane_t (which has
+// extra type/signbits/pad fields). Mismatch shifts trace_t.ent and produces
+// uninitialized reads (the field SV_Move writes lives at a different offset
+// than the field this typedef reads).
 typedef struct {
     float  normal[3];
     float  dist;
-    int    type;
-} mplane_t;
+} plane_t;
 
 typedef struct {
     qboolean allsolid;
@@ -74,7 +77,7 @@ typedef struct {
     qboolean inopen, inwater;
     float    fraction;
     float    endpos[3];
-    mplane_t plane;
+    plane_t  plane;
     edict_t *ent;
 } trace_t;
 
