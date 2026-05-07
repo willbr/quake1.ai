@@ -532,11 +532,37 @@ void WolfKnife_DoHit(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
+// Wolf3D pistol -- GunAttack from WL_AGENT.C:1168-1243
+//   damage  = p6_wolf_hitscan tile-falloff (0..63 close, 0..42 mid, far chance to whiff)
+//   ammo    = 1 bullet per shot; single-shot per press semantics
+//   refire  = 24 chain tics + 7 tap-not-hold buffer = 31 tics @ 70 Hz ~= 0.443 s
+//   sound   = phase6/wolf_pistol.wav
+//   cone    = 0.05 rad ~= 2.9 deg (tighter than MG/chaingun)
+// ---------------------------------------------------------------------------
+#define WOLFPISTOL_CHAIN_S  (31.0f * (1.0f / 70.0f))
+
+void W_FirePhase6_WolfPistol(void) {
+    edict_t *self = g->self;
+    if (self->v.ammo_bullets < 1) return;  // silent stay
+    self->v.attack_finished = g->time + WOLFPISTOL_CHAIN_S;
+    player_wolfpistol1(self);
+}
+
+void WolfPistol_DoFire(edict_t *self) {
+    if (self->v.ammo_bullets < 1) return;
+    eng->SV_StartSound(self, CHAN_WEAPON, "phase6/wolf_pistol.wav", 1, ATTN_NORM);
+    self->v.punchangle[0] = -1;
+    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
+    self->v.ammo_bullets -= 1;
+    self->v.currentammo   = self->v.ammo_bullets;
+    p6_wolf_hitscan(0.05f);
+}
+
+// ---------------------------------------------------------------------------
 // Stubs for not-yet-implemented Phase 6 weapons (Phase D/E/F).
 // They just return so dispatch is safe even if a weapon flag is granted
 // before its fire function is written.
 // ---------------------------------------------------------------------------
-void W_FirePhase6_WolfPistol   (void) {}
 void W_FirePhase6_WolfMG       (void) {}
 void W_FirePhase6_WolfChaingun (void) {}
 

@@ -346,3 +346,42 @@ static void player_wolfknife5_think(edict_t *self) {
 void player_wolfknife1(edict_t *self) {
     player_wolfknife1_think(self);
 }
+
+// ---------------------------------------------------------------------------
+// Wolf3D pistol -- attackinfo {6,0,1},{6,1,2},{6,0,3},{6,-1,4}.
+// 4 steps x 6 tics @ 70 Hz = 0.343 s. Fires on step 2 (attack=1).
+// Frame layout in v_wolfpistol.spr (5 frames, indices 0..4):
+//   0 = idle (not used in attack chain)
+//   1 = pre-fire pose
+//   2 = fire pose with flash
+//   3 = post-fire pose
+//   4 = recover
+// ---------------------------------------------------------------------------
+
+static void player_wolfpistol2_think(edict_t *self);
+static void player_wolfpistol3_think(edict_t *self);
+static void player_wolfpistol4_think(edict_t *self);
+static void player_wolfpistol5_think(edict_t *self);
+
+static void player_wolfpistol1_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY,     1, WOLF_6_TIC, player_wolfpistol2_think);
+}
+static void player_wolfpistol2_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, WOLF_6_TIC, player_wolfpistol3_think);
+    WolfPistol_DoFire(self);
+}
+static void player_wolfpistol3_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 3, WOLF_6_TIC, player_wolfpistol4_think);
+}
+static void player_wolfpistol4_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 4, WOLF_6_TIC, player_wolfpistol5_think);
+}
+static void player_wolfpistol5_think(edict_t *self) {
+    g->self = self;
+    g->self->v.weaponframe = 0;
+    player_run(self);
+}
+
+void player_wolfpistol1(edict_t *self) {
+    player_wolfpistol1_think(self);
+}
