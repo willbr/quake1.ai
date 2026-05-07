@@ -180,3 +180,32 @@ static void player_doomsaw3_think(edict_t *self) {
 void player_doomsaw1(edict_t *self) {
     player_doomsaw1_think(self);
 }
+
+// ---------------------------------------------------------------------------
+// Doom chaingun -- S_CHAIN1..S_CHAIN2 (4/4 tics) loop.
+// Both frames fire; chain reloops via attack_finished while button0 held.
+// Frame layout in v_doomchaingun.spr:
+//   0 = CHGGA + CHGFA composited (fire pose A with flash A)
+//   1 = CHGGB + CHGFB composited (fire pose B with flash B)
+// ---------------------------------------------------------------------------
+
+static void player_doomchaingun2_think(edict_t *self);
+static void player_doomchaingun3_think(edict_t *self);
+
+static void player_doomchaingun1_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY,     0, DOOM_4_TIC, player_doomchaingun2_think);
+    DoomChaingun_DoFire(self);
+}
+static void player_doomchaingun2_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_4_TIC, player_doomchaingun3_think);
+    DoomChaingun_DoFire(self);
+}
+static void player_doomchaingun3_think(edict_t *self) {
+    g->self = self;
+    g->self->v.weaponframe = 0;
+    player_run(self);
+}
+
+void player_doomchaingun1(edict_t *self) {
+    player_doomchaingun1_think(self);
+}

@@ -338,12 +338,43 @@ void DoomSaw_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
+// Doom chaingun -- A_FireCGun from p_pspr.c
+//   damage  = 5*(P_Random%3+1) = 5/10/15 (same as pistol)
+//   ammo    = 1 bullet per shot; both chain frames fire = 2 bullets per chain
+//   refire  = 4 tics per shot (35 Hz Doom tic) ~= 8.7 Hz sustained
+//   sound   = sfx_pistol (= phase6/doom_pistol.wav, shared with pistol)
+//   spread  = wider cone than pistol (0.04 each axis ~= 2.3 deg)
+// ---------------------------------------------------------------------------
+#define DOOMCG_CHAIN_S  (8.0f * (1.0f / 35.0f))  // 8 tics = 2 frames * DOOM_4_TIC
+
+void W_FirePhase6_DoomChaingun(void) {
+    edict_t *self = g->self;
+    if (self->v.ammo_bullets < 1) return;  // silent stay (Doom-authentic)
+    self->v.attack_finished = g->time + DOOMCG_CHAIN_S;
+    player_doomchaingun1(self);
+}
+
+void DoomChaingun_DoFire(edict_t *self) {
+    if (self->v.ammo_bullets < 1) return;
+
+    eng->SV_StartSound(self, CHAN_WEAPON, "phase6/doom_pistol.wav", 1, ATTN_NORM);
+    self->v.punchangle[0] = -1;
+    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
+    self->v.ammo_bullets -= 1;
+    self->v.currentammo   = self->v.ammo_bullets;
+
+    int dmg = 5 * ((rand_byte() % 3) + 1);
+    vec3_t aim;
+    eng->SV_Aim(self, 100000, aim);
+    p6_fire_bullet((float)dmg, aim, 0.04f, 0.04f);
+}
+
+// ---------------------------------------------------------------------------
 // Stubs for not-yet-implemented Phase 6 weapons (Phase D/E/F).
 // They just return so dispatch is safe even if a weapon flag is granted
 // before its fire function is written.
 // ---------------------------------------------------------------------------
 void W_FirePhase6_DoomShotgun  (void) {}
-void W_FirePhase6_DoomChaingun (void) {}
 void W_FirePhase6_DoomRocket   (void) {}
 void W_FirePhase6_WolfKnife    (void) {}
 void W_FirePhase6_WolfPistol   (void) {}
