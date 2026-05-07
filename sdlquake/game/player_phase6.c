@@ -144,3 +144,39 @@ static void player_doomfist6_think(edict_t *self) {
 void player_doomfist1(edict_t *self) {
     player_doomfist1_think(self);
 }
+
+// ---------------------------------------------------------------------------
+// Doom chainsaw -- S_SAW1..S_SAW2 (4/4 tics ~= 0.114/0.114 s) loop.
+// Both frames fire (A_Saw); A_ReFire gates the loop on button0.
+// Frame layout in v_doomchainsaw.spr:
+//   0 = SAWGA (attack pose A)  -- S_SAW1
+//   1 = SAWGB (attack pose B)  -- S_SAW2
+//   2 = SAWGC (idle alt -- unused, kept for completeness)
+//   3 = SAWGD (idle alt -- unused)
+// ---------------------------------------------------------------------------
+
+static void player_doomsaw2_think(edict_t *self);
+static void player_doomsaw3_think(edict_t *self);
+
+// S_SAW1: pose A, fires.
+static void player_doomsaw1_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY,     0, DOOM_4_TIC, player_doomsaw2_think);
+    DoomSaw_DoFire(self);
+}
+// S_SAW2: pose B, fires.
+static void player_doomsaw2_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_4_TIC, player_doomsaw3_think);
+    DoomSaw_DoFire(self);
+}
+// Back to idle. Refire is gated by attack_finished (set to time+DOOMSAW_CHAIN_S
+// in W_FirePhase6_DoomChainsaw); engine re-enters W_Attack_Phase6 if button0
+// is still held.
+static void player_doomsaw3_think(edict_t *self) {
+    g->self = self;
+    g->self->v.weaponframe = 0;
+    player_run(self);
+}
+
+void player_doomsaw1(edict_t *self) {
+    player_doomsaw1_think(self);
+}

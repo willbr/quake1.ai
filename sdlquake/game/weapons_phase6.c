@@ -312,6 +312,32 @@ void DoomFist_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
+// Doom chainsaw -- A_Saw from p_pspr.c
+//   damage  = 2*(P_Random%10+1) = 2..20
+//   range   = MELEERANGE_QU = 64 map units
+//   refire  = ~0.229 s while held; both chain frames fire (S_SAW1+S_SAW2)
+//   sound   = sfx_sawhit on flesh, sfx_sawful on whiff/wall
+// ---------------------------------------------------------------------------
+#define DOOMSAW_CHAIN_S  (8.0f * (1.0f / 35.0f))  // 8 tics = 2 frames * DOOM_4_TIC
+
+void W_FirePhase6_DoomChainsaw(void) {
+    edict_t *self = g->self;
+    // 4+4+0 tics = 0.229s, plus the 0-tic A_ReFire which immediately re-checks
+    // button0 + attack_finished. Hold fire = continuous saw.
+    self->v.attack_finished = g->time + DOOMSAW_CHAIN_S;
+    player_doomsaw1(self);
+}
+
+void DoomSaw_DoFire(edict_t *self) {
+    int dmg = 2 * ((rand_byte() % 10) + 1);  // 2..20
+    int hit = p6_doom_melee_hit(dmg, 0.05f);
+    eng->SV_StartSound(self, CHAN_WEAPON,
+                       hit ? "phase6/doom_sawhit.wav" : "phase6/doom_sawful.wav",
+                       1, ATTN_NORM);
+    if (hit) self->v.punchangle[0] = -1;
+}
+
+// ---------------------------------------------------------------------------
 // Stubs for not-yet-implemented Phase 6 weapons (Phase D/E/F).
 // They just return so dispatch is safe even if a weapon flag is granted
 // before its fire function is written.
@@ -319,7 +345,6 @@ void DoomFist_DoFire(edict_t *self) {
 void W_FirePhase6_DoomShotgun  (void) {}
 void W_FirePhase6_DoomChaingun (void) {}
 void W_FirePhase6_DoomRocket   (void) {}
-void W_FirePhase6_DoomChainsaw (void) {}
 void W_FirePhase6_WolfKnife    (void) {}
 void W_FirePhase6_WolfPistol   (void) {}
 void W_FirePhase6_WolfMG       (void) {}
