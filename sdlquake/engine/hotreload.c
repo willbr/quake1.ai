@@ -379,13 +379,102 @@ static void engine_sv_movetogal(edict_t *e, float step)
     SV_movestep(e, move, 1);
 }
 
+// PF_aim port (pr_cmds.c). Returns a forward direction vector with optional
+// auto-aim snap to the closest valid DAMAGE_AIM target within sv_aim cosine
+// of the player's forward direction. Without this, every weapon that calls
+// aim() — shotgun, super shotgun, nailgun, super nailgun, rocket, grenade —
+// fires off into the void because dir is treated as a direction vector by
+// the callers (e.g. FireBullets does end = src + dir*2048).
 static void engine_sv_aim(edict_t *e, float speed, float *out)
 {
+    extern trace_t SV_Move(float *start, float *mins, float *maxs,
+                           float *end, int type, edict_t *passedict);
+
     (void)speed;
-    // Fallback: return entity's v_angle direction
-    out[0] = e->v.v_angle[0];
-    out[1] = e->v.v_angle[1];
-    out[2] = e->v.v_angle[2];
+
+    float fwd[3], rgt[3], upv[3];
+    AngleVectors(e->v.v_angle, fwd, rgt, upv);
+
+    float start[3];
+    start[0] = e->v.origin[0];
+    start[1] = e->v.origin[1];
+    start[2] = e->v.origin[2] + 20.0f;
+
+    float zero[3] = {0,0,0};
+    float end[3];
+    end[0] = start[0] + 2048.0f * fwd[0];
+    end[1] = start[1] + 2048.0f * fwd[1];
+    end[2] = start[2] + 2048.0f * fwd[2];
+
+    trace_t tr = SV_Move(start, zero, zero, end, 0, e);
+
+    float teamplay = Cvar_VariableValue("teamplay");
+
+    // Straight ahead hits a valid target — no need to snap.
+    if (tr.ent && tr.ent != svb_edicts()
+        && tr.ent->v.takedamage == 2.0f /* DAMAGE_AIM */
+        && (teamplay == 0 || e->v.team <= 0 || e->v.team != tr.ent->v.team))
+    {
+        out[0] = fwd[0]; out[1] = fwd[1]; out[2] = fwd[2];
+        return;
+    }
+
+    // Search all candidate targets for the best auto-aim snap.
+    edict_t *bestent  = NULL;
+    float    bestdist = Cvar_VariableValue("sv_aim");
+
+    edict_t *check = _NEXT_EDICT(svb_edicts());
+    edict_t *limit = _EDICT_NUM(svb_num_edicts());
+    while (check < limit) {
+        if (!check->free
+            && check->v.takedamage == 2.0f /* DAMAGE_AIM */
+            && check != e
+            && !(teamplay != 0 && e->v.team > 0 && e->v.team == check->v.team))
+        {
+            float center[3];
+            center[0] = check->v.origin[0] + 0.5f*(check->v.mins[0]+check->v.maxs[0]);
+            center[1] = check->v.origin[1] + 0.5f*(check->v.mins[1]+check->v.maxs[1]);
+            center[2] = check->v.origin[2] + 0.5f*(check->v.mins[2]+check->v.maxs[2]);
+
+            float dir[3];
+            dir[0] = center[0]-start[0];
+            dir[1] = center[1]-start[1];
+            dir[2] = center[2]-start[2];
+            float len = (float)sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
+            if (len > 0.0f) { dir[0]/=len; dir[1]/=len; dir[2]/=len; }
+
+            float dot = dir[0]*fwd[0]+dir[1]*fwd[1]+dir[2]*fwd[2];
+            if (dot >= bestdist) {
+                tr = SV_Move(start, zero, zero, center, 0, e);
+                if (tr.ent == check) {
+                    bestdist = dot;
+                    bestent  = check;
+                }
+            }
+        }
+        check = _NEXT_EDICT(check);
+    }
+
+    if (bestent) {
+        // Project (bestent.origin - ent.origin) onto fwd to keep horizontal
+        // aim, then preserve the actual z-delta so the shot rises/falls onto
+        // the target. Renormalize.
+        float dir[3];
+        dir[0] = bestent->v.origin[0] - e->v.origin[0];
+        dir[1] = bestent->v.origin[1] - e->v.origin[1];
+        dir[2] = bestent->v.origin[2] - e->v.origin[2];
+        float dot = dir[0]*fwd[0]+dir[1]*fwd[1]+dir[2]*fwd[2];
+        float aimv[3] = { fwd[0]*dot, fwd[1]*dot, fwd[2]*dot };
+        aimv[2] = dir[2];
+        float len = (float)sqrt(aimv[0]*aimv[0]+aimv[1]*aimv[1]+aimv[2]*aimv[2]);
+        if (len > 0.0f) {
+            out[0] = aimv[0]/len; out[1] = aimv[1]/len; out[2] = aimv[2]/len;
+        } else {
+            out[0] = fwd[0]; out[1] = fwd[1]; out[2] = fwd[2];
+        }
+    } else {
+        out[0] = fwd[0]; out[1] = fwd[1]; out[2] = fwd[2];
+    }
 }
 
 // ---------------------------------------------------------------------------
