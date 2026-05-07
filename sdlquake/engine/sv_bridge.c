@@ -110,7 +110,7 @@ void svb_sv_lightstyle(int style, const char *val)
     for (j = 0; j < svs.maxclients; j++) {
         client_t *cl = &svs.clients[j];
         if (cl->active || cl->spawned) {
-            MSG_WriteChar(&cl->message, 6);   /* svc_lightstyle */
+            MSG_WriteChar(&cl->message, svc_lightstyle);
             MSG_WriteChar(&cl->message, style);
             MSG_WriteString(&cl->message, (char *)val);
         }
