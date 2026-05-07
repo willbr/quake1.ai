@@ -123,15 +123,13 @@ static void edict_body_center(const edict_t *e, vec3_t out)
     out[2] = (e->v.absmin[2] + e->v.absmax[2]) * 0.5f;
 }
 
-// Like draw_line_3d but also draws a midpoint arrowhead and a second
-// arrowhead 8 px back from the destination. Skips arrowheads if either
-// endpoint is behind the near plane (no meaningful screen midpoint).
-static void draw_edge_with_arrows(const vec3_t a_world, const vec3_t b_world, int color)
+// Draw midpoint + near-destination arrowheads on the screen-space line
+// between two world-space points. Skips both arrowheads if either endpoint
+// is behind the near plane (no meaningful screen midpoint).
+static void draw_arrows_2d(const vec3_t a_world, const vec3_t b_world, int color)
 {
     vec3_t va, vb;
     float  sax, say, sbx, sby, dx, dy, len, t_back;
-
-    draw_line_3d(a_world, b_world, color);
 
     RDD_ToView(a_world, va);
     RDD_ToView(b_world, vb);
@@ -140,15 +138,44 @@ static void draw_edge_with_arrows(const vec3_t a_world, const vec3_t b_world, in
     RDD_Project(va, &sax, &say);
     RDD_Project(vb, &sbx, &sby);
 
-    // Midpoint arrowhead.
     draw_arrowhead_2d(sax, say, sbx, sby, 0.5f, color);
 
-    // Second arrowhead 8 px back from the destination tip.
     dx = sbx - sax; dy = sby - say;
     len = (float)sqrt(dx*dx + dy*dy);
-    if (len < 16.0f) return;       // edge too short for a second arrow
+    if (len < 16.0f) return;
     t_back = 1.0f - (8.0f / len);
     draw_arrowhead_2d(sax, say, sbx, sby, t_back, color);
+}
+
+// Centerline + arrowheads. Used by the static path_corner graph (bit 0).
+static void draw_edge_with_arrows(const vec3_t a_world, const vec3_t b_world, int color)
+{
+    draw_line_3d(a_world, b_world, color);
+    draw_arrows_2d(a_world, b_world, color);
+}
+
+// Like draw_edge_with_arrows but draws two parallel 3D rails offset along
+// the camera's right axis instead of one centreline. Perspective foreshortens
+// the far end, so the wedge appears narrow at the source and wide at the
+// destination — useful for live monster->goal links since the goal (player)
+// is usually closest to the camera. Arrowheads still ride the centreline.
+static void draw_wedge_with_arrows(const vec3_t a_world, const vec3_t b_world, int color)
+{
+    const float HALF_WIDTH = 4.0f;   // world units; total wedge width = 8u
+    vec3_t side, a_left, a_right, b_left, b_right;
+
+    side[0] = vright[0] * HALF_WIDTH;
+    side[1] = vright[1] * HALF_WIDTH;
+    side[2] = vright[2] * HALF_WIDTH;
+
+    VectorSubtract(a_world, side, a_left);
+    VectorAdd     (a_world, side, a_right);
+    VectorSubtract(b_world, side, b_left);
+    VectorAdd     (b_world, side, b_right);
+
+    draw_line_3d(a_left,  b_left,  color);
+    draw_line_3d(a_right, b_right, color);
+    draw_arrows_2d(a_world, b_world, color);
 }
 
 void RPaths_Draw(void)
@@ -216,7 +243,7 @@ void RPaths_Draw(void)
                 vec3_t src, dst;
                 edict_body_center(ed, src);
                 edict_body_center(goal, dst);
-                draw_edge_with_arrows(src, dst, PATHS_COLOR_LIVE);
+                draw_wedge_with_arrows(src, dst, PATHS_COLOR_LIVE);
             }
         }
     }
