@@ -8,6 +8,9 @@
 #include "weapons_phase6.h"
 #include "game_defs.h"
 
+#include <math.h>
+#include <stddef.h>
+
 extern engine_api_t   *eng;
 extern game_globals_t *g;
 
@@ -74,6 +77,136 @@ static void p6_fire_bullet(float damage, vec3_t aim, float spread_x, float sprea
         eng->MSG_WriteCoord(MSG_BROADCAST, hit_org[1]);
         eng->MSG_WriteCoord(MSG_BROADCAST, hit_org[2]);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Doom melee — A_Punch / A_Saw shared core. Returns 1 on hit, 0 on miss so
+// the caller can switch sounds (saw plays a different sample on whiff vs hit).
+//
+// MELEERANGE in Doom is 64 fracunits = 64 map units in Quake's coordinate
+// system (Quake doesn't use a fracunits scale). Damage formula and angle
+// jitter are passed in so fist (rnd%10+1)*2 with optional 10x berserk and
+// saw 2*(rnd%10+1) can share one body.
+// ---------------------------------------------------------------------------
+static int p6_doom_melee_hit(int damage, float angle_jitter_radians) {
+    edict_t *self = g->self;
+    eng->MakeVectors(self->v.v_angle);
+
+    float jx = p6_crandom() * angle_jitter_radians;
+    vec3_t aim;
+    aim[0] = g->v_forward[0] + jx*g->v_right[0];
+    aim[1] = g->v_forward[1] + jx*g->v_right[1];
+    aim[2] = g->v_forward[2];
+
+    vec3_t src;
+    src[0] = self->v.origin[0];
+    src[1] = self->v.origin[1];
+    src[2] = self->v.absmin[2] + self->v.size[2]*0.7f;
+
+    vec3_t end;
+    end[0] = src[0] + aim[0]*64.0f;
+    end[1] = src[1] + aim[1]*64.0f;
+    end[2] = src[2] + aim[2]*64.0f;
+    eng->SV_Traceline(src, end, 0, self);
+    if (g->trace_fraction == 1.0f)
+        return 0;
+
+    if (g->trace_ent && g->trace_ent->v.takedamage) {
+        vec3_t blood_vel = {0, 0, 0};
+        SpawnBlood(g->trace_endpos, blood_vel, (float)damage);
+        T_Damage(g->trace_ent, self, self, (float)damage);
+        return 1;
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Wolf3D hitscan — closest-visible-target front-cone + tile-distance damage
+// falloff. Models WL_AGENT.C:1168-1243 (GunAttack).
+//
+// Algorithm:
+//   1. ED_FindRadius enumerates all edicts within ~4096 units (plenty for any
+//      Quake combat range). Walk the chain via head->v.chain.
+//   2. For each candidate: must have health>0, takedamage!=DAMAGE_NO, must be
+//      in front of the player (forward dot-product > 0), and within the cone
+//      (lateral / forward < tan(cone)).
+//   3. Pick the closest by squared distance.
+//   4. SV_Traceline to that closest target's bbox centre — if obstructed by
+//      world geometry, render a TE_GUNSHOT puff and return miss.
+//   5. Apply Wolf's per-tile damage falloff (1 tile = 64 map units):
+//        dist<2 -> rnd/4 (0..63), dist<4 -> rnd/6 (0..42),
+//        else (rnd/12 < dist) miss, otherwise rnd/6.
+//
+// Returns 1 on hit, 0 on miss/whiff. Caller plays the sound regardless and
+// owns animation; we just resolve the damage.
+// ---------------------------------------------------------------------------
+static int p6_wolf_hitscan(float shoot_cone_radians) {
+    edict_t *self = g->self;
+    eng->MakeVectors(self->v.v_angle);
+
+    edict_t *closest = NULL;
+    float    closest_d2 = 1e18f;
+
+    edict_t *head = eng->ED_FindRadius(self->v.origin, 4096.0f);
+    while (head) {
+        edict_t *e = head;
+        head = head->v.chain;  // grab next before continuing — defensive, in case anything mutates
+        if (e == self) continue;
+        if (e->v.health <= 0) continue;
+        if (e->v.takedamage == DAMAGE_NO) continue;
+
+        vec3_t to;
+        to[0] = e->v.origin[0] - self->v.origin[0];
+        to[1] = e->v.origin[1] - self->v.origin[1];
+        to[2] = e->v.origin[2] - self->v.origin[2];
+        float fwd = to[0]*g->v_forward[0] + to[1]*g->v_forward[1] + to[2]*g->v_forward[2];
+        if (fwd <= 0) continue;
+
+        float lat_x = to[0] - fwd*g->v_forward[0];
+        float lat_y = to[1] - fwd*g->v_forward[1];
+        float lat_z = to[2] - fwd*g->v_forward[2];
+        float lat   = sqrtf(lat_x*lat_x + lat_y*lat_y + lat_z*lat_z);
+        if (lat / fwd > tanf(shoot_cone_radians)) continue;
+
+        float d2 = to[0]*to[0] + to[1]*to[1] + to[2]*to[2];
+        if (d2 < closest_d2) { closest_d2 = d2; closest = e; }
+    }
+
+    if (!closest) return 0;
+
+    vec3_t src;
+    src[0] = self->v.origin[0];
+    src[1] = self->v.origin[1];
+    src[2] = self->v.absmin[2] + self->v.size[2]*0.7f;
+    vec3_t tgt;
+    tgt[0] = (closest->v.absmin[0] + closest->v.absmax[0]) * 0.5f;
+    tgt[1] = (closest->v.absmin[1] + closest->v.absmax[1]) * 0.5f;
+    tgt[2] = (closest->v.absmin[2] + closest->v.absmax[2]) * 0.5f;
+    eng->SV_Traceline(src, tgt, 1 /* nomonsters: ignore monsters except the target */, self);
+    if (g->trace_fraction < 1.0f && g->trace_ent != closest) {
+        eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+        eng->MSG_WriteByte (MSG_BROADCAST, TE_GUNSHOT);
+        eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[0]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[1]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[2]);
+        return 0;
+    }
+
+    float dist = sqrtf(closest_d2) / 64.0f;
+    int rnd = rand_byte();
+    int damage;
+    if (dist < 2.0f)      damage = rnd / 4;
+    else if (dist < 4.0f) damage = rnd / 6;
+    else {
+        if ((rnd / 12) < (int)dist) return 0;
+        damage = rnd / 6;
+    }
+    if (damage <= 0) return 0;
+
+    vec3_t blood_vel = {0, 0, 0};
+    SpawnBlood(tgt, blood_vel, (float)damage);
+    T_Damage(closest, self, self, (float)damage);
+    return 1;
 }
 
 // ---------------------------------------------------------------------------
