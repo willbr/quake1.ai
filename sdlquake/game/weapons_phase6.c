@@ -91,10 +91,8 @@ void W_FirePhase6_DoomPistol(void) {
     edict_t *self = g->self;
 
     if (self->v.ammo_bullets < 1) {
-        // No bullets — fall back to Quake's best available weapon.
-        self->v.weapon2 = 0;
-        self->v.weapon  = W_BestWeapon();
-        W_SetCurrentAmmo();
+        // Doom-authentic: keep the pistol up, do nothing on press.
+        // Player must switch weapons manually (impulse) or pick up another.
         return;
     }
 
