@@ -71,10 +71,13 @@ void spawn_bodyque(edict_t *self)
     g->self = self;
 }
 
+extern void Client_LevelInit(void);
+
 void spawn_worldspawn(edict_t *self)
 {
     g->self  = self;
     lastspawn = g->world;
+    Client_LevelInit();
     InitBodyQue();
 
     if (g->self->v.model && strcmp(g->self->v.model, "maps/e1m8.bsp") == 0)

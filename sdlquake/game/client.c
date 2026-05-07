@@ -48,6 +48,18 @@ static float       intermission_running  = 0;
 static float       intermission_exittime = 0;
 static const char *nextmap               = NULL;
 
+// Reset per-level state. Called from spawn_worldspawn (world.c) at the start
+// of every map. In original QuakeC these were progs globals that PR_LoadProgs
+// implicitly cleared on each SV_SpawnServer; we need to clear them by hand
+// because the DLL's static storage persists across levels and `nextmap` would
+// otherwise dangle into the previous level's hunk after Host_ClearMemory.
+void Client_LevelInit(void)
+{
+    intermission_running  = 0;
+    intermission_exittime = 0;
+    nextmap               = NULL;
+}
+
 // ---------------------------------------------------------------------------
 // Intermission
 // ---------------------------------------------------------------------------
