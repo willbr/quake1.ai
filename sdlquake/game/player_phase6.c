@@ -1,13 +1,14 @@
 // player_phase6.c -- Animation chains for Phase 6 viewmodels.
 //
-// Each chain runs `weaponframe` 1 → ... → final, then returns to player_run
-// (which sets weaponframe back to 0 = idle sprite frame). Body-frame animation
-// reuses Quake's shotgun-attack stance (FR_SHOTATT1) since we don't have
-// Doom/Wolf-specific body poses. The held-sprite-frame index is what matters
-// — that drives R_DrawViewModelSprite's frame selection.
+// Each chain advances `weaponframe` through its attack poses, then returns to
+// player_run (which resets `weaponframe` to 0 = idle sprite frame). Body-frame
+// animation reuses Quake's shotgun-attack stance (FR_SHOTATT1) since we don't
+// have Doom/Wolf-specific body poses. The held-sprite-frame index is what
+// matters — that drives R_DrawViewModelSprite's frame selection.
 //
-// Tic timing: Doom runs at 35 Hz, so 1 tic ≈ 0.0286 s. Pistol is ~14 tics
-// total → 0.4 s, distributed over 4 attack frames at ~0.1 s each.
+// Tic timing: Doom runs at 35 Hz, so 1 tic ≈ 0.0286 s. Per-chain timings are
+// documented in each chain block (e.g. the pistol uses Doom's S_PISTOL1..4
+// distribution of 4/6/4/5 tics ≈ 0.114/0.171/0.114/0.143 s, total 0.543 s).
 
 #include "weapons_phase6.h"
 
