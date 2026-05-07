@@ -360,23 +360,13 @@ static int engine_sv_pointcontents(float *p)  { return SV_PointContents(p); }
 
 static void engine_sv_movetogal(edict_t *e, float step)
 {
-    // SV_MoveToGoal reads pr_global_struct->self and G_FLOAT(OFS_PARM0).
-    // It's a legacy QC-style builtin. Mirror PF_walkmove's approach: just call SV_movestep.
-    // For now delegate to the inline walkmove toward goalentity.
-    float move[3];
-    edict_t *goal = e->v.goalentity;
-    if (!goal) return;
-    if (!((int)e->v.flags & (512|1|4))) return;
-    // Try moving directly; if fails, call SV_NewChaseDir equivalent
-    move[0] = goal->v.origin[0] - e->v.origin[0];
-    move[1] = goal->v.origin[1] - e->v.origin[1];
-    move[2] = 0.0f;
-    float len = (float)sqrt(move[0]*move[0]+move[1]*move[1]);
-    if (len > step) {
-        float scale = step / len;
-        move[0] *= scale; move[1] *= scale;
-    }
-    SV_movestep(e, move, 1);
+    // Delegate to the engine's native SV_MoveToGoal (sv_move.c, NATIVE_GAME=1).
+    // It calls SV_StepDirection(ideal_yaw) which rotates angles[1] toward
+    // ideal_yaw via do_changeyaw, and falls back to SV_NewChaseDir when blocked.
+    // The previous inline reimplementation skipped the yaw rotation entirely,
+    // so patrolling monsters (whose only yaw update happens in t_movetarget)
+    // never turned to face their direction of movement.
+    SV_MoveToGoal(e, step);
 }
 
 // PF_aim port (pr_cmds.c). Returns a forward direction vector with optional
