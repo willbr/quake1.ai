@@ -65,6 +65,8 @@ static void audio_get_callback(void *userdata, SDL_AudioStream *stream,
 // SNDDMA interface
 // ---------------------------------------------------------------------------
 
+extern qboolean sys_headless;
+
 qboolean SNDDMA_Init(void)
 {
     shm = &sn;
@@ -81,6 +83,13 @@ qboolean SNDDMA_Init(void)
 
     memset(dma_buf, 0, sizeof(dma_buf));
     dma_play_pos = 0;
+
+    if (sys_headless)
+    {
+        // Pretend audio is initialized so S_Init doesn't deref a null shm,
+        // but never open a real device — main loop won't run anyway.
+        return true;
+    }
 
     SDL_AudioSpec spec = {
         .format   = SDL_AUDIO_S16,

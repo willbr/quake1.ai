@@ -106,45 +106,50 @@ void VID_ShiftPalette(unsigned char *palette) { build_palette(palette); }
 // Init / shutdown
 // ---------------------------------------------------------------------------
 
+extern qboolean sys_headless;
+
 void VID_Init(unsigned char *palette)
 {
-    // Pick the largest integer scale that fits the usable desktop area
-    int scale = 3; // fallback
+    if (!sys_headless)
     {
-        SDL_DisplayID display = SDL_GetPrimaryDisplay();
-        SDL_Rect usable;
-        if (SDL_GetDisplayUsableBounds(display, &usable))
+        // Pick the largest integer scale that fits the usable desktop area
+        int scale = 3; // fallback
         {
-            int sx = usable.w / VID_WIDTH;
-            int sy = usable.h / VID_HEIGHT;
-            scale = sx < sy ? sx : sy;
-            if (scale < 1) scale = 1;
+            SDL_DisplayID display = SDL_GetPrimaryDisplay();
+            SDL_Rect usable;
+            if (SDL_GetDisplayUsableBounds(display, &usable))
+            {
+                int sx = usable.w / VID_WIDTH;
+                int sy = usable.h / VID_HEIGHT;
+                scale = sx < sy ? sx : sy;
+                if (scale < 1) scale = 1;
+            }
         }
+
+        sdl_window = SDL_CreateWindow("quake1.ai",
+            VID_WIDTH * scale, VID_HEIGHT * scale,
+            SDL_WINDOW_RESIZABLE);
+        if (!sdl_window)
+            Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
+
+        sdl_renderer = SDL_CreateRenderer(sdl_window, NULL);
+        if (!sdl_renderer)
+            Sys_Error("SDL_CreateRenderer failed: %s", SDL_GetError());
+
+        // Scale texture to window, keeping pixel art crisp
+        SDL_SetRenderLogicalPresentation(sdl_renderer,
+            VID_WIDTH, VID_HEIGHT,
+            SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+        SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
+
+        // Streaming texture: we upload the expanded 32-bit framebuffer every frame
+        sdl_texture = SDL_CreateTexture(sdl_renderer,
+            SDL_PIXELFORMAT_ARGB8888,
+            SDL_TEXTUREACCESS_STREAMING,
+            VID_WIDTH, VID_HEIGHT);
+        if (!sdl_texture)
+            Sys_Error("SDL_CreateTexture failed: %s", SDL_GetError());
     }
-
-    sdl_window = SDL_CreateWindow("quake1.ai",
-        VID_WIDTH * scale, VID_HEIGHT * scale,
-        SDL_WINDOW_RESIZABLE);
-    if (!sdl_window)
-        Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
-
-    sdl_renderer = SDL_CreateRenderer(sdl_window, NULL);
-    if (!sdl_renderer)
-        Sys_Error("SDL_CreateRenderer failed: %s", SDL_GetError());
-
-    // Scale texture to window, keeping pixel art crisp
-    SDL_SetRenderLogicalPresentation(sdl_renderer,
-        VID_WIDTH, VID_HEIGHT,
-        SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
-    SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
-
-    // Streaming texture: we upload the expanded 32-bit framebuffer every frame
-    sdl_texture = SDL_CreateTexture(sdl_renderer,
-        SDL_PIXELFORMAT_ARGB8888,
-        SDL_TEXTUREACCESS_STREAMING,
-        VID_WIDTH, VID_HEIGHT);
-    if (!sdl_texture)
-        Sys_Error("SDL_CreateTexture failed: %s", SDL_GetError());
 
     // Fill in viddef
     memset(&vid, 0, sizeof(vid));
@@ -169,8 +174,11 @@ void VID_Init(unsigned char *palette)
     build_palette(palette);
     vid_load_aux_palette(VID_PAL_DOOM, "gfx/palette_doom.lmp");
 
-    ImguiLayer_Init(sdl_window, sdl_renderer);
-    RBBox_Init();
+    if (!sys_headless)
+    {
+        ImguiLayer_Init(sdl_window, sdl_renderer);
+        RBBox_Init();
+    }
 
     // Allocate z-buffer and surface cache from the hunk (as vid_win.c does)
     {

@@ -22,6 +22,7 @@
 #define MAXIMUM_MEMORY  0x1000000
 
 qboolean isDedicated;
+qboolean sys_headless;  // set when running in --list-cvars mode (no window, no audio)
 
 // ---------------------------------------------------------------------------
 // File I/O
@@ -110,9 +111,10 @@ void Sys_Printf(char *fmt, ...)
     va_start(argptr, fmt);
     vsnprintf(text, sizeof(text), fmt, argptr);
     va_end(argptr);
-    // In MCP mode stdout carries JSON-RPC; redirect engine logs to stderr.
-    fputs(text, mcp_active ? stderr : stdout);
-    fflush(mcp_active ? stderr : stdout);
+    // In MCP / --list-cvars mode stdout is reserved for output; send logs to stderr.
+    FILE *out = (mcp_active || sys_headless) ? stderr : stdout;
+    fputs(text, out);
+    fflush(out);
 }
 
 void Sys_Quit(void)
@@ -154,8 +156,86 @@ static char *argv_buf[MAX_NUM_ARGVS];
 
 extern void Sys_InstallCrashHandler(void);
 
+static int cvar_name_cmp(const void *a, const void *b)
+{
+    const cvar_t *ca = *(const cvar_t * const *)a;
+    const cvar_t *cb = *(const cvar_t * const *)b;
+    return strcmp(ca->name, cb->name);
+}
+
+static void dump_cvars_and_exit(void)
+{
+    int n = 0;
+    for (cvar_t *v = cvar_vars; v; v = v->next) n++;
+
+    cvar_t **all = (cvar_t **)malloc(n * sizeof(cvar_t *));
+    if (!all) { fprintf(stderr, "out of memory\n"); exit(1); }
+    int i = 0;
+    for (cvar_t *v = cvar_vars; v; v = v->next) all[i++] = v;
+    qsort(all, n, sizeof(cvar_t *), cvar_name_cmp);
+
+    for (i = 0; i < n; i++)
+    {
+        cvar_t *v = all[i];
+        const char *flags = v->archive && v->server ? " [archive,server]"
+                          : v->archive              ? " [archive]"
+                          : v->server               ? " [server]"
+                          : "";
+        printf("%-28s \"%s\"%s\n", v->name, v->string, flags);
+    }
+    fflush(stdout);
+    free(all);
+    exit(0);
+}
+
+static void print_usage(void)
+{
+    fputs(
+        "Usage: quake [options] [+command ...]\n"
+        "\n"
+        "Platform options:\n"
+        "  --mcp                Run MCP server on stdio (logs go to stderr)\n"
+        "  --hot-reload         Poll game.dll for changes and reload at runtime\n"
+        "  --list-cvars         Print all registered cvars and their values, then exit\n"
+        "  -dedicated           Run as dedicated server (no video/audio)\n"
+        "  -heapsize <KB>       Engine heap size in KB (default 16384)\n"
+        "  -basedir <path>      Override base directory (default: cwd)\n"
+        "  --help, -h, -?       Show this help and exit\n"
+        "\n"
+        "Engine options (passed through to Quake):\n"
+        "  -game <moddir>       Load mod from <moddir> (e.g. rogue, hipnotic)\n"
+        "  -window              Force windowed mode\n"
+        "  -fullscreen          Force fullscreen mode\n"
+        "  -port <n>            Network port (default 26000)\n"
+        "  -nosound             Disable audio\n"
+        "  -nocdaudio           Disable CD music\n"
+        "\n"
+        "Console commands (start with '+'):\n"
+        "  +map <name>          Load map at startup, e.g. +map e1m1\n"
+        "  +connect <addr>      Connect to server at startup\n"
+        "  +<cvar> <value>      Set a cvar at startup, e.g. +sv_gravity 400\n"
+        "\n"
+        "Examples:\n"
+        "  quake +map e1m1\n"
+        "  quake --hot-reload +map start\n"
+        "  quake --mcp -dedicated +map e1m1\n"
+        "  quake -game rogue +map ctf1\n",
+        stdout);
+    fflush(stdout);
+}
+
 int main(int argc, char **argv)
 {
+    for (int i = 1; i < argc; i++)
+    {
+        if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-help") ||
+            !strcmp(argv[i], "-h") || !strcmp(argv[i], "-?"))
+        {
+            print_usage();
+            return 0;
+        }
+    }
+
     Sys_InstallCrashHandler();
     SDL_SetMainReady();
 
@@ -197,7 +277,11 @@ int main(int argc, char **argv)
 
     isDedicated = (COM_CheckParm("-dedicated") != 0);
 
-    if (COM_CheckParm("--mcp"))
+    int list_cvars = COM_CheckParm("--list-cvars");
+    if (list_cvars)
+        sys_headless = true;
+
+    if (COM_CheckParm("--mcp") && !list_cvars)
         MCP_Init();
 
     parms.memsize = MINIMUM_MEMORY;
@@ -215,6 +299,8 @@ int main(int argc, char **argv)
     Sys_Printf("Host_Init\n");
     Host_Init(&parms);
     HotReload_Init();
+    if (list_cvars)
+        dump_cvars_and_exit();
     if (COM_CheckParm("--hot-reload"))
         HotReload_EnablePolling();
 
