@@ -431,6 +431,11 @@ void R_DrawViewModelSprite (entity_t *e)
 	sx = vp_x + (vp_w - frame->width) / 2;
 	sy = vp_y +  vp_h - frame->height;
 
+	// Heal `r_doom_bob_last_time` after a level reload (or any other time
+	// warp where cl.time runs backward) so the next delta isn't a large
+	// negative spike that snaps the phase.
+	if (cl.time < r_doom_bob_last_time)
+		r_doom_bob_last_time = cl.time;
 	if (!cl.paused)
 		r_doom_bob_phase += (float)((cl.time - r_doom_bob_last_time)
 		                            * (2.0 * M_PI / DOOM_BOB_PERIOD));
