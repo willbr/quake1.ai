@@ -102,6 +102,11 @@ void W_FirePhase6_DoomPistol(void) {
     self->v.attack_finished = g->time + 0.4f;
     self->v.punchangle[0]   = -1;
 
+    // Spawn a one-frame dynamic light at the player so the muzzle flash
+    // illuminates dark areas. Cleared in sv_main.c after the snapshot is
+    // sent (same handshake stock Quake uses for its 8 weapons).
+    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
+
     self->v.ammo_bullets -= 1;
     self->v.currentammo   = self->v.ammo_bullets;
 

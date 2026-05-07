@@ -25,9 +25,17 @@ const WolfSpriteSet = struct {
     frame_count: u8,  // sequential
 };
 
+// A Doom viewmodel frame is either a bare gun lump, or a gun lump with a
+// flash lump composited on top (positioned via Doom's per-sprite leftoffset
+// / topoffset so the flash sits over the muzzle).
+const DoomFrameSpec = struct {
+    lump:  []const u8,
+    flash: ?[]const u8 = null,
+};
+
 const DoomSpriteSet = struct {
     out_path: []const u8,
-    lumps: []const []const u8,  // ordered frames
+    frames: []const DoomFrameSpec,
 };
 
 const wolf_sprite_sets = [_]WolfSpriteSet{
@@ -37,21 +45,55 @@ const wolf_sprite_sets = [_]WolfSpriteSet{
     .{ .out_path = "id1/progs/v_wolfchaingun.spr",  .base_idx = 537, .frame_count = 5 },
 };
 
-// Frame counts confirmed by enumerating DOOM1.WAD via -doom_info.
-const doom_pung_lumps  = [_][]const u8{ "PUNGA0", "PUNGB0", "PUNGC0", "PUNGD0" };
-const doom_pisg_lumps  = [_][]const u8{ "PISGA0", "PISGB0", "PISGC0", "PISGD0", "PISGE0" };
-const doom_shtg_lumps  = [_][]const u8{ "SHTGA0", "SHTGB0", "SHTGC0", "SHTGD0" };
-const doom_chgg_lumps  = [_][]const u8{ "CHGGA0", "CHGGB0" };
-const doom_misg_lumps  = [_][]const u8{ "MISGA0", "MISGB0" };
-const doom_sawg_lumps  = [_][]const u8{ "SAWGA0", "SAWGB0", "SAWGC0", "SAWGD0" };
+// Frame manifests confirmed by enumerating DOOM1.WAD via -doom_info.
+// Flash overlays follow Doom's p_pspr.c firing actions:
+//   - A_FirePistol   sets ps_flash = S_PISTOLFLASH (PISFA0, 7 tics, fullbright).
+//   - A_FireShotgun  sets ps_flash = S_SGUNFLASH1 (SHTFA0) → S_SGUNFLASH2 (SHTFB0).
+//   - A_FireCGun     alternates CHGFA0/CHGFB0 each shot (we use CHGFA0 on first frame).
+//   - A_FireMissile  sets ps_flash = S_MISSILEFLASH1..4 (MISFA..MISFD).
+//   - Punch/Saw      no flash.
+// We composite the flash onto the frame whose Doom state visually overlaps it.
+const doom_pung_frames  = [_]DoomFrameSpec{
+    .{ .lump = "PUNGA0" },
+    .{ .lump = "PUNGB0" },
+    .{ .lump = "PUNGC0" },
+    .{ .lump = "PUNGD0" },
+};
+const doom_pisg_frames  = [_]DoomFrameSpec{
+    .{ .lump = "PISGA0" },
+    .{ .lump = "PISGB0", .flash = "PISFA0" },
+    .{ .lump = "PISGC0" },
+    .{ .lump = "PISGD0" },
+    .{ .lump = "PISGE0" },
+};
+const doom_shtg_frames  = [_]DoomFrameSpec{
+    .{ .lump = "SHTGA0" },
+    .{ .lump = "SHTGB0", .flash = "SHTFA0" },
+    .{ .lump = "SHTGC0", .flash = "SHTFB0" },
+    .{ .lump = "SHTGD0" },
+};
+const doom_chgg_frames  = [_]DoomFrameSpec{
+    .{ .lump = "CHGGA0", .flash = "CHGFA0" },
+    .{ .lump = "CHGGB0", .flash = "CHGFB0" },
+};
+const doom_misg_frames  = [_]DoomFrameSpec{
+    .{ .lump = "MISGA0", .flash = "MISFA0" },
+    .{ .lump = "MISGB0" },
+};
+const doom_sawg_frames  = [_]DoomFrameSpec{
+    .{ .lump = "SAWGA0" },
+    .{ .lump = "SAWGB0" },
+    .{ .lump = "SAWGC0" },
+    .{ .lump = "SAWGD0" },
+};
 
 const doom_sprite_sets = [_]DoomSpriteSet{
-    .{ .out_path = "id1/progs/v_doomfist.spr",     .lumps = &doom_pung_lumps },
-    .{ .out_path = "id1/progs/v_doompistol.spr",   .lumps = &doom_pisg_lumps },
-    .{ .out_path = "id1/progs/v_doomshotgun.spr",  .lumps = &doom_shtg_lumps },
-    .{ .out_path = "id1/progs/v_doomchaingun.spr", .lumps = &doom_chgg_lumps },
-    .{ .out_path = "id1/progs/v_doomrocket.spr",   .lumps = &doom_misg_lumps },
-    .{ .out_path = "id1/progs/v_doomchainsaw.spr", .lumps = &doom_sawg_lumps },
+    .{ .out_path = "id1/progs/v_doomfist.spr",     .frames = &doom_pung_frames },
+    .{ .out_path = "id1/progs/v_doompistol.spr",   .frames = &doom_pisg_frames },
+    .{ .out_path = "id1/progs/v_doomshotgun.spr",  .frames = &doom_shtg_frames },
+    .{ .out_path = "id1/progs/v_doomchaingun.spr", .frames = &doom_chgg_frames },
+    .{ .out_path = "id1/progs/v_doomrocket.spr",   .frames = &doom_misg_frames },
+    .{ .out_path = "id1/progs/v_doomchainsaw.spr", .frames = &doom_sawg_frames },
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +170,120 @@ fn convertWolfPalette() [256][3]u8 {
 }
 
 // ---------------------------------------------------------------------------
+// Doom sprite decode + flash composite helpers
+// ---------------------------------------------------------------------------
+
+const DoomPic = struct {
+    width:       u16,
+    height:      u16,
+    left_offset: i16,
+    top_offset:  i16,
+    pixels:      []u8, // heap-allocated, caller frees
+};
+
+fn decodeDoomLump(allocator: Allocator, wad: *doom_wad.Wad, name: []const u8) !DoomPic {
+    const l = wad.findLump(name) orelse {
+        std.debug.print("  WARNING: Doom lump '{s}' missing in WAD\n", .{name});
+        return error.LumpMissing;
+    };
+    const data = wad.lumpData(l);
+    if (data.len < 4) return error.PicHeaderTooSmall;
+    const wpx = std.mem.readInt(u16, data[0..2], .little);
+    const hpx = std.mem.readInt(u16, data[2..4], .little);
+    const out = try allocator.alloc(u8, @as(usize, wpx) * @as(usize, hpx));
+    errdefer allocator.free(out);
+    const sz = try doom_wad.decodePicture(data, out);
+    return .{
+        .width = sz.width, .height = sz.height,
+        .left_offset = sz.left_offset, .top_offset = sz.top_offset,
+        .pixels = out,
+    };
+}
+
+const Composed = struct {
+    width:  u16,
+    height: u16,
+    pixels: []u8,
+};
+
+/// Composite a Doom flash sprite over a gun sprite, aligning their per-frame
+/// anchors (Doom's leftoffset / topoffset). Doom positions every weapon sprite
+/// so its anchor lands at the same screen point; matching them keeps the flash
+/// over the muzzle. The output canvas keeps the gun horizontally centered (so
+/// bottom-center anchoring on the screen stays stable across frames) and grows
+/// upward / sideways as needed to contain the flash.
+///
+/// All pixels equal to 0xFF are transparent in both input and output.
+fn compositeFlash(allocator: Allocator, gun: DoomPic, flash: DoomPic) !Composed {
+    // Gun anchor at (gun.left_offset, gun.top_offset) within gun pixels;
+    // same anchor for flash. Place gun at canvas (gx, gy) and flash at
+    // (fx, fy) so anchors coincide. Pick axes so the gun is bottom-centered.
+    const dx: i32 = @as(i32, gun.left_offset) - @as(i32, flash.left_offset);
+    const dy: i32 = @as(i32, gun.top_offset)  - @as(i32, flash.top_offset);
+
+    // Horizontal: keep gun centered. We expand the canvas symmetrically by
+    // whichever side the flash overflows further.
+    const gw: i32 = @intCast(gun.width);
+    const gh: i32 = @intCast(gun.height);
+    const fw: i32 = @intCast(flash.width);
+    const fh: i32 = @intCast(flash.height);
+
+    // If we placed gun at gx=0, the flash would be at fx = dx, occupying
+    // dx..dx+fw. Compute pad needed on each side of the gun:
+    const pad_left:  i32 = @max(0, -dx);
+    const pad_right: i32 = @max(0, (dx + fw) - gw);
+    const pad_each:  i32 = @max(pad_left, pad_right);
+    const canvas_w:  i32 = gw + 2 * pad_each;
+    const gx: i32 = pad_each;
+    const fx: i32 = gx + dx;
+
+    // Vertical: gun stays at the bottom; canvas grows upward if flash sits
+    // above the gun (typical case — dy < 0 for muzzle flashes).
+    // If flash extends below gun (dy + fh > gh), pad bottom too — but the
+    // gun's bottom-edge will no longer be the canvas-bottom, so we drop the
+    // overflow instead (rare for muzzle flashes).
+    const flash_top_above: i32 = @max(0, -dy);
+    const canvas_h: i32 = gh + flash_top_above;
+    const gy: i32 = flash_top_above;
+    const fy: i32 = gy + dy;
+
+    // Defensive: anything that would still spill outside the canvas, we skip
+    // per-pixel rather than expand further.
+    const total: usize = @intCast(canvas_w * canvas_h);
+    const canvas = try allocator.alloc(u8, total);
+    @memset(canvas, 0xFF);
+
+    blitPixels(canvas, canvas_w, canvas_h, gun.pixels, gw, gh, gx, gy);
+    blitPixels(canvas, canvas_w, canvas_h, flash.pixels, fw, fh, fx, fy);
+
+    return .{
+        .width  = @intCast(canvas_w),
+        .height = @intCast(canvas_h),
+        .pixels = canvas,
+    };
+}
+
+fn blitPixels(
+    dst: []u8, dst_w: i32, dst_h: i32,
+    src: []const u8, src_w: i32, src_h: i32,
+    dx: i32, dy: i32,
+) void {
+    var y: i32 = 0;
+    while (y < src_h) : (y += 1) {
+        const cy = dy + y;
+        if (cy < 0 or cy >= dst_h) continue;
+        var x: i32 = 0;
+        while (x < src_w) : (x += 1) {
+            const cx = dx + x;
+            if (cx < 0 or cx >= dst_w) continue;
+            const px = src[@intCast(y * src_w + x)];
+            if (px == 0xFF) continue;
+            dst[@intCast(cy * dst_w + cx)] = px;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Driver
 // ---------------------------------------------------------------------------
 
@@ -197,9 +353,9 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
 
     for (doom_sprite_sets) |set| {
         // Doom sprites vary in size — allocate per frame.
-        var frames = try allocator.alloc(quake_spr.Frame, set.lumps.len);
+        var frames = try allocator.alloc(quake_spr.Frame, set.frames.len);
         defer allocator.free(frames);
-        var pixel_bufs = try allocator.alloc([]u8, set.lumps.len);
+        var pixel_bufs = try allocator.alloc([]u8, set.frames.len);
         // Mark slots empty so partial-init cleanup is safe.
         for (pixel_bufs) |*pb| pb.* = &.{};
         defer {
@@ -208,29 +364,41 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
         }
 
         var i: usize = 0;
-        while (i < set.lumps.len) : (i += 1) {
-            const l = w.findLump(set.lumps[i]) orelse {
-                std.debug.print("  WARNING: Doom lump '{s}' missing in WAD\n", .{set.lumps[i]});
-                return error.LumpMissing;
-            };
-            const data = w.lumpData(l);
-            // Peek dimensions to size the output buffer.
-            if (data.len < 4) return error.PicHeaderTooSmall;
-            const wpx = std.mem.readInt(u16, data[0..2], .little);
-            const hpx = std.mem.readInt(u16, data[2..4], .little);
-            const out = try allocator.alloc(u8, @as(usize, wpx) * @as(usize, hpx));
-            pixel_bufs[i] = out;
-            const sz = try doom_wad.decodePicture(data, out);
+        while (i < set.frames.len) : (i += 1) {
+            const spec = set.frames[i];
+            const gun = try decodeDoomLump(allocator, &w, spec.lump);
+            // gun.pixels is heap-allocated — either we keep it (no flash) or
+            // we hand it to compositeFlash, which frees it after blitting.
+            if (spec.flash) |flash_name| {
+                if (w.findLump(flash_name)) |_| {
+                    const flash = try decodeDoomLump(allocator, &w, flash_name);
+                    const composed = try compositeFlash(allocator, gun, flash);
+                    allocator.free(gun.pixels);
+                    allocator.free(flash.pixels);
+                    pixel_bufs[i] = composed.pixels;
+                    frames[i] = .{
+                        .width    = composed.width,
+                        .height   = composed.height,
+                        .pixels   = composed.pixels,
+                        .origin_x = -@divTrunc(@as(i32, composed.width), 2),
+                        .origin_y = composed.height,
+                    };
+                    continue;
+                }
+                std.debug.print("  WARNING: Doom flash lump '{s}' missing — skipping flash on {s}\n",
+                    .{ flash_name, spec.lump });
+            }
+            pixel_bufs[i] = gun.pixels;
             frames[i] = .{
-                .width    = sz.width,
-                .height   = sz.height,
-                .pixels   = out,
-                .origin_x = -@divTrunc(@as(i32, sz.width), 2),
-                .origin_y = sz.height,
+                .width    = gun.width,
+                .height   = gun.height,
+                .pixels   = gun.pixels,
+                .origin_x = -@divTrunc(@as(i32, gun.width), 2),
+                .origin_y = gun.height,
             };
         }
         try quake_spr.writeSprite(io, allocator, set.out_path, frames);
-        std.debug.print("  wrote {s} ({d} frames)\n", .{ set.out_path, set.lumps.len });
+        std.debug.print("  wrote {s} ({d} frames)\n", .{ set.out_path, set.frames.len });
     }
 
     for (doom_sound_sets) |set| {

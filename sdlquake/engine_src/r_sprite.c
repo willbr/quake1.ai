@@ -297,7 +297,8 @@ extern byte vid_palette_id[];	// from sdlquake/platform/vid_sdl.c
 void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame, byte palette_id)
 {
 	int		w, h, u, v;
-	byte	*dest, *source, *pal_dest, tbyte;
+	int		u_start, u_end, v_start, v_end;
+	byte	*dest, *source, *pal_dest, *src_row, tbyte;
 
 	if (r_pixbytes != 1)
 		return;		// 16-bit color path not supported for viewmodel sprites yet
@@ -307,30 +308,43 @@ void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame, byte palette_id)
 	if (w <= 0 || h <= 0)
 		return;
 
-	if (sx < 0 || sy < 0 ||
-		sx + w > (int)vid.width || sy + h > (int)vid.height)
-		return;		// off-screen — skip rather than crash
-
-	source   = (byte *)&frame->pixels[0];
-	dest     = vid.buffer       + sy * vid.rowbytes + sx;
-	// vid_palette_id is sized VID_WIDTH * VID_HEIGHT, stride = vid.width
-	// (independent of vid.rowbytes, which strides vid.buffer and could differ
-	// in the future if rowbytes gains alignment padding).
-	pal_dest = vid_palette_id   + sy * vid.width + sx;
-
-	for (v = 0; v < h; v++)
+	// Per-pixel clip to the 3D viewport (vrect), not the full vid rect.
+	// The viewmodel must not write into the sbar zone, because this routine
+	// also stamps vid_palette_id with the model's palette tag — and Sbar_Draw
+	// only overwrites vid.buffer, never vid_palette_id, so any pixel we tag
+	// in the sbar zone gets re-coloured through the wrong palette LUT in
+	// VID_Update even after the sbar overdraws it. Clipping at vrect is also
+	// the correct Doom-style visual: peak weapon bob makes the gun's bottom
+	// rows disappear at the sbar top edge, exactly like Doom hiding the gun
+	// behind the status bar.
 	{
-		for (u = 0; u < w; u++)
+		int x_min = r_refdef.vrect.x;
+		int y_min = r_refdef.vrect.y;
+		int x_max = r_refdef.vrect.x + r_refdef.vrect.width;
+		int y_max = r_refdef.vrect.y + r_refdef.vrect.height;
+		u_start = (sx < x_min) ? x_min - sx : 0;
+		u_end   = (sx + w > x_max) ? x_max - sx : w;
+		v_start = (sy < y_min) ? y_min - sy : 0;
+		v_end   = (sy + h > y_max) ? y_max - sy : h;
+	}
+	if (u_start >= u_end || v_start >= v_end)
+		return;		// fully off-screen
+
+	source = (byte *)&frame->pixels[0];
+
+	for (v = v_start; v < v_end; v++)
+	{
+		dest     = vid.buffer     + (sy + v) * vid.rowbytes + (sx + u_start);
+		pal_dest = vid_palette_id + (sy + v) * vid.width    + (sx + u_start);
+		src_row  = source         +  v       * w            +       u_start;
+		for (u = 0; u < u_end - u_start; u++)
 		{
-			if ((tbyte = source[u]) != TRANSPARENT_COLOR)
+			if ((tbyte = src_row[u]) != TRANSPARENT_COLOR)
 			{
 				dest[u]     = tbyte;
 				pal_dest[u] = palette_id;
 			}
 		}
-		dest     += vid.rowbytes;
-		pal_dest += vid.width;
-		source   += w;
 	}
 }
 
@@ -345,6 +359,29 @@ Anchors the sprite bottom-center; the status bar overlays its lower
 portion the same way it does the 3D MDL viewmodel.
 ================
 */
+// Doom-style weapon bob — replicates A_WeaponReady's psp->sx/sy update from
+// p_pspr.c. Horizontal axis sways with cosine; vertical axis dips with |sine|
+// (Doom's WEAPONTOP+|sin| means the weapon only ever falls below its rest
+// position, never rising above it). Magnitude scales with horizontal speed.
+//
+// Numbers chosen to match Doom's feel at 320×200: full cycle ≈ 1.83 s
+// (Doom: angle = 128*leveltime mod FINEANGLES at 35 Hz → 1.829 s/cycle),
+// max amplitude 16 px (Doom MAXBOB), saturating around 320 u/s ≈ Quake run
+// speed.
+#define DOOM_BOB_PERIOD     1.83f
+#define DOOM_BOB_MAX        16.0f
+#define DOOM_BOB_REF_SPEED  320.0f
+
+static float R_DoomViewBobAmount (void)
+{
+	float vx = cl.velocity[0];
+	float vy = cl.velocity[1];
+	float speed = sqrt (vx*vx + vy*vy);
+	float bob = speed * (DOOM_BOB_MAX / DOOM_BOB_REF_SPEED);
+	if (bob > DOOM_BOB_MAX) bob = DOOM_BOB_MAX;
+	return bob;
+}
+
 void R_DrawViewModelSprite (entity_t *e)
 {
 	msprite_t      *psprite;
@@ -352,6 +389,7 @@ void R_DrawViewModelSprite (entity_t *e)
 	int             frame_idx;
 	int             sx, sy;
 	int             vp_x, vp_y, vp_w, vp_h;
+	float           bob, angle;
 
 	if (!e->model || e->model->type != mod_sprite)
 		return;
@@ -371,15 +409,30 @@ void R_DrawViewModelSprite (entity_t *e)
 	if (!frame)
 		return;
 
-	// Anchor inside the 3D viewport so we don't draw into the status bar
-	// zone (R_RenderView only writes to vrect; Sbar_Draw owns everything below).
+	// Anchor inside the 3D viewport so the rest position lines up with the
+	// status bar (Sbar_Draw owns everything below vrect bottom).
 	vp_x = r_refdef.vrect.x;
 	vp_y = r_refdef.vrect.y;
 	vp_w = r_refdef.vrect.width;
 	vp_h = r_refdef.vrect.height;
 
+	// Rest position: bottom-centered, gun bottom flush with the sbar top.
+	// Doom's |sin| pulls the gun further down on the bob (sy increases),
+	// briefly into sbar territory; Sbar_Draw runs after the viewmodel and
+	// overdraws the sbar zone every frame (see vid.numpages bump in vid_sdl.c
+	// — the original optimization that skipped redrawing the sbar relied on
+	// VRAM-page persistence we don't have under SDL).
 	sx = vp_x + (vp_w - frame->width) / 2;
 	sy = vp_y +  vp_h - frame->height;
+
+	bob = R_DoomViewBobAmount ();
+	if (bob > 0.0f)
+	{
+		angle = cl.time * (2.0f * M_PI / DOOM_BOB_PERIOD);
+		sx += (int)(bob * cos (angle));
+		sy += (int)(bob * fabs (sin (angle)));
+	}
+
 	R_BlitSpriteScreen (sx, sy, frame, e->model->palette_id);
 }
 

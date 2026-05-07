@@ -238,6 +238,18 @@ void VID_Update(vrect_t *rects)
     // reads the tags this frame's renderer wrote — clearing earlier
     // would wipe those tags before expand sees them.
     memset(vid_palette_id, 0, sizeof(vid_palette_id));
+
+    // Force the sbar to redraw on the next SCR_UpdateScreen. Stock Quake
+    // uses sb_updates / vid.numpages to skip Sbar_Draw once each VRAM page
+    // has the latest sbar — an optimization that assumed the front buffer
+    // and back buffer kept stable copies between flips. Our SDL backend
+    // re-uploads vid.buffer wholesale every frame, so any region not
+    // explicitly redrawn this frame keeps whatever the previous renderer
+    // wrote there — most visibly, a bobbing viewmodel sprite writing pixels
+    // under the sbar. Resetting sb_updates here makes Sbar_Draw redraw
+    // every frame; the redraw cost is a couple of paletted blits and is
+    // negligible compared to the framebuffer expand+upload above.
+    Sbar_Changed();
 }
 
 int VID_SetMode(int modenum, unsigned char *palette)
