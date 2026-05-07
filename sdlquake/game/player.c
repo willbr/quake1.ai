@@ -156,7 +156,7 @@ void SUB_Remove(edict_t *self);   // subs.c
 #define FRAME_STEP(fr, next_fn) do { \
     g->self = self; \
     g->self->v.frame     = (fr); \
-    g->self->v.nextthink = g->self->v.ltime + 0.1f; \
+    g->self->v.nextthink = g->time + 0.1f; \
     g->self->v.think     = (next_fn); \
 } while (0)
 
