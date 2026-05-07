@@ -23,6 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "hotreload.h"
 #include "r_local.h"
 
+// Pause single-player physics while the ImGui dev overlay is open,
+// mirroring the existing key_dest != key_game pause for the console/menu.
+extern int ImguiLayer_IsOpen(void);
+
 /*
 
 A server can allways be started, even if the system started out as a client
@@ -566,8 +570,8 @@ void _Host_ServerFrame (void)
 	SV_RunClients ();
 	
 // move things around and think
-// always pause in single player if in console or menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
+// always pause in single player if in console, menus, or dev overlay
+	if (!sv.paused && (svs.maxclients > 1 || (key_dest == key_game && !ImguiLayer_IsOpen())) )
 		SV_Physics ();
 }
 
@@ -618,8 +622,8 @@ void Host_ServerFrame (void)
 	SV_RunClients ();
 	
 // move things around and think
-// always pause in single player if in console or menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
+// always pause in single player if in console, menus, or dev overlay
+	if (!sv.paused && (svs.maxclients > 1 || (key_dest == key_game && !ImguiLayer_IsOpen())) )
 		SV_Physics ();
 
 // send all messages to the clients
