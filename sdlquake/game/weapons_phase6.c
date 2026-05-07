@@ -79,6 +79,10 @@ static void p6_fire_bullet(float damage, vec3_t aim, float spread_x, float sprea
     }
 }
 
+// Doom MELEERANGE: 64 fracunits in Doom = 64 map units in Quake. Used by
+// p6_doom_melee_hit for fist + chainsaw line-attacks.
+#define MELEERANGE_QU           64.0f
+
 // ---------------------------------------------------------------------------
 // Doom melee — A_Punch / A_Saw shared core. Returns 1 on hit, 0 on miss so
 // the caller can switch sounds (saw plays a different sample on whiff vs hit).
@@ -104,9 +108,9 @@ static int p6_doom_melee_hit(int damage, float angle_jitter_radians) {
     src[2] = self->v.absmin[2] + self->v.size[2]*0.7f;
 
     vec3_t end;
-    end[0] = src[0] + aim[0]*64.0f;
-    end[1] = src[1] + aim[1]*64.0f;
-    end[2] = src[2] + aim[2]*64.0f;
+    end[0] = src[0] + aim[0]*MELEERANGE_QU;
+    end[1] = src[1] + aim[1]*MELEERANGE_QU;
+    end[2] = src[2] + aim[2]*MELEERANGE_QU;
     eng->SV_Traceline(src, end, 0, self);
     if (g->trace_fraction == 1.0f)
         return 0;
@@ -119,6 +123,15 @@ static int p6_doom_melee_hit(int damage, float angle_jitter_radians) {
     }
     return 0;
 }
+
+// Wolf3D damage falloff -- DO NOT change without re-checking WL_AGENT.C:1227-1240.
+// US_RndT() returns 0..255 (modeled as rand_byte() & 0xFF here, same range).
+#define WOLF_TILE_QU            64.0f   // 1 Wolf tile = 64 Quake units
+#define WOLF_NEAR_TILES         2.0f    // dist < NEAR  -> rnd / NEAR_DIVISOR (max 63 dmg)
+#define WOLF_MID_TILES          4.0f    // dist < MID   -> rnd / MID_DIVISOR  (max 42 dmg)
+#define WOLF_NEAR_DIVISOR       4
+#define WOLF_MID_DIVISOR        6
+#define WOLF_FAR_MISS_DIVISOR   12      // (rnd / FAR_MISS_DIVISOR) < (int)dist -> miss
 
 // ---------------------------------------------------------------------------
 // Wolf3D hitscan — closest-visible-target front-cone + tile-distance damage
@@ -139,6 +152,15 @@ static int p6_doom_melee_hit(int damage, float angle_jitter_radians) {
 //
 // Returns 1 on hit, 0 on miss/whiff. Caller plays the sound regardless and
 // owns animation; we just resolve the damage.
+//
+// Deviations from Wolf3D's GunAttack (intentional simplifications):
+//   - Single-trace: if the closest in-cone target has world-blocked LOS,
+//     we whiff and return 0. Wolf3D iterates to the next-closest target;
+//     we don't. Acceptable because the player still gets visual feedback
+//     (TE_GUNSHOT puff at the obstacle).
+//   - Distance metric: Euclidean / 64 instead of Wolf's Chebyshev tile
+//     distance (max(|dx|,|dy|)). Difference is at most ~40% on diagonals;
+//     "Wolf-ish feel" rather than byte-for-byte parity is the goal.
 // ---------------------------------------------------------------------------
 static int p6_wolf_hitscan(float shoot_cone_radians) {
     edict_t *self = g->self;
@@ -182,7 +204,12 @@ static int p6_wolf_hitscan(float shoot_cone_radians) {
     tgt[0] = (closest->v.absmin[0] + closest->v.absmax[0]) * 0.5f;
     tgt[1] = (closest->v.absmin[1] + closest->v.absmax[1]) * 0.5f;
     tgt[2] = (closest->v.absmin[2] + closest->v.absmax[2]) * 0.5f;
-    eng->SV_Traceline(src, tgt, 1 /* nomonsters: ignore monsters except the target */, self);
+    // World-LOS check only -- nomonsters=1 skips every monster including the
+    // target, matching Wolf3D's CheckLine semantics. The trace can still hit
+    // non-monster takedamage entities (buttons, breakables); the
+    // g->trace_ent != closest guard below covers the case where such an entity
+    // is between us and the target.
+    eng->SV_Traceline(src, tgt, 1, self);
     if (g->trace_fraction < 1.0f && g->trace_ent != closest) {
         eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
         eng->MSG_WriteByte (MSG_BROADCAST, TE_GUNSHOT);
@@ -192,14 +219,14 @@ static int p6_wolf_hitscan(float shoot_cone_radians) {
         return 0;
     }
 
-    float dist = sqrtf(closest_d2) / 64.0f;
+    float dist = sqrtf(closest_d2) / WOLF_TILE_QU;
     int rnd = rand_byte();
     int damage;
-    if (dist < 2.0f)      damage = rnd / 4;
-    else if (dist < 4.0f) damage = rnd / 6;
+    if (dist < WOLF_NEAR_TILES)      damage = rnd / WOLF_NEAR_DIVISOR;
+    else if (dist < WOLF_MID_TILES)  damage = rnd / WOLF_MID_DIVISOR;
     else {
-        if ((rnd / 12) < (int)dist) return 0;
-        damage = rnd / 6;
+        if ((rnd / WOLF_FAR_MISS_DIVISOR) < (int)dist) return 0;
+        damage = rnd / WOLF_MID_DIVISOR;
     }
     if (damage <= 0) return 0;
 
