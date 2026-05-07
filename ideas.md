@@ -45,6 +45,7 @@
 
 ## Engine & platform
 
+* replace build.zig with build.c
 * uncapped framerate with fixed physics
 * increased engine limits
 * BSP2 support
