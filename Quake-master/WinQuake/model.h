@@ -366,6 +366,11 @@ typedef struct model_s
 //
 	cache_user_t	cache;		// only access through Mod_Extradata
 
+// PHASE 6: source palette for paletted sprite rendering. 0 = Quake (default),
+// 1 = Doom, 2 = Wolf3D (reserved). Set by Mod_LoadSpriteModel via filename
+// prefix; consumed by R_BlitSpriteScreen to tag vid_palette_id pixels.
+	byte		palette_id;
+
 } model_t;
 
 //============================================================================
