@@ -77,3 +77,50 @@ static void player_doompistol5_think(edict_t *self) {
 void player_doompistol1(edict_t *self) {
     player_doompistol1_think(self);
 }
+
+// ---------------------------------------------------------------------------
+// Doom fist -- S_PUNCH1..S_PUNCH5 (4/4/5/4/5 tics ~= 0.114/0.114/0.143/0.114/0.143 s).
+// Frame layout in v_doomfist.spr:
+//   0 = PUNGA (idle)         -- not used in attack chain
+//   1 = PUNGB (windup)       -- S_PUNCH1, S_PUNCH5
+//   2 = PUNGC (impact)       -- S_PUNCH2 (A_Punch fires here), S_PUNCH4
+//   3 = PUNGD (recoil)       -- S_PUNCH3
+// ---------------------------------------------------------------------------
+
+static void player_doomfist2_think(edict_t *self);
+static void player_doomfist3_think(edict_t *self);
+static void player_doomfist4_think(edict_t *self);
+static void player_doomfist5_think(edict_t *self);
+static void player_doomfist6_think(edict_t *self);
+
+// S_PUNCH1: windup.
+static void player_doomfist1_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY,     1, 0.114f, player_doomfist2_think);
+}
+// S_PUNCH2: impact pose. Punch fires.
+static void player_doomfist2_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, 0.114f, player_doomfist3_think);
+    DoomFist_DoFire(self);
+}
+// S_PUNCH3: recoil.
+static void player_doomfist3_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 3, 0.143f, player_doomfist4_think);
+}
+// S_PUNCH4: bounce-back through impact pose.
+static void player_doomfist4_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 2, 0.114f, player_doomfist5_think);
+}
+// S_PUNCH5: settle through windup pose.
+static void player_doomfist5_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY,     1, 0.143f, player_doomfist6_think);
+}
+// Back to idle (frame 0 = PUNGA).
+static void player_doomfist6_think(edict_t *self) {
+    g->self = self;
+    g->self->v.weaponframe = 0;
+    player_run(self);
+}
+
+void player_doomfist1(edict_t *self) {
+    player_doomfist1_think(self);
+}

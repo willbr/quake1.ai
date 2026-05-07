@@ -55,4 +55,7 @@ void player_doompistol1 (edict_t *self);
 // weapons_phase6.c rather than scattering them into player_phase6.c.
 void DoomPistol_DoFire (edict_t *self);
 
+void player_doomfist1   (edict_t *self);
+void DoomFist_DoFire    (edict_t *self);
+
 #endif // WEAPONS_PHASE6_H

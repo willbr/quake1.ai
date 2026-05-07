@@ -283,12 +283,27 @@ void DoomPistol_DoFire(edict_t *self) {
     p6_fire_bullet((float)dmg, aim, 0.01f, 0.01f);
 }
 
+void W_FirePhase6_DoomFist(void) {
+    edict_t *self = g->self;
+    // Total chain = 4+4+5+4+5 = 22 tics = 0.629s. Fire happens at S_PUNCH2
+    // (entering frame index 2 = PUNGC), so the punch lands ~0.229s after press.
+    self->v.attack_finished = g->time + 0.629f;
+    player_doomfist1(self);
+}
+
+void DoomFist_DoFire(edict_t *self) {
+    int dmg = ((rand_byte() % 10) + 1) << 1;  // 2..20
+    int hit = p6_doom_melee_hit(dmg, 0.05f);
+    if (hit)
+        eng->SV_StartSound(self, CHAN_WEAPON, "phase6/doom_punch.wav", 1, ATTN_NORM);
+    self->v.punchangle[0] = -1;
+}
+
 // ---------------------------------------------------------------------------
 // Stubs for not-yet-implemented Phase 6 weapons (Phase D/E/F).
 // They just return so dispatch is safe even if a weapon flag is granted
 // before its fire function is written.
 // ---------------------------------------------------------------------------
-void W_FirePhase6_DoomFist     (void) {}
 void W_FirePhase6_DoomShotgun  (void) {}
 void W_FirePhase6_DoomChaingun (void) {}
 void W_FirePhase6_DoomRocket   (void) {}
