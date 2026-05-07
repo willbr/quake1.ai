@@ -1160,12 +1160,12 @@ void PR_LoadProgs (void)
 	// For NATIVE_GAME=1, skip loading progs.dat.
 	// Set pr_edict_size to the native edict_t layout and set up a
 	// minimal pr_global_struct stub (some engine code still reads it).
+	// Always reallocate: Host_ClearMemory (called just above us in
+	// SV_SpawnServer) ran Hunk_FreeToLowMark, so any prior pointer is now
+	// stale and would alias whatever sv.edicts is about to allocate.
 	pr_edict_size = sizeof(edict_t);
-	if (!pr_global_struct)
-		pr_global_struct = (globalvars_t *)Hunk_AllocName(sizeof(globalvars_t), "pr_globals");
-	// Also need a pr_strings pointer so ED_NewString can return a valid offset.
-	if (!pr_strings)
-		pr_strings = Hunk_AllocName(1, "pr_strings");
+	pr_global_struct = (globalvars_t *)Hunk_AllocName(sizeof(globalvars_t), "pr_globals");
+	pr_strings       = Hunk_AllocName(1, "pr_strings");
 #else /* !NATIVE_GAME — load the QC VM progs.dat */
 
 // flush the non-C variable lookup cache
