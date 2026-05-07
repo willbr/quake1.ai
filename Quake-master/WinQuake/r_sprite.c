@@ -379,10 +379,7 @@ void R_DrawViewModelSprite (entity_t *e)
 
 	sx = vp_x + (vp_w - frame->width) / 2;
 	sy = vp_y +  vp_h - frame->height;
-	// PHASE 6 palette switching: pass 0 (Quake) until cutover task. Task 6
-	// flips this to e->model->palette_id which gives Doom sprites their
-	// native colors via vid_lut[1].
-	R_BlitSpriteScreen (sx, sy, frame, 0);
+	R_BlitSpriteScreen (sx, sy, frame, e->model->palette_id);
 }
 
 

@@ -195,8 +195,6 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
         std.debug.print("  wrote {s} (768 bytes)\n", .{out_path});
     }
 
-    const doom_remap = buildRemap8(doom_pal, quake_pal);
-
     for (doom_sprite_sets) |set| {
         // Doom sprites vary in size — allocate per frame.
         var frames = try allocator.alloc(quake_spr.Frame, set.lumps.len);
@@ -223,7 +221,6 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
             const out = try allocator.alloc(u8, @as(usize, wpx) * @as(usize, hpx));
             pixel_bufs[i] = out;
             const sz = try doom_wad.decodePicture(data, out);
-            applyRemap(doom_remap, out);
             frames[i] = .{
                 .width    = sz.width,
                 .height   = sz.height,
