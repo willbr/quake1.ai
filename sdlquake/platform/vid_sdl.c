@@ -6,6 +6,7 @@
 #include "winquake.h"
 #include "imgui_layer.h"
 #include "r_bbox.h"
+#include "vid_palette.h"
 
 // ---------------------------------------------------------------------------
 // Globals that Win32 platform files normally define
@@ -33,8 +34,14 @@ cvar_t _windowed_mouse = {"_windowed_mouse", "1", true};
 
 viddef_t vid;
 
+// d_8to24table[256]: slot 0 Quake palette. Engine code reads this directly
+// via the `extern unsigned d_8to24table[256]` declaration in vid.h.
 unsigned    d_8to24table[256];
 unsigned short d_8to16table[256]; // unused in software but declared in vid.h
+
+// Multi-palette LUT used only by VID_Update.
+// vid_lut[VID_PAL_QUAKE] mirrors d_8to24table[]; slots 1+ are filled on demand.
+static unsigned vid_lut[VID_NUM_PALETTES][256];
 
 void (*vid_menudrawfn)(void) = NULL;
 void (*vid_menukeyfn)(int key) = NULL;
@@ -47,23 +54,33 @@ static SDL_Texture  *sdl_texture  = NULL;
 #define VID_HEIGHT 200
 
 static byte vid_buffer[VID_WIDTH * VID_HEIGHT];
+byte vid_palette_id[VID_WIDTH * VID_HEIGHT];   // declared in vid_palette.h
 
 // ---------------------------------------------------------------------------
 // Palette helpers
 // ---------------------------------------------------------------------------
 
-static void build_palette(unsigned char *palette)
+static void build_palette_slot(int slot, unsigned char *palette)
 {
+    unsigned *lut = vid_lut[slot];
     for (int i = 0; i < 256; i++)
     {
         unsigned r = palette[i*3 + 0];
         unsigned g = palette[i*3 + 1];
         unsigned b = palette[i*3 + 2];
         // SDL_PIXELFORMAT_ARGB8888: 0xAARRGGBB as uint32 (LE stored as B,G,R,A)
-        d_8to24table[i] = 0xFF000000u | (r << 16) | (g << 8) | b;
+        lut[i] = 0xFF000000u | (r << 16) | (g << 8) | b;
     }
-    // fullbright starts at color 224
-    d_8to24table[255] = 0; // transparent black
+    // 255 is transparent in every palette slot
+    lut[255] = 0;
+    // Slot 0 also backs the engine-visible d_8to24table[256].
+    if (slot == VID_PAL_QUAKE)
+        memcpy(d_8to24table, lut, 256 * sizeof(unsigned));
+}
+
+static void build_palette(unsigned char *palette)
+{
+    build_palette_slot(VID_PAL_QUAKE, palette);
 }
 
 void VID_SetPalette(unsigned char *palette)   { build_palette(palette); }
@@ -176,12 +193,19 @@ void VID_Update(vrect_t *rects)
     if (SDL_LockTexture(sdl_texture, NULL, &pixels, &pitch) < 0)
         return;
 
+    // vid_lut[slot][index]: per-pixel palette dispatch.
+    // Slot 0 (Quake) mirrors d_8to24table[]; slot 1 (Doom) filled on demand.
+    unsigned (*lut)[256] = vid_lut;
+
     for (int y = 0; y < VID_HEIGHT; y++)
     {
-        unsigned *dst = (unsigned *)((byte *)pixels + y * pitch);
-        byte     *src = vid.buffer + y * vid.rowbytes;
+        unsigned *dst     = (unsigned *)((byte *)pixels + y * pitch);
+        byte     *src     = vid.buffer       + y * vid.rowbytes;
+        // vid_palette_id is stride-equal to vid.buffer at fixed resolution
+        // (VID_Init sets vid.rowbytes = VID_WIDTH).
+        byte     *pal_src = vid_palette_id   + y * vid.rowbytes;
         for (int x = 0; x < VID_WIDTH; x++)
-            dst[x] = d_8to24table[src[x]];
+            dst[x] = lut[pal_src[x]][src[x]];
     }
 
     SDL_UnlockTexture(sdl_texture);
@@ -189,6 +213,11 @@ void VID_Update(vrect_t *rects)
     SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
     ImguiLayer_Render();
     SDL_RenderPresent(sdl_renderer);
+
+    // Reset palette tags for the next frame. Engine renderer paths that
+    // write to vid.buffer leave palette_id at 0 (Quake); only the Doom
+    // sprite blit opts in by writing 1.
+    memset(vid_palette_id, 0, sizeof(vid_palette_id));
 }
 
 int VID_SetMode(int modenum, unsigned char *palette)
