@@ -417,3 +417,35 @@ static void player_wolfmg3_think(edict_t *self) {
 void player_wolfmg1(edict_t *self) {
     player_wolfmg1_think(self);
 }
+
+// ---------------------------------------------------------------------------
+// Wolf3D chaingun -- single-step 6-tic chain. Refire is gated by
+// attack_finished = time + WOLFCG_CHAIN_S (6 tics) so holding fire
+// produces ~11.6 Hz sustained shots. Frame index alternates 2/3 across
+// calls via a static toggle so the muzzle pose visibly changes.
+// Frame layout in v_wolfchaingun.spr:
+//   0 = idle (not used)
+//   1 = pre-fire (only on first press)
+//   2 = fire pose A with flash
+//   3 = fire pose B with flash (alternates with 2)
+//   4 = recover
+// ---------------------------------------------------------------------------
+
+static int p6_wolf_cg_toggle = 0;
+
+static void player_wolfchaingun2_think(edict_t *self);
+
+static void player_wolfchaingun1_think(edict_t *self) {
+    int weap_fr = (p6_wolf_cg_toggle ^= 1) ? 2 : 3;
+    P6_FRAME_STEP(FR_PHASE6_BODY, weap_fr, WOLF_6_TIC, player_wolfchaingun2_think);
+    WolfChaingun_DoFire(self);
+}
+static void player_wolfchaingun2_think(edict_t *self) {
+    g->self = self;
+    g->self->v.weaponframe = 0;
+    player_run(self);
+}
+
+void player_wolfchaingun1(edict_t *self) {
+    player_wolfchaingun1_think(self);
+}

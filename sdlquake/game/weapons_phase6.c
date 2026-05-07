@@ -586,11 +586,31 @@ void WolfMG_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
-// Stubs for not-yet-implemented Phase 6 weapons (Phase D/E/F).
-// They just return so dispatch is safe even if a weapon flag is granted
-// before its fire function is written.
+// Wolf3D chaingun -- 6-tic per-shot loop, fastest Wolf gun
+//   damage  = p6_wolf_hitscan tile-falloff
+//   ammo    = 1 bullet per shot
+//   refire  = 6 tics @ 70 Hz ~= 0.086s -> ~11.6 Hz sustained
+//   sound   = phase6/wolf_chaingun.wav
+//   cone    = 0.09 rad ~= 5.2 deg (widest of the three Wolf hitscans)
 // ---------------------------------------------------------------------------
-void W_FirePhase6_WolfChaingun (void) {}
+#define WOLFCG_CHAIN_S  (6.0f * (1.0f / 70.0f))
+
+void W_FirePhase6_WolfChaingun(void) {
+    edict_t *self = g->self;
+    if (self->v.ammo_bullets < 1) return;
+    self->v.attack_finished = g->time + WOLFCG_CHAIN_S;
+    player_wolfchaingun1(self);
+}
+
+void WolfChaingun_DoFire(edict_t *self) {
+    if (self->v.ammo_bullets < 1) return;
+    eng->SV_StartSound(self, CHAN_WEAPON, "phase6/wolf_chaingun.wav", 1, ATTN_NORM);
+    self->v.punchangle[0] = -1;
+    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
+    self->v.ammo_bullets -= 1;
+    self->v.currentammo   = self->v.ammo_bullets;
+    p6_wolf_hitscan(0.09f);
+}
 
 // ---------------------------------------------------------------------------
 // Top-level dispatchers — called from weapons.c when self->v.weapon2 != 0.
