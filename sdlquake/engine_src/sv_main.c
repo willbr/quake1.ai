@@ -1208,6 +1208,23 @@ void SV_SpawnServer (char *server)
 	ent->v.movetype = MOVETYPE_PUSH;
 
 #if NATIVE_GAME
+	// Reset per-map state. Unlike pr_global_struct (hunk-allocated, fresh
+	// every spawn), game_globals is a static struct that persists across
+	// map loads. Without this, g->time stays at the previous game's last
+	// value, so spawn-time think schedules (StartItem etc. do
+	// nextthink = g->time + 0.2) land in the far future and entities sit
+	// inert until sv.time catches up — manifests as pickups not working
+	// for several seconds after `map` reload, monster/secret counters
+	// doubling, etc.
+	game_globals.time           = sv.time;
+	game_globals.framecount     = 0;
+	game_globals.force_retouch  = 0;
+	game_globals.total_secrets  = 0;
+	game_globals.found_secrets  = 0;
+	game_globals.total_monsters = 0;
+	game_globals.killed_monsters = 0;
+	game_globals.movedist       = 0;
+	game_globals.gameover       = 0;
 	game_globals.coop        = coop.value;
 	game_globals.deathmatch  = coop.value ? 0 : deathmatch.value;
 	game_globals.mapname     = sv.name;
