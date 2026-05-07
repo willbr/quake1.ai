@@ -36,8 +36,8 @@ void monster_use(edict_t *self, edict_t *activator) {
 // ---------------------------------------------------------------------------
 // monster_death_use — fires targets with the dead monster's enemy as activator
 // ---------------------------------------------------------------------------
-void monster_death_use(edict_t *self) {
-    g->self = self;
+void monster_death_use(void) {
+    edict_t *self = g->self;
     if ((int)self->v.flags & FL_FLY)
         self->v.flags = (float)((int)self->v.flags - FL_FLY);
     if ((int)self->v.flags & FL_SWIM)
