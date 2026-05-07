@@ -46,10 +46,8 @@
 ## Engine & platform
 
 * uncapped framerate with fixed physics
-* window resize independent of render resolution
 * increased engine limits
 * BSP2 support
-* hot reloading
 * what SDL3 features should I use?
 
 ## Environmental fx
@@ -61,9 +59,8 @@
 ## UI & HUD
 
 * mouse support for the default menu
-* rebuilt menu in imgui
+* rebuilt main menu in imgui (dev overlay already done)
 * custom HUD
-* cimgui
 
 ## Editor & live workflow
 
@@ -79,13 +76,11 @@
 
 ## Game logic / scripting
 
-* replace QuakeC — Lua, raw C
 * random / procedural maps
 * procedural everything — models, textures, music, story
 
 ## AI / LLM-native gameplay
 
-* MCP server so Claude can use it
 * LLM-driven monster taunts that react to *how* you fight (camping, rocket-jumping, low health)
 * talk-to-monsters mode — Undertale mercy route, Claude voices each shambler
 * AI dungeon master that rewrites encounters mid-level based on player skill
