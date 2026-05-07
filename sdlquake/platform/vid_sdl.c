@@ -6,6 +6,7 @@
 #include "winquake.h"
 #include "imgui_layer.h"
 #include "r_bbox.h"
+#include "r_paths.h"
 #include "vid_palette.h"
 
 // ---------------------------------------------------------------------------
@@ -178,6 +179,7 @@ void VID_Init(unsigned char *palette)
     {
         ImguiLayer_Init(sdl_window, sdl_renderer);
         RBBox_Init();
+        RPaths_Init();
     }
 
     // Allocate z-buffer and surface cache from the hunk (as vid_win.c does)
@@ -211,6 +213,7 @@ void VID_Update(vrect_t *rects)
 {
     if (!sdl_texture) return;
 
+    RPaths_Draw();
     RBBox_Draw();
 
     void *pixels;

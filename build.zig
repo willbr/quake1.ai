@@ -80,6 +80,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/imgui_layer.c",
         "sdlquake/engine/r_debugdraw.c",
         "sdlquake/engine/r_bbox.c",
+        "sdlquake/engine/r_paths.c",
     };
 
     const imgui_dir = "sdlquake/vendor/imgui-1.92.8";
