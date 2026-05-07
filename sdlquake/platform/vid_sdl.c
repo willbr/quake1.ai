@@ -188,36 +188,39 @@ void VID_Update(vrect_t *rects)
 
     RBBox_Draw();
 
-    // Reset palette tags before the expand step so the invariant "palette_id
-    // is zero at the start of every frame" holds even when SDL_LockTexture
-    // fails and we return early.
-    memset(vid_palette_id, 0, sizeof(vid_palette_id));
-
     void *pixels;
     int pitch;
-    if (SDL_LockTexture(sdl_texture, NULL, &pixels, &pitch) < 0)
-        return;
-
-    // vid_lut[slot][index]: per-pixel palette dispatch.
-    // Slot 0 (Quake) mirrors d_8to24table[]; slot 1 (Doom) filled on demand.
-    unsigned (*lut)[256] = vid_lut;
-
-    for (int y = 0; y < VID_HEIGHT; y++)
+    if (SDL_LockTexture(sdl_texture, NULL, &pixels, &pitch) >= 0)
     {
-        unsigned *dst     = (unsigned *)((byte *)pixels + y * pitch);
-        byte     *src     = vid.buffer       + y * vid.rowbytes;
-        // vid_palette_id is sized VID_WIDTH * VID_HEIGHT by construction;
-        // stride is always VID_WIDTH, independent of any vid.rowbytes padding.
-        byte     *pal_src = vid_palette_id   + y * VID_WIDTH;
-        for (int x = 0; x < VID_WIDTH; x++)
-            dst[x] = lut[pal_src[x]][src[x]];
+        // vid_lut[slot][index]: per-pixel palette dispatch.
+        // Slot 0 (Quake) mirrors d_8to24table[]; slot 1 (Doom) filled on demand.
+        unsigned (*lut)[256] = vid_lut;
+
+        for (int y = 0; y < VID_HEIGHT; y++)
+        {
+            unsigned *dst     = (unsigned *)((byte *)pixels + y * pitch);
+            byte     *src     = vid.buffer       + y * vid.rowbytes;
+            // vid_palette_id is sized VID_WIDTH * VID_HEIGHT by construction;
+            // stride is always VID_WIDTH, independent of any vid.rowbytes padding.
+            byte     *pal_src = vid_palette_id   + y * VID_WIDTH;
+            for (int x = 0; x < VID_WIDTH; x++)
+                dst[x] = lut[pal_src[x]][src[x]];
+        }
+
+        SDL_UnlockTexture(sdl_texture);
+        SDL_RenderClear(sdl_renderer);
+        SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
+        ImguiLayer_Render();
+        SDL_RenderPresent(sdl_renderer);
     }
 
-    SDL_UnlockTexture(sdl_texture);
-    SDL_RenderClear(sdl_renderer);
-    SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
-    ImguiLayer_Render();
-    SDL_RenderPresent(sdl_renderer);
+    // Reset palette tags so the next frame's renderer starts clean. Runs
+    // unconditionally (even if SDL_LockTexture failed) to preserve the
+    // invariant: palette_id is always zero at the start of every frame's
+    // renderer pipeline. Must run AFTER the expand step (above) which
+    // reads the tags this frame's renderer wrote — clearing earlier
+    // would wipe those tags before expand sees them.
+    memset(vid_palette_id, 0, sizeof(vid_palette_id));
 }
 
 int VID_SetMode(int modenum, unsigned char *palette)
