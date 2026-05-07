@@ -24,6 +24,10 @@ const char       *svb_model_precache(int i);
 void              svb_set_model_precache(int i, const char *s);
 /* Fills mins/maxs from sv.models[i].  Returns 1 on success, 0 if no such model. */
 int               svb_model_bounds(int i, float *mins, float *maxs);
+/* Loads name via Mod_ForName and stores in sv.models[i].  Mirrors PF_precache_model
+ * for non-inline BSP/MDL/SPR files (e.g. maps/b_explob.bsp) so SV_SetModel can pull
+ * mins/maxs back out — without this, such entities get a zero-size bbox. */
+void              svb_load_model(int i, const char *name);
 const char       *svb_sound_precache(int i);
 void              svb_set_sound_precache(int i, const char *s);
 void              svb_set_lightstyle(int i, const char *s);

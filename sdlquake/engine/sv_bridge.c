@@ -33,6 +33,13 @@ int svb_model_bounds(int i, float *mins, float *maxs)
     return 1;
 }
 
+void svb_load_model(int i, const char *name)
+{
+    if (i < 0 || i >= MAX_MODELS) return;
+    if (sv.models[i]) return;            /* already loaded */
+    sv.models[i] = Mod_ForName((char *)name, false);
+}
+
 const char *svb_sound_precache(int i)   { return sv.sound_precache[i]; }
 void svb_set_sound_precache(int i, const char *s) { sv.sound_precache[i] = (char *)s; }
 

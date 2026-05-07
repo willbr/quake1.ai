@@ -653,6 +653,12 @@ static const char *engine_precachemodel(const char *s)
     for (i = 0; i < 256; i++) {
         if (!svb_model_precache(i)) {
             svb_set_model_precache(i, s);
+            // Mirror PF_precache_model: also load the model into sv.models[i]
+            // so engine_sv_setmodel can read its bbox back out. Without this,
+            // any entity whose collision comes from the model (e.g. barrels
+            // using maps/b_explob.bsp, which don't call SV_SetSize after
+            // SV_SetModel) ends up with a zero-size bbox and is non-solid.
+            svb_load_model(i, s);
             return s;
         }
         if (!strcmp(svb_model_precache(i), s)) return s;
