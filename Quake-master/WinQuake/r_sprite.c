@@ -292,10 +292,12 @@ past the framebuffer.
 Modeled on draw.c:Draw_TransPic (which does the same thing for HUD pics).
 ================
 */
-void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame)
+extern byte vid_palette_id[];	// from sdlquake/platform/vid_sdl.c
+
+void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame, byte palette_id)
 {
 	int		w, h, u, v;
-	byte	*dest, *source, tbyte;
+	byte	*dest, *source, *pal_dest, tbyte;
 
 	if (r_pixbytes != 1)
 		return;		// 16-bit color path not supported for viewmodel sprites yet
@@ -309,18 +311,25 @@ void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame)
 		sx + w > (int)vid.width || sy + h > (int)vid.height)
 		return;		// off-screen — skip rather than crash
 
-	source = (byte *)&frame->pixels[0];
-	dest   = vid.buffer + sy * vid.rowbytes + sx;
+	source   = (byte *)&frame->pixels[0];
+	dest     = vid.buffer       + sy * vid.rowbytes + sx;
+	// vid_palette_id is sized to VID_WIDTH * VID_HEIGHT and stride-equivalent
+	// to vid.buffer at fixed-resolution mode (vid.rowbytes == VID_WIDTH).
+	pal_dest = vid_palette_id   + sy * vid.rowbytes + sx;
 
 	for (v = 0; v < h; v++)
 	{
 		for (u = 0; u < w; u++)
 		{
 			if ((tbyte = source[u]) != TRANSPARENT_COLOR)
-				dest[u] = tbyte;
+			{
+				dest[u]     = tbyte;
+				pal_dest[u] = palette_id;
+			}
 		}
-		dest   += vid.rowbytes;
-		source += w;
+		dest     += vid.rowbytes;
+		pal_dest += vid.rowbytes;
+		source   += w;
 	}
 }
 
@@ -370,7 +379,10 @@ void R_DrawViewModelSprite (entity_t *e)
 
 	sx = vp_x + (vp_w - frame->width) / 2;
 	sy = vp_y +  vp_h - frame->height;
-	R_BlitSpriteScreen (sx, sy, frame);
+	// PHASE 6 palette switching: pass 0 (Quake) until cutover task. Task 6
+	// flips this to e->model->palette_id which gives Doom sprites their
+	// native colors via vid_lut[1].
+	R_BlitSpriteScreen (sx, sy, frame, 0);
 }
 
 
