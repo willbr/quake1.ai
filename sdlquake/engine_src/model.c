@@ -1846,13 +1846,13 @@ void Mod_LoadSpriteModel (model_t *mod, void *buffer)
 	// PHASE 6: tag the model with its source palette so the screen-space
 	// blit knows which entry of vid_lut[][] to render through.
 	// Filenames are produced by the Phase 6 extractor:
-	//   progs/v_doom*.spr  -> Doom palette
-	//   progs/v_wolf*.spr  -> Wolf3D palette (reserved; unused for now)
+	//   progs/v_doom*.spr  -> Doom palette (vid_lut[VID_PAL_DOOM])
+	//   progs/v_wolf*.spr  -> Quake palette (already remapped by the
+	//                         extractor's wolf_remap; the dedicated
+	//                         VID_PAL_WOLF3D slot is reserved but unwired)
 	//   everything else    -> Quake palette
 	if (!strncmp(mod->name, "progs/v_doom", 12))
 		mod->palette_id = 1;	// VID_PAL_DOOM
-	else if (!strncmp(mod->name, "progs/v_wolf", 12))
-		mod->palette_id = 2;	// VID_PAL_WOLF3D
 	else
 		mod->palette_id = 0;	// VID_PAL_QUAKE (default)
 }
