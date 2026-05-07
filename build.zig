@@ -69,6 +69,7 @@ pub fn build(b: *std.Build) void {
 
     const platform_files: []const []const u8 = &.{
         "sdlquake/platform/sys_sdl.c",
+        "sdlquake/platform/sys_crash.c",
         "sdlquake/platform/vid_sdl.c",
         "sdlquake/platform/in_sdl.c",
         "sdlquake/platform/snd_sdl.c",
@@ -150,6 +151,7 @@ pub fn build(b: *std.Build) void {
     mod.addLibraryPath(b.path(sdl3_dir ++ "/lib/x64"));
     mod.linkSystemLibrary("SDL3", .{});
     mod.linkSystemLibrary("ws2_32", .{});  // Winsock for net_dgrm.c (inet_ntoa/inet_addr)
+    mod.linkSystemLibrary("dbghelp", .{}); // SymInitialize / StackWalk64 for sys_crash.c
 
     // ---------------------------------------------------------------------------
     // Game DLL (hot-reloadable)

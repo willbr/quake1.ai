@@ -152,8 +152,11 @@ void Sys_SetFPCW(void)         {}
 
 static char *argv_buf[MAX_NUM_ARGVS];
 
+extern void Sys_InstallCrashHandler(void);
+
 int main(int argc, char **argv)
 {
+    Sys_InstallCrashHandler();
     SDL_SetMainReady();
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) < 0)
