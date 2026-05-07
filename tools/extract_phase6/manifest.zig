@@ -180,7 +180,8 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
     // 768-byte LMP that the engine loads at startup into vid_lut[1].
     {
         const out_path = "id1/gfx/palette_doom.lmp";
-        try Dir.cwd().createDirPath(io, "id1/gfx");
+        if (std.fs.path.dirname(out_path)) |dir_path|
+            try Dir.cwd().createDirPath(io, dir_path);
         var bytes: [768]u8 = undefined;
         var i: usize = 0;
         while (i < 256) : (i += 1) {
