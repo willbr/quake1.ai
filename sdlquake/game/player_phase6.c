@@ -307,3 +307,42 @@ static void player_doomrocket3_think(edict_t *self) {
 void player_doomrocket1(edict_t *self) {
     player_doomrocket1_think(self);
 }
+
+// ---------------------------------------------------------------------------
+// Wolf3D knife -- attackinfo {6,0,1},{6,2,2},{6,0,3},{6,-1,4}
+// 4 steps x 6 tics at 70 Hz = 0.343 s total. Hit on step 2 (attack=2).
+// Frame layout in v_wolfknife.spr (5 frames, indices 0..4):
+//   0 = idle pose (not used in attack chain)
+//   1 = pre-swing
+//   2 = swing through (hit lands here)
+//   3 = follow-through
+//   4 = recover
+// ---------------------------------------------------------------------------
+
+static void player_wolfknife2_think(edict_t *self);
+static void player_wolfknife3_think(edict_t *self);
+static void player_wolfknife4_think(edict_t *self);
+static void player_wolfknife5_think(edict_t *self);
+
+static void player_wolfknife1_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY,     1, WOLF_6_TIC, player_wolfknife2_think);
+}
+static void player_wolfknife2_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, WOLF_6_TIC, player_wolfknife3_think);
+    WolfKnife_DoHit(self);
+}
+static void player_wolfknife3_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 3, WOLF_6_TIC, player_wolfknife4_think);
+}
+static void player_wolfknife4_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 4, WOLF_6_TIC, player_wolfknife5_think);
+}
+static void player_wolfknife5_think(edict_t *self) {
+    g->self = self;
+    g->self->v.weaponframe = 0;
+    player_run(self);
+}
+
+void player_wolfknife1(edict_t *self) {
+    player_wolfknife1_think(self);
+}

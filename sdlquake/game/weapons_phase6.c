@@ -509,11 +509,33 @@ void DoomRocket_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
+// Wolf3D knife -- KnifeAttack from WL_AGENT.C:1133-1164
+//   damage  = US_RndT() >> 4 = 0..15
+//   range   = MELEERANGE_QU = 64 map units (Wolf used 0x18000l ~= 96 units;
+//             64 is fine because Quake combat distances are larger anyway)
+//   refire  = 4 steps x 6 tics @ 70 Hz = 24 tics ~= 0.343 s
+//   sound   = none -- shareware Wolf3D's knife is Adlib-only; manifest skips it
+// ---------------------------------------------------------------------------
+#define WOLFKNIFE_CHAIN_S  (24.0f * (1.0f / 70.0f))
+
+void W_FirePhase6_WolfKnife(void) {
+    edict_t *self = g->self;
+    self->v.attack_finished = g->time + WOLFKNIFE_CHAIN_S;
+    player_wolfknife1(self);
+}
+
+void WolfKnife_DoHit(edict_t *self) {
+    int dmg = rand_byte() >> 4;  // 0..15
+    if (dmg <= 0) return;
+    // No sound -- shareware Wolf3D's knife is Adlib-only; no PCM extracted.
+    p6_doom_melee_hit(dmg, 0.02f);
+}
+
+// ---------------------------------------------------------------------------
 // Stubs for not-yet-implemented Phase 6 weapons (Phase D/E/F).
 // They just return so dispatch is safe even if a weapon flag is granted
 // before its fire function is written.
 // ---------------------------------------------------------------------------
-void W_FirePhase6_WolfKnife    (void) {}
 void W_FirePhase6_WolfPistol   (void) {}
 void W_FirePhase6_WolfMG       (void) {}
 void W_FirePhase6_WolfChaingun (void) {}
