@@ -49,4 +49,10 @@ void Phase6_CheatGiveAll (void);
 // ---------------------------------------------------------------------------
 void player_doompistol1 (edict_t *self);
 
+// Called from player_doompistol2_think when the recoil pose appears,
+// matching Doom's A_FirePistol-on-S_PISTOL2 semantics. Keeps the bullet,
+// sound, EF_MUZZLEFLASH, punchangle, and ammo decrement co-located in
+// weapons_phase6.c rather than scattering them into player_phase6.c.
+void DoomPistol_DoFire (edict_t *self);
+
 #endif // WEAPONS_PHASE6_H

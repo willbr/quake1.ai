@@ -96,9 +96,22 @@ void W_FirePhase6_DoomPistol(void) {
         return;
     }
 
+    // Doom's S_PISTOL1..S_PISTOL4 = 4+6+4+5 = 19 tics ≈ 0.543 s. The bullet,
+    // sound, muzzleflash, punchangle, and ammo decrement happen on entering
+    // S_PISTOL2 (the recoil pose) — see DoomPistol_DoFire, called from
+    // player_doompistol2_think. Press → 4-tic idle hold → bullet leaves;
+    // this lockout is intentional Doom feel.
+    self->v.attack_finished = g->time + 0.543f;
+    player_doompistol1(self);
+}
+
+// Called when the chain enters the recoil pose (player_doompistol2_think).
+void DoomPistol_DoFire(edict_t *self) {
+    if (self->v.ammo_bullets < 1)
+        return;  // defensive: ammo could have been spent by another path
+
     eng->SV_StartSound(self, CHAN_WEAPON, "phase6/doom_pistol.wav", 1, ATTN_NORM);
-    self->v.attack_finished = g->time + 0.4f;
-    self->v.punchangle[0]   = -1;
+    self->v.punchangle[0] = -1;
 
     // Spawn a one-frame dynamic light at the player so the muzzle flash
     // illuminates dark areas. Cleared in sv_main.c after the snapshot is
@@ -112,9 +125,6 @@ void W_FirePhase6_DoomPistol(void) {
     vec3_t aim;
     eng->SV_Aim(self, 100000, aim);
     p6_fire_bullet((float)dmg, aim, 0.01f, 0.01f);
-
-    // Kick off the viewmodel animation chain (frame 0 → 1 → 2 → 3 → 0).
-    player_doompistol1(self);
 }
 
 // ---------------------------------------------------------------------------
