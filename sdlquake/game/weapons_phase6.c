@@ -243,6 +243,8 @@ static int p6_wolf_hitscan(float shoot_cone_radians) {
 //   refire  = ~14 tics  (35 Hz Doom tic) ≈ 0.4 s
 //   sound   = sfx_pistol  (= phase6/doom_pistol.wav after our extract)
 // ---------------------------------------------------------------------------
+#define DOOMPISTOL_CHAIN_S  (19.0f * (1.0f / 35.0f))  // matches DOOM_TIC_S; defined locally to avoid leaking from player_phase6.c
+
 void W_FirePhase6_DoomPistol(void) {
     edict_t *self = g->self;
 
@@ -252,12 +254,13 @@ void W_FirePhase6_DoomPistol(void) {
         return;
     }
 
-    // Doom's S_PISTOL1..S_PISTOL4 = 4+6+4+5 = 19 tics ≈ 0.543 s. The bullet,
-    // sound, muzzleflash, punchangle, and ammo decrement happen on entering
-    // S_PISTOL2 (the recoil pose) — see DoomPistol_DoFire, called from
-    // player_doompistol2_think. Press → 4-tic idle hold → bullet leaves;
+    // Total chain = 4+6+4+5 = 19 tics. Constant DOOMPISTOL_CHAIN_S keeps this
+    // in sync with the per-step DOOM_*_TIC values in player_phase6.c. The
+    // bullet, sound, muzzleflash, punchangle, and ammo decrement happen on
+    // entering S_PISTOL2 (the recoil pose) — see DoomPistol_DoFire, called
+    // from player_doompistol2_think. Press → 4-tic idle hold → bullet leaves;
     // this lockout is intentional Doom feel.
-    self->v.attack_finished = g->time + 0.543f;
+    self->v.attack_finished = g->time + DOOMPISTOL_CHAIN_S;
     player_doompistol1(self);
 }
 
@@ -283,11 +286,20 @@ void DoomPistol_DoFire(edict_t *self) {
     p6_fire_bullet((float)dmg, aim, 0.01f, 0.01f);
 }
 
+// ---------------------------------------------------------------------------
+// Doom fist -- A_Punch from p_pspr.c
+//   damage  = (P_Random%10+1)<<1 = 2..20  (no berserk multiplier)
+//   range   = MELEERANGE_QU = 64 map units
+//   refire  = 22 tics (35 Hz Doom tic) ≈ 0.629 s
+//   sound   = sfx_punch on hit only (silent on whiff)
+//   chain   = S_PUNCH1..S_PUNCH5 (4/4/5/4/5 tics)
+// ---------------------------------------------------------------------------
+#define DOOMFIST_CHAIN_S  (22.0f * (1.0f / 35.0f))  // matches DOOM_TIC_S; defined locally to avoid leaking from player_phase6.c
+
 void W_FirePhase6_DoomFist(void) {
     edict_t *self = g->self;
-    // Total chain = 4+4+5+4+5 = 22 tics = 0.629s. Fire happens at S_PUNCH2
-    // (entering frame index 2 = PUNGC), so the punch lands ~0.229s after press.
-    self->v.attack_finished = g->time + 0.629f;
+    // Total chain = 4+4+5+4+5 = 22 tics. Constant DOOMFIST_CHAIN_S keeps this in sync with the per-step DOOM_*_TIC values in player_phase6.c.
+    self->v.attack_finished = g->time + DOOMFIST_CHAIN_S;
     player_doomfist1(self);
 }
 

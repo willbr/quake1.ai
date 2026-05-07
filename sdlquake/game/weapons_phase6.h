@@ -44,18 +44,20 @@ void Phase6_ChangeWeapon (int impulse);
 void Phase6_CheatGiveAll (void);
 
 // ---------------------------------------------------------------------------
-// Animation chains (declared so weapons.c can fire-trigger them and
-// player.c's extern block can forward-declare without circular includes).
+// Animation chain entry points. Each chain is implemented in player_phase6.c
+// as a series of static `_think` callbacks; the `_1` wrapper here is the
+// public entry called from the matching W_FirePhase6_* in weapons_phase6.c.
 // ---------------------------------------------------------------------------
-void player_doompistol1 (edict_t *self);
+void player_doompistol1   (edict_t *self);
+void player_doomfist1     (edict_t *self);
 
-// Called from player_doompistol2_think when the recoil pose appears,
-// matching Doom's A_FirePistol-on-S_PISTOL2 semantics. Keeps the bullet,
-// sound, EF_MUZZLEFLASH, punchangle, and ammo decrement co-located in
-// weapons_phase6.c rather than scattering them into player_phase6.c.
-void DoomPistol_DoFire (edict_t *self);
-
-void player_doomfist1   (edict_t *self);
-void DoomFist_DoFire    (edict_t *self);
+// ---------------------------------------------------------------------------
+// Deferred-fire callbacks. Heavy actions (sound, damage, EF_MUZZLEFLASH,
+// punchangle, ammo decrement, projectile spawn) happen in the chain step
+// that visually corresponds to firing -- not in the top-level W_FirePhase6_*.
+// This matches Doom's A_FireXxx-on-state-N convention (see p_pspr.c).
+// ---------------------------------------------------------------------------
+void DoomPistol_DoFire    (edict_t *self);
+void DoomFist_DoFire      (edict_t *self);
 
 #endif // WEAPONS_PHASE6_H

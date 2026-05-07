@@ -12,6 +12,26 @@
 
 #include "weapons_phase6.h"
 
+// ---------------------------------------------------------------------------
+// Tic-time conversions. Doom runs at 35 Hz, Wolf3D at 70 Hz. Per-step
+// chain timings come straight from p_pspr.c info.c state durations or
+// WL_AGENT.C's attackinfo[] tic counts -- prefer the named constants
+// over bare floats so a future eyeball-check against the source matches
+// the symbol, not a 3-decimal magic number.
+// ---------------------------------------------------------------------------
+#define DOOM_TIC_S    (1.0f / 35.0f)
+#define WOLF_TIC_S    (1.0f / 70.0f)
+
+#define DOOM_3_TIC    (3 * DOOM_TIC_S)   // 0.086 -- shotgun S_SGUN1 / S_SGUN8
+#define DOOM_4_TIC    (4 * DOOM_TIC_S)   // 0.114 -- pistol S_PISTOL1, fist S_PUNCH1/2/4, etc.
+#define DOOM_5_TIC    (5 * DOOM_TIC_S)   // 0.143 -- fist S_PUNCH3/5, shotgun pump
+#define DOOM_6_TIC    (6 * DOOM_TIC_S)   // 0.171 -- pistol S_PISTOL2 (recoil)
+#define DOOM_7_TIC    (7 * DOOM_TIC_S)   // 0.200 -- shotgun S_SGUN2 fire
+#define DOOM_8_TIC    (8 * DOOM_TIC_S)   // 0.229 -- rocket S_MISSILE1 flash hold
+#define DOOM_12_TIC   (12 * DOOM_TIC_S)  // 0.343 -- rocket S_MISSILE2 fire
+
+#define WOLF_6_TIC    (6 * WOLF_TIC_S)   // 0.086 -- all Wolf weapons step duration
+
 extern engine_api_t   *eng;
 extern game_globals_t *g;
 
@@ -46,23 +66,23 @@ static void player_doompistol5_think(edict_t *self);
 
 // S_PISTOL1: idle pose held 4 tics before the bullet leaves.
 static void player_doompistol1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     0, 0.114f, player_doompistol2_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY,     0, DOOM_4_TIC, player_doompistol2_think);
 }
 
 // S_PISTOL2: recoil pose with muzzle flash. A_FirePistol fires here.
 static void player_doompistol2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, 0.171f, player_doompistol3_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_6_TIC, player_doompistol3_think);
     DoomPistol_DoFire(self);
 }
 
 // S_PISTOL3: smoke pose.
 static void player_doompistol3_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 2, 0.114f, player_doompistol4_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 2, DOOM_4_TIC, player_doompistol4_think);
 }
 
 // S_PISTOL4: recoil settle (PISGB without flash).
 static void player_doompistol4_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 3, 0.143f, player_doompistol5_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 3, DOOM_5_TIC, player_doompistol5_think);
 }
 
 // Back to idle. attack_finished was already set in W_FirePhase6_DoomPistol
@@ -95,24 +115,24 @@ static void player_doomfist6_think(edict_t *self);
 
 // S_PUNCH1: windup.
 static void player_doomfist1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     1, 0.114f, player_doomfist2_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY,     1, DOOM_4_TIC, player_doomfist2_think);
 }
 // S_PUNCH2: impact pose. Punch fires.
 static void player_doomfist2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, 0.114f, player_doomfist3_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, DOOM_4_TIC, player_doomfist3_think);
     DoomFist_DoFire(self);
 }
 // S_PUNCH3: recoil.
 static void player_doomfist3_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 3, 0.143f, player_doomfist4_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 3, DOOM_5_TIC, player_doomfist4_think);
 }
 // S_PUNCH4: bounce-back through impact pose.
 static void player_doomfist4_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 2, 0.114f, player_doomfist5_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 2, DOOM_4_TIC, player_doomfist5_think);
 }
 // S_PUNCH5: settle through windup pose.
 static void player_doomfist5_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     1, 0.143f, player_doomfist6_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY,     1, DOOM_5_TIC, player_doomfist6_think);
 }
 // Back to idle (frame 0 = PUNGA).
 static void player_doomfist6_think(edict_t *self) {
