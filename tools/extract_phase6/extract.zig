@@ -1,7 +1,7 @@
 // extract.zig -- Phase 6 asset extractor.
 //
-// Reads:   wolf3d-data/VSWAP.WL1 + AUDIOHED.WL1 + AUDIOT.WL1
-//          doom-data/DOOM1.WAD
+// Reads:   ref/wolf3d-data/VSWAP.WL1 + AUDIOHED.WL1 + AUDIOT.WL1
+//          ref/doom-data/DOOM1.WAD
 // Writes:  id1/progs/v_*.spr   (Quake SP1 viewmodel sprites)
 //          id1/sound/phase6/*.wav (11025 Hz mono u8 PCM)
 //
@@ -120,7 +120,7 @@ fn testPalette(io: Io, allocator: std.mem.Allocator) !void {
 }
 
 fn vswapInfo(io: Io, allocator: std.mem.Allocator) !void {
-    var v = try wolf_vswap.VSwap.open(io, allocator, "wolf3d-data/VSWAP.WL1");
+    var v = try wolf_vswap.VSwap.open(io, allocator, "ref/wolf3d-data/VSWAP.WL1");
     defer v.deinit(allocator);
     std.debug.print(
         "VSWAP: {d} chunks, sprite_start={d}, sound_start={d}\n",
@@ -135,7 +135,7 @@ fn vswapInfo(io: Io, allocator: std.mem.Allocator) !void {
 }
 
 fn dumpSprite(io: Io, allocator: std.mem.Allocator, idx: u16) !void {
-    var v = try wolf_vswap.VSwap.open(io, allocator, "wolf3d-data/VSWAP.WL1");
+    var v = try wolf_vswap.VSwap.open(io, allocator, "ref/wolf3d-data/VSWAP.WL1");
     defer v.deinit(allocator);
 
     var pixels: [wolf_vswap.SPRITE_DIM * wolf_vswap.SPRITE_DIM]u8 = undefined;
@@ -205,7 +205,7 @@ fn testSpr(io: Io, allocator: std.mem.Allocator) !void {
 }
 
 fn doomInfo(io: Io, allocator: std.mem.Allocator) !void {
-    var w = try doom_wad.Wad.open(io, allocator, "doom-data/DOOM1.WAD");
+    var w = try doom_wad.Wad.open(io, allocator, "ref/doom-data/DOOM1.WAD");
     defer w.deinit(allocator);
     std.debug.print("DOOM1.WAD: {d} lumps\n", .{w.lumps.len});
     // Scan all 4-letter sprite prefixes for player weapons.
@@ -229,7 +229,7 @@ fn doomInfo(io: Io, allocator: std.mem.Allocator) !void {
 }
 
 fn dumpDoomSprite(io: Io, allocator: std.mem.Allocator, name: []const u8) !void {
-    var w = try doom_wad.Wad.open(io, allocator, "doom-data/DOOM1.WAD");
+    var w = try doom_wad.Wad.open(io, allocator, "ref/doom-data/DOOM1.WAD");
     defer w.deinit(allocator);
 
     const l = w.findLump(name) orelse return error.LumpNotFound;
@@ -244,7 +244,7 @@ fn dumpDoomSprite(io: Io, allocator: std.mem.Allocator, name: []const u8) !void 
 }
 
 fn dumpDoomSound(io: Io, allocator: std.mem.Allocator, name: []const u8) !void {
-    var w = try doom_wad.Wad.open(io, allocator, "doom-data/DOOM1.WAD");
+    var w = try doom_wad.Wad.open(io, allocator, "ref/doom-data/DOOM1.WAD");
     defer w.deinit(allocator);
 
     const l = w.findLump(name) orelse return error.LumpNotFound;
@@ -257,7 +257,7 @@ fn dumpDoomSound(io: Io, allocator: std.mem.Allocator, name: []const u8) !void {
 }
 
 fn dumpDigi(io: Io, allocator: std.mem.Allocator, digi_idx: u16) !void {
-    var v = try wolf_vswap.VSwap.open(io, allocator, "wolf3d-data/VSWAP.WL1");
+    var v = try wolf_vswap.VSwap.open(io, allocator, "ref/wolf3d-data/VSWAP.WL1");
     defer v.deinit(allocator);
 
     const raw = try wolf_digi.extractDigiSound(allocator, &v, digi_idx);

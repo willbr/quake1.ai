@@ -15,15 +15,15 @@ No test suite exists yet. Build success and visual/audio correctness in-game are
 
 ## Architecture
 
-This project is a port of the original WinQuake (1996 software renderer) from Win32/DirectX to SDL3, using Zig as the build system. The engine source is unmodified; only the platform layer is replaced.
+This project is a port of the original WinQuake (1996 software renderer) from Win32/DirectX to SDL3, using Zig as the build system. The engine source has been forked into `sdlquake/engine_src/` so we can patch it as needed; the platform layer is fully replaced.
 
 ### Source split
 
-- `Quake-master/WinQuake/` — upstream WinQuake source, **never modify**. Used as-is by `build.zig` (`wq_dir`).
-- `sdlquake/platform/` — SDL3 platform layer; these are the files we own and edit.
+- `sdlquake/engine_src/` — forked WinQuake engine source. We own and edit this. Compare against `ref/Quake-master/WinQuake/` for the pristine upstream baseline.
+- `sdlquake/platform/` — SDL3 platform layer.
 - `sdlquake/vendor/SDL3-3.4.8/` — vendored SDL3 headers + pre-built `.dll`/`.lib` for x64 Windows.
 - `sdlquake/mcp/` — MCP server (Phase 2, complete).
-- `sdlquake/engine/` — engine-side hot-reload machinery (Phase 3).
+- `sdlquake/engine/` — engine-side hot-reload + ImGui glue (Phase 3 / 4).
 - `sdlquake/game/` — hot-reloadable game DLL source (Phase 3).
 
 ### Platform layer files
@@ -37,11 +37,11 @@ This project is a port of the original WinQuake (1996 software renderer) from Wi
 | `net_sdl.c` | `net_wins.c` | Winsock net stub |
 | `winquake.h` | `winquake.h` | Stub: replaces DirectDraw/DirectSound types with no-op equivalents; shadows the original |
 
-`sdlquake/platform/` is on the include path **before** `Quake-master/WinQuake/`, so our `winquake.h` shadows the original.
+`sdlquake/platform/` is on the include path **before** `sdlquake/engine_src/`, so our `winquake.h` shadows the original.
 
 ### Build flags
 
-Engine files (`Quake-master/WinQuake/*.c`) are compiled with `-std=gnu89 -fcommon -fno-sanitize=undefined`. The `-fno-sanitize=undefined` is intentional — the original engine relies on float→int truncation UB that is well-defined on x86.
+Engine files (`sdlquake/engine_src/*.c`) are compiled with `-std=gnu89 -fcommon -fno-sanitize=undefined`. The `-fno-sanitize=undefined` is intentional — the original engine relies on float→int truncation UB that is well-defined on x86.
 
 Platform files (`sdlquake/platform/*.c`) omit `-std=gnu89` (they're written in modern C).
 
@@ -99,8 +99,8 @@ zig build game                # rebuild only game.dll (fast hot-reload iteration
 
 ## Reference data
 
-Game data for reference/future work is committed at the repo root:
-- `id1/` — Quake PAK files (required at runtime)
-- `doom-data/` — Doom 1.9 shareware WAD
-- `wolf3d-data/` — Wolf3D shareware data files
-- `Quake-2-master/`, `Quake-Tools-master/`, `TrenchBroom-master/`, `fteqw-master/` etc. — upstream references, do not modify
+- `id1/` — Quake PAK files at repo root (required at runtime)
+- `ref/doom-data/` — Doom 1.9 shareware WAD (read by `zig build extract`)
+- `ref/wolf3d-data/` — Wolf3D shareware data files (read by `zig build extract`)
+- `ref/Quake-master/` — pristine upstream WinQuake (id-Software/Quake), kept as a diff baseline against `sdlquake/engine_src/`
+- `ref/Quake-2-master/`, `ref/Quake-Tools-master/`, `ref/TrenchBroom-master/`, `ref/fteqw-master/`, `ref/DOOM-master/`, `ref/wolf3d-master/`, `ref/quake106/`, `ref/quake_map_source-master/`, `ref/Quake-2-Tools-master/` — upstream references, do not modify

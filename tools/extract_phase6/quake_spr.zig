@@ -1,6 +1,6 @@
 // quake_spr.zig -- Write Quake SP1 sprite (.spr) files.
 //
-// File layout (see Quake-master/WinQuake/spritegn.h):
+// File layout (see sdlquake/engine_src/spritegn.h):
 //   dsprite_t {
 //     i32 ident       = "IDSP" little-endian
 //     i32 version     = 1

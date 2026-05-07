@@ -25,7 +25,7 @@ pub fn build(b: *std.Build) void {
         "-w",
     };
 
-    const wq_dir = "Quake-master/WinQuake";
+    const wq_dir = "sdlquake/engine_src";
 
     const engine_files: []const []const u8 = &.{
         "chase.c",
@@ -247,7 +247,7 @@ pub fn build(b: *std.Build) void {
 
     // ---------------------------------------------------------------------------
     // Phase 6 asset extractor: zig build extract
-    //   Reads wolf3d-data/ and doom-data/, writes loose .spr/.wav into id1/.
+    //   Reads ref/wolf3d-data/ and ref/doom-data/, writes loose .spr/.wav into id1/.
     // ---------------------------------------------------------------------------
     const extract_mod = b.createModule(.{
         .root_source_file = b.path("tools/extract_phase6/extract.zig"),

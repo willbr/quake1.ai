@@ -1,4 +1,4 @@
-// winquake.h -- stub replacing Quake-master/WinQuake/winquake.h
+// winquake.h -- stub replacing sdlquake/engine_src/winquake.h
 // Provides the same interface without DirectX/DirectDraw/DirectSound headers.
 
 #pragma once

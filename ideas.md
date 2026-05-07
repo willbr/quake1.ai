@@ -1,3 +1,5 @@
+review native c code vs old quakec
+
 # Ideas
 
 ## Rendering & visuals
@@ -45,6 +47,7 @@
 
 ## Engine & platform
 
+* replace stdlib & null terminated strings
 * replace build.zig with build.c
 * uncapped framerate with fixed physics
 * increased engine limits

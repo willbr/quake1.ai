@@ -1,6 +1,6 @@
 // wolf_vswap.zig -- VSWAP.WL1 reader for Wolf3D shareware data.
 //
-// VSWAP layout (see wolf3d-master/WOLFSRC/ID_PM.C):
+// VSWAP layout (see ref/wolf3d-master/WOLFSRC/ID_PM.C):
 //   u16 chunkCount
 //   u16 spriteStart       (first sprite chunk index)
 //   u16 soundStart        (first sound chunk index)

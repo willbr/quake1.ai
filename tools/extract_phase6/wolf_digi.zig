@@ -6,7 +6,7 @@
 // `DigiList`, an array of (u16 page_offset, u16 byte_count) pairs indexed
 // by digital-sound number.
 //
-// See wolf3d-master/WOLFSRC/ID_SD.C `SDL_SetupDigi` for the original loader.
+// See ref/wolf3d-master/WOLFSRC/ID_SD.C `SDL_SetupDigi` for the original loader.
 //
 // Wolf3D shareware (WL1) digital-sound map (from WL_MAIN.C `wolfdigimap`):
 //   ATKMACHINEGUNSND → 4

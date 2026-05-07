@@ -135,7 +135,7 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
     const quake_pal = try palette_mod.loadPalette(io, allocator);
 
     // ----- Wolf sources -----
-    var v = try wolf_vswap.VSwap.open(io, allocator, "wolf3d-data/VSWAP.WL1");
+    var v = try wolf_vswap.VSwap.open(io, allocator, "ref/wolf3d-data/VSWAP.WL1");
     defer v.deinit(allocator);
 
     const wolf_pal_8bit = convertWolfPalette();
@@ -172,7 +172,7 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
     }
 
     // ----- Doom sources -----
-    var w = try doom_wad.Wad.open(io, allocator, "doom-data/DOOM1.WAD");
+    var w = try doom_wad.Wad.open(io, allocator, "ref/doom-data/DOOM1.WAD");
     defer w.deinit(allocator);
     const doom_pal = try w.loadPlaypal0();
 

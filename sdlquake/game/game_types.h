@@ -20,7 +20,7 @@ typedef void (*painfn_t)(edict_t *self, edict_t *attacker, float damage);
 // This struct is embedded as edict_t.v in the engine's edict_t definition.
 // IMPORTANT: The layout of the engine's edict_t shell (free, area, leafnums,
 // baseline, freetime) is NOT changed. Only entvars_t v changes.
-// Canonical VM field reference: Quake-master/WinQuake/progdefs.q1
+// Canonical VM field reference: sdlquake/engine_src/progdefs.q1
 // ---------------------------------------------------------------------------
 typedef struct entvars_s {
     // Identity
