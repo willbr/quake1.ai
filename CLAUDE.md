@@ -62,7 +62,7 @@ Fixed 320×200 resolution. Each frame: Quake's software renderer writes 8-bit pa
 
 ### Hot-reload game DLL (Phase 3)
 
-`sdlquake/engine/hotreload.c` + `sdlquake/game/` — `game_api_t` ABI separates game logic from the engine. `HotReload_Frame()` polls `zig-out/bin/game.dll` mtime every ~1 s; on change it copies the DLL to `game_loaded.dll` (so zig can overwrite the original), unloads the old copy, loads the new one, and calls `game_api->init()` again. The fast iteration workflow is `zig build game` in a separate terminal.
+`sdlquake/engine/hotreload.c` + `sdlquake/game/` — `game_api_t` ABI separates game logic from the engine. `HotReload_Init()` loads `zig-out/bin/game.dll` once at startup. With `--hot-reload`, `HotReload_Frame()` then polls the DLL's mtime every ~1 s; on change it copies the DLL to `game_loaded.dll` (so zig can overwrite the original), unloads the old copy, loads the new one, and calls `game_api->init()` again. Without the flag, polling is off — the DLL is loaded once and stays put. The fast-iteration workflow is `zig build run -- --hot-reload` in one terminal + `zig build game` in another.
 
 `game_api.h` defines two vtable structs:
 - `engine_api_t` — functions the engine exposes (Con_Print, Cvar_SetValue, Cvar_VariableValue, Sys_FloatTime)
@@ -73,8 +73,9 @@ Bump `GAME_API_VERSION` in `game_api.h` whenever the struct layout changes; the 
 ### Build commands
 
 ```sh
-zig build run -- +map e1m1    # build everything (engine + game.dll) and run
-zig build game                # rebuild only game.dll (fast hot-reload iteration)
+zig build run -- +map e1m1               # build everything (engine + game.dll) and run
+zig build run -- --hot-reload +map e1m1  # same, but enable game.dll auto-reload polling
+zig build game                           # rebuild only game.dll (fast hot-reload iteration; pair with --hot-reload above)
 ```
 
 ### Phases
