@@ -32,9 +32,9 @@ void RPaths_Init(void)
     Cvar_RegisterVariable(&r_drawpaths_what);
 }
 
-// Find an edict by string field (classname / target / targetname) match.
-// Returns NULL if not found. Mirrors what game/ai.c does via eng->ED_Find,
-// but engine-side we call it directly since no game ABI hop is needed.
+// Find the first live edict whose v.targetname matches name. Returns NULL
+// if name is NULL/empty or no match. If two corners share a targetname
+// (mapper error), the first hit wins — matches the engine's runtime AI.
 static edict_t *find_by_targetname(const char *name)
 {
     int i;
