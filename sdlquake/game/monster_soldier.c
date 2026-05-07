@@ -17,8 +17,8 @@ extern void ai_pain(float dist);
 extern void ai_painforward(float dist);
 extern void ai_back(float dist);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
-extern void ThrowHead(edict_t *self, const char *gibname, float health);
-extern void ThrowGib(edict_t *self, const char *gibname, float health);
+extern void ThrowHead(const char *gibname, float dm);
+extern void ThrowGib(const char *gibname, float dm);
 extern void DropBackpack(void);
 extern void walkmonster_start(edict_t *self);
 extern void SUB_CheckRefire(thinkfn_t fn);
@@ -259,10 +259,10 @@ static void army_die_cb(edict_t *self) {
     g->self = self;
     if (self->v.health < -35) {
         eng->SV_StartSound(self, CHAN_VOICE, "player/udeath.wav", 1, ATTN_NORM);
-        ThrowHead(self, "progs/h_guard.mdl", self->v.health);
-        ThrowGib(self, "progs/gib1.mdl", self->v.health);
-        ThrowGib(self, "progs/gib2.mdl", self->v.health);
-        ThrowGib(self, "progs/gib3.mdl", self->v.health);
+        ThrowHead("progs/h_guard.mdl", self->v.health);
+        ThrowGib("progs/gib1.mdl", self->v.health);
+        ThrowGib("progs/gib2.mdl", self->v.health);
+        ThrowGib("progs/gib3.mdl", self->v.health);
         return;
     }
     eng->SV_StartSound(self, CHAN_VOICE, "soldier/death1.wav", 1, ATTN_NORM);
