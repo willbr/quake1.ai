@@ -7,6 +7,7 @@
 // Walks sv.edicts each frame. No PVS culling — debug overlay shows the
 // whole network through walls, like r_drawbboxes.
 
+#include <math.h>
 #include <string.h>
 
 #include "quakedef.h"
@@ -78,6 +79,67 @@ static void draw_line_3d(const vec3_t a_world, const vec3_t b_world, int color)
     RDD_DrawLine3D_View(va, vb, color);
 }
 
+// Draw a chevron arrowhead pointing from (sx0,sy0) toward (sx1,sy1), placed
+// at parametric position t along the segment (0=start, 1=end). Drawn in
+// 2D after projection so the on-screen size is independent of edge length.
+//
+// Arms are LEN pixels long and form a 2*HALF_ANGLE chevron.
+static void draw_arrowhead_2d(float sx0, float sy0, float sx1, float sy1,
+                              float t, int color)
+{
+    const float LEN = 6.0f;
+    const float COS_HA = 0.9063f;   // cos(25 deg)
+    const float SIN_HA = 0.4226f;   // sin(25 deg)
+    float dx = sx1 - sx0, dy = sy1 - sy0;
+    float len = (float)sqrt(dx*dx + dy*dy);
+    float ux, uy;     // unit vector along edge
+    float tip_x, tip_y;
+    float ax, ay, bx, by;
+
+    if (len < 1.0f) return;          // degenerate
+    ux = dx / len; uy = dy / len;
+    tip_x = sx0 + dx * t;
+    tip_y = sy0 + dy * t;
+
+    // Each arm = tip - LEN * (R(+/-HA) * unit). The arrowhead points along
+    // the edge direction, so arms project backward from the tip.
+    ax = tip_x - LEN * ( ux * COS_HA + uy * SIN_HA);
+    ay = tip_y - LEN * (-ux * SIN_HA + uy * COS_HA);
+    bx = tip_x - LEN * ( ux * COS_HA - uy * SIN_HA);
+    by = tip_y - LEN * ( ux * SIN_HA + uy * COS_HA);
+
+    RDD_DrawLine2D((int)tip_x, (int)tip_y, (int)ax, (int)ay, color);
+    RDD_DrawLine2D((int)tip_x, (int)tip_y, (int)bx, (int)by, color);
+}
+
+// Like draw_line_3d but also draws a midpoint arrowhead and a second
+// arrowhead 8 px back from the destination. Skips arrowheads if either
+// endpoint is behind the near plane (no meaningful screen midpoint).
+static void draw_edge_with_arrows(const vec3_t a_world, const vec3_t b_world, int color)
+{
+    vec3_t va, vb;
+    float  sax, say, sbx, sby, dx, dy, len, t_back;
+
+    draw_line_3d(a_world, b_world, color);
+
+    RDD_ToView(a_world, va);
+    RDD_ToView(b_world, vb);
+    if (va[2] < RDD_NEAR_CLIP || vb[2] < RDD_NEAR_CLIP) return;
+
+    RDD_Project(va, &sax, &say);
+    RDD_Project(vb, &sbx, &sby);
+
+    // Midpoint arrowhead.
+    draw_arrowhead_2d(sax, say, sbx, sby, 0.5f, color);
+
+    // Second arrowhead 8 px back from the destination tip.
+    dx = sbx - sax; dy = sby - say;
+    len = (float)sqrt(dx*dx + dy*dy);
+    if (len < 16.0f) return;       // edge too short for a second arrow
+    t_back = 1.0f - (8.0f / len);
+    draw_arrowhead_2d(sax, say, sbx, sby, t_back, color);
+}
+
 void RPaths_Draw(void)
 {
     int what;
@@ -117,7 +179,7 @@ void RPaths_Draw(void)
             {
                 edict_t *next = find_by_targetname(ed->v.target);
                 if (next && next != ed)
-                    draw_line_3d(ed->v.origin, next->v.origin, PATHS_COLOR_STATIC);
+                    draw_edge_with_arrows(ed->v.origin, next->v.origin, PATHS_COLOR_STATIC);
             }
         }
     }
