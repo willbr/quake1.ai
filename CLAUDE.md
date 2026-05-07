@@ -87,7 +87,7 @@ zig build game                           # rebuild only game.dll (fast hot-reloa
 | 3 | ✅ done | Hot-reload (`game_api_t` ABI, `game.dll`) |
 | 4 | ✅ done | Dear ImGui dev overlay |
 | 5 | ✅ done | QuakeC → C (port progs to hot-reloadable game.dll) |
-| 6 | planned | Port Wolf3D & Doom1 guns into Quake (sprites, sounds, behaviour) |
+| 6 | ✅ done | Port Wolf3D & Doom1 guns into Quake (sprites, sounds, behaviour) |
 | 7 | planned | In-game 3D map editor |
 | 8 | planned | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust) |
 
