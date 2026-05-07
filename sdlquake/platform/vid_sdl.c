@@ -83,6 +83,22 @@ static void build_palette(unsigned char *palette)
     build_palette_slot(VID_PAL_QUAKE, palette);
 }
 
+// Load an auxiliary palette from a .lmp file (768 bytes: 256 * RGB) into the
+// given vid_lut slot. Tolerates a missing file — slot stays zero-filled and a
+// warning is printed. COM_LoadHunkFile is declared in common.h (via quakedef.h).
+static void vid_load_aux_palette(int slot, const char *qpath)
+{
+    byte *data = COM_LoadHunkFile((char *)qpath);
+    if (!data)
+    {
+        Con_Printf("vid_load_aux_palette: %s missing; slot %d zero-filled\n",
+                   qpath, slot);
+        return;
+    }
+    build_palette_slot(slot, data);
+    // COM_LoadHunkFile data is owned by the hunk; nothing to free here.
+}
+
 void VID_SetPalette(unsigned char *palette)   { build_palette(palette); }
 void VID_ShiftPalette(unsigned char *palette) { build_palette(palette); }
 
@@ -151,6 +167,7 @@ void VID_Init(unsigned char *palette)
     vid.recalc_refdef = 1;
 
     build_palette(palette);
+    vid_load_aux_palette(VID_PAL_DOOM, "gfx/palette_doom.lmp");
 
     ImguiLayer_Init(sdl_window, sdl_renderer);
     RBBox_Init();
