@@ -33,19 +33,18 @@ sdlquake/engine/
 The shared module exposes:
 
 ```c
-void RDD_BeginFrame(float density_0_1);                 // sets bayer_threshold
-int  RDD_Visible(void);                                 // bayer_threshold > 0
-void RDD_ToView(const vec3_t world, vec3_t out_view);   // world -> view space
-int  RDD_Project(const vec3_t view, float *sx, float *sy); // 0 if behind near plane
-void RDD_DrawLine3D(const vec3_t a_world, const vec3_t b_world, int color);
-void RDD_DrawLine2D(int x0, int y0, int x1, int y1, int color);   // dithered, viewport-clipped
+void RDD_BeginFrame(float density_0_1);                            // sets bayer_threshold
+int  RDD_Visible(void);                                            // bayer_threshold > 0
+void RDD_ToView(const vec3_t world, vec3_t out_view);              // world -> view space
+int  RDD_Project(const vec3_t view, float *sx, float *sy);         // 0 if behind near plane
+void RDD_DrawLine3D_View(const vec3_t va, const vec3_t vb, int color); // near-clip + project + 2D draw
+void RDD_DrawLine2D(int x0, int y0, int x1, int y1, int color);    // dithered, viewport-clipped
 void RDD_DrawSolidPixel(int x, int y, int color);                  // no dither, viewport-clipped
-void RDD_PlotVertex3D(const vec3_t world, int color);
 ```
 
-`RDD_DrawLine3D` performs the near-plane clip + projection + 2D draw via `RDD_DrawLine2D`. `RDD_DrawLine2D` is the Bresenham raster + Bayer dither + 3D-viewport-rect clip currently inlined as `draw_line` in `r_bbox.c`. `RDD_DrawSolidPixel` is the no-dither vertex plot from `plot_vertex` in `r_bbox.c`. Refactor preserves existing `r_drawbboxes` behaviour.
+`RDD_DrawLine3D_View` takes view-space endpoints (so `r_bbox.c` can pass its pre-cached `view[8]` corner array without redundant transforms) and performs the near-plane clip + projection + 2D draw via `RDD_DrawLine2D`. `RDD_DrawLine2D` is the Bresenham raster + Bayer dither + viewport-rect clip currently inlined as `draw_line` in `r_bbox.c`. `RDD_DrawSolidPixel` is the no-dither vertex plot from `plot_vertex` in `r_bbox.c`. Refactor preserves existing `r_drawbboxes` behaviour.
 
-`r_paths.c` uses `RDD_DrawLine3D` for the corner-to-corner edges and `RDD_DrawLine2D` for arrowheads (which are computed in screen space after projection).
+`r_paths.c` keeps a thin private wrapper `draw_line_3d(world_a, world_b, color)` that calls `RDD_ToView` for both endpoints then `RDD_DrawLine3D_View`. Arrowheads are computed in screen space after projection and use `RDD_DrawLine2D` directly.
 
 ## Render hook
 
