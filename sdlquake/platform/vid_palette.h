@@ -1,8 +1,11 @@
 // vid_palette.h -- Multi-palette state for Phase 6 Doom asset rendering.
 //
 // vid_palette_id rides parallel to vid.buffer (one byte per pixel,
-// VID_WIDTH * VID_HEIGHT). At present time, VID_Update expands
-// argb[i] = d_8to24table[vid_palette_id[i]][vid.buffer[i]].
+// VID_WIDTH * VID_HEIGHT). VID_Update expands each pixel as:
+//   argb[i] = vid_lut[vid_palette_id[i]][vid.buffer[i]]
+// where vid_lut is the internal multi-palette LUT defined in vid_sdl.c.
+// vid_lut[VID_PAL_QUAKE] is mirrored into d_8to24table[] so engine code
+// reading the legacy symbol still gets the Quake palette.
 //
 // Slot 0 = Quake palette (default; built from gfx/palette.lmp).
 // Slot 1 = Doom palette  (built from gfx/palette_doom.lmp).

@@ -188,6 +188,11 @@ void VID_Update(vrect_t *rects)
 
     RBBox_Draw();
 
+    // Reset palette tags before the expand step so the invariant "palette_id
+    // is zero at the start of every frame" holds even when SDL_LockTexture
+    // fails and we return early.
+    memset(vid_palette_id, 0, sizeof(vid_palette_id));
+
     void *pixels;
     int pitch;
     if (SDL_LockTexture(sdl_texture, NULL, &pixels, &pitch) < 0)
@@ -201,9 +206,9 @@ void VID_Update(vrect_t *rects)
     {
         unsigned *dst     = (unsigned *)((byte *)pixels + y * pitch);
         byte     *src     = vid.buffer       + y * vid.rowbytes;
-        // vid_palette_id is stride-equal to vid.buffer at fixed resolution
-        // (VID_Init sets vid.rowbytes = VID_WIDTH).
-        byte     *pal_src = vid_palette_id   + y * vid.rowbytes;
+        // vid_palette_id is sized VID_WIDTH * VID_HEIGHT by construction;
+        // stride is always VID_WIDTH, independent of any vid.rowbytes padding.
+        byte     *pal_src = vid_palette_id   + y * VID_WIDTH;
         for (int x = 0; x < VID_WIDTH; x++)
             dst[x] = lut[pal_src[x]][src[x]];
     }
@@ -213,11 +218,6 @@ void VID_Update(vrect_t *rects)
     SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
     ImguiLayer_Render();
     SDL_RenderPresent(sdl_renderer);
-
-    // Reset palette tags for the next frame. Engine renderer paths that
-    // write to vid.buffer leave palette_id at 0 (Quake); only the Doom
-    // sprite blit opts in by writing 1.
-    memset(vid_palette_id, 0, sizeof(vid_palette_id));
 }
 
 int VID_SetMode(int modenum, unsigned char *palette)
