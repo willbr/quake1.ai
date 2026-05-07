@@ -112,6 +112,17 @@ static void draw_arrowhead_2d(float sx0, float sy0, float sx1, float sy1,
     RDD_DrawLine2D((int)tip_x, (int)tip_y, (int)bx, (int)by, color);
 }
 
+// Compute the centre of an edict's world-space bbox (absmin/absmax average).
+// Used for live-link rendering so the line connects creature bodies rather
+// than their feet — origin is at feet for SOLID_SLIDEBOX entities, which
+// makes lines to the player end at floor level (below the camera).
+static void edict_body_center(const edict_t *e, vec3_t out)
+{
+    out[0] = (e->v.absmin[0] + e->v.absmax[0]) * 0.5f;
+    out[1] = (e->v.absmin[1] + e->v.absmax[1]) * 0.5f;
+    out[2] = (e->v.absmin[2] + e->v.absmax[2]) * 0.5f;
+}
+
 // Like draw_line_3d but also draws a midpoint arrowhead and a second
 // arrowhead 8 px back from the destination. Skips arrowheads if either
 // endpoint is behind the near plane (no meaningful screen midpoint).
@@ -201,7 +212,12 @@ void RPaths_Draw(void)
             if (goal == ed) continue;                    // self-loop
             if (goal->free) continue;
 
-            draw_edge_with_arrows(ed->v.origin, goal->v.origin, PATHS_COLOR_LIVE);
+            {
+                vec3_t src, dst;
+                edict_body_center(ed, src);
+                edict_body_center(goal, dst);
+                draw_edge_with_arrows(src, dst, PATHS_COLOR_LIVE);
+            }
         }
     }
 }
