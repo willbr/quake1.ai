@@ -3,6 +3,7 @@ zig-out/
 quake.db
 id1/pak*.pak
 .superpowers/
+.claude/settings.local.json
 crash_*.txt
 test_*.txt
 
