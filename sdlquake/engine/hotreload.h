@@ -6,6 +6,7 @@
 void HotReload_Init(void);
 void HotReload_Frame(float dt);
 void HotReload_Shutdown(void);
+void HotReload_EnablePolling(void);
 
 // Exposed for #if NATIVE_GAME dispatch guards in engine files.
 #if NATIVE_GAME

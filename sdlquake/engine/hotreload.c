@@ -867,6 +867,8 @@ static void do_load(void)
 // Public API
 // ---------------------------------------------------------------------------
 
+static int polling_enabled = 0;
+
 #define RELOAD_CHECK_INTERVAL 60   // frames between mtime polls (~1 s at 60 fps)
 
 void HotReload_Init(void)
@@ -878,6 +880,8 @@ void HotReload_Init(void)
 void HotReload_Frame(float dt)
 {
     (void)dt;
+    if (!polling_enabled) return;
+
     static int counter = 0;
     if (++counter >= RELOAD_CHECK_INTERVAL)
     {
@@ -895,6 +899,12 @@ void HotReload_Shutdown(void)
     do_unload();
 }
 
+void HotReload_EnablePolling(void)
+{
+    polling_enabled = 1;
+    Con_Printf("hotreload: polling enabled\n");
+}
+
 #else /* !NATIVE_GAME — game DLL not used */
 
 game_api_t *g_game_api = NULL;
@@ -902,5 +912,6 @@ game_api_t *g_game_api = NULL;
 void HotReload_Init(void)     {}
 void HotReload_Frame(float dt) { (void)dt; }
 void HotReload_Shutdown(void) {}
+void HotReload_EnablePolling(void) {}
 
 #endif /* NATIVE_GAME */
