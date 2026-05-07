@@ -436,9 +436,10 @@ static void DoomRocket_Touch(edict_t *self, edict_t *other) {
     }
 
     if (other->v.health) {
-        // Doom direct hit: 20 + (rnd & 63) -- a 20..83 minimum, plus the
-        // rocket's per-mobj damage*8 base. We approximate to 20..160.
-        float damg = 20.0f + (float)(rand_byte() & 63) + (float)(rand_byte() & 63);
+        // Doom MT_ROCKET direct hit: mobjinfo damage (20) * ((P_Random()&7)+1)
+        // = 20, 40, 60, 80, 100, 120, 140, or 160. Matches p_inter.c's
+        // P_DamageMobj missile-damage calculation exactly.
+        float damg = 20.0f * (float)((rand_byte() & 7) + 1);
         T_Damage(other, self, self->v.owner, damg);
     }
     T_RadiusDamage(self, self->v.owner, 128, other);
@@ -482,7 +483,7 @@ void DoomRocket_DoFire(edict_t *self) {
     missile->v.owner    = self;
     missile->v.movetype = MOVETYPE_FLYMISSILE;
     missile->v.solid    = SOLID_BBOX;
-    missile->v.classname = "rocket";  // distinct from "rocket" Quake too uses; cosmetic
+    missile->v.classname = "rocket";  // for reverse-lookup / debugging
 
     eng->MakeVectors(self->v.v_angle);
     eng->SV_Aim(self, 1000, missile->v.velocity);
