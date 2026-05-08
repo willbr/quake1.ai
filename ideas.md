@@ -1,4 +1,11 @@
-review native c code vs old quakec
+* render bbox needs a direction arrow
+* render patrol path
+* review native c code vs old quakec
+* review what can be extracted in to libraries
+* command history for the console
+    * up and down
+    * CTRL+R for search
+    * usualy readline hotkeys
 
 # Ideas
 
