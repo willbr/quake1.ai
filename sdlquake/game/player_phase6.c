@@ -280,26 +280,39 @@ void player_doomshotgun1(edict_t *self) {
 // then S_MISSILE2 (12 tics, A_FireMissile, fires). S_MISSILE3 0-tic A_ReFire
 // folded into attack_finished. Total 20 tics + 7 tic extra settle = 27 tics
 // ~= 0.771 s.
-// Frame layout in v_doomrocket.spr (after manifest cutover):
+//
+// Doom's flash layer (S_MISSILEFLASH1..4 = 3+4+4+4 = 15 tics) overlays only
+// the first 15 tics: all of S_MISSILE1 (8 tics) plus the first 7 tics of
+// S_MISSILE2. The last 5 tics of S_MISSILE2 show the gun without the flash.
+// We approximate by splitting S_MISSILE2 into two sub-steps so the
+// composited flash frame doesn't linger for the entire 20-tic firing
+// animation -- it disappears at tic 15 like Doom.
+//
+// Frame layout in v_doomrocket.spr:
 //   0 = MISGA (idle / lowered)         -- not used in attack chain
-//   1 = MISGB + MISFA composited (fire pose with flash) -- S_MISSILE1, S_MISSILE2
-//   2 = MISGB (settle, no flash)
+//   1 = MISGB + MISFA composited (fire pose with flash) -- S_MISSILE1 + early S_MISSILE2
+//   2 = MISGB (settle, no flash) -- late S_MISSILE2
 // ---------------------------------------------------------------------------
 
 static void player_doomrocket2_think(edict_t *self);
 static void player_doomrocket3_think(edict_t *self);
+static void player_doomrocket4_think(edict_t *self);
 
-// S_MISSILE1: flash already up; no fire yet.
+// S_MISSILE1: flash already up; no fire yet (8 tics, flash present).
 static void player_doomrocket1_think(edict_t *self) {
     P6_FRAME_STEP(FR_PHASE6_BODY,     1, DOOM_8_TIC, player_doomrocket2_think);
 }
-// S_MISSILE2: fire.
+// First 7 tics of S_MISSILE2: fire here, flash still present.
 static void player_doomrocket2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_12_TIC, player_doomrocket3_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_7_TIC, player_doomrocket3_think);
     DoomRocket_DoFire(self);
 }
-// Back to idle. Settle frame is index 2 (no flash).
+// Last 5 tics of S_MISSILE2: flash has expired, switch to no-flash settle.
 static void player_doomrocket3_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, DOOM_5_TIC, player_doomrocket4_think);
+}
+// Back to idle.
+static void player_doomrocket4_think(edict_t *self) {
     g->self = self;
     g->self->v.weaponframe = 0;
     player_run(self);
