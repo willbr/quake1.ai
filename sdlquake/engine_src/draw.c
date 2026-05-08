@@ -22,6 +22,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // vid buffer
 
 #include "quakedef.h"
+#include "vid_palette.h"
+
+// PHASE 6: 2D HUD draws happen AFTER the screen-space sprite viewmodel
+// blit, which can leave vid_palette_id=1 (Doom) on pixels that the HUD
+// then overwrites with Quake-palette indices. Without this reset the HUD
+// pixel gets routed through the Doom LUT at present time -> wrong colors
+// for any text / crosshair / pic over a Doom weapon. vid.buffer and
+// vid_palette_id share the same 320x200 layout (rowbytes == VID_WIDTH ==
+// 320, no padding) so the offset translates 1:1.
+#define VID_TAG_QUAKE_AT(dest_byte) \
+    (vid_palette_id[(dest_byte) - vid.buffer] = 0)
 
 typedef struct {
 	vrect_t	rect;
@@ -169,25 +180,17 @@ void Draw_Character (int x, int y, int num)
 	if (r_pixbytes == 1)
 	{
 		dest = vid.conbuffer + y*vid.conrowbytes + x;
-	
+
 		while (drawline--)
 		{
-			if (source[0])
-				dest[0] = source[0];
-			if (source[1])
-				dest[1] = source[1];
-			if (source[2])
-				dest[2] = source[2];
-			if (source[3])
-				dest[3] = source[3];
-			if (source[4])
-				dest[4] = source[4];
-			if (source[5])
-				dest[5] = source[5];
-			if (source[6])
-				dest[6] = source[6];
-			if (source[7])
-				dest[7] = source[7];
+			if (source[0]) { dest[0] = source[0]; VID_TAG_QUAKE_AT(&dest[0]); }
+			if (source[1]) { dest[1] = source[1]; VID_TAG_QUAKE_AT(&dest[1]); }
+			if (source[2]) { dest[2] = source[2]; VID_TAG_QUAKE_AT(&dest[2]); }
+			if (source[3]) { dest[3] = source[3]; VID_TAG_QUAKE_AT(&dest[3]); }
+			if (source[4]) { dest[4] = source[4]; VID_TAG_QUAKE_AT(&dest[4]); }
+			if (source[5]) { dest[5] = source[5]; VID_TAG_QUAKE_AT(&dest[5]); }
+			if (source[6]) { dest[6] = source[6]; VID_TAG_QUAKE_AT(&dest[6]); }
+			if (source[7]) { dest[7] = source[7]; VID_TAG_QUAKE_AT(&dest[7]); }
 			source += 128;
 			dest += vid.conrowbytes;
 		}

@@ -11,11 +11,17 @@
 // Slot 1 = Doom palette  (built from gfx/palette_doom.lmp).
 // Slot 2 = reserved Wolf3D palette (not wired yet).
 //
-// Invariant: every renderer path that writes a non-zero palette_id must
-// do so AFTER any Quake-palette writes that could overlap. Currently only
-// the screen-space viewmodel blit writes a non-zero palette_id, and it
-// sits inside r_refdef.vrect above the status bar, so the invariant
-// holds trivially.
+// Tagging rules:
+//   - Renderer paths that draw with a non-Quake palette (currently only the
+//     screen-space viewmodel blit, for Doom guns) tag pixels with the matching
+//     palette_id at write time.
+//   - Quake-palette writers that can paint over previously-tagged pixels MUST
+//     reset palette_id back to 0 at each pixel they write. The Doom 2D
+//     viewmodel sits inside r_refdef.vrect, so anything that draws there
+//     (crosshair, centerprint, console messages over the gun, particles)
+//     needs the reset. R_DrawParticles avoids the problem by running before
+//     the 2D viewmodel pass; draw.c HUD writers (Draw_Character et al.)
+//     reset palette_id inline via VID_TAG_QUAKE_AT.
 
 #ifndef SDLQ_VID_PALETTE_H
 #define SDLQ_VID_PALETTE_H
