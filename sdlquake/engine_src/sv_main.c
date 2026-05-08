@@ -473,12 +473,22 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 #endif
 				continue;
 
-			for (i=0 ; i < ent->num_leafs ; i++)
-				if (pvs[ent->leafnums[i] >> 3] & (1 << (ent->leafnums[i]&7) ))
-					break;
-				
-			if (i == ent->num_leafs)
-				continue;		// not visible
+			// Phase 7 editor free-fly: the camera detaches from the player,
+			// so the player's PVS no longer represents what the editor view
+			// can see. Bypass the leaf-vs-PVS test in that mode so every
+			// edict reaches the client.
+			{
+				extern int Editor_ShouldDrawPlayer(void);
+				if (!Editor_ShouldDrawPlayer())
+				{
+					for (i=0 ; i < ent->num_leafs ; i++)
+						if (pvs[ent->leafnums[i] >> 3] & (1 << (ent->leafnums[i]&7) ))
+							break;
+
+					if (i == ent->num_leafs)
+						continue;		// not visible
+				}
+			}
 		}
 
 		if (msg->maxsize - msg->cursize < 16)

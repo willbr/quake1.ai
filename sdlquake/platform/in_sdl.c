@@ -88,11 +88,12 @@ void IN_ProcessEvents(void)
             continue;
         }
 
-        // Feed every event to ImGui before Quake sees it. Skip when the
-        // editor is in look mode — ImGui shouldn't try to follow the cursor
-        // while we're capturing relative-mouse for the camera.
-        if (!Editor_LookmodeActive())
-            ImguiLayer_ProcessEvent(&ev);
+        // Feed every event to ImGui before Quake sees it. We pass through
+        // even during editor look-mode so ImGui's tracked cursor position
+        // stays accurate — otherwise the moment we release RMB, ImGui still
+        // thinks the cursor is wherever it was when look-mode started, and
+        // the next click hits the wrong widget (or no widget at all).
+        ImguiLayer_ProcessEvent(&ev);
 
         // Editor consumes mouse events for picking + gizmo while open. Lives
         // BEFORE the type switch so it can intercept clicks ImGui didn't
