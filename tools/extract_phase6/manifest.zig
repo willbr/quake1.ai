@@ -318,11 +318,13 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
     const wolf_remap = buildRemap8(wolf_pal_8bit, quake_pal);
 
     // Wolf3D drew the viewmodel via SimpleScaleShape, scaling the 64x64 cell
-    // up to fill the lower viewport (~120 px tall on a 200-line screen).
-    // Quake's R_DrawViewModelSprite renders SPR pixels 1:1, so a raw 64x64
-    // Wolf sprite shows up much smaller than Doom's native ~80x60 sprites.
-    // Pre-upscale 2x at extract time to compensate (128x128 final SPR cells).
-    const WOLF_VIEW_SCALE = 2;
+    // to viewheight (~144 px) at 320x200. Quake's R_DrawViewModelSprite
+    // renders SPR pixels 1:1, and Wolf sprites carry a lot of transparent
+    // padding inside the 64x64 cell, so the actual gun pixels look small.
+    // Pre-upscale 3x at extract time so the 64x64 cell becomes 192x192 --
+    // the visible gun pixels then occupy roughly the same on-screen area
+    // as Doom's tightly-cropped native ~80x60 sprites.
+    const WOLF_VIEW_SCALE = 3;
     const WOLF_VIEW_DIM   = wolf_vswap.SPRITE_DIM * WOLF_VIEW_SCALE;
     for (wolf_sprite_sets) |set| {
         var frames_storage: [16]quake_spr.Frame = undefined;
