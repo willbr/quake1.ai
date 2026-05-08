@@ -319,12 +319,14 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
 
     // Wolf3D drew the viewmodel via SimpleScaleShape, scaling the 64x64 cell
     // to viewheight (~144 px) at 320x200. Quake's R_DrawViewModelSprite
-    // renders SPR pixels 1:1, and Wolf sprites carry a lot of transparent
-    // padding inside the 64x64 cell, so the actual gun pixels look small.
-    // Pre-upscale 3x at extract time so the 64x64 cell becomes 192x192 --
-    // the visible gun pixels then occupy roughly the same on-screen area
-    // as Doom's tightly-cropped native ~80x60 sprites.
-    const WOLF_VIEW_SCALE = 3;
+    // renders SPR pixels 1:1. 3x (192 cell) overshot Wolf's actual ~144 px
+    // and made the gun feel oversized -- the chaingun's gun pixels alone
+    // covered the upper half of the viewport. 2x (128 cell) brings the cell
+    // closer to Wolf's intended visual size; the actual gun pixels (which
+    // sit in the lower portion of the 64x64 cell with substantial transparent
+    // padding above) end up roughly 60-70 px tall after upscale -- comparable
+    // to Doom's tightly-cropped sprites post-downscale.
+    const WOLF_VIEW_SCALE = 2;
     const WOLF_VIEW_DIM   = wolf_vswap.SPRITE_DIM * WOLF_VIEW_SCALE;
     for (wolf_sprite_sets) |set| {
         var frames_storage: [16]quake_spr.Frame = undefined;
@@ -384,12 +386,17 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
         std.debug.print("  wrote {s} (768 bytes)\n", .{out_path});
     }
 
-    // Doom sprites are large at native size (e.g. CHGGA0 is 114x83). When
-    // bottom-anchored to vrect they extend close to half the screen. Apply a
-    // uniform 3/4 nearest-neighbor downscale at extract time so the on-screen
-    // viewmodel feels closer to a typical FPS-gun footprint.
-    const DOOM_SCALE_NUM: u32 = 3;
-    const DOOM_SCALE_DEN: u32 = 4;
+    // Doom sprites are large at native size (e.g. CHGGA0 is 114x83). Doom
+    // itself anchors weapon sprites at WEAPONTOP=32 in the viewport, with
+    // negative topoffsets pulling much of the gun below the status-bar line
+    // where it gets overdrawn -- so the visible portion of Doom's chaingun
+    // is much smaller than the raw 114x83. Our renderer bottom-anchors and
+    // doesn't drop into a sbar zone, so we need to downscale to compensate.
+    // 2/3 brings the chaingun idle from 114x83 to 76x55 (31% of vrect, gun
+    // top at ~69% from screen top); pistol/shotgun/rocket/fist/saw scale
+    // proportionally and stay in the bottom-third of the screen.
+    const DOOM_SCALE_NUM: u32 = 2;
+    const DOOM_SCALE_DEN: u32 = 3;
 
     for (doom_sprite_sets) |set| {
         // Doom sprites vary in size — allocate per frame.
