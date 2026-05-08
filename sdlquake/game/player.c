@@ -68,6 +68,12 @@ static void player_axed4_think(edict_t *);
 static void player_nail2_think(edict_t *);
 static void player_light2_think(edict_t *);
 
+static void player_rocket2_think(edict_t *);
+static void player_rocket3_think(edict_t *);
+static void player_rocket4_think(edict_t *);
+static void player_rocket5_think(edict_t *);
+static void player_rocket6_think(edict_t *);
+
 static void player_pain2_think(edict_t *);
 static void player_pain3_think(edict_t *);
 static void player_pain4_think(edict_t *);
@@ -312,15 +318,19 @@ void player_light2(edict_t *self) { player_light2_think(self); }
 // Rocket attack
 // ---------------------------------------------------------------------------
 
-static void player_rocket2_think(edict_t *self) { FRAME_STEP(FR_ROCKATT1+1, player_rocket2_think); }
-
 static void player_rocket1_think(edict_t *self)
 {
-    FRAME_STEP(FR_ROCKATT1, player_rocket2_think); // simplified — 6-frame sequence ending at player_run
+    FRAME_STEP(FR_ROCKATT1, player_rocket2_think);
     g->self->v.weaponframe = 1;
     g->self->v.effects = (float)((int)g->self->v.effects | EF_MUZZLEFLASH);
 }
 void player_rocket1(edict_t *self) { player_rocket1_think(self); }
+
+static void player_rocket2_think(edict_t *self) { FRAME_STEP(FR_ROCKATT1+1, player_rocket3_think); g->self->v.weaponframe=2; }
+static void player_rocket3_think(edict_t *self) { FRAME_STEP(FR_ROCKATT1+2, player_rocket4_think); g->self->v.weaponframe=3; }
+static void player_rocket4_think(edict_t *self) { FRAME_STEP(FR_ROCKATT1+3, player_rocket5_think); g->self->v.weaponframe=4; }
+static void player_rocket5_think(edict_t *self) { FRAME_STEP(FR_ROCKATT1+4, player_rocket6_think); g->self->v.weaponframe=5; }
+static void player_rocket6_think(edict_t *self) { FRAME_STEP(FR_ROCKATT1+5, player_run_think);     g->self->v.weaponframe=6; }
 
 // ---------------------------------------------------------------------------
 // Pain sound helpers
