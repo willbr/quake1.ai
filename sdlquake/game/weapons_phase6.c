@@ -634,14 +634,18 @@ void WolfMG_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
-// Wolf3D chaingun -- 6-tic per-shot loop, fastest Wolf gun
+// Wolf3D chaingun -- 12-tic per-shot loop matching Wolf3D's actual cadence
 //   damage  = p6_wolf_hitscan tile-falloff
 //   ammo    = 1 bullet per shot
-//   refire  = 6 tics @ 70 Hz ~= 0.086s -> ~11.6 Hz sustained
+//   refire  = 12 tics @ 70 Hz ~= 0.171s -> ~5.8 Hz sustained
+//             (Wolf's attackinfo loops between fire step (attack=1) and
+//              refire-branch step (attack=4), 6+6 = 12 tics per shot --
+//              same rate as the MG; the chaingun differs only in keeping
+//              the spin running with no ammo, which we don't model)
 //   sound   = phase6/wolf_chaingun.wav
 //   cone    = 0.09 rad ~= 5.2 deg (widest of the three Wolf hitscans)
 // ---------------------------------------------------------------------------
-#define WOLFCG_CHAIN_S  (6.0f * (1.0f / 70.0f))
+#define WOLFCG_CHAIN_S  (12.0f * (1.0f / 70.0f))
 
 void W_FirePhase6_WolfChaingun(void) {
     edict_t *self = g->self;

@@ -429,28 +429,32 @@ void player_wolfmg1(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
-// Wolf3D chaingun -- single-step 6-tic chain. Refire is gated by
-// attack_finished = time + WOLFCG_CHAIN_S (6 tics) so holding fire
-// produces ~11.6 Hz sustained shots. Frame index alternates 2/3 across
-// calls via a static toggle so the muzzle pose visibly changes.
+// Wolf3D chaingun -- 2-step 12-tic chain (same rate as the MG, matching
+// Wolf3D's actual chaingun cadence). Wolf's attackinfo for the chaingun is
+// {6,0,1},{6,1,2},{6,4,3},{6,-1,4}: held-fire bounces between step 2 (fires)
+// and step 3 (attack=4 refire branch), 12 tics per shot ~= 5.8 Hz. Both
+// steps show fire-pose frames in Wolf, so we mirror that here -- step 1
+// uses frame 2, step 2 uses frame 3, and consecutive shots produce the
+// 2,3,2,3 spinning-barrel sequence without needing a static toggle.
 // Frame layout in v_wolfchaingun.spr:
-//   0 = idle (not used)
-//   1 = pre-fire (only on first press)
-//   2 = fire pose A with flash
-//   3 = fire pose B with flash (alternates with 2)
-//   4 = recover
+//   0 = idle (not used in attack chain)
+//   1 = pre-fire (unused -- skipped same as MG's pre-fire)
+//   2 = fire pose A with flash -- step 1 (fires)
+//   3 = fire pose B with flash -- step 2
+//   4 = recover (unused)
 // ---------------------------------------------------------------------------
 
-static int p6_wolf_cg_toggle = 0;
-
 static void player_wolfchaingun2_think(edict_t *self);
+static void player_wolfchaingun3_think(edict_t *self);
 
 static void player_wolfchaingun1_think(edict_t *self) {
-    int weap_fr = (p6_wolf_cg_toggle ^= 1) ? 2 : 3;
-    P6_FRAME_STEP(FR_PHASE6_BODY, weap_fr, WOLF_6_TIC, player_wolfchaingun2_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY,     2, WOLF_6_TIC, player_wolfchaingun2_think);
     WolfChaingun_DoFire(self);
 }
 static void player_wolfchaingun2_think(edict_t *self) {
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 3, WOLF_6_TIC, player_wolfchaingun3_think);
+}
+static void player_wolfchaingun3_think(edict_t *self) {
     g->self = self;
     g->self->v.weaponframe = 0;
     player_run(self);
