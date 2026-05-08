@@ -11,6 +11,7 @@ WinQuake — Carmack's 1996 software-rendered Quake — rebuilt on a foundation 
 - **MCP server** — run with `--mcp` and Claude Code can call tools to read game state and set cvars in real time
 - **Hot-reload** splits the engine and game at a C ABI boundary; edit game logic and reload in ~1s without restarting
 - **Dear ImGui overlay** — press F12 for a live dev overlay: perf stats, filterable cvar editor with descriptions, entity table, and a console with tab-completion and command input
+- **Wolf3D + Doom1 guns** — all 10 weapons (knife, pistol, MG, chaingun from Wolf3D; fist, chainsaw, pistol, shotgun, chaingun, rocket from Doom) ported with original sprites, sounds, fire rates, muzzle flashes, and Doom-palette swapping for the viewmodel
 - **In-game 3D map editor** — planned: press Tab, click a wall to select its brush, drag to move it, hit Recompile; the BSP rebuilds in the background and reloads while you stay in the game
 
 ## Phases
@@ -22,7 +23,7 @@ WinQuake — Carmack's 1996 software-rendered Quake — rebuilt on a foundation 
 | 3 | ✅ done | Hot-reload (`game_api_t` ABI, `game.dll`) |
 | 4 | ✅ done | Dear ImGui dev overlay |
 | 5 | ✅ done | QuakeC → C (port progs to hot-reloadable game.dll) |
-| 6 | planned | Port Wolf3D & Doom1 guns into Quake (sprites, sounds, behaviour) |
+| 6 | ✅ done | Port Wolf3D & Doom1 guns into Quake (sprites, sounds, behaviour) |
 | 7 | planned | In-game 3D map editor |
 | 8 | planned | Immersive-sim systems — physics, reactive AI, wind/smoke, light tier, Blink + Gust ([design](docs/superpowers/specs/2026-05-04-immersive-sim-systems-design.md), [M1+M2+M2.5 plan](docs/superpowers/plans/2026-05-04-immersive-sim-m1-m2-ai-substrate.md)) |
 
