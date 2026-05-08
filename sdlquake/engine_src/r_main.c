@@ -626,14 +626,12 @@ void R_DrawViewModel (void)
 	if (!currententity->model)
 		return;
 
-	// PHASE 6 PATCH: 2D sprite viewmodels (.spr) use a screen-anchored blit
-	// instead of the world-space alias-model path. This is what makes Phase 6's
-	// extracted Wolf3D / Doom1 weapon sprites appear in the player's hand.
+	// PHASE 6 PATCH: 2D sprite viewmodels render in a separate post-particles
+	// pass (R_DrawViewModel_2DPass below) so they sit on top of particles and
+	// don't get their palette_id tag stomped by particle overdraw. Skip here
+	// in the pre-particles 3D pass.
 	if (currententity->model->type == mod_sprite)
-	{
-		R_DrawViewModelSprite (currententity);
 		return;
-	}
 
 	VectorCopy (currententity->origin, r_entorigin);
 	VectorSubtract (r_origin, r_entorigin, modelorg);
@@ -678,6 +676,41 @@ void R_DrawViewModel (void)
 #endif
 
 	R_AliasDrawModel (&r_viewlighting);
+}
+
+
+/*
+=============
+R_DrawViewModel_2DPass
+
+PHASE 6: post-particles pass for 2D screen-space viewmodel sprites. Runs
+after R_DrawParticles so:
+  - particles never visually overdraw the gun (which is essentially a HUD
+    element for the sprite path, not a 3D world object), and
+  - particles never inherit the gun's vid_palette_id=1 (Doom palette) tag,
+    which would otherwise route their Quake-palette index through the wrong
+    LUT and produce wildly wrong colors right where they overlap the gun.
+
+Mirrors R_DrawViewModel's preconditions; bails early for the 3D alias case
+(handled by the pre-particles pass).
+=============
+*/
+void R_DrawViewModel_2DPass (void)
+{
+	if (!r_drawviewmodel.value || r_fov_greater_than_90)
+		return;
+	if (cl.items & IT_INVISIBILITY)
+		return;
+	if (cl.stats[STAT_HEALTH] <= 0)
+		return;
+
+	currententity = &cl.viewent;
+	if (!currententity->model)
+		return;
+	if (currententity->model->type != mod_sprite)
+		return;
+
+	R_DrawViewModelSprite (currententity);
 }
 
 
@@ -1020,6 +1053,11 @@ SetVisibilityByPassages ();
 	}
 
 	R_DrawParticles ();
+
+	// PHASE 6: 2D sprite viewmodel pass. Runs after particles so they sit on
+	// top of the world (vanilla feel) but never overdraw the gun -- and never
+	// inherit the gun's Doom-palette tag.
+	R_DrawViewModel_2DPass ();
 
 	if (r_dspeeds.value)
 		dp_time2 = Sys_FloatTime ();
