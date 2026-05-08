@@ -124,6 +124,7 @@ const doom_sound_sets = [_]DoomSoundSet{
     .{ .out_path = "id1/sound/phase6/doom_punch.wav",    .lump = "DSPUNCH"   },
     .{ .out_path = "id1/sound/phase6/doom_sawhit.wav",   .lump = "DSSAWHIT"  },
     .{ .out_path = "id1/sound/phase6/doom_sawful.wav",   .lump = "DSSAWFUL"  },
+    .{ .out_path = "id1/sound/phase6/doom_sawidl.wav",   .lump = "DSSAWIDL"  },
 };
 
 // ---------------------------------------------------------------------------

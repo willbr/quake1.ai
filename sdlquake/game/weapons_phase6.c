@@ -665,6 +665,40 @@ void WolfChaingun_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
+// Doom chainsaw idle animation. Doom info.c states S_SAW (SAWGC, 4 tics) and
+// S_SAWB (SAWGD, 4 tics) alternate while the chainsaw is up and idle, with
+// A_WeaponReady playing sfx_sawidl every time the state machine enters S_SAW.
+// One full alternation = 8 tics = 0.229 s, so the idle sound plays ~4.4 Hz.
+//
+// Called from player_run_think / player_stand1_think (which run on the
+// player's nextthink slot only when no attack chain is active). Mid-attack
+// the chain owns weaponframe directly, so the idle hook is correctly idle.
+// ---------------------------------------------------------------------------
+#define DOOMSAW_IDLE_PHASE_TICS  4    // tics per SAWGC↔SAWGD swap (matches Doom S_SAW/S_SAWB duration)
+
+void Phase6_WeaponIdleFrame(edict_t *self) {
+    int it2 = (int)self->v.weapon2;
+    if (it2 != IT2_DOOM_CHAINSAW) {
+        self->v.weaponframe = 0;
+        return;
+    }
+
+    // Drive alternation off world time so the running-saw look is
+    // independent of however often this hook fires.
+    int phase = ((int)(g->time * 35.0f) / DOOMSAW_IDLE_PHASE_TICS) & 1;
+    self->v.weaponframe = phase ? 3 : 2;   // 0 = SAWGC (S_SAW), 1 = SAWGD (S_SAWB)
+
+    // Doom plays sfx_sawidl on each entry to S_SAW. We detect the 1→0 phase
+    // transition. Single-player Quake, so a file-static is fine here; the
+    // worst case across saw-equip cycles is one missed idle blip.
+    static int last_phase = -1;
+    if (phase == 0 && last_phase != 0) {
+        eng->SV_StartSound(self, CHAN_WEAPON, "phase6/doom_sawidl.wav", 1, ATTN_NORM);
+    }
+    last_phase = phase;
+}
+
+// ---------------------------------------------------------------------------
 // Top-level dispatchers — called from weapons.c when self->v.weapon2 != 0.
 // ---------------------------------------------------------------------------
 void W_Attack_Phase6(void) {
@@ -756,6 +790,7 @@ void Phase6_PrecacheCommon(void) {
     eng->PrecacheSound("phase6/doom_punch.wav");
     eng->PrecacheSound("phase6/doom_sawhit.wav");
     eng->PrecacheSound("phase6/doom_sawful.wav");
+    eng->PrecacheSound("phase6/doom_sawidl.wav");
     eng->PrecacheSound("phase6/wolf_pistol.wav");
     eng->PrecacheSound("phase6/wolf_mg.wav");
     eng->PrecacheSound("phase6/wolf_chaingun.wav");

@@ -155,6 +155,7 @@ __attribute__((weak)) void W_FireSpikes(float offset)   { (void)offset; }
 __attribute__((weak)) void W_FireLightning(void)        {}
 __attribute__((weak)) void SuperDamageSound(void)       {}
 void SUB_Remove(edict_t *self);   // subs.c
+extern void Phase6_WeaponIdleFrame(edict_t *self);   // weapons_phase6.c — chainsaw idle alternation
 
 // ---------------------------------------------------------------------------
 // Helper: set up a think-frame step
@@ -173,7 +174,7 @@ void SUB_Remove(edict_t *self);   // subs.c
 static void player_stand1_think(edict_t *self)
 {
     FRAME_STEP(FR_AXSTND1, player_stand1_think);
-    g->self->v.weaponframe = 0;
+    Phase6_WeaponIdleFrame(g->self);
     if (g->self->v.velocity[0] || g->self->v.velocity[1]) {
         g->self->v.walkframe = 0;
         player_run_think(self);
@@ -196,7 +197,7 @@ void player_run(edict_t *self) { player_run_think(self); }
 static void player_run_think(edict_t *self)
 {
     FRAME_STEP(FR_ROCKRUN1, player_run_think);
-    g->self->v.weaponframe = 0;
+    Phase6_WeaponIdleFrame(g->self);
     if (!g->self->v.velocity[0] && !g->self->v.velocity[1]) {
         g->self->v.walkframe = 0;
         player_stand1_think(self);

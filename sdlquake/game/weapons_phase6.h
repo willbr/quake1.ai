@@ -44,6 +44,14 @@ void Phase6_ChangeWeapon (int impulse);
 void Phase6_CheatGiveAll (void);
 
 // ---------------------------------------------------------------------------
+// Weapon-idle hook -- called from player_run_think and player_stand1_think
+// in place of the unconditional `weaponframe = 0`. Lets phase 6 weapons
+// drive their own idle animation (currently only the Doom chainsaw, which
+// alternates SAWGC/SAWGD and plays sawidl on each S_SAW entry).
+// ---------------------------------------------------------------------------
+void Phase6_WeaponIdleFrame (edict_t *self);
+
+// ---------------------------------------------------------------------------
 // Animation chain entry points. Each chain is implemented in player_phase6.c
 // as a series of static `_think` callbacks; the `_1` wrapper here is the
 // public entry called from the matching W_FirePhase6_* in weapons_phase6.c.

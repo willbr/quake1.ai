@@ -151,8 +151,9 @@ void player_doomfist1(edict_t *self) {
 // Frame layout in v_doomchainsaw.spr:
 //   0 = SAWGA (attack pose A)  -- S_SAW1
 //   1 = SAWGB (attack pose B)  -- S_SAW2
-//   2 = SAWGC (idle alt -- unused, kept for completeness)
-//   3 = SAWGD (idle alt -- unused)
+//   2 = SAWGC (idle, S_SAW)    -- driven by Phase6_WeaponIdleFrame in
+//   3 = SAWGD (idle, S_SAWB)      weapons_phase6.c (alternates 4 tics each,
+//                                 plays sawidl on each S_SAW entry)
 // ---------------------------------------------------------------------------
 
 static void player_doomsaw2_think(edict_t *self);
