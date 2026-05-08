@@ -187,6 +187,8 @@ enum {
     EDIT_STYLE_WIRE = 0,
     EDIT_STYLE_FLAT = 1,
     EDIT_STYLE_FLAT_WIRE = 2,
+    EDIT_STYLE_TEX  = 3,
+    EDIT_STYLE_TEX_WIRE = 4,
     EDIT_STYLE_COUNT
 };
 
@@ -205,27 +207,34 @@ void Editor_RenderScene(void)
 
     if (edit_scene.numentities == 0) return;
 
-    // Pass 1: filled faces (flat shaded).
-    if (style == EDIT_STYLE_FLAT || style == EDIT_STYLE_FLAT_WIRE)
+    // Pass 1: filled faces (flat-shaded or textured).
     {
-        for (i = 0; i < edit_scene.numentities; i++)
+        int do_flat = (style == EDIT_STYLE_FLAT || style == EDIT_STYLE_FLAT_WIRE);
+        int do_tex  = (style == EDIT_STYLE_TEX  || style == EDIT_STYLE_TEX_WIRE);
+        if (do_flat || do_tex)
         {
-            edit_entity_t *e = &edit_scene.entities[i];
-            for (j = 0; j < e->numbrushes; j++)
+            for (i = 0; i < edit_scene.numentities; i++)
             {
-                edit_brush_t *b = &e->brushes[j];
-                if (!b->valid) continue;
-                if (!brush_visible(b)) continue;
-                Editor_FlatDrawBrush(b);
+                edit_entity_t *e = &edit_scene.entities[i];
+                for (j = 0; j < e->numbrushes; j++)
+                {
+                    edit_brush_t *b = &e->brushes[j];
+                    if (!b->valid) continue;
+                    if (!brush_visible(b)) continue;
+                    if (do_tex)  Editor_TexDrawBrush(b);
+                    else         Editor_FlatDrawBrush(b);
+                }
             }
         }
     }
 
-    // Pass 2: wireframe (always over flat fills, so selection + brush
-    // boundaries stay readable).
-    if (style == EDIT_STYLE_WIRE || style == EDIT_STYLE_FLAT_WIRE
-        || sel != NULL)  // selected brush always gets a wireframe outline
+    // Pass 2: wireframe (drawn over filled faces so selection + brush
+    // boundaries stay readable). For pure-fill styles only the selected
+    // brush gets an outline.
     {
+        int wire_all = (style == EDIT_STYLE_WIRE
+                     || style == EDIT_STYLE_FLAT_WIRE
+                     || style == EDIT_STYLE_TEX_WIRE);
         for (i = 0; i < edit_scene.numentities; i++)
         {
             edit_entity_t *e = &edit_scene.entities[i];
@@ -234,7 +243,7 @@ void Editor_RenderScene(void)
                 edit_brush_t *b = &e->brushes[j];
                 if (!b->valid) continue;
                 if (!brush_visible(b)) continue;
-                if (style == EDIT_STYLE_FLAT && b != sel) continue;
+                if (!wire_all && b != sel) continue;
                 draw_brush(b, (b == sel) ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
             }
         }

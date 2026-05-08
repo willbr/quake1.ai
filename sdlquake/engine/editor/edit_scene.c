@@ -2,6 +2,7 @@
 
 #include "quakedef.h"
 #include "edit_scene.h"
+#include "editor_internal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -89,8 +90,22 @@ void Brush_Translate(edit_brush_t *b, const vec3_t delta)
 {
     int i, j;
     for (i = 0; i < b->numplanes; i++)
+    {
+        edit_plane_t *p = &b->planes[i];
+        // Texture lock: keep the projected texture pinned to the brush by
+        // subtracting the texel-shift induced by the world translation.
+        // s_world = dot(P, s_axis) + s_shift, so a +delta in P needs an
+        // equal -dot(delta, s_axis) in s_shift to leave s_world unchanged.
+        {
+            vec3_t s_axis, t_axis;
+            float  s_shift, t_shift;
+            Editor_PlaneUVAxes(p, s_axis, t_axis, &s_shift, &t_shift);
+            p->s_shift -= DotProduct(delta, s_axis);
+            p->t_shift -= DotProduct(delta, t_axis);
+        }
         for (j = 0; j < 3; j++)
-            VectorAdd(b->planes[i].points[j], delta, b->planes[i].points[j]);
+            VectorAdd(p->points[j], delta, p->points[j]);
+    }
     Brush_Compile(b);
 }
 

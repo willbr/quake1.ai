@@ -88,6 +88,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/editor/brush_compile.c",
         "sdlquake/engine/editor/render_wire.c",
         "sdlquake/engine/editor/render_flat.c",
+        "sdlquake/engine/editor/render_tex.c",
         "sdlquake/engine/editor/gizmo.c",
         "sdlquake/engine/editor/editor_ui.c",
         "sdlquake/engine/editor/collide.c",

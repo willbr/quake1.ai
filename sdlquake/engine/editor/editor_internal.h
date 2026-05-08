@@ -8,6 +8,7 @@
 // vec_t, and the Vector* macros). We don't include it here because it's a
 // non-pragma-once header that redefines qboolean if pulled in twice.
 struct edit_brush_s;
+struct edit_plane_s;
 
 // Color palette indices used by render_wire.c and gizmo.c. Tuned to the
 // vanilla Quake palette (which has no pure green — 243 is the closest
@@ -25,6 +26,16 @@ int  Editor_PickAt       (float sx, float sy, int *out_ent, int *out_brush);
 
 // render_flat.c
 void Editor_FlatDrawBrush(const struct edit_brush_s *b);
+
+// render_tex.c
+void Editor_TexDrawBrush (const struct edit_brush_s *b);
+
+// Compute scaled+rotated s/t world axes (and shifts) for a plane, matching
+// qbsp's QuakeEd-style texinfo. Public so Brush_Translate can keep textures
+// pinned to the brush ("texture lock") by adjusting plane shifts.
+void Editor_PlaneUVAxes(const struct edit_plane_s *p,
+                        vec3_t out_s, vec3_t out_t,
+                        float *out_s_shift, float *out_t_shift);
 
 // gizmo.c
 void Editor_GizmoDraw       (void);

@@ -20,7 +20,9 @@
 static void draw_toolbar(void)
 {
     extern cvar_t editor_render_style;
-    static const char *style_items[] = { "wireframe", "flat", "flat+wire" };
+    static const char *style_items[] = {
+        "wireframe", "flat", "flat+wire", "textured", "textured+wire"
+    };
 
     IG_SetNextWindowPos(10, 10, IG_Cond_FirstUseEver);
     IG_SetNextWindowSize(620, 80, IG_Cond_FirstUseEver);
