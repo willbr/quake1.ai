@@ -160,6 +160,24 @@ fn applyRemap(rmap: [256]u8, pixels: []u8) void {
     for (pixels) |*p| p.* = rmap[p.*];
 }
 
+/// Nearest-neighbor upscale. dst dims must be integer multiples of src dims.
+fn upscaleNearest(
+    src: []const u8, src_w: u32, src_h: u32,
+    dst: []u8,       dst_w: u32, dst_h: u32,
+) void {
+    const sx = dst_w / src_w;
+    const sy = dst_h / src_h;
+    var y: u32 = 0;
+    while (y < dst_h) : (y += 1) {
+        const sy_idx = y / sy;
+        var x: u32 = 0;
+        while (x < dst_w) : (x += 1) {
+            const sx_idx = x / sx;
+            dst[y * dst_w + x] = src[sy_idx * src_w + sx_idx];
+        }
+    }
+}
+
 fn convertWolfPalette() [256][3]u8 {
     var out: [256][3]u8 = undefined;
     var i: usize = 0;
@@ -299,21 +317,32 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
     const wolf_pal_8bit = convertWolfPalette();
     const wolf_remap = buildRemap8(wolf_pal_8bit, quake_pal);
 
-    // Sprite output buffers (held one frame at a time). 64x64 fits all Wolf sprites.
+    // Wolf3D drew the viewmodel via SimpleScaleShape, scaling the 64x64 cell
+    // up to fill the lower viewport (~120 px tall on a 200-line screen).
+    // Quake's R_DrawViewModelSprite renders SPR pixels 1:1, so a raw 64x64
+    // Wolf sprite shows up much smaller than Doom's native ~80x60 sprites.
+    // Pre-upscale 2x at extract time to compensate (128x128 final SPR cells).
+    const WOLF_VIEW_SCALE = 2;
+    const WOLF_VIEW_DIM   = wolf_vswap.SPRITE_DIM * WOLF_VIEW_SCALE;
     for (wolf_sprite_sets) |set| {
         var frames_storage: [16]quake_spr.Frame = undefined;
-        var pixel_storage: [16][wolf_vswap.SPRITE_DIM * wolf_vswap.SPRITE_DIM]u8 = undefined;
+        var decode_buf: [wolf_vswap.SPRITE_DIM * wolf_vswap.SPRITE_DIM]u8 = undefined;
+        var pixel_storage: [16][WOLF_VIEW_DIM * WOLF_VIEW_DIM]u8 = undefined;
 
         var fi: u8 = 0;
         while (fi < set.frame_count) : (fi += 1) {
-            try v.decodeSprite(set.base_idx + fi, &pixel_storage[fi]);
-            applyRemap(wolf_remap, &pixel_storage[fi]);
+            try v.decodeSprite(set.base_idx + fi, &decode_buf);
+            applyRemap(wolf_remap, &decode_buf);
+            upscaleNearest(
+                &decode_buf, wolf_vswap.SPRITE_DIM, wolf_vswap.SPRITE_DIM,
+                &pixel_storage[fi], WOLF_VIEW_DIM, WOLF_VIEW_DIM,
+            );
             frames_storage[fi] = .{
-                .width    = wolf_vswap.SPRITE_DIM,
-                .height   = wolf_vswap.SPRITE_DIM,
+                .width    = WOLF_VIEW_DIM,
+                .height   = WOLF_VIEW_DIM,
                 .pixels   = &pixel_storage[fi],
-                .origin_x = -@divTrunc(@as(i32, wolf_vswap.SPRITE_DIM), 2),
-                .origin_y = wolf_vswap.SPRITE_DIM,
+                .origin_x = -@divTrunc(@as(i32, WOLF_VIEW_DIM), 2),
+                .origin_y = WOLF_VIEW_DIM,
             };
         }
         try quake_spr.writeSprite(io, allocator, set.out_path, frames_storage[0..set.frame_count]);
