@@ -454,18 +454,20 @@ void R_DrawViewModelSprite (entity_t *e)
 		                            * (2.0 * M_PI / DOOM_BOB_PERIOD));
 	r_doom_bob_last_time = cl.time;
 
-	bob = R_DoomViewBobAmount ();
-	if (bob > 0.0f)
+	// Doom-style A_WeaponReady bob is Doom-specific. Wolf3D's DrawPlayerWeapon
+	// (WL_DRAW.C:1201) calls SimpleScaleShape(viewwidth/2, shapenum,
+	// viewheight+1) — fixed at viewport centre with no bob, no sway. Gate the
+	// bob on palette_id == 1 (Doom) so Wolf SPRs (palette_id == 0, since they
+	// were remapped to the Quake palette at extract time) stay statically
+	// positioned, matching the original game's feel.
+	if (e->model->palette_id == 1)
 	{
-		// Scale bob to sprite height so larger viewmodels (e.g. the 192px
-		// Wolf3D sprites, vs Doom's ~80px) bob proportionally rather than
-		// looking nearly static. Reference height is Doom's ~80px sprite,
-		// so Doom's feel is unchanged and Wolf gets ~2.4x the absolute swing.
-		float bob_scale = frame->height / 80.0f;
-		if (bob_scale < 1.0f) bob_scale = 1.0f;	// don't shrink for small sprites
-		bob *= bob_scale;
-		sx += (int)(bob * cos (r_doom_bob_phase));
-		sy += (int)(bob * fabs (sin (r_doom_bob_phase)));
+		bob = R_DoomViewBobAmount ();
+		if (bob > 0.0f)
+		{
+			sx += (int)(bob * cos (r_doom_bob_phase));
+			sy += (int)(bob * fabs (sin (r_doom_bob_phase)));
+		}
 	}
 
 	R_BlitSpriteScreen (sx, sy, frame, e->model->palette_id);
