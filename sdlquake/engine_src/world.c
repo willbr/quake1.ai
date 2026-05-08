@@ -967,6 +967,14 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 // clip to entities
 	SV_ClipToLinks ( sv_areanodes, &clip );
 
+	// Phase 7 M2: also clip to in-memory editor brushes (no BSP, no compile).
+	{
+		extern void EditorCollide_ClipMove(const vec3_t, const vec3_t,
+		                                   const vec3_t, const vec3_t,
+		                                   trace_t *);
+		EditorCollide_ClipMove(start, mins, maxs, end, &clip.trace);
+	}
+
 	return clip.trace;
 }
 

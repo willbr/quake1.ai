@@ -250,16 +250,23 @@ void ImguiLayer_Render(void)
     IG_ImplSDL3_NewFrame();
     IG_NewFrame();
 
-    draw_perf();
-    draw_cvars();
-    draw_entities();
-    draw_console();
-
-    // Phase 7 editor panels (toolbar / brush list / inspector). No-op if the
-    // editor isn't open.
+    // Editor mode replaces the dev panels with editor-specific panels so the
+    // 320x200 viewport stays readable. F12-only (no F2) shows the dev set;
+    // F2 (editor) shows just the editor toolbar / brush list / inspector.
     {
+        extern int  Editor_IsOpen(void);
         extern void Editor_DrawUI(void);
-        Editor_DrawUI();
+        if (Editor_IsOpen())
+        {
+            Editor_DrawUI();
+        }
+        else
+        {
+            draw_perf();
+            draw_cvars();
+            draw_entities();
+            draw_console();
+        }
     }
 
     IG_Render();
