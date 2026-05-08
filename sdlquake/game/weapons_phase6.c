@@ -168,6 +168,49 @@ static int p6_wolf_hitscan(float shoot_cone_radians) {
     edict_t *self = g->self;
     eng->MakeVectors(self->v.v_angle);
 
+    // Pass 1: direct traceline. The player can intentionally shoot a brush
+    // entity (func_button, func_breakable, ...) by aiming at it; the cone
+    // auto-aim below would reject anything more than a few degrees off-axis
+    // and miss small / vertical targets entirely. Doom-style traceline first
+    // matches modern FPS expectation and fixes the "Wolf weapons can't shoot
+    // map buttons" bug.
+    {
+        vec3_t src;
+        src[0] = self->v.origin[0];
+        src[1] = self->v.origin[1];
+        src[2] = self->v.absmin[2] + self->v.size[2]*0.7f;
+        vec3_t end;
+        end[0] = src[0] + g->v_forward[0]*8192.0f;
+        end[1] = src[1] + g->v_forward[1]*8192.0f;
+        end[2] = src[2] + g->v_forward[2]*8192.0f;
+        eng->SV_Traceline(src, end, 0, self);
+        if (g->trace_ent && g->trace_ent != self &&
+            g->trace_ent->v.takedamage != DAMAGE_NO &&
+            g->trace_ent->v.health > 0)
+        {
+            float dx = g->trace_endpos[0] - self->v.origin[0];
+            float dy = g->trace_endpos[1] - self->v.origin[1];
+            float dz = g->trace_endpos[2] - self->v.origin[2];
+            float dist = sqrtf(dx*dx + dy*dy + dz*dz) / WOLF_TILE_QU;
+            int rnd = rand_byte();
+            int damage;
+            if (dist < WOLF_NEAR_TILES)      damage = rnd / WOLF_NEAR_DIVISOR;
+            else if (dist < WOLF_MID_TILES)  damage = rnd / WOLF_MID_DIVISOR;
+            else {
+                if ((rnd / WOLF_FAR_MISS_DIVISOR) < (int)dist) damage = 0;
+                else damage = rnd / WOLF_MID_DIVISOR;
+            }
+            if (damage <= 0) return 0;
+            vec3_t blood_vel = {0, 0, 0};
+            SpawnBlood(g->trace_endpos, blood_vel, (float)damage);
+            T_Damage(g->trace_ent, self, self, (float)damage);
+            return 1;
+        }
+    }
+
+    // Pass 2: Wolf3D-style cone auto-aim — picks the closest visible monster
+    // within a tight front cone. Only reached if the direct traceline above
+    // didn't find a damageable target.
     edict_t *closest = NULL;
     float    closest_d2 = 1e18f;
 
