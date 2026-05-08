@@ -836,62 +836,106 @@ static void CheatCommand(void) {
     W_SetCurrentAmmo();
 }
 
-static void CycleWeaponCommand(void) {
+// ---------------------------------------------------------------------------
+// Unified weapon cycle (impulse 10 / 12) — covers stock Quake + Phase 6.
+// Order: 8 stock Quake, 6 Doom, 4 Wolf3D. Cycler walks forward/back through
+// the array, skipping slots the player doesn't own or doesn't have enough
+// ammo for, and wraps at either end.
+// ---------------------------------------------------------------------------
+typedef struct { int is_phase6; int flag; } weapon_slot_t;
+static const weapon_slot_t WCYCLE[] = {
+    {0, IT_AXE},
+    {0, IT_SHOTGUN},
+    {0, IT_SUPER_SHOTGUN},
+    {0, IT_NAILGUN},
+    {0, IT_SUPER_NAILGUN},
+    {0, IT_GRENADE_LAUNCHER},
+    {0, IT_ROCKET_LAUNCHER},
+    {0, IT_LIGHTNING},
+    {1, IT2_DOOM_FIST},
+    {1, IT2_DOOM_PISTOL},
+    {1, IT2_DOOM_SHOTGUN},
+    {1, IT2_DOOM_CHAINGUN},
+    {1, IT2_DOOM_ROCKET},
+    {1, IT2_DOOM_CHAINSAW},
+    {1, IT2_WOLF_KNIFE},
+    {1, IT2_WOLF_PISTOL},
+    {1, IT2_WOLF_MACHINEGUN},
+    {1, IT2_WOLF_CHAINGUN},
+};
+#define WCYCLE_COUNT ((int)(sizeof(WCYCLE) / sizeof(WCYCLE[0])))
+
+static int wcycle_usable(int idx) {
     edict_t *self = g->self;
-    int it = (int)self->v.items;
-    self->v.impulse = 0;
-
-    // Phase 6 weapon active? Exit to a Quake weapon and stop.
-    // (Without this guard the loop spins forever -- none of the IT_* branches
-    // below match weapon == 0, so weapon stays 0 and the it & 0 == 0 check
-    // never lets us exit.)
-    if ((int)self->v.weapon == 0) {
-        self->v.weapon  = IT_AXE;
-        self->v.weapon2 = 0;
-        W_SetCurrentAmmo();
-        return;
+    int items  = (int)self->v.items;
+    int items2 = (int)self->v.items2;
+    switch (idx) {
+        case 0:  return  (items  & IT_AXE) != 0;
+        case 1:  return ((items  & IT_SHOTGUN)          != 0) && self->v.ammo_shells  >= 1;
+        case 2:  return ((items  & IT_SUPER_SHOTGUN)    != 0) && self->v.ammo_shells  >= 2;
+        case 3:  return ((items  & IT_NAILGUN)          != 0) && self->v.ammo_nails   >= 1;
+        case 4:  return ((items  & IT_SUPER_NAILGUN)    != 0) && self->v.ammo_nails   >= 2;
+        case 5:  return ((items  & IT_GRENADE_LAUNCHER) != 0) && self->v.ammo_rockets >= 1;
+        case 6:  return ((items  & IT_ROCKET_LAUNCHER)  != 0) && self->v.ammo_rockets >= 1;
+        case 7:  return ((items  & IT_LIGHTNING)        != 0) && self->v.ammo_cells   >= 1;
+        case 8:  return  (items2 & IT2_DOOM_FIST)       != 0;
+        case 9:  return ((items2 & IT2_DOOM_PISTOL)     != 0) && self->v.ammo_bullets >= 1;
+        case 10: return ((items2 & IT2_DOOM_SHOTGUN)    != 0) && self->v.ammo_shells  >= 1;
+        case 11: return ((items2 & IT2_DOOM_CHAINGUN)   != 0) && self->v.ammo_bullets >= 1;
+        case 12: return ((items2 & IT2_DOOM_ROCKET)     != 0) && self->v.ammo_rockets >= 1;
+        case 13: return  (items2 & IT2_DOOM_CHAINSAW)   != 0;
+        case 14: return  (items2 & IT2_WOLF_KNIFE)      != 0;
+        case 15: return ((items2 & IT2_WOLF_PISTOL)     != 0) && self->v.ammo_bullets >= 1;
+        case 16: return ((items2 & IT2_WOLF_MACHINEGUN) != 0) && self->v.ammo_bullets >= 1;
+        case 17: return ((items2 & IT2_WOLF_CHAINGUN)   != 0) && self->v.ammo_bullets >= 1;
+        default: return 0;
     }
+}
 
-    while (1) {
-        int am = 0;
-        int w  = (int)self->v.weapon;
-        if      (w == IT_LIGHTNING)        { self->v.weapon = IT_AXE; }
-        else if (w == IT_AXE)              { self->v.weapon = IT_SHOTGUN;          if (self->v.ammo_shells < 1) am=1; }
-        else if (w == IT_SHOTGUN)          { self->v.weapon = IT_SUPER_SHOTGUN;    if (self->v.ammo_shells < 2) am=1; }
-        else if (w == IT_SUPER_SHOTGUN)    { self->v.weapon = IT_NAILGUN;          if (self->v.ammo_nails  < 1) am=1; }
-        else if (w == IT_NAILGUN)          { self->v.weapon = IT_SUPER_NAILGUN;    if (self->v.ammo_nails  < 2) am=1; }
-        else if (w == IT_SUPER_NAILGUN)    { self->v.weapon = IT_GRENADE_LAUNCHER; if (self->v.ammo_rockets< 1) am=1; }
-        else if (w == IT_GRENADE_LAUNCHER) { self->v.weapon = IT_ROCKET_LAUNCHER;  if (self->v.ammo_rockets< 1) am=1; }
-        else if (w == IT_ROCKET_LAUNCHER)  { self->v.weapon = IT_LIGHTNING;        if (self->v.ammo_cells  < 1) am=1; }
-        if ((it & (int)self->v.weapon) && am == 0) { W_SetCurrentAmmo(); return; }
+static int wcycle_current_index(void) {
+    edict_t *self = g->self;
+    int w2 = (int)self->v.weapon2;
+    int w  = (int)self->v.weapon;
+    if (w2 != 0) {
+        for (int i = 0; i < WCYCLE_COUNT; i++)
+            if (WCYCLE[i].is_phase6 && WCYCLE[i].flag == w2) return i;
+    }
+    if (w != 0) {
+        for (int i = 0; i < WCYCLE_COUNT; i++)
+            if (!WCYCLE[i].is_phase6 && WCYCLE[i].flag == w) return i;
+    }
+    return -1;
+}
+
+static void wcycle_select(int idx) {
+    edict_t *self = g->self;
+    if (WCYCLE[idx].is_phase6) {
+        self->v.weapon  = 0;
+        self->v.weapon2 = (float)WCYCLE[idx].flag;
+    } else {
+        self->v.weapon  = (float)WCYCLE[idx].flag;
+        self->v.weapon2 = 0;
+    }
+    W_SetCurrentAmmo();
+}
+
+static void CycleWeaponCommand(void) {
+    g->self->v.impulse = 0;
+    int cur = wcycle_current_index();
+    int start = (cur < 0) ? -1 : cur;
+    for (int i = 1; i <= WCYCLE_COUNT; i++) {
+        int next = (start + i + WCYCLE_COUNT) % WCYCLE_COUNT;
+        if (wcycle_usable(next)) { wcycle_select(next); return; }
     }
 }
 
 static void CycleWeaponReverseCommand(void) {
-    edict_t *self = g->self;
-    int it = (int)self->v.items;
-    self->v.impulse = 0;
-
-    // Phase 6 weapon active? Exit to a Quake weapon and stop.
-    if ((int)self->v.weapon == 0) {
-        self->v.weapon  = IT_AXE;
-        self->v.weapon2 = 0;
-        W_SetCurrentAmmo();
-        return;
-    }
-
-    while (1) {
-        int am = 0;
-        int w  = (int)self->v.weapon;
-        if      (w == IT_LIGHTNING)        { self->v.weapon = IT_ROCKET_LAUNCHER;  if (self->v.ammo_rockets< 1) am=1; }
-        else if (w == IT_ROCKET_LAUNCHER)  { self->v.weapon = IT_GRENADE_LAUNCHER; if (self->v.ammo_rockets< 1) am=1; }
-        else if (w == IT_GRENADE_LAUNCHER) { self->v.weapon = IT_SUPER_NAILGUN;    if (self->v.ammo_nails  < 2) am=1; }
-        else if (w == IT_SUPER_NAILGUN)    { self->v.weapon = IT_NAILGUN;          if (self->v.ammo_nails  < 1) am=1; }
-        else if (w == IT_NAILGUN)          { self->v.weapon = IT_SUPER_SHOTGUN;    if (self->v.ammo_shells < 2) am=1; }
-        else if (w == IT_SUPER_SHOTGUN)    { self->v.weapon = IT_SHOTGUN;          if (self->v.ammo_shells < 1) am=1; }
-        else if (w == IT_SHOTGUN)          { self->v.weapon = IT_AXE; }
-        else if (w == IT_AXE)              { self->v.weapon = IT_LIGHTNING;        if (self->v.ammo_cells  < 1) am=1; }
-        if ((it & (int)self->v.weapon) && am == 0) { W_SetCurrentAmmo(); return; }
+    g->self->v.impulse = 0;
+    int cur = wcycle_current_index();
+    int start = (cur < 0) ? WCYCLE_COUNT : cur;
+    for (int i = 1; i <= WCYCLE_COUNT; i++) {
+        int next = (start - i + WCYCLE_COUNT) % WCYCLE_COUNT;
+        if (wcycle_usable(next)) { wcycle_select(next); return; }
     }
 }
 
