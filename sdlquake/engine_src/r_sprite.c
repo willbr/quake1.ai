@@ -294,18 +294,18 @@ Modeled on draw.c:Draw_TransPic (which does the same thing for HUD pics).
 */
 extern byte vid_palette_id[];	// from sdlquake/platform/vid_sdl.c
 
-void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame, byte palette_id)
+void R_BlitSpriteScreen (int sx, int sy, int dst_w, int dst_h, mspriteframe_t *frame, byte palette_id)
 {
-	int		w, h, u, v;
+	int		src_w, src_h, u, v;
 	int		u_start, u_end, v_start, v_end;
-	byte	*dest, *source, *pal_dest, *src_row, tbyte;
+	byte	*dest, *source, *pal_dest, tbyte;
 
 	if (r_pixbytes != 1)
 		return;		// 16-bit color path not supported for viewmodel sprites yet
 
-	w = frame->width;
-	h = frame->height;
-	if (w <= 0 || h <= 0)
+	src_w = frame->width;
+	src_h = frame->height;
+	if (src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0)
 		return;
 
 	// Per-pixel clip to the 3D viewport (vrect), not the full vid rect.
@@ -323,27 +323,33 @@ void R_BlitSpriteScreen (int sx, int sy, mspriteframe_t *frame, byte palette_id)
 		int x_max = r_refdef.vrect.x + r_refdef.vrect.width;
 		int y_max = r_refdef.vrect.y + r_refdef.vrect.height;
 		u_start = (sx < x_min) ? x_min - sx : 0;
-		u_end   = (sx + w > x_max) ? x_max - sx : w;
+		u_end   = (sx + dst_w > x_max) ? x_max - sx : dst_w;
 		v_start = (sy < y_min) ? y_min - sy : 0;
-		v_end   = (sy + h > y_max) ? y_max - sy : h;
+		v_end   = (sy + dst_h > y_max) ? y_max - sy : dst_h;
 	}
 	if (u_start >= u_end || v_start >= v_end)
 		return;		// fully off-screen
 
 	source = (byte *)&frame->pixels[0];
 
+	// Nearest-neighbor scaled blit: each dst pixel samples src[v*src_h/dst_h, u*src_w/dst_w].
+	// 1:1 case (dst_w == src_w, dst_h == src_h) reduces to direct row-copy.
 	for (v = v_start; v < v_end; v++)
 	{
-		dest     = vid.buffer     + (sy + v) * vid.rowbytes + (sx + u_start);
-		pal_dest = vid_palette_id + (sy + v) * vid.width    + (sx + u_start);
-		src_row  = source         +  v       * w            +       u_start;
-		for (u = 0; u < u_end - u_start; u++)
+		int src_v   = v * src_h / dst_h;
+		dest        = vid.buffer     + (sy + v) * vid.rowbytes + (sx + u_start);
+		pal_dest    = vid_palette_id + (sy + v) * vid.width    + (sx + u_start);
+		byte *src_row = source       + src_v * src_w;
+		for (u = u_start; u < u_end; u++)
 		{
-			if ((tbyte = src_row[u]) != TRANSPARENT_COLOR)
+			int src_u = u * src_w / dst_w;
+			if ((tbyte = src_row[src_u]) != TRANSPARENT_COLOR)
 			{
-				dest[u]     = tbyte;
-				pal_dest[u] = palette_id;
+				*dest     = tbyte;
+				*pal_dest = palette_id;
 			}
+			dest++;
+			pal_dest++;
 		}
 	}
 }
@@ -395,6 +401,8 @@ void R_DrawViewModelSprite (entity_t *e)
 	int             frame_idx;
 	int             sx, sy;
 	int             vp_x, vp_y, vp_w, vp_h;
+	int             dst_w, dst_h;
+	float           pspritescale;
 	float           bob;
 
 	if (!e->model || e->model->type != mod_sprite)
@@ -435,30 +443,43 @@ void R_DrawViewModelSprite (entity_t *e)
 	vp_w = r_refdef.vrect.width;
 	vp_h = r_refdef.vrect.height;
 
+	// pspritescale: matches Doom's R_ExecuteSetViewSize: viewwidth/SCREENWIDTH.
+	// As the player shrinks the 3D viewport (Quake's viewsize cvar), the
+	// viewmodel scales down proportionally -- same behavior as Doom and
+	// (effectively) Wolf3D's SimpleScaleShape.
+	pspritescale = (float)vp_w / 320.0f;
+	dst_w = (int)((float)frame->width  * pspritescale + 0.5f);
+	dst_h = (int)((float)frame->height * pspritescale + 0.5f);
+
 	if (e->model->palette_id == 1)
 	{
 		// Doom-authentic anchoring (p_pspr.c WEAPONTOP=32 + r_things.c
 		// R_DrawPSprite). The Phase 6 extractor stores Doom's WAD leftoffset
 		// in the SPR's origin[0] and topoffset in origin[1]; Mod_LoadSpriteFrame
 		// puts these into frame->left and frame->up respectively. Doom positions
-		// every weapon at (centerx + (sx_psp - 160 - leftoff) * scale, centery -
-		// (BASEYCENTER + 0.5 - sy_psp + topoff) * scale). With sx_psp=0,
-		// sy_psp=WEAPONTOP=32, scale=1, BASEYCENTER=100, and Doom's
-		// sbar-mode centery=84, this reduces to:
-		//   sx = vp_x + vp_w/2 - 160 - leftoff
-		//   sy = vp_y + 16 - topoff (the 0.5 fractional rounds down)
-		// The sprite's bottom can extend past vrect bottom; R_BlitSpriteScreen
-		// clips at vrect, mimicking Doom's status-bar overdraw of the gun.
-		sx = vp_x + (vp_w / 2) - 160 - (int)frame->left;
-		sy = vp_y + 16 - (int)frame->up;
+		// every weapon at:
+		//   x1 = centerx + (sx_psp - 160 - leftoff) * pspritescale
+		//   sprtopscreen = centery - (BASEYCENTER + 0.5 - sy_psp + topoff) * pspritescale
+		// With sx_psp=0, sy_psp=WEAPONTOP=32, BASEYCENTER=100:
+		//   sx = centerx + (-160 - leftoff) * scale
+		//   sy = centery - (68.5 + topoff) * scale
+		// We use centery = vp_y + vp_h/2 (Doom: viewheight/2) so the gun moves
+		// up with shrinking views, like Doom's setblocks=8/9/10 cascade.
+		const int   centerx     = vp_x + (vp_w / 2);
+		const int   centery     = vp_y + (vp_h / 2);
+		const float doom_tx     = -160.0f - frame->left;          // unscaled X tx (psp_sx=0)
+		const float doom_ty     =   68.5f + frame->up;            // unscaled Y texturemid
+		sx = centerx + (int)(doom_tx * pspritescale);
+		sy = centery - (int)(doom_ty * pspritescale);
 	}
 	else
 	{
 		// Bottom-centered anchor (Wolf3D and any other non-Doom SPR).
 		// Wolf3D's DrawPlayerWeapon scales the sprite to viewheight, so a
-		// flush bottom anchor is the closest analog.
-		sx = vp_x + (vp_w - frame->width) / 2;
-		sy = vp_y +  vp_h - frame->height;
+		// flush bottom anchor is the closest analog. dst_w/dst_h already
+		// scale the sprite to match the viewport size.
+		sx = vp_x + (vp_w - dst_w) / 2;
+		sy = vp_y +  vp_h - dst_h;
 	}
 
 	// Heal `r_doom_bob_last_time` after a level reload (or any other time
@@ -477,9 +498,12 @@ void R_DrawViewModelSprite (entity_t *e)
 	// bob on palette_id == 1 (Doom) so Wolf SPRs (palette_id == 0, since they
 	// were remapped to the Quake palette at extract time) stay statically
 	// positioned, matching the original game's feel.
+	//
+	// Scale the bob with pspritescale so the bob amplitude shrinks alongside
+	// the viewport — matches Doom's MAXBOB-then-FixedMul-with-pspritescale.
 	if (e->model->palette_id == 1)
 	{
-		bob = R_DoomViewBobAmount ();
+		bob = R_DoomViewBobAmount () * pspritescale;
 		if (bob > 0.0f)
 		{
 			sx += (int)(bob * cos (r_doom_bob_phase));
@@ -487,7 +511,7 @@ void R_DrawViewModelSprite (entity_t *e)
 		}
 	}
 
-	R_BlitSpriteScreen (sx, sy, frame, e->model->palette_id);
+	R_BlitSpriteScreen (sx, sy, dst_w, dst_h, frame, e->model->palette_id);
 }
 
 
