@@ -179,10 +179,15 @@ static int p6_wolf_hitscan(float shoot_cone_radians) {
         if (e->v.health <= 0) continue;
         if (e->v.takedamage == DAMAGE_NO) continue;
 
+        // Use bbox centre, not v.origin: brush entities (func_button,
+        // func_breakable, etc.) often have v.origin == (0,0,0) and only
+        // describe their actual position via absmin/absmax. Using v.origin
+        // for the cone test would misplace the entity at the world origin
+        // and they'd never qualify as "in front of the player".
         vec3_t to;
-        to[0] = e->v.origin[0] - self->v.origin[0];
-        to[1] = e->v.origin[1] - self->v.origin[1];
-        to[2] = e->v.origin[2] - self->v.origin[2];
+        to[0] = (e->v.absmin[0] + e->v.absmax[0]) * 0.5f - self->v.origin[0];
+        to[1] = (e->v.absmin[1] + e->v.absmax[1]) * 0.5f - self->v.origin[1];
+        to[2] = (e->v.absmin[2] + e->v.absmax[2]) * 0.5f - self->v.origin[2];
         float fwd = to[0]*g->v_forward[0] + to[1]*g->v_forward[1] + to[2]*g->v_forward[2];
         if (fwd <= 0) continue;
 
