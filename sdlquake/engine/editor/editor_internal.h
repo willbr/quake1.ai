@@ -10,17 +10,21 @@
 struct edit_brush_s;
 
 // Color palette indices used by render_wire.c and gizmo.c. Tuned to the
-// vanilla Quake palette.
-#define EDIT_COLOR_AXIS_X       251     // red
-#define EDIT_COLOR_AXIS_Y       184     // green
-#define EDIT_COLOR_AXIS_Z       244     // blue
-#define EDIT_COLOR_AXIS_HOT     79      // yellow (hovered/dragging axis)
+// vanilla Quake palette (which has no pure green — 243 is the closest
+// distinct hue).
+#define EDIT_COLOR_AXIS_X       251     // bright red    (255,  0,  0)
+#define EDIT_COLOR_AXIS_Y       243     // yellow-green  (231,227, 87)
+#define EDIT_COLOR_AXIS_Z       244     // light blue    (127,191,255)
+#define EDIT_COLOR_AXIS_HOT     254     // white         (255,255,255) -- hovered/dragging axis
 
 // render_wire.c
 int  Editor_ProjectWorld (const vec3_t world, float *out_sx, float *out_sy);
 void Editor_ScreenToRay  (float sx, float sy, vec3_t out_origin, vec3_t out_dir);
 void Editor_DrawLine3D   (const vec3_t a, const vec3_t b, byte color);
 int  Editor_PickAt       (float sx, float sy, int *out_ent, int *out_brush);
+
+// render_flat.c
+void Editor_FlatDrawBrush(const struct edit_brush_s *b);
 
 // gizmo.c
 void Editor_GizmoDraw       (void);

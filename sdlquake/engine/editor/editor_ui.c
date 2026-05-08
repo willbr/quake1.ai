@@ -19,41 +19,44 @@
 
 static void draw_toolbar(void)
 {
+    extern cvar_t editor_render_style;
+    static const char *style_items[] = { "wireframe", "flat", "flat+wire" };
+
     IG_SetNextWindowPos(10, 10, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize(560, 60, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize(620, 80, IG_Cond_FirstUseEver);
     if (!IG_Begin("Editor", NULL, IG_WF_None)) { IG_End(); return; }
 
-    if (IG_Button("Save"))
+    if (IG_Button("Save"))         Cbuf_AddText("editor_save\n");
+    IG_SameLine(0, -1);
+    if (IG_Button("Revert edits")) Cbuf_AddText("editor_revert\n");
+    IG_SameLine(0, -1);
+    if (IG_Button("Restart map") && edit_scene.mapname[0])
     {
-        char buf[300];
-        snprintf(buf, sizeof(buf), "editor_save");
+        char buf[160];
+        snprintf(buf, sizeof(buf), "map %s\n", edit_scene.mapname);
         Cbuf_AddText(buf);
-        Cbuf_AddText("\n");
     }
     IG_SameLine(0, -1);
-    if (IG_Button("Revert edits"))
+    if (IG_Button("Close (F2)"))   Cbuf_AddText("editor\n");
+
     {
-        Cbuf_AddText("editor_revert\n");
-    }
-    IG_SameLine(0, -1);
-    if (IG_Button("Restart map"))
-    {
-        if (edit_scene.mapname[0])
+        int style = (int)editor_render_style.value;
+        if (style < 0) style = 0;
+        if (style >= (int)(sizeof(style_items) / sizeof(style_items[0])))
+            style = (int)(sizeof(style_items) / sizeof(style_items[0])) - 1;
+        IG_SetNextItemWidth(160);
+        if (IG_Combo("render style", &style, style_items,
+                     (int)(sizeof(style_items) / sizeof(style_items[0]))))
         {
-            char buf[160];
-            snprintf(buf, sizeof(buf), "map %s\n", edit_scene.mapname);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "editor_render_style %d\n", style);
             Cbuf_AddText(buf);
         }
     }
     IG_SameLine(0, -1);
-    if (IG_Button("Close (F2)"))
-    {
-        Cbuf_AddText("editor\n"); // toggles editor off
-    }
-
     {
         char buf[64];
-        snprintf(buf, sizeof(buf), "loaded: %s",
+        snprintf(buf, sizeof(buf), "  loaded: %s",
                  edit_scene.mapname[0] ? edit_scene.mapname : "(none)");
         IG_TextUnformatted(buf);
     }

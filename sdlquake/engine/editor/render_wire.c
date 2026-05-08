@@ -179,25 +179,64 @@ static void draw_brush(const edit_brush_t *b, byte color)
 // Public entry point — called from r_main.c R_RenderView_
 // -----------------------------------------------------------------------------
 
-#define EDIT_COLOR_BRUSH        15      // white
-#define EDIT_COLOR_SELECTED     79      // bright yellow
+#define EDIT_COLOR_BRUSH        15      // off-white      (235,235,235)
+#define EDIT_COLOR_SELECTED     192     // bright yellow  (255,243, 27)
+
+// Render styles: index into editor_render_style cvar.
+enum {
+    EDIT_STYLE_WIRE = 0,
+    EDIT_STYLE_FLAT = 1,
+    EDIT_STYLE_FLAT_WIRE = 2,
+    EDIT_STYLE_COUNT
+};
+
+cvar_t editor_render_style = { "editor_render_style", "0" };
+
+void Editor_RegisterCvars(void)
+{
+    Cvar_RegisterVariable(&editor_render_style);
+}
 
 void Editor_RenderScene(void)
 {
     int i, j;
     edit_brush_t *sel = Scene_GetSelectedBrush();
+    int style = (int)editor_render_style.value;
 
     if (edit_scene.numentities == 0) return;
 
-    for (i = 0; i < edit_scene.numentities; i++)
+    // Pass 1: filled faces (flat shaded).
+    if (style == EDIT_STYLE_FLAT || style == EDIT_STYLE_FLAT_WIRE)
     {
-        edit_entity_t *e = &edit_scene.entities[i];
-        for (j = 0; j < e->numbrushes; j++)
+        for (i = 0; i < edit_scene.numentities; i++)
         {
-            edit_brush_t *b = &e->brushes[j];
-            if (!b->valid) continue;
-            if (!brush_visible(b)) continue;
-            draw_brush(b, (b == sel) ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
+            edit_entity_t *e = &edit_scene.entities[i];
+            for (j = 0; j < e->numbrushes; j++)
+            {
+                edit_brush_t *b = &e->brushes[j];
+                if (!b->valid) continue;
+                if (!brush_visible(b)) continue;
+                Editor_FlatDrawBrush(b);
+            }
+        }
+    }
+
+    // Pass 2: wireframe (always over flat fills, so selection + brush
+    // boundaries stay readable).
+    if (style == EDIT_STYLE_WIRE || style == EDIT_STYLE_FLAT_WIRE
+        || sel != NULL)  // selected brush always gets a wireframe outline
+    {
+        for (i = 0; i < edit_scene.numentities; i++)
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            for (j = 0; j < e->numbrushes; j++)
+            {
+                edit_brush_t *b = &e->brushes[j];
+                if (!b->valid) continue;
+                if (!brush_visible(b)) continue;
+                if (style == EDIT_STYLE_FLAT && b != sel) continue;
+                draw_brush(b, (b == sel) ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
+            }
         }
     }
 

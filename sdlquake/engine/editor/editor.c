@@ -169,6 +169,11 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_revert", Editor_Cmd_Revert_f);
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
 
+    {
+        extern void Editor_RegisterCvars(void);
+        Editor_RegisterCvars();
+    }
+
     s_inited = 1;
 }
 
