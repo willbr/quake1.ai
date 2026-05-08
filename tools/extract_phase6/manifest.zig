@@ -66,15 +66,16 @@ const doom_pisg_frames  = [_]DoomFrameSpec{
     .{ .lump = "PISGB0" },                       // 3: recoil settle (no flash)
 };
 const doom_shtg_frames  = [_]DoomFrameSpec{
-    .{ .lump = "SHTGA0", .flash = "SHTFA0" },    // 0: fire (with flash) -- S_SGUN2 fires here
-    .{ .lump = "SHTGA0" },                       // 1: idle / pre-fire    -- S_SGUN1, S_SGUN8 (no flash)
+    .{ .lump = "SHTGA0" },                       // 0: idle / pre-fire    -- S_SGUN1, S_SGUN8 (no flash) — also weaponframe=0 idle
+    .{ .lump = "SHTGA0", .flash = "SHTFA0" },    // 1: fire (with flash)  -- S_SGUN2 fires here
     .{ .lump = "SHTGB0" },                       // 2: pump open          -- S_SGUN3, S_SGUN7
     .{ .lump = "SHTGC0" },                       // 3: pump back          -- S_SGUN4, S_SGUN6
     .{ .lump = "SHTGD0" },                       // 4: pump full back     -- S_SGUN5
 };
 const doom_chgg_frames  = [_]DoomFrameSpec{
-    .{ .lump = "CHGGA0", .flash = "CHGFA0" },
-    .{ .lump = "CHGGB0", .flash = "CHGFB0" },
+    .{ .lump = "CHGGA0" },                       // 0: idle (no flash) — weaponframe=0 idle pose
+    .{ .lump = "CHGGA0", .flash = "CHGFA0" },    // 1: fire pose A with flash A -- S_CHAIN1
+    .{ .lump = "CHGGB0", .flash = "CHGFB0" },    // 2: fire pose B with flash B -- S_CHAIN2
 };
 const doom_misg_frames  = [_]DoomFrameSpec{
     .{ .lump = "MISGA0" },                         // 0: idle / lowered pose

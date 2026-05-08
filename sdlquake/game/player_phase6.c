@@ -185,19 +185,20 @@ void player_doomsaw1(edict_t *self) {
 // Doom chaingun -- S_CHAIN1..S_CHAIN2 (4/4 tics) loop.
 // Both frames fire; chain reloops via attack_finished while button0 held.
 // Frame layout in v_doomchaingun.spr:
-//   0 = CHGGA + CHGFA composited (fire pose A with flash A)
-//   1 = CHGGB + CHGFB composited (fire pose B with flash B)
+//   0 = CHGGA (no flash) — idle pose (weaponframe=0 default)
+//   1 = CHGGA + CHGFA composited (fire pose A with flash A)
+//   2 = CHGGB + CHGFB composited (fire pose B with flash B)
 // ---------------------------------------------------------------------------
 
 static void player_doomchaingun2_think(edict_t *self);
 static void player_doomchaingun3_think(edict_t *self);
 
 static void player_doomchaingun1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     0, DOOM_4_TIC, player_doomchaingun2_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY,     1, DOOM_4_TIC, player_doomchaingun2_think);
     DoomChaingun_DoFire(self);
 }
 static void player_doomchaingun2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_4_TIC, player_doomchaingun3_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, DOOM_4_TIC, player_doomchaingun3_think);
     DoomChaingun_DoFire(self);
 }
 static void player_doomchaingun3_think(edict_t *self) {
@@ -213,9 +214,9 @@ void player_doomchaingun1(edict_t *self) {
 // ---------------------------------------------------------------------------
 // Doom shotgun -- S_SGUN1..S_SGUN8 (3/7/5/5/4/5/5/3 tics). S_SGUN9 (7 tic
 // A_ReFire) folded into attack_finished.
-// Frame layout in v_doomshotgun.spr (after manifest cutover):
-//   0 = SHTGA + SHTFA composited (fire pose with flash) -- S_SGUN2
-//   1 = SHTGA (idle, no flash)                          -- S_SGUN1, S_SGUN8
+// Frame layout in v_doomshotgun.spr:
+//   0 = SHTGA (idle, no flash)                          -- weaponframe=0 idle, S_SGUN1, S_SGUN8
+//   1 = SHTGA + SHTFA composited (fire pose with flash) -- S_SGUN2
 //   2 = SHTGB (pump open)                               -- S_SGUN3, S_SGUN7
 //   3 = SHTGC (pump back)                               -- S_SGUN4, S_SGUN6
 //   4 = SHTGD (pump full back)                          -- S_SGUN5
@@ -232,11 +233,11 @@ static void player_doomshotgun9_think(edict_t *self);
 
 // S_SGUN1: idle pose (3 tics).
 static void player_doomshotgun1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     1, DOOM_3_TIC, player_doomshotgun2_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY,     0, DOOM_3_TIC, player_doomshotgun2_think);
 }
 // S_SGUN2: fire (7 tics).
 static void player_doomshotgun2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 0, DOOM_7_TIC, player_doomshotgun3_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_7_TIC, player_doomshotgun3_think);
     DoomShotgun_DoFire(self);
 }
 // S_SGUN3: pump open (5 tics).
@@ -261,7 +262,7 @@ static void player_doomshotgun7_think(edict_t *self) {
 }
 // S_SGUN8: idle pose return (3 tics).
 static void player_doomshotgun8_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 1, DOOM_3_TIC, player_doomshotgun9_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 0, DOOM_3_TIC, player_doomshotgun9_think);
 }
 // Back to idle.
 static void player_doomshotgun9_think(edict_t *self) {
