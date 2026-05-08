@@ -288,6 +288,11 @@ void SetChangeParms(edict_t *client)
     g->parm[6]  = g->self->v.ammo_cells;
     g->parm[7]  = g->self->v.weapon;
     g->parm[8]  = g->self->v.armortype * 100.0f;
+    // Phase 6 carry-over: items2 (Doom + Wolf weapon-owned bitmask) and
+    // weapon2 (currently active Phase 6 weapon, 0 if a stock Quake weapon
+    // is active).
+    g->parm[9]  = g->self->v.items2;
+    g->parm[10] = g->self->v.weapon2;
 }
 
 void SetNewParms(void)
@@ -301,6 +306,8 @@ void SetNewParms(void)
     g->parm[6] = 0;
     g->parm[7] = 1;
     g->parm[8] = 0;
+    g->parm[9]  = 0;  // items2: no Phase 6 weapons owned at fresh start
+    g->parm[10] = 0;  // weapon2: stock Quake weapon active
 }
 
 static void DecodeLevelParms(void)
@@ -318,6 +325,8 @@ static void DecodeLevelParms(void)
     g->self->v.ammo_cells  = g->parm[6];
     g->self->v.weapon      = g->parm[7];
     g->self->v.armortype   = g->parm[8] * 0.01f;
+    g->self->v.items2      = g->parm[9];
+    g->self->v.weapon2     = g->parm[10];
 }
 
 // ---------------------------------------------------------------------------
