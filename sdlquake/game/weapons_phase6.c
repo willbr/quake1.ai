@@ -683,6 +683,14 @@ void Phase6_WeaponIdleFrame(edict_t *self) {
         return;
     }
 
+    // While fire is held, the attack chain owns weaponframe. Skipping the
+    // idle override here prevents a 1-tick flash to SAWGC/SAWGD between
+    // attack cycles -- they have a 34-pixel-higher topoffset than SAWGA/B,
+    // so any momentary hop into idle pose visibly jumps the saw vertically.
+    // The chain keeps SAWGA after doomsaw3_think; the next refire then sets
+    // SAWGA again via doomsaw1, so the swing stays at the attack y-position.
+    if (self->v.button0) return;
+
     // Drive alternation off world time so the running-saw look is
     // independent of however often this hook fires.
     int phase = ((int)(g->time * 35.0f) / DOOMSAW_IDLE_PHASE_TICS) & 1;
