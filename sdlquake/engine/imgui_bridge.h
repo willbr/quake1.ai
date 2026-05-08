@@ -70,6 +70,7 @@ void  IG_SetIniFilename(const char *path);   // pass NULL to disable .ini
 
 // Per-frame info
 float IG_GetFramerate(void);
+int   IG_WantCaptureMouse(void);    // 1 if ImGui currently owns the mouse
 
 // Frame lifecycle
 void  IG_NewFrame(void);
@@ -88,6 +89,18 @@ int   IG_InputText(const char *label, char *buf, int buf_size, int flags);
 int   IG_InputTextWithCompletion(const char *label, char *buf, int buf_size,
                                  int extra_flags, IG_CompletionCallback cb);
 int   IG_Checkbox(const char *label, int *v);
+int   IG_Button(const char *label);
+int   IG_SmallButton(const char *label);
+int   IG_Selectable(const char *label, int selected, int flags);
+void  IG_SameLine(float offset_x, float spacing);   // pass 0,-1 for default
+void  IG_Separator(void);
+void  IG_Spacing(void);
+int   IG_Combo(const char *label, int *current_item, const char * const items[],
+               int items_count);
+int   IG_DragFloat3(const char *label, float v[3], float speed);
+int   IG_InputFloat3(const char *label, float v[3]);
+void  IG_PushID_Int(int id);
+void  IG_PopID(void);
 
 // Child windows
 int   IG_BeginChild(const char *id, float w, float h, int child_flags, int window_flags);

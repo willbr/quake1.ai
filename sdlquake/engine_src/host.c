@@ -27,6 +27,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // mirroring the existing key_dest != key_game pause for the console/menu.
 extern int ImguiLayer_IsOpen(void);
 
+// Phase 7 in-game .map editor lifecycle + pause hooks.
+extern void Editor_Init    (void);
+extern void Editor_Shutdown(void);
+extern int  Editor_IsPaused(void);
+
 /*
 
 A server can allways be started, even if the system started out as a client
@@ -570,8 +575,8 @@ void _Host_ServerFrame (void)
 	SV_RunClients ();
 	
 // move things around and think
-// always pause in single player if in console, menus, or dev overlay
-	if (!sv.paused && (svs.maxclients > 1 || (key_dest == key_game && !ImguiLayer_IsOpen())) )
+// always pause in single player if in console, menus, dev overlay, or editor
+	if (!sv.paused && !Editor_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && !ImguiLayer_IsOpen())) )
 		SV_Physics ();
 }
 
@@ -622,8 +627,8 @@ void Host_ServerFrame (void)
 	SV_RunClients ();
 	
 // move things around and think
-// always pause in single player if in console, menus, or dev overlay
-	if (!sv.paused && (svs.maxclients > 1 || (key_dest == key_game && !ImguiLayer_IsOpen())) )
+// always pause in single player if in console, menus, dev overlay, or editor
+	if (!sv.paused && !Editor_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && !ImguiLayer_IsOpen())) )
 		SV_Physics ();
 
 // send all messages to the clients
@@ -919,6 +924,8 @@ void Host_Init (quakeparms_t *parms)
 		IN_Init ();
 #endif
 	}
+
+	Editor_Init ();
 
 	Cbuf_InsertText ("exec quake.rc\n");
 

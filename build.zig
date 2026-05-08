@@ -81,6 +81,14 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/r_debugdraw.c",
         "sdlquake/engine/r_bbox.c",
         "sdlquake/engine/r_paths.c",
+        // Phase 7 in-game .map editor
+        "sdlquake/engine/editor/editor.c",
+        "sdlquake/engine/editor/edit_scene.c",
+        "sdlquake/engine/editor/map_io.c",
+        "sdlquake/engine/editor/brush_compile.c",
+        "sdlquake/engine/editor/render_wire.c",
+        "sdlquake/engine/editor/gizmo.c",
+        "sdlquake/engine/editor/editor_ui.c",
     };
 
     const imgui_dir = "sdlquake/vendor/imgui-1.92.8";
@@ -143,6 +151,7 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(b.path("sdlquake/platform"));
     mod.addIncludePath(b.path("sdlquake/mcp"));
     mod.addIncludePath(b.path("sdlquake/engine"));
+    mod.addIncludePath(b.path("sdlquake/engine/editor"));
     mod.addIncludePath(b.path("sdlquake/game"));
     mod.addIncludePath(b.path(wq_dir));
 

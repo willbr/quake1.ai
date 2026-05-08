@@ -1,0 +1,191 @@
+// editor_ui.c -- M1 ImGui panels: toolbar, brush list, inspector.
+//
+// All panels are drawn inside Editor_DrawUI which is called from
+// imgui_layer.c ImguiLayer_Render. The panels only render when the editor is
+// open (so they don't clutter the regular F12 dev overlay).
+
+#include "quakedef.h"
+#include "imgui_bridge.h"
+#include "edit_scene.h"
+#include "editor.h"
+#include "editor_internal.h"
+
+#include <stdio.h>
+#include <string.h>
+
+// -----------------------------------------------------------------------------
+// Toolbar
+// -----------------------------------------------------------------------------
+
+static void draw_toolbar(void)
+{
+    IG_SetNextWindowPos(10, 10, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize(560, 60, IG_Cond_FirstUseEver);
+    if (!IG_Begin("Editor", NULL, IG_WF_None)) { IG_End(); return; }
+
+    if (IG_Button("Save"))
+    {
+        char buf[300];
+        snprintf(buf, sizeof(buf), "editor_save");
+        Cbuf_AddText(buf);
+        Cbuf_AddText("\n");
+    }
+    IG_SameLine(0, -1);
+    if (IG_Button("Revert edits"))
+    {
+        Cbuf_AddText("editor_revert\n");
+    }
+    IG_SameLine(0, -1);
+    if (IG_Button("Restart map"))
+    {
+        if (edit_scene.mapname[0])
+        {
+            char buf[160];
+            snprintf(buf, sizeof(buf), "map %s\n", edit_scene.mapname);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    if (IG_Button("Close (F2)"))
+    {
+        Cbuf_AddText("editor\n"); // toggles editor off
+    }
+
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "loaded: %s",
+                 edit_scene.mapname[0] ? edit_scene.mapname : "(none)");
+        IG_TextUnformatted(buf);
+    }
+    IG_End();
+}
+
+// -----------------------------------------------------------------------------
+// Brush list
+// -----------------------------------------------------------------------------
+
+static void draw_brush_list(void)
+{
+    int i, j;
+    char buf[128];
+
+    IG_SetNextWindowPos(10, 80, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize(260, 380, IG_Cond_FirstUseEver);
+    if (!IG_Begin("Brushes", NULL, IG_WF_None)) { IG_End(); return; }
+
+    snprintf(buf, sizeof(buf), "%d entities, ? brushes",
+             edit_scene.numentities);
+    {
+        int total = 0;
+        for (i = 0; i < edit_scene.numentities; i++)
+            total += edit_scene.entities[i].numbrushes;
+        snprintf(buf, sizeof(buf), "%d entities, %d brushes",
+                 edit_scene.numentities, total);
+    }
+    IG_TextUnformatted(buf);
+    IG_Separator();
+
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        const char *cls = "(no classname)";
+        if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
+
+        IG_PushID_Int(i);
+        snprintf(buf, sizeof(buf), "[%d] %s", i, cls);
+        IG_TextUnformatted(buf);
+
+        for (j = 0; j < e->numbrushes; j++)
+        {
+            int sel = (i == edit_scene.sel_entity && j == edit_scene.sel_brush);
+            edit_brush_t *b = &e->brushes[j];
+            snprintf(buf, sizeof(buf),
+                     "  brush %d (%d planes, %d faces)##b%d_%d",
+                     j, b->numplanes, b->numfaces, i, j);
+            if (IG_Selectable(buf, sel, 0))
+            {
+                edit_scene.sel_entity = i;
+                edit_scene.sel_brush  = j;
+            }
+        }
+        IG_PopID();
+    }
+    IG_End();
+}
+
+// -----------------------------------------------------------------------------
+// Inspector
+// -----------------------------------------------------------------------------
+
+static void draw_inspector(void)
+{
+    edit_entity_t *e;
+    edit_brush_t  *b;
+    int i;
+    char buf[128];
+
+    IG_SetNextWindowPos(280, 80, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize(320, 380, IG_Cond_FirstUseEver);
+    if (!IG_Begin("Inspector", NULL, IG_WF_None)) { IG_End(); return; }
+
+    e = Scene_GetSelectedEntity();
+    b = Scene_GetSelectedBrush();
+    if (!e)
+    {
+        IG_TextUnformatted("(no selection)");
+        IG_End();
+        return;
+    }
+
+    IG_TextUnformatted("entity keys");
+    IG_Separator();
+
+    for (i = 0; i < e->numkv; i++)
+    {
+        IG_PushID_Int(i);
+        snprintf(buf, sizeof(buf), "%s##key", e->kv[i].key);
+        IG_SetNextItemWidth(180);
+        IG_InputText(buf, e->kv[i].value, EDIT_VAL_LEN, IG_ITF_EnterReturnsTrue);
+        IG_PopID();
+    }
+    IG_Separator();
+
+    if (b)
+    {
+        vec3_t centroid;
+        Editor_BrushCentroid(b, centroid);
+        snprintf(buf, sizeof(buf),
+                 "brush %d/%d  planes=%d  faces=%d",
+                 edit_scene.sel_brush,
+                 e->numbrushes,
+                 b->numplanes, b->numfaces);
+        IG_TextUnformatted(buf);
+        snprintf(buf, sizeof(buf), "centroid: %.0f %.0f %.0f",
+                 centroid[0], centroid[1], centroid[2]);
+        IG_TextUnformatted(buf);
+        snprintf(buf, sizeof(buf), "mins: %.0f %.0f %.0f",
+                 b->mins[0], b->mins[1], b->mins[2]);
+        IG_TextUnformatted(buf);
+        snprintf(buf, sizeof(buf), "maxs: %.0f %.0f %.0f",
+                 b->maxs[0], b->maxs[1], b->maxs[2]);
+        IG_TextUnformatted(buf);
+    }
+    else
+    {
+        IG_TextUnformatted("(point entity — no brushes)");
+    }
+
+    IG_End();
+}
+
+// -----------------------------------------------------------------------------
+// Public entry
+// -----------------------------------------------------------------------------
+
+void Editor_DrawUI(void)
+{
+    if (!Editor_IsOpen()) return;
+    draw_toolbar();
+    draw_brush_list();
+    draw_inspector();
+}

@@ -16,6 +16,7 @@ void IG_SetIniFilename(const char *p)   { ImGui::GetIO().IniFilename = p; }
 
 // Per-frame info
 float IG_GetFramerate(void)             { return ImGui::GetIO().Framerate; }
+int   IG_WantCaptureMouse(void)         { return ImGui::GetIO().WantCaptureMouse ? 1 : 0; }
 
 // Frame lifecycle
 void IG_NewFrame(void)  { ImGui::NewFrame(); }
@@ -74,6 +75,39 @@ int  IG_Checkbox(const char *label, int *v)
     *v = b ? 1 : 0;
     return changed ? 1 : 0;
 }
+int  IG_Button(const char *label)
+{
+    return ImGui::Button(label) ? 1 : 0;
+}
+int  IG_SmallButton(const char *label)
+{
+    return ImGui::SmallButton(label) ? 1 : 0;
+}
+int  IG_Selectable(const char *label, int selected, int flags)
+{
+    return ImGui::Selectable(label, selected != 0, flags) ? 1 : 0;
+}
+void IG_SameLine(float offset, float spacing)
+{
+    ImGui::SameLine(offset, spacing);
+}
+void IG_Separator(void)               { ImGui::Separator(); }
+void IG_Spacing(void)                 { ImGui::Spacing(); }
+int  IG_Combo(const char *label, int *current_item, const char * const items[],
+              int items_count)
+{
+    return ImGui::Combo(label, current_item, items, items_count) ? 1 : 0;
+}
+int  IG_DragFloat3(const char *label, float v[3], float speed)
+{
+    return ImGui::DragFloat3(label, v, speed) ? 1 : 0;
+}
+int  IG_InputFloat3(const char *label, float v[3])
+{
+    return ImGui::InputFloat3(label, v) ? 1 : 0;
+}
+void IG_PushID_Int(int id)            { ImGui::PushID(id); }
+void IG_PopID(void)                   { ImGui::PopID(); }
 
 // Child windows
 int  IG_BeginChild(const char *id, float w, float h, int child_flags, int window_flags)

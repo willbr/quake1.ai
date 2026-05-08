@@ -255,6 +255,13 @@ void ImguiLayer_Render(void)
     draw_entities();
     draw_console();
 
+    // Phase 7 editor panels (toolbar / brush list / inspector). No-op if the
+    // editor isn't open.
+    {
+        extern void Editor_DrawUI(void);
+        Editor_DrawUI();
+    }
+
     IG_Render();
     IG_ImplSDLRenderer3_RenderDrawData(s_renderer);
 

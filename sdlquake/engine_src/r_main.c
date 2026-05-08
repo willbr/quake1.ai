@@ -1038,6 +1038,13 @@ SetVisibilityByPassages ();
 
 	R_DrawEntitiesOnList ();
 
+	// Phase 7 editor: wireframe brush overlay + gizmo, drawn after world+
+	// entities so edits are always visible regardless of underlying geometry.
+	{
+		extern void Editor_RenderScene(void);
+		Editor_RenderScene();
+	}
+
 	if (r_dspeeds.value)
 	{
 		de_time2 = Sys_FloatTime ();

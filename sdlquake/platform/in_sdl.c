@@ -4,6 +4,7 @@
 #include "quakedef.h"
 #include "winquake.h"
 #include "imgui_layer.h"
+#include "editor.h"
 
 // Winsock lib is not used in our SDL net layer
 qboolean winsock_lib_initialized = false;
@@ -76,6 +77,12 @@ void IN_ProcessEvents(void)
         // Feed every event to ImGui before Quake sees it.
         ImguiLayer_ProcessEvent(&ev);
 
+        // Editor consumes mouse events for picking + gizmo while open. Lives
+        // BEFORE the type switch so it can intercept clicks ImGui didn't
+        // capture (i.e. clicks in the 3D viewport).
+        if (Editor_ProcessEvent(&ev))
+            continue;
+
         switch (ev.type)
         {
         case SDL_EVENT_QUIT:
@@ -85,11 +92,18 @@ void IN_ProcessEvents(void)
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP:
         {
-            // F12 toggles the dev overlay; don't pass to Quake.
+            // F12 toggles the dev overlay; F2 toggles the in-game .map editor.
+            // Neither key reaches the game.
             if (ev.key.scancode == SDL_SCANCODE_F12)
             {
                 if (ev.key.type == SDL_EVENT_KEY_DOWN)
                     ImguiLayer_Toggle();
+                break;
+            }
+            if (ev.key.scancode == SDL_SCANCODE_F2)
+            {
+                if (ev.key.type == SDL_EVENT_KEY_DOWN)
+                    Editor_Toggle();
                 break;
             }
 
