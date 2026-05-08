@@ -457,6 +457,13 @@ void R_DrawViewModelSprite (entity_t *e)
 	bob = R_DoomViewBobAmount ();
 	if (bob > 0.0f)
 	{
+		// Scale bob to sprite height so larger viewmodels (e.g. the 192px
+		// Wolf3D sprites, vs Doom's ~80px) bob proportionally rather than
+		// looking nearly static. Reference height is Doom's ~80px sprite,
+		// so Doom's feel is unchanged and Wolf gets ~2.4x the absolute swing.
+		float bob_scale = frame->height / 80.0f;
+		if (bob_scale < 1.0f) bob_scale = 1.0f;	// don't shrink for small sprites
+		bob *= bob_scale;
 		sx += (int)(bob * cos (r_doom_bob_phase));
 		sy += (int)(bob * fabs (sin (r_doom_bob_phase)));
 	}
