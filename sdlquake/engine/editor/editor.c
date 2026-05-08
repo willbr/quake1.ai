@@ -50,6 +50,27 @@ static void window_to_vid(float wx, float wy, float *vx, float *vy)
 static int  s_open = 0;
 static int  s_inited = 0;
 
+// Free-fly / FPS camera support (M5 dev work).
+//
+// editor_camera 0 = free-fly: sim is paused, the editor owns r_refdef and
+//                  WASD + mouse-look (RMB held) drive a detached camera.
+// editor_camera 1 = fps: sim runs while RMB is held (mouse-look + WASD route
+//                  to the player); cursor is free for clicking gizmos / UI
+//                  the rest of the time. Sim pauses again when RMB is up.
+//
+// Tab toggles between modes while the editor is open. RMB enters/leaves
+// "look mode" (relative-mouse capture).
+cvar_t      editor_camera = { "editor_camera", "0" };
+
+static int     s_lookmode      = 0;
+static int     s_camera_inited = 0;
+static vec3_t  s_cam_origin;
+static vec3_t  s_cam_angles;
+static int     s_cam_mouse_dx  = 0;
+static int     s_cam_mouse_dy  = 0;
+
+static void set_lookmode(int on);
+
 // -----------------------------------------------------------------------------
 // Console commands
 // -----------------------------------------------------------------------------
@@ -169,6 +190,8 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_revert", Editor_Cmd_Revert_f);
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
 
+    Cvar_RegisterVariable(&editor_camera);
+
     {
         extern void Editor_RegisterCvars(void);
         Editor_RegisterCvars();
@@ -199,10 +222,141 @@ void Editor_Toggle(void)
         ImguiLayer_Toggle();
     else if (!s_open && ImguiLayer_IsOpen())
         ImguiLayer_Toggle();
+
+    // Re-latch the camera on the next pre-render and drop any residual
+    // look-mode capture.
+    s_camera_inited = 0;
+    if (s_lookmode) set_lookmode(0);
 }
 
 int Editor_IsOpen  (void) { return s_open; }
-int Editor_IsPaused(void) { return s_open; } // pause sim while editor active
+int Editor_IsPaused(void)
+{
+    if (!s_open) return 0;
+    if ((int)editor_camera.value == 0) return 1;   // free-fly: always paused
+    return !s_lookmode;                            // fps: paused when not looking
+}
+int Editor_LookmodeActive (void) { return s_open && s_lookmode; }
+int Editor_AllowGameInput (void)
+{
+    return s_open && s_lookmode && (int)editor_camera.value == 1;
+}
+int Editor_ShouldDrawPlayer(void)
+{
+    // Only in free-fly: in FPS mode the camera is at the player's eyes so
+    // their own model would block the view.
+    return s_open && (int)editor_camera.value == 0;
+}
+
+// -----------------------------------------------------------------------------
+// Camera mode + lookmode helpers
+// -----------------------------------------------------------------------------
+
+// Stock Quake1's Key_ClearStates only zeros the keydown[] array, so it
+// doesn't fire the "-forward 119" etc. release commands that actually clear
+// in_forward.state. We need to walk the array and call Key_Event(i, false)
+// per held key so the player input system's bind state matches reality.
+extern qboolean keydown[256];
+
+static void release_held_keys(void)
+{
+    int i;
+    for (i = 0; i < 256; i++)
+        if (keydown[i]) Key_Event(i, false);
+}
+
+static void set_lookmode(int on)
+{
+    SDL_Window *w = VID_GetWindow();
+    int was_on = s_lookmode;
+    s_lookmode = on ? 1 : 0;
+    s_cam_mouse_dx = s_cam_mouse_dy = 0;
+    if (w) SDL_SetWindowRelativeMouseMode(w, on ? true : false);
+
+    // Leaving look mode: fire fake key-up events for everything currently
+    // held. Otherwise the in_sdl.c gate (`if (ImguiLayer_IsOpen() &&
+    // !Editor_AllowGameInput()) break;`) silently swallows the real key-up
+    // events when the user releases RMB before the WASD key, leaving
+    // +forward / +moveright / etc. latched. The next time we re-enter look
+    // mode the player walks "by itself".
+    if (was_on && !on)
+        release_held_keys();
+}
+
+void Editor_CycleCameraMode(void)
+{
+    int next = ((int)editor_camera.value == 0) ? 1 : 0;
+    Cvar_SetValue("editor_camera", (float)next);
+    // If we changed mode mid-look, drop look so the player input doesn't get
+    // a jolt of accumulated delta from the wrong consumer.
+    if (s_lookmode) set_lookmode(0);
+    Con_Printf("editor camera: %s\n", next == 0 ? "free-fly" : "fps");
+}
+
+// -----------------------------------------------------------------------------
+// Pre-render hook: called from R_RenderView_ before R_SetupFrame
+// -----------------------------------------------------------------------------
+
+void Editor_PreRender(void)
+{
+    extern double host_frametime;
+    extern cvar_t sensitivity, m_pitch, m_yaw;
+
+    if (!s_open) return;
+
+    // First frame after opening the editor: latch the current view into the
+    // camera state so free-fly mode starts where the player was standing.
+    if (!s_camera_inited)
+    {
+        VectorCopy(r_refdef.vieworg,    s_cam_origin);
+        VectorCopy(r_refdef.viewangles, s_cam_angles);
+        s_camera_inited = 1;
+    }
+
+    if ((int)editor_camera.value != 0) return;     // FPS mode: no override
+
+    // Free-fly mode: drive camera from input while RMB held, then override
+    // r_refdef so the renderer sees the editor camera.
+    if (s_lookmode)
+    {
+        // Mouse-look (uses Quake's same mouse params for consistency).
+        s_cam_angles[YAW]   -= m_yaw.value   * (float)s_cam_mouse_dx * sensitivity.value;
+        s_cam_angles[PITCH] += m_pitch.value * (float)s_cam_mouse_dy * sensitivity.value;
+        if (s_cam_angles[PITCH] >  89) s_cam_angles[PITCH] =  89;
+        if (s_cam_angles[PITCH] < -89) s_cam_angles[PITCH] = -89;
+        s_cam_mouse_dx = s_cam_mouse_dy = 0;
+
+        // WASD + Space/Ctrl from raw keyboard state (ImGui's input is gated;
+        // we don't go through Quake's key system at all here). Use the
+        // SDL3-native bool* type so we don't rely on sizeof(bool)==1.
+        // Modifier keys also come from SDL_GetModState — more reliable than
+        // reading individual scancodes for Ctrl/Shift on Windows.
+        {
+            const bool *keys = SDL_GetKeyboardState(NULL);
+            SDL_Keymod  mods = SDL_GetModState();
+            vec3_t fwd, right, up;
+            float speed = 240.0f * (float)host_frametime;
+            int   i;
+            if (mods & SDL_KMOD_SHIFT) speed *= 4.0f;
+            AngleVectors(s_cam_angles, fwd, right, up);
+            if (keys[SDL_SCANCODE_W])
+                for (i = 0; i < 3; i++) s_cam_origin[i] += fwd[i] * speed;
+            if (keys[SDL_SCANCODE_S])
+                for (i = 0; i < 3; i++) s_cam_origin[i] -= fwd[i] * speed;
+            if (keys[SDL_SCANCODE_D])
+                for (i = 0; i < 3; i++) s_cam_origin[i] += right[i] * speed;
+            if (keys[SDL_SCANCODE_A])
+                for (i = 0; i < 3; i++) s_cam_origin[i] -= right[i] * speed;
+            if (keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_E])
+                s_cam_origin[2] += speed;
+            if ((mods & SDL_KMOD_CTRL) || keys[SDL_SCANCODE_Q])
+                s_cam_origin[2] -= speed;
+        }
+    }
+
+    VectorCopy(s_cam_origin, r_refdef.vieworg);
+    VectorCopy(s_cam_angles, r_refdef.viewangles);
+}
 
 // Editor_RenderScene  -> render_wire.c
 // Editor_DrawUI       -> editor_ui.c
@@ -220,10 +374,20 @@ int Editor_ProcessEvent(void *evp)
     {
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     {
+        if (ev->button.button == SDL_BUTTON_RIGHT)
+        {
+            // RMB enters look mode. Don't grab if the cursor is over an
+            // ImGui panel — let the panel take the click instead.
+            if (IG_WantCaptureMouse()) return 0;
+            set_lookmode(1);
+            return 1;
+        }
         if (ev->button.button != SDL_BUTTON_LEFT) return 0;
         // ImGui owns the click if the cursor is over an ImGui window (panel,
         // button). Don't run picking/gizmo in that case.
         if (IG_WantCaptureMouse()) return 0;
+        // Don't pick or drag while looking around.
+        if (s_lookmode) return 0;
         float vx, vy;
         window_to_vid(ev->button.x, ev->button.y, &vx, &vy);
         // Try the gizmo first; if it doesn't grab an axis, treat as a pick.
@@ -244,6 +408,11 @@ int Editor_ProcessEvent(void *evp)
         return 1;
     }
     case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (ev->button.button == SDL_BUTTON_RIGHT && s_lookmode)
+        {
+            set_lookmode(0);
+            return 1;
+        }
         if (ev->button.button == SDL_BUTTON_LEFT && Editor_GizmoIsActive())
         {
             Editor_GizmoMouseUp();
@@ -251,6 +420,15 @@ int Editor_ProcessEvent(void *evp)
         }
         return 0;
     case SDL_EVENT_MOUSE_MOTION:
+        // Free-fly look: accumulate the delta locally; the pre-render hook
+        // converts it to camera angles. FPS look: leave the event alone so
+        // in_sdl.c's player-mouse path picks it up.
+        if (s_lookmode && (int)editor_camera.value == 0)
+        {
+            s_cam_mouse_dx += (int)ev->motion.xrel;
+            s_cam_mouse_dy += (int)ev->motion.yrel;
+            return 1;
+        }
         if (Editor_GizmoIsActive())
         {
             float vx, vy;

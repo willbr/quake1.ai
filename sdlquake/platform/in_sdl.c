@@ -4,6 +4,7 @@
 #include "quakedef.h"
 #include "winquake.h"
 #include "imgui_layer.h"
+#include "imgui_bridge.h"
 #include "editor.h"
 
 // Winsock lib is not used in our SDL net layer
@@ -74,8 +75,24 @@ void IN_ProcessEvents(void)
     SDL_Event ev;
     while (SDL_PollEvent(&ev))
     {
-        // Feed every event to ImGui before Quake sees it.
-        ImguiLayer_ProcessEvent(&ev);
+        // Tab cycles editor camera modes (free-fly <-> fps). Suppress before
+        // ImGui or Quake see it so it doesn't double-fire as widget focus
+        // change or scoreboard. Don't intercept while typing into an ImGui
+        // text input.
+        if (ev.type == SDL_EVENT_KEY_DOWN
+            && ev.key.scancode == SDL_SCANCODE_TAB
+            && Editor_IsOpen()
+            && !IG_WantCaptureKeyboard())
+        {
+            Editor_CycleCameraMode();
+            continue;
+        }
+
+        // Feed every event to ImGui before Quake sees it. Skip when the
+        // editor is in look mode — ImGui shouldn't try to follow the cursor
+        // while we're capturing relative-mouse for the camera.
+        if (!Editor_LookmodeActive())
+            ImguiLayer_ProcessEvent(&ev);
 
         // Editor consumes mouse events for picking + gizmo while open. Lives
         // BEFORE the type switch so it can intercept clicks ImGui didn't
@@ -107,8 +124,16 @@ void IN_ProcessEvents(void)
                 break;
             }
 
-            // Overlay open — all other keys go to ImGui only.
-            if (ImguiLayer_IsOpen()) break;
+            // Overlay open and not in editor FPS look mode — keys are
+            // ImGui-only.
+            if (ImguiLayer_IsOpen() && !Editor_AllowGameInput()) break;
+
+            // SDL3 fires KEY_DOWN with repeat=true continuously while a key
+            // is held. We only want one Key_Event(true) per actual physical
+            // press — otherwise toggling editor look-mode while a movement
+            // key is held re-asserts the bind on the first repeat after
+            // re-entering look-mode and the player walks "by itself".
+            if (ev.key.type == SDL_EVENT_KEY_DOWN && ev.key.repeat) break;
 
             qboolean down = (ev.key.type == SDL_EVENT_KEY_DOWN);
             int qkey = sdl_scancode_to_quake(ev.key.scancode);
@@ -127,8 +152,10 @@ void IN_ProcessEvents(void)
         }
 
         case SDL_EVENT_MOUSE_MOTION:
-            // Don't accumulate game mouse when overlay is open (mouse is free).
-            if (mouse_active && !ImguiLayer_IsOpen())
+            // Don't accumulate game mouse when overlay is open (mouse is
+            // free) — except when the editor is in FPS look mode, in which
+            // case it explicitly wants the player to receive the delta.
+            if (mouse_active && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))
             {
                 mouse_dx += (int)ev.motion.xrel;
                 mouse_dy += (int)ev.motion.yrel;
@@ -138,7 +165,7 @@ void IN_ProcessEvents(void)
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
         {
-            if (ImguiLayer_IsOpen()) break;
+            if (ImguiLayer_IsOpen() && !Editor_AllowGameInput()) break;
             qboolean down = (ev.button.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
             int btn = 0;
             switch (ev.button.button)
@@ -152,7 +179,7 @@ void IN_ProcessEvents(void)
         }
 
         case SDL_EVENT_MOUSE_WHEEL:
-            if (ImguiLayer_IsOpen()) break;
+            if (ImguiLayer_IsOpen() && !Editor_AllowGameInput()) break;
             if (ev.wheel.y > 0)
             {
                 Key_Event(K_MWHEELUP, true);
@@ -167,8 +194,16 @@ void IN_ProcessEvents(void)
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
         {
+            // Restore relative-mouse mode based on what UI is currently up.
+            // If the dev overlay or editor is open with no active look-mode,
+            // we want the cursor visible so the user can click panels /
+            // gizmos. Otherwise (normal play, or editor in look-mode) we
+            // capture the cursor for mouse-look.
             SDL_Window *win = VID_GetWindow();
-            if (win) SDL_SetWindowRelativeMouseMode(win, true);
+            qboolean want_relative = true;
+            if (ImguiLayer_IsOpen() && !Editor_LookmodeActive())
+                want_relative = false;
+            if (win) SDL_SetWindowRelativeMouseMode(win, want_relative);
             mouse_active = true;
             break;
         }

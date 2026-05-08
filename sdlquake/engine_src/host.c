@@ -28,9 +28,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern int ImguiLayer_IsOpen(void);
 
 // Phase 7 in-game .map editor lifecycle + pause hooks.
-extern void Editor_Init    (void);
-extern void Editor_Shutdown(void);
-extern int  Editor_IsPaused(void);
+extern void Editor_Init        (void);
+extern void Editor_Shutdown    (void);
+extern int  Editor_IsPaused    (void);
+extern int  Editor_AllowGameInput(void);
 
 /*
 
@@ -576,7 +577,10 @@ void _Host_ServerFrame (void)
 	
 // move things around and think
 // always pause in single player if in console, menus, dev overlay, or editor
-	if (!sv.paused && !Editor_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && !ImguiLayer_IsOpen())) )
+// (Editor_AllowGameInput is the FPS-mode look-mode bypass — when set, the
+// player is actively driving the camera and physics should run even with
+// the editor UI up.)
+	if (!sv.paused && !Editor_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))) )
 		SV_Physics ();
 }
 
@@ -628,7 +632,10 @@ void Host_ServerFrame (void)
 	
 // move things around and think
 // always pause in single player if in console, menus, dev overlay, or editor
-	if (!sv.paused && !Editor_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && !ImguiLayer_IsOpen())) )
+// (Editor_AllowGameInput is the FPS-mode look-mode bypass — when set, the
+// player is actively driving the camera and physics should run even with
+// the editor UI up.)
+	if (!sv.paused && !Editor_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))) )
 		SV_Physics ();
 
 // send all messages to the clients

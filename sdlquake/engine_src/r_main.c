@@ -541,8 +541,15 @@ void R_DrawEntitiesOnList (void)
 	{
 		currententity = cl_visedicts[i];
 
-		if (currententity == &cl_entities[cl.viewentity])
-			continue;	// don't draw the player
+		// Phase 7 editor: free-fly camera detaches from the player, so we
+		// want the player's own model to be visible (you can see where you
+		// would be standing). Quake otherwise culls the local body here so
+		// you don't see your own legs through the floor.
+		{
+			extern int Editor_ShouldDrawPlayer(void);
+			if (currententity == &cl_entities[cl.viewentity] && !Editor_ShouldDrawPlayer())
+				continue;
+		}
 
 		switch (currententity->model->type)
 		{
@@ -612,7 +619,12 @@ void R_DrawViewModel (void)
 	vec3_t		dist;
 	float		add;
 	dlight_t	*dl;
-	
+	extern int  Editor_ShouldDrawPlayer(void);
+
+	// Phase 7 editor: free-fly camera renders the player body, so a
+	// floating viewmodel at the camera origin would look wrong.
+	if (Editor_ShouldDrawPlayer()) return;
+
 	if (!r_drawviewmodel.value || r_fov_greater_than_90)
 		return;
 
@@ -697,6 +709,8 @@ Mirrors R_DrawViewModel's preconditions; bails early for the 3D alias case
 */
 void R_DrawViewModel_2DPass (void)
 {
+	extern int Editor_ShouldDrawPlayer(void);
+	if (Editor_ShouldDrawPlayer()) return;
 	if (!r_drawviewmodel.value || r_fov_greater_than_90)
 		return;
 	if (cl.items & IT_INVISIBILITY)
@@ -996,6 +1010,13 @@ void R_RenderView_ (void)
 
 	if (r_timegraph.value || r_speeds.value || r_dspeeds.value)
 		r_time1 = Sys_FloatTime ();
+
+	// Phase 7 editor: free-fly camera overrides r_refdef.vieworg /
+	// viewangles before R_SetupFrame derives r_origin / vpn / etc.
+	{
+		extern void Editor_PreRender(void);
+		Editor_PreRender();
+	}
 
 	R_SetupFrame ();
 

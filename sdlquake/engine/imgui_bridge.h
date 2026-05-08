@@ -71,6 +71,8 @@ void  IG_SetIniFilename(const char *path);   // pass NULL to disable .ini
 // Per-frame info
 float IG_GetFramerate(void);
 int   IG_WantCaptureMouse(void);    // 1 if ImGui currently owns the mouse
+int   IG_WantCaptureKeyboard(void); // 1 if a text widget is focused
+void  IG_GetDisplaySize(float *w, float *h);
 
 // Frame lifecycle
 void  IG_NewFrame(void);

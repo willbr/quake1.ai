@@ -607,8 +607,13 @@ void CL_RelinkEntities (void)
 
 		ent->forcelink = false;
 
-		if (i == cl.viewentity && !chase_active.value)
-			continue;
+		// Phase 7 editor: free-fly camera also wants to see the local
+		// player model so the user can tell where they "are" in the world.
+		{
+			extern int Editor_ShouldDrawPlayer(void);
+			if (i == cl.viewentity && !chase_active.value && !Editor_ShouldDrawPlayer())
+				continue;
+		}
 
 #ifdef QUAKE2
 		if ( ent->effects & EF_NODRAW )

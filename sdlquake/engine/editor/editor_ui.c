@@ -17,15 +17,27 @@
 // Toolbar
 // -----------------------------------------------------------------------------
 
+// Layout constants (in window pixels). Toolbar runs across the top; brush
+// list anchors the bottom-left, inspector the bottom-right.
+#define UI_PAD          10
+#define UI_TOOLBAR_H    72
+#define UI_LEFT_W       320
+#define UI_RIGHT_W      360
+
 static void draw_toolbar(void)
 {
     extern cvar_t editor_render_style;
+    extern cvar_t editor_camera;
     static const char *style_items[] = {
         "wireframe", "flat", "flat+wire", "textured", "textured+wire"
     };
+    static const char *camera_items[] = { "free-fly", "fps" };
 
-    IG_SetNextWindowPos(10, 10, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize(620, 80, IG_Cond_FirstUseEver);
+    float disp_w = 1280, disp_h = 720;
+    IG_GetDisplaySize(&disp_w, &disp_h);
+
+    IG_SetNextWindowPos((float)UI_PAD, (float)UI_PAD, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize(disp_w - 2 * UI_PAD, (float)UI_TOOLBAR_H, IG_Cond_FirstUseEver);
     if (!IG_Begin("Editor", NULL, IG_WF_None)) { IG_End(); return; }
 
     if (IG_Button("Save"))         Cbuf_AddText("editor_save\n");
@@ -57,8 +69,23 @@ static void draw_toolbar(void)
     }
     IG_SameLine(0, -1);
     {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "  loaded: %s",
+        int cam = (int)editor_camera.value;
+        if (cam < 0) cam = 0;
+        if (cam >= (int)(sizeof(camera_items) / sizeof(camera_items[0])))
+            cam = (int)(sizeof(camera_items) / sizeof(camera_items[0])) - 1;
+        IG_SetNextItemWidth(110);
+        if (IG_Combo("camera (Tab)", &cam, camera_items,
+                     (int)(sizeof(camera_items) / sizeof(camera_items[0]))))
+        {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "editor_camera %d\n", cam);
+            Cbuf_AddText(buf);
+        }
+    }
+    {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "loaded: %s    hold RMB to look + WASD to move",
                  edit_scene.mapname[0] ? edit_scene.mapname : "(none)");
         IG_TextUnformatted(buf);
     }
@@ -73,9 +100,14 @@ static void draw_brush_list(void)
 {
     int i, j;
     char buf[128];
+    float disp_w = 1280, disp_h = 720;
+    IG_GetDisplaySize(&disp_w, &disp_h);
 
-    IG_SetNextWindowPos(10, 80, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize(260, 380, IG_Cond_FirstUseEver);
+    float y    = (float)(UI_PAD + UI_TOOLBAR_H + UI_PAD);
+    float h    = disp_h - y - UI_PAD;
+
+    IG_SetNextWindowPos((float)UI_PAD, y, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize((float)UI_LEFT_W, h, IG_Cond_FirstUseEver);
     if (!IG_Begin("Brushes", NULL, IG_WF_None)) { IG_End(); return; }
 
     snprintf(buf, sizeof(buf), "%d entities, ? brushes",
@@ -128,9 +160,15 @@ static void draw_inspector(void)
     edit_brush_t  *b;
     int i;
     char buf[128];
+    float disp_w = 1280, disp_h = 720;
+    IG_GetDisplaySize(&disp_w, &disp_h);
 
-    IG_SetNextWindowPos(280, 80, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize(320, 380, IG_Cond_FirstUseEver);
+    float y = (float)(UI_PAD + UI_TOOLBAR_H + UI_PAD);
+    float h = disp_h - y - UI_PAD;
+    float x = disp_w - UI_RIGHT_W - UI_PAD;
+
+    IG_SetNextWindowPos(x, y, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize((float)UI_RIGHT_W, h, IG_Cond_FirstUseEver);
     if (!IG_Begin("Inspector", NULL, IG_WF_None)) { IG_End(); return; }
 
     e = Scene_GetSelectedEntity();

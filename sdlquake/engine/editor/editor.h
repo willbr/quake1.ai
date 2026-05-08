@@ -27,6 +27,26 @@ int  Editor_IsPaused(void); // OR'd into host.c sim-pause check
 // during play. Cull-checks the camera against each brush's bbox.
 void Editor_RenderScene(void);
 
+// Pre-render hook: called from R_RenderView_ BEFORE R_SetupFrame so we can
+// override r_refdef.vieworg / viewangles when in free-fly camera mode.
+// Also reads keyboard / mouse delta to drive the editor camera.
+void Editor_PreRender(void);
+
+// 1 when the editor's RMB-look mode is active (cursor captured for
+// mouse-look). in_sdl.c uses this to decide whether ImGui's keyboard /
+// mouse capture should be bypassed and routed to the player input.
+int  Editor_AllowGameInput(void);
+int  Editor_LookmodeActive(void);
+
+// Cycle editor_camera between 0 (free-fly) and 1 (FPS). Bound to Tab in
+// in_sdl.c.
+void Editor_CycleCameraMode(void);
+
+// 1 when the engine should render the local player's model. Quake normally
+// culls cl_entities[cl.viewentity] (you don't see your own legs), but in
+// free-fly mode the camera has detached so we want it visible.
+int  Editor_ShouldDrawPlayer(void);
+
 // ImGui hook: called from ImguiLayer_Render between NewFrame and Render.
 // Editor toolbar/inspector/brush list panels.
 void Editor_DrawUI(void);

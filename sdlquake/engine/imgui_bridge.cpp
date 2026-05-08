@@ -17,6 +17,13 @@ void IG_SetIniFilename(const char *p)   { ImGui::GetIO().IniFilename = p; }
 // Per-frame info
 float IG_GetFramerate(void)             { return ImGui::GetIO().Framerate; }
 int   IG_WantCaptureMouse(void)         { return ImGui::GetIO().WantCaptureMouse ? 1 : 0; }
+int   IG_WantCaptureKeyboard(void)      { return ImGui::GetIO().WantCaptureKeyboard ? 1 : 0; }
+void  IG_GetDisplaySize(float *w, float *h)
+{
+    ImVec2 sz = ImGui::GetIO().DisplaySize;
+    if (w) *w = sz.x;
+    if (h) *h = sz.y;
+}
 
 // Frame lifecycle
 void IG_NewFrame(void)  { ImGui::NewFrame(); }
