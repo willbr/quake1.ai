@@ -435,14 +435,31 @@ void R_DrawViewModelSprite (entity_t *e)
 	vp_w = r_refdef.vrect.width;
 	vp_h = r_refdef.vrect.height;
 
-	// Rest position: bottom-centered, gun bottom flush with the sbar top.
-	// Doom's |sin| pulls the gun further down on the bob (sy increases),
-	// briefly into sbar territory; Sbar_Draw runs after the viewmodel and
-	// overdraws the sbar zone every frame (see vid.numpages bump in vid_sdl.c
-	// — the original optimization that skipped redrawing the sbar relied on
-	// VRAM-page persistence we don't have under SDL).
-	sx = vp_x + (vp_w - frame->width) / 2;
-	sy = vp_y +  vp_h - frame->height;
+	if (e->model->palette_id == 1)
+	{
+		// Doom-authentic anchoring (p_pspr.c WEAPONTOP=32 + r_things.c
+		// R_DrawPSprite). The Phase 6 extractor stores Doom's WAD leftoffset
+		// in the SPR's origin[0] and topoffset in origin[1]; Mod_LoadSpriteFrame
+		// puts these into frame->left and frame->up respectively. Doom positions
+		// every weapon at (centerx + (sx_psp - 160 - leftoff) * scale, centery -
+		// (BASEYCENTER + 0.5 - sy_psp + topoff) * scale). With sx_psp=0,
+		// sy_psp=WEAPONTOP=32, scale=1, BASEYCENTER=100, and Doom's
+		// sbar-mode centery=84, this reduces to:
+		//   sx = vp_x + vp_w/2 - 160 - leftoff
+		//   sy = vp_y + 16 - topoff (the 0.5 fractional rounds down)
+		// The sprite's bottom can extend past vrect bottom; R_BlitSpriteScreen
+		// clips at vrect, mimicking Doom's status-bar overdraw of the gun.
+		sx = vp_x + (vp_w / 2) - 160 - (int)frame->left;
+		sy = vp_y + 16 - (int)frame->up;
+	}
+	else
+	{
+		// Bottom-centered anchor (Wolf3D and any other non-Doom SPR).
+		// Wolf3D's DrawPlayerWeapon scales the sprite to viewheight, so a
+		// flush bottom anchor is the closest analog.
+		sx = vp_x + (vp_w - frame->width) / 2;
+		sy = vp_y +  vp_h - frame->height;
+	}
 
 	// Heal `r_doom_bob_last_time` after a level reload (or any other time
 	// warp where cl.time runs backward) so the next delta isn't a large

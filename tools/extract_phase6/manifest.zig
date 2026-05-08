@@ -223,6 +223,11 @@ fn decodeDoomLump(allocator: Allocator, wad: *doom_wad.Wad, name: []const u8) !D
 const Composed = struct {
     width:  u16,
     height: u16,
+    // Effective Doom-style offsets for the composited canvas. Computed so that
+    // the gun's anchor in screen space stays at exactly where it would have
+    // been if rendered alone (the flash is just decoration above the gun).
+    left_offset: i32,
+    top_offset:  i32,
     pixels: []u8,
 };
 
@@ -276,10 +281,16 @@ fn compositeFlash(allocator: Allocator, gun: DoomPic, flash: DoomPic) !Composed 
     blitPixels(canvas, canvas_w, canvas_h, gun.pixels, gw, gh, gx, gy);
     blitPixels(canvas, canvas_w, canvas_h, flash.pixels, fw, fh, fx, fy);
 
+    // The gun was placed at (gx, gy) within the canvas. To keep the gun's
+    // screen-space anchor identical to bare-gun rendering, shift the
+    // canvas-effective offsets by gx/gy: gun_anchor_in_canvas =
+    // (gx + gun.left_offset, gy + gun.top_offset).
     return .{
-        .width  = @intCast(canvas_w),
-        .height = @intCast(canvas_h),
-        .pixels = canvas,
+        .width       = @intCast(canvas_w),
+        .height      = @intCast(canvas_h),
+        .left_offset = @as(i32, gun.left_offset) + gx,
+        .top_offset  = @as(i32, gun.top_offset)  + gy,
+        .pixels      = canvas,
     };
 }
 
@@ -386,17 +397,11 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
         std.debug.print("  wrote {s} (768 bytes)\n", .{out_path});
     }
 
-    // Doom sprites are large at native size (e.g. CHGGA0 is 114x83). Doom
-    // itself anchors weapon sprites at WEAPONTOP=32 in the viewport, with
-    // negative topoffsets pulling much of the gun below the status-bar line
-    // where it gets overdrawn -- so the visible portion of Doom's chaingun
-    // is much smaller than the raw 114x83. Our renderer bottom-anchors and
-    // doesn't drop into a sbar zone, so we need to downscale to compensate.
-    // 2/3 brings the chaingun idle from 114x83 to 76x55 (31% of vrect, gun
-    // top at ~69% from screen top); pistol/shotgun/rocket/fist/saw scale
-    // proportionally and stay in the bottom-third of the screen.
-    const DOOM_SCALE_NUM: u32 = 2;
-    const DOOM_SCALE_DEN: u32 = 3;
+    // Doom-authentic anchoring: emit each Doom sprite at its native size and
+    // pass through the WAD's leftoffset / topoffset values via SPR's
+    // origin_x / origin_y. R_DrawViewModelSprite then anchors the sprite
+    // using Doom's WEAPONTOP+topoffset math so the gun's bottom extends past
+    // vrect bottom (clipped, like Doom's sbar overdraws). No downscale.
 
     for (doom_sprite_sets) |set| {
         // Doom sprites vary in size — allocate per frame.
@@ -415,13 +420,13 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
             const spec = set.frames[i];
             const gun = try decodeDoomLump(allocator, &w, spec.lump);
 
-            // Step 1: build a raw frame buffer (either bare gun, or
-            // gun + composited flash). decodeDoomLump heap-allocs gun.pixels;
-            // compositeFlash heap-allocs its own canvas. Whichever wins is
-            // tracked in raw_pixels and freed after the downscale below.
+            // Build either bare gun or gun + composited flash. Pass through
+            // Doom-style offsets so the renderer can use WEAPONTOP+topoffset.
             var raw_w: u32 = 0;
             var raw_h: u32 = 0;
             var raw_pixels: []u8 = &.{};
+            var raw_left_off: i32 = 0;
+            var raw_top_off: i32 = 0;
             if (spec.flash) |flash_name| {
                 if (w.findLump(flash_name)) |_| {
                     const flash = try decodeDoomLump(allocator, &w, flash_name);
@@ -431,33 +436,32 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
                     raw_w = composed.width;
                     raw_h = composed.height;
                     raw_pixels = composed.pixels;
+                    raw_left_off = composed.left_offset;
+                    raw_top_off = composed.top_offset;
                 } else {
                     std.debug.print("  WARNING: Doom flash lump '{s}' missing — skipping flash on {s}\n",
                         .{ flash_name, spec.lump });
                     raw_w = gun.width;
                     raw_h = gun.height;
                     raw_pixels = gun.pixels;
+                    raw_left_off = gun.left_offset;
+                    raw_top_off = gun.top_offset;
                 }
             } else {
                 raw_w = gun.width;
                 raw_h = gun.height;
                 raw_pixels = gun.pixels;
+                raw_left_off = gun.left_offset;
+                raw_top_off = gun.top_offset;
             }
 
-            // Step 2: 3/4 nearest-neighbor downscale.
-            const dst_w: u32 = raw_w * DOOM_SCALE_NUM / DOOM_SCALE_DEN;
-            const dst_h: u32 = raw_h * DOOM_SCALE_NUM / DOOM_SCALE_DEN;
-            const dst_pixels = try allocator.alloc(u8, @as(usize, dst_w) * @as(usize, dst_h));
-            resampleNearest(raw_pixels, raw_w, raw_h, dst_pixels, dst_w, dst_h);
-            allocator.free(raw_pixels);
-
-            pixel_bufs[i] = dst_pixels;
+            pixel_bufs[i] = raw_pixels;
             frames[i] = .{
-                .width    = dst_w,
-                .height   = dst_h,
-                .pixels   = dst_pixels,
-                .origin_x = -@divTrunc(@as(i32, @intCast(dst_w)), 2),
-                .origin_y = @intCast(dst_h),
+                .width    = raw_w,
+                .height   = raw_h,
+                .pixels   = raw_pixels,
+                .origin_x = raw_left_off,
+                .origin_y = raw_top_off,
             };
         }
         try quake_spr.writeSprite(io, allocator, set.out_path, frames);
