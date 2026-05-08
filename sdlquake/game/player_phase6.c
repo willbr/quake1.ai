@@ -276,40 +276,36 @@ void player_doomshotgun1(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
-// Doom rocket launcher -- S_MISSILE1 (8 tics, A_GunFlash, no actual fire)
-// then S_MISSILE2 (12 tics, A_FireMissile, fires). S_MISSILE3 0-tic A_ReFire
-// folded into attack_finished. Total 20 tics + 7 tic extra settle = 27 tics
-// ~= 0.771 s.
-//
-// Doom's flash layer (S_MISSILEFLASH1..4 = 3+4+4+4 = 15 tics) overlays only
-// the first 15 tics: all of S_MISSILE1 (8 tics) plus the first 7 tics of
-// S_MISSILE2. The last 5 tics of S_MISSILE2 show the gun without the flash.
-// We approximate by splitting S_MISSILE2 into two sub-steps so the
-// composited flash frame doesn't linger for the entire 20-tic firing
-// animation -- it disappears at tic 15 like Doom.
+// Doom rocket launcher -- depart from Doom's 15-tic flash; the composited
+// flash frame is bright enough that even Doom's duration feels distractingly
+// long. Cut the flash to 4 tics (single ~0.11s muzzle "snap" on fire, like
+// the pistol's S_PISTOL2 flash), then settle on the no-flash MISGB for the
+// remainder of the 20-tic firing window. Total chain length and 7-tic refire
+// padding are unchanged so the rate-of-fire and feel of the lockout match
+// Doom's rocket cadence.
 //
 // Frame layout in v_doomrocket.spr:
 //   0 = MISGA (idle / lowered)         -- not used in attack chain
-//   1 = MISGB + MISFA composited (fire pose with flash) -- S_MISSILE1 + early S_MISSILE2
-//   2 = MISGB (settle, no flash) -- late S_MISSILE2
+//   1 = MISGB + MISFA composited       -- shown only on the 4-tic fire snap
+//   2 = MISGB (no flash)               -- pre-fire pose + post-fire settle
 // ---------------------------------------------------------------------------
 
 static void player_doomrocket2_think(edict_t *self);
 static void player_doomrocket3_think(edict_t *self);
 static void player_doomrocket4_think(edict_t *self);
 
-// S_MISSILE1: flash already up; no fire yet (8 tics, flash present).
+// Pre-fire pose (8 tics, no flash). Replaces Doom's S_MISSILE1 flash hold.
 static void player_doomrocket1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     1, DOOM_8_TIC, player_doomrocket2_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY,     2, DOOM_8_TIC, player_doomrocket2_think);
 }
-// First 7 tics of S_MISSILE2: fire here, flash still present.
+// Fire snap (4 tics, with flash). Rocket leaves here.
 static void player_doomrocket2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_7_TIC, player_doomrocket3_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 1, DOOM_4_TIC, player_doomrocket3_think);
     DoomRocket_DoFire(self);
 }
-// Last 5 tics of S_MISSILE2: flash has expired, switch to no-flash settle.
+// Post-fire settle (8 tics, no flash).
 static void player_doomrocket3_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, DOOM_5_TIC, player_doomrocket4_think);
+    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, DOOM_8_TIC, player_doomrocket4_think);
 }
 // Back to idle.
 static void player_doomrocket4_think(edict_t *self) {
