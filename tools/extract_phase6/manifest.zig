@@ -160,20 +160,20 @@ fn applyRemap(rmap: [256]u8, pixels: []u8) void {
     for (pixels) |*p| p.* = rmap[p.*];
 }
 
-/// Nearest-neighbor upscale. dst dims must be integer multiples of src dims.
-fn upscaleNearest(
+/// Nearest-neighbor resample. Handles both upscale and downscale at any
+/// ratio (need not be an integer multiple). Used for Wolf 3x upscale and
+/// the Doom 3/4 downscale.
+fn resampleNearest(
     src: []const u8, src_w: u32, src_h: u32,
     dst: []u8,       dst_w: u32, dst_h: u32,
 ) void {
-    const sx = dst_w / src_w;
-    const sy = dst_h / src_h;
     var y: u32 = 0;
     while (y < dst_h) : (y += 1) {
-        const sy_idx = y / sy;
+        const sy = y * src_h / dst_h;
         var x: u32 = 0;
         while (x < dst_w) : (x += 1) {
-            const sx_idx = x / sx;
-            dst[y * dst_w + x] = src[sy_idx * src_w + sx_idx];
+            const sx = x * src_w / dst_w;
+            dst[y * dst_w + x] = src[sy * src_w + sx];
         }
     }
 }
@@ -335,7 +335,7 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
         while (fi < set.frame_count) : (fi += 1) {
             try v.decodeSprite(set.base_idx + fi, &decode_buf);
             applyRemap(wolf_remap, &decode_buf);
-            upscaleNearest(
+            resampleNearest(
                 &decode_buf, wolf_vswap.SPRITE_DIM, wolf_vswap.SPRITE_DIM,
                 &pixel_storage[fi], WOLF_VIEW_DIM, WOLF_VIEW_DIM,
             );
@@ -384,6 +384,13 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
         std.debug.print("  wrote {s} (768 bytes)\n", .{out_path});
     }
 
+    // Doom sprites are large at native size (e.g. CHGGA0 is 114x83). When
+    // bottom-anchored to vrect they extend close to half the screen. Apply a
+    // uniform 3/4 nearest-neighbor downscale at extract time so the on-screen
+    // viewmodel feels closer to a typical FPS-gun footprint.
+    const DOOM_SCALE_NUM: u32 = 3;
+    const DOOM_SCALE_DEN: u32 = 4;
+
     for (doom_sprite_sets) |set| {
         // Doom sprites vary in size — allocate per frame.
         var frames = try allocator.alloc(quake_spr.Frame, set.frames.len);
@@ -400,34 +407,50 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
         while (i < set.frames.len) : (i += 1) {
             const spec = set.frames[i];
             const gun = try decodeDoomLump(allocator, &w, spec.lump);
-            // gun.pixels is heap-allocated — either we keep it (no flash) or
-            // we hand it to compositeFlash, which frees it after blitting.
+
+            // Step 1: build a raw frame buffer (either bare gun, or
+            // gun + composited flash). decodeDoomLump heap-allocs gun.pixels;
+            // compositeFlash heap-allocs its own canvas. Whichever wins is
+            // tracked in raw_pixels and freed after the downscale below.
+            var raw_w: u32 = 0;
+            var raw_h: u32 = 0;
+            var raw_pixels: []u8 = &.{};
             if (spec.flash) |flash_name| {
                 if (w.findLump(flash_name)) |_| {
                     const flash = try decodeDoomLump(allocator, &w, flash_name);
                     const composed = try compositeFlash(allocator, gun, flash);
                     allocator.free(gun.pixels);
                     allocator.free(flash.pixels);
-                    pixel_bufs[i] = composed.pixels;
-                    frames[i] = .{
-                        .width    = composed.width,
-                        .height   = composed.height,
-                        .pixels   = composed.pixels,
-                        .origin_x = -@divTrunc(@as(i32, composed.width), 2),
-                        .origin_y = composed.height,
-                    };
-                    continue;
+                    raw_w = composed.width;
+                    raw_h = composed.height;
+                    raw_pixels = composed.pixels;
+                } else {
+                    std.debug.print("  WARNING: Doom flash lump '{s}' missing — skipping flash on {s}\n",
+                        .{ flash_name, spec.lump });
+                    raw_w = gun.width;
+                    raw_h = gun.height;
+                    raw_pixels = gun.pixels;
                 }
-                std.debug.print("  WARNING: Doom flash lump '{s}' missing — skipping flash on {s}\n",
-                    .{ flash_name, spec.lump });
+            } else {
+                raw_w = gun.width;
+                raw_h = gun.height;
+                raw_pixels = gun.pixels;
             }
-            pixel_bufs[i] = gun.pixels;
+
+            // Step 2: 3/4 nearest-neighbor downscale.
+            const dst_w: u32 = raw_w * DOOM_SCALE_NUM / DOOM_SCALE_DEN;
+            const dst_h: u32 = raw_h * DOOM_SCALE_NUM / DOOM_SCALE_DEN;
+            const dst_pixels = try allocator.alloc(u8, @as(usize, dst_w) * @as(usize, dst_h));
+            resampleNearest(raw_pixels, raw_w, raw_h, dst_pixels, dst_w, dst_h);
+            allocator.free(raw_pixels);
+
+            pixel_bufs[i] = dst_pixels;
             frames[i] = .{
-                .width    = gun.width,
-                .height   = gun.height,
-                .pixels   = gun.pixels,
-                .origin_x = -@divTrunc(@as(i32, gun.width), 2),
-                .origin_y = gun.height,
+                .width    = dst_w,
+                .height   = dst_h,
+                .pixels   = dst_pixels,
+                .origin_x = -@divTrunc(@as(i32, @intCast(dst_w)), 2),
+                .origin_y = @intCast(dst_h),
             };
         }
         try quake_spr.writeSprite(io, allocator, set.out_path, frames);
