@@ -165,6 +165,9 @@ int   Entity_IsPoint        (const edit_entity_t *e);
 int   Entity_GetOrigin      (const edit_entity_t *e, vec3_t out);
 // Adds `delta` to the entity's origin. Creates the "origin" key if missing.
 void  Entity_TranslateOrigin(edit_entity_t *e, const vec3_t delta);
+// Upsert a kv pair (replace by key if present, else append). Refreshes the
+// classname_idx / origin_idx caches when those keys change.
+void  Entity_SetKV          (edit_entity_t *e, const char *key, const char *value);
 
 // Selection helpers. The list-based API treats the *primary* (last-added)
 // brush as the focal one — that's what GetSelected{Brush,Entity} return,

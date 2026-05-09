@@ -496,6 +496,16 @@ void Entity_TranslateOrigin(edit_entity_t *e, const vec3_t delta)
     snprintf(e->kv[idx].value, EDIT_VAL_LEN, "%g %g %g", o[0], o[1], o[2]);
 }
 
+void Entity_SetKV(edit_entity_t *e, const char *key, const char *value)
+{
+    int idx;
+    if (!e || !key || !key[0]) return;
+    idx = kv_find(e, key);
+    if (idx < 0) idx = kv_append(e, key);
+    Q_strncpy(e->kv[idx].value, value ? value : "", EDIT_VAL_LEN - 1);
+    e->kv[idx].value[EDIT_VAL_LEN - 1] = '\0';
+}
+
 int Scene_AddPointEntity(const char *classname, const vec3_t origin)
 {
     edit_entity_t e;

@@ -290,6 +290,90 @@ static void Editor_Cmd_Status_f(void)
 }
 
 // -----------------------------------------------------------------------------
+// Populate edit_scene from a running server (editor opened without editor_load)
+// -----------------------------------------------------------------------------
+//
+// When the user does `+map start` and opens the editor without first running
+// editor_load, edit_scene is empty and they see no entities. Build a virtual
+// scene directly from sv.edicts so monsters / lights / players / triggers
+// are immediately selectable and draggable. Brushes from the BSP stay
+// outside edit_scene (the engine renders them as part of cl.worldmodel).
+
+static void populate_entity_from_edict(edict_t *ed, edit_entity_t *e)
+{
+    char buf[256];
+    memset(e, 0, sizeof(*e));
+    e->classname_idx = -1;
+    e->origin_idx    = -1;
+    e->live_ent      = ed;
+    e->spawned       = 1;       // already in the world
+
+    if (ed->v.classname && ed->v.classname[0])
+        Entity_SetKV(e, "classname", ed->v.classname);
+
+    snprintf(buf, sizeof(buf), "%g %g %g",
+             ed->v.origin[0], ed->v.origin[1], ed->v.origin[2]);
+    Entity_SetKV(e, "origin", buf);
+
+    if (ed->v.angles[1] != 0)
+    {
+        snprintf(buf, sizeof(buf), "%g", ed->v.angles[1]);
+        Entity_SetKV(e, "angle", buf);
+    }
+    if (ed->v.spawnflags != 0)
+    {
+        snprintf(buf, sizeof(buf), "%g", ed->v.spawnflags);
+        Entity_SetKV(e, "spawnflags", buf);
+    }
+    if (ed->v.target && ed->v.target[0])
+        Entity_SetKV(e, "target", ed->v.target);
+    if (ed->v.targetname && ed->v.targetname[0])
+        Entity_SetKV(e, "targetname", ed->v.targetname);
+}
+
+static void Editor_PopulateFromServer(void)
+{
+    int i, n;
+    if (!sv.active) return;
+    Scene_Clear();
+    History_Clear();
+
+    // Conservative upper bound for the entities array; we'll only fill the
+    // slots that pass the filter loop below.
+    edit_scene.entities = (edit_entity_t *)malloc(
+        sv.num_edicts * sizeof(edit_entity_t));
+    n = 0;
+    for (i = 1; i < sv.num_edicts; i++)         // 1: skip worldspawn
+    {
+        edict_t *ed = EDICT_NUM(i);
+        if (ed->free) continue;
+        if (!ed->v.classname || !ed->v.classname[0]) continue;
+        // Brush entities (func_door etc) own a BSP submodel — kv editing is
+        // useful but we don't pull their brushes into edit_scene; their
+        // visuals come from the engine's bmodel pipeline.
+        populate_entity_from_edict(ed, &edit_scene.entities[n]);
+        n++;
+    }
+    edit_scene.numentities = n;
+
+    // Track the current map so the Restart button + a future explicit
+    // editor_save know what to write to. Filename stays empty so auto-save
+    // on close stays a no-op — overwriting id1/maps/<name>.map silently
+    // would destroy any existing source .map (test.map etc.).
+    if (sv.name[0])
+    {
+        size_t l = strlen(sv.name);
+        if (l >= sizeof(edit_scene.mapname)) l = sizeof(edit_scene.mapname) - 1;
+        memcpy(edit_scene.mapname, sv.name, l);
+        edit_scene.mapname[l] = '\0';
+    }
+    edit_scene.filename[0] = '\0';
+
+    Con_Printf("editor: populated %d entities from running server (%s)\n",
+               n, edit_scene.mapname[0] ? edit_scene.mapname : "(no name)");
+}
+
+// -----------------------------------------------------------------------------
 // Spawn pending point entities (closing the editor → live edicts)
 // -----------------------------------------------------------------------------
 //
@@ -441,6 +525,21 @@ void Editor_Shutdown(void)
 void Editor_Toggle(void)
 {
     if (!s_inited) return;
+
+    // Opening the editor without an explicit editor_load: build edit_scene
+    // from the running server's edicts so monsters / lights / players are
+    // selectable and editable. Re-runs when the map name changes (so a
+    // mid-session +map command picks up the new world). Skipped if the
+    // user already loaded a .map manually (filename non-empty), which we
+    // treat as "they explicitly chose the source".
+    if (!s_open && sv.active)
+    {
+        int need_populate = (edit_scene.numentities == 0)
+            || (edit_scene.filename[0] == '\0'
+                && strcmp(edit_scene.mapname, sv.name) != 0);
+        if (need_populate)
+            Editor_PopulateFromServer();
+    }
 
     // Closing the editor: spawn any newly-placed point entities into the
     // live server so the player can actually touch them, then auto-save
