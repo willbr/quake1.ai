@@ -99,11 +99,7 @@ static void draw_toolbar(void)
         Cbuf_AddText(buf);
     }
     IG_SameLine(0, -1);
-    // Spawn a 64-unit cube ~128 units in front of the camera, snapped to a
-    // 16-unit grid. The console command does the camera math too — keep them
-    // in sync.
-    if (IG_Button("Add cube"))     Cbuf_AddText("editor_brush_add_cube\n");
-    IG_SameLine(0, -1);
+    // (Add cube moved to row 2, paired with the texture picker.)
     if (IG_Button("Group"))        Cbuf_AddText("editor_group\n");
     IG_SameLine(0, -1);
     if (IG_Button("Ungroup"))      Cbuf_AddText("editor_ungroup\n");
@@ -247,6 +243,62 @@ static void draw_toolbar(void)
             Cbuf_AddText(buf);
         }
     }
+    // Brush palette: texture combo + Add cube. Texture list is pulled from
+    // the loaded worldmodel each frame — names point straight into
+    // worldmodel->textures[i]->name so the combo cost is one ptr-array
+    // build per worldmodel swap. Skip slots that are NULL (parser holes)
+    // or empty-named.
+    {
+        extern cvar_t editor_brush_tex;
+        static const char **s_tex_names    = NULL;
+        static int          s_tex_cap      = 0;
+        static int          s_tex_count    = 0;
+        static void        *s_tex_world    = (void *)(intptr_t)-1;
+        int    sel = 0, i;
+
+        if ((void *)cl.worldmodel != s_tex_world)
+        {
+            s_tex_world = (void *)cl.worldmodel;
+            s_tex_count = 0;
+            if (cl.worldmodel && cl.worldmodel->textures
+             && cl.worldmodel->numtextures > 0)
+            {
+                if (cl.worldmodel->numtextures > s_tex_cap)
+                {
+                    s_tex_cap = cl.worldmodel->numtextures;
+                    s_tex_names = (const char **)realloc(s_tex_names,
+                        sizeof(*s_tex_names) * (size_t)s_tex_cap);
+                }
+                for (i = 0; i < cl.worldmodel->numtextures; i++)
+                {
+                    texture_t *t = cl.worldmodel->textures[i];
+                    if (t && t->name[0])
+                        s_tex_names[s_tex_count++] = t->name;
+                }
+            }
+        }
+
+        for (i = 0; i < s_tex_count; i++)
+        {
+            if (!strcmp(s_tex_names[i], editor_brush_tex.string))
+            { sel = i; break; }
+        }
+
+        IG_SetNextItemWidth(180);
+        if (s_tex_count > 0)
+        {
+            if (IG_Combo("brush tex", &sel, s_tex_names, s_tex_count))
+                Cvar_Set("editor_brush_tex", (char *)s_tex_names[sel]);
+        }
+        else
+        {
+            IG_TextUnformatted("brush tex (no map loaded)");
+        }
+        IG_SameLine(0, -1);
+        if (IG_Button("Add cube"))
+            Cbuf_AddText("editor_brush_add_cube\n");
+    }
+    IG_SameLine(0, -1);
     // Entity palette: classname combo + Add button. Sits on the next row
     // below the main button strip. Selection persists across frames so the
     // user can spam Add to drop several of the same kind.

@@ -90,6 +90,12 @@ cvar_t      editor_view_mode     = { "editor_view_mode", "0" };
 cvar_t      editor_show_angles   = { "editor_show_angles", "0" };
 cvar_t      editor_show_links    = { "editor_show_links",  "1" };
 
+// Default texture for newly-spawned cube brushes. The toolbar texture
+// picker writes here; Editor_Cmd_AddCube_f reads it. Falls through to
+// Scene_AddCubeBrush's "wbrick1_5" hardcoded fallback if blanked out
+// or set to a name that isn't in the loaded worldmodel.
+cvar_t      editor_brush_tex     = { "editor_brush_tex", "wbrick1_5" };
+
 static int     s_lookmode      = 0;
 static int     s_camera_inited = 0;
 static vec3_t  s_cam_origin;
@@ -316,6 +322,7 @@ static void Editor_Cmd_AddCube_f(void)
 {
     vec3_t center, mins, maxs;
     int i;
+    const char *tex;
     const float HALF = 32.0f;       // 64-unit cube
     compute_camera_focal(center);
     for (i = 0; i < 3; i++)
@@ -323,10 +330,13 @@ static void Editor_Cmd_AddCube_f(void)
         mins[i] = center[i] - HALF;
         maxs[i] = center[i] + HALF;
     }
+    tex = editor_brush_tex.string;
+    if (!tex || !tex[0]) tex = NULL;     // Scene_AddCubeBrush picks default
     History_Push("add cube");
-    if (Scene_AddCubeBrush(mins, maxs, NULL))
-        Con_Printf("editor: added cube at %.0f %.0f %.0f\n",
-                   center[0], center[1], center[2]);
+    if (Scene_AddCubeBrush(mins, maxs, tex))
+        Con_Printf("editor: added cube at %.0f %.0f %.0f tex='%s'\n",
+                   center[0], center[1], center[2],
+                   tex ? tex : "(default)");
 }
 
 // List every texture in cl.worldmodel — these are the names that brush face
@@ -602,6 +612,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_view_mode);
     Cvar_RegisterVariable(&editor_show_angles);
     Cvar_RegisterVariable(&editor_show_links);
+    Cvar_RegisterVariable(&editor_brush_tex);
 
     {
         extern void Editor_RegisterCvars(void);
