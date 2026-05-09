@@ -950,7 +950,7 @@ static void draw_angle_arrows(void)
 {
     int i, j;
     vec3_t a, dir, b;
-    const float arrow_len = 24.0f;     // ~1.5 build grid cells; reads
+    const float arrow_len = 48.0f;     // 3 build grid cells; reads well
                                        // beyond a typical 32-unit bbox
 
     for (i = 0; i < edit_scene.numentities; i++)
