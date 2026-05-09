@@ -130,6 +130,56 @@ static void set_lookmode(int on);
 // Console commands
 // -----------------------------------------------------------------------------
 
+// Build a minimal playable scaffold: a sealed 256-cube hollow room with
+// 16-unit walls, an info_player_start above the floor, and a func_door
+// brush waiting inside. Provides a known-good starting scene so
+// editor_compile + walk-into-door works end-to-end without the user
+// needing to author from scratch each session. Caller has already run
+// History_Clear + Scene_Clear if appropriate.
+static void scaffold_build_test_room(const char *mapname)
+{
+    vec3_t r_mins = { -128, -128,    0 };  /* floor at z=0 */
+    vec3_t r_maxs = {  128,  128,  128 };
+    vec3_t door_mins = {  16,   80,    0 };
+    vec3_t door_maxs = {  48,  112,   96 };
+    vec3_t spawn     = { -64,    0,   24 };
+    int    door_ent_idx;
+
+    /* Big solid cube; Hollow turns it into 6 wall slabs. */
+    Scene_AddCubeBrush(r_mins, r_maxs, "wbrick1_5");
+    Scene_HollowBrush(0 /*worldspawn*/, 0, 16);
+
+    /* Door brush — added to worldspawn, then wrapped into a func_door. */
+    Scene_AddCubeBrush(door_mins, door_maxs, "wbrick1_5");
+    Scene_WrapBrushesIntoEntity("func_door");
+    door_ent_idx = edit_scene.numentities - 1;
+    Editor_ApplyClassnameDefaults(&edit_scene.entities[door_ent_idx],
+                                  "func_door");
+    /* angle -1 = "moves up", more obviously a working door than the
+     * default east slide. */
+    Entity_SetKV(&edit_scene.entities[door_ent_idx], "angle", "-1");
+
+    /* Player spawn inside the room, above the floor at eye height. */
+    Scene_AddPointEntity("info_player_start", spawn);
+
+    Q_strncpy(edit_scene.mapname, mapname,
+              sizeof(edit_scene.mapname) - 1);
+    edit_scene.mapname[sizeof(edit_scene.mapname) - 1] = '\0';
+    edit_scene.filename[0] = '\0';   /* not yet saved to disk */
+
+    Scene_SelectionClear();
+    Con_Printf("editor: built scaffold scene (mapname=%s, "
+               "%d entities)\n", mapname, edit_scene.numentities);
+}
+
+static void Editor_Cmd_New_f(void)
+{
+    const char *name = (Cmd_Argc() >= 2) ? Cmd_Argv(1) : "test";
+    History_Clear();
+    Scene_Clear();
+    scaffold_build_test_room(name);
+}
+
 static void Editor_Cmd_Open_f(void)
 {
     char path[256];
@@ -137,6 +187,7 @@ static void Editor_Cmd_Open_f(void)
     if (Cmd_Argc() < 2)
     {
         Con_Printf("usage: editor_load <mapname>  (loads id1/maps/<name>.map)\n");
+        Con_Printf("       editor_new [<mapname>] (build scaffold scene)\n");
         return;
     }
     name = Cmd_Argv(1);
@@ -144,7 +195,15 @@ static void Editor_Cmd_Open_f(void)
 
     if (!Scene_Load(path))
     {
-        Con_Printf("editor_load: failed to read %s\n", path);
+        /* Fall through to the scaffold so the user has something
+         * usable instead of a load error. They can immediately
+         * editor_compile to see it; editor_save will write a fresh
+         * <name>.map to disk. */
+        Con_Printf("editor_load: %s not found — building scaffold scene\n",
+                   path);
+        History_Clear();
+        Scene_Clear();
+        scaffold_build_test_room(name);
         return;
     }
 
@@ -976,6 +1035,7 @@ void Editor_Init(void)
 
     Cmd_AddCommand("editor",        Editor_Cmd_Toggle_f);
     Cmd_AddCommand("editor_load",   Editor_Cmd_Open_f);
+    Cmd_AddCommand("editor_new",    Editor_Cmd_New_f);
     Cmd_AddCommand("editor_save",   Editor_Cmd_Save_f);
     Cmd_AddCommand("editor_revert", Editor_Cmd_Revert_f);
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
