@@ -507,18 +507,36 @@ static void point_entity_bbox(const edit_entity_t *e,
     vec3_t o, am, ax;
     int i;
 
-    // Live mode: use the live edict's absmin/absmax so the bbox tracks
-    // AI-moved monsters and brush entities (func_door etc) in their
-    // current state. Map mode falls through to the .map origin path so
-    // the bbox stays anchored at the source position.
+    // Live mode: prefer the visible model's bbox so the box hugs what's
+    // actually rendered. Items (item_health, item_shells, …) call
+    // SV_SetSize with a generous touch volume (e.g. 32×32×56) so the
+    // player can grab them easily, but the user wants the bbox to match
+    // the small ammo-box graphic, not the touch trigger. Monsters look
+    // tighter against the silhouette, and brush ents (func_door etc.)
+    // read identically since their submodel bbox equals absmin/absmax.
+    // Falls back to absmin/absmax when no model is loaded.
     if (view_live && e->live_ent && !e->live_ent->free)
     {
-        const float *amn = e->live_ent->v.absmin;
-        const float *amx = e->live_ent->v.absmax;
-        if (amx[0] > amn[0] || amx[1] > amn[1] || amx[2] > amn[2])
+        int      mi = (int)e->live_ent->v.modelindex;
+        model_t *m  = (mi > 0 && mi < MAX_MODELS) ? sv.models[mi] : NULL;
+        if (m && model_local_bbox(m, am, ax))
         {
-            for (i = 0; i < 3; i++) { out_mins[i] = amn[i]; out_maxs[i] = amx[i]; }
+            const float *org = e->live_ent->v.origin;
+            for (i = 0; i < 3; i++)
+            {
+                out_mins[i] = org[i] + am[i];
+                out_maxs[i] = org[i] + ax[i];
+            }
             return;
+        }
+        {
+            const float *amn = e->live_ent->v.absmin;
+            const float *amx = e->live_ent->v.absmax;
+            if (amx[0] > amn[0] || amx[1] > amn[1] || amx[2] > amn[2])
+            {
+                for (i = 0; i < 3; i++) { out_mins[i] = amn[i]; out_maxs[i] = amx[i]; }
+                return;
+            }
         }
     }
 
