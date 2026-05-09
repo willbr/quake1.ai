@@ -14,8 +14,9 @@
 //         }                          ; brush end
 //     }                              ; entity end
 
-#include "quakedef.h"
+#include "quakedef.h"           // pulls in client.h: cl_static_entities, cl.num_statics
 #include "edit_scene.h"
+#include "editor_internal.h"    // Editor_ClassnameToModel
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -275,8 +276,9 @@ static int parse_scene_text(char *src)
             // just parsed matches what the server already knows about) or
             // is brush-only and never had a server edict. Either way, the
             // editor shouldn't attempt to spawn it again on close.
-            e->spawned  = 1;
-            e->live_ent = NULL;     // re-linked below
+            e->spawned     = 1;
+            e->live_ent    = NULL;  // re-linked below
+            e->live_static = NULL;  // re-linked below (SV_MakeStatic'd ents)
         }
     }
 
@@ -313,6 +315,47 @@ static int parse_scene_text(char *src)
                 if (d2 < best_d2) { best_d2 = d2; best = ed; }
             }
             e->live_ent = best;
+        }
+    }
+
+    // Second matcher: bind SV_MakeStatic'd entities (flame torches etc.)
+    // to their cl_static_entities[] entry. Those edicts were ED_Free'd
+    // during the spawn function so the live-edict loop above couldn't
+    // find them — but the flame is still rendered every frame from the
+    // static list, so we need a handle into it for the gizmo to push
+    // origin updates. We match by expected model path (looked up from
+    // the classname → s_class_info table) + closest origin within a
+    // tight tolerance, since static entity placement is exact at signon.
+    if (sv.active && cl.num_statics > 0)
+    {
+        int i, j;
+        for (i = 0; i < edit_scene.numentities; i++)
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            const char  *cls, *mpath;
+            vec3_t       o;
+            entity_t    *best = NULL;
+            float        best_d2 = 4.0f * 4.0f;
+            if (!Entity_IsPoint(e)) continue;
+            if (e->live_ent) continue;             // already bound to a live edict
+            if (e->classname_idx < 0) continue;
+            cls   = e->kv[e->classname_idx].value;
+            mpath = Editor_ClassnameToModel(cls);
+            if (!mpath) continue;
+            Entity_GetOrigin(e, o);
+            for (j = 0; j < cl.num_statics; j++)
+            {
+                entity_t *ce = &cl_static_entities[j];
+                float dx, dy, dz, d2;
+                if (!ce->model) continue;
+                if (strcmp(ce->model->name, mpath) != 0) continue;
+                dx = ce->origin[0] - o[0];
+                dy = ce->origin[1] - o[1];
+                dz = ce->origin[2] - o[2];
+                d2 = dx*dx + dy*dy + dz*dz;
+                if (d2 < best_d2) { best_d2 = d2; best = ce; }
+            }
+            e->live_static = best;
         }
     }
     return ok;

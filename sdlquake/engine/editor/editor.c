@@ -319,13 +319,17 @@ static void editor_check_map_change(void)
     if (edit_scene.filename[0])
     {
         // User-loaded scene (editor_load): keep their entities, but every
-        // live_ent pointer references the old sv.edicts which is now reused
-        // for new entities. Null them so the gizmo doesn't drag a random
-        // unrelated edict, and clear the selection for the same reason.
+        // live_ent / live_static pointer references the old sv.edicts /
+        // cl_static_entities which is now reused for new entities. Null
+        // them so the gizmo doesn't drag a random unrelated edict, and
+        // clear the selection for the same reason.
         int i;
         Scene_SelectionClear();
         for (i = 0; i < edit_scene.numentities; i++)
-            edit_scene.entities[i].live_ent = NULL;
+        {
+            edit_scene.entities[i].live_ent    = NULL;
+            edit_scene.entities[i].live_static = NULL;
+        }
         Q_strncpy(edit_scene.mapname, sv.name, sizeof(edit_scene.mapname) - 1);
         edit_scene.mapname[sizeof(edit_scene.mapname) - 1] = '\0';
         Con_Printf("editor: map changed to %s; cleared selection + live links\n",

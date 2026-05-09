@@ -538,6 +538,22 @@ void Editor_GizmoMouseMove(float sx, float sy)
                         ce->forcelink = true;           // re-link efrags
                     }
                 }
+                // Static-entity path: SV_MakeStatic'd ents (flame torches
+                // etc.) have no live edict — their only runtime presence
+                // is in cl_static_entities[]. Move the origin there and
+                // rebuild the BSP-leaf efrags chain so the renderer
+                // discovers the entity at its new position. Without
+                // R_AddEfrags the flame would still render, but only when
+                // its *old* leaves were visible — nonsensical after even a
+                // small move.
+                else if (e->live_static)
+                {
+                    vec3_t o;
+                    Entity_GetOrigin(e, o);
+                    R_RemoveEfrags(e->live_static);
+                    VectorCopy(o, e->live_static->origin);
+                    R_AddEfrags(e->live_static);
+                }
             }
             else
             {

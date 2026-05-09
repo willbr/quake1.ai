@@ -27,6 +27,10 @@ void Editor_DrawLine3D   (const vec3_t a, const vec3_t b, byte color);
 // visible (and clickable) even when behind a brush.
 void Editor_DrawLine3DOver(const vec3_t a, const vec3_t b, byte color);
 int  Editor_PickAt       (float sx, float sy, int *out_ent, int *out_brush);
+// Map a classname to its alias model path (if known). Returns NULL for
+// classes without a registered model. map_io.c uses this when binding
+// SV_MakeStatic'd entities to their cl_static_entities[] counterpart.
+const char *Editor_ClassnameToModel(const char *classname);
 
 // render_flat.c
 void Editor_FlatDrawBrush(const struct edit_brush_s *b);

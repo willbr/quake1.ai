@@ -333,6 +333,15 @@ static const edit_class_info_t s_class_info[] = {
     {"item_artifact_invulnerability","progs/invulner.mdl", BB1_MIN, BB1_MAX},
     {"item_artifact_envirosuit",     "progs/suit.mdl",     BB1_MIN, BB1_MAX},
     {"item_torch_small_walltorch",   "progs/flame.mdl",    {-8,-8,-8}, {8,8,8}},
+    // Flame torches (light_flame_*, light_torch_*) all SV_MakeStatic, so
+    // their runtime presence lives in cl_static_entities[]. Editor preview
+    // model + bbox lookup keys off these; the post-load matcher in
+    // map_io.c uses the modelpath here to bind each edit_entity to its
+    // static-entity counterpart so gizmo drags actually move the flame.
+    {"light_torch_small_walltorch",  "progs/flame.mdl",    {-8,-8,-8}, {8,8,8}},
+    {"light_flame_large_yellow",     "progs/flame2.mdl",   {-8,-8,-8}, {8,8,8}},
+    {"light_flame_small_yellow",     "progs/flame2.mdl",   {-8,-8,-8}, {8,8,8}},
+    {"light_flame_small_white",      "progs/flame2.mdl",   {-8,-8,-8}, {8,8,8}},
     // .bsp ammo boxes (item_health/shells/spikes/rockets/cells) have no
     // alias model preview; their bbox in-game is {0,0,0}–{32,32,56}.
     {"item_health",             NULL, {0,0,0},  {32,32,56}},
@@ -407,6 +416,13 @@ static const char *classname_to_model(const char *classname)
 {
     const edit_class_info_t *ci = find_class(classname);
     return ci ? ci->modelpath : NULL;
+}
+
+// Public wrapper. Used by map_io.c's static-entity matcher to bind each
+// edit_entity to its cl_static_entities[] counterpart by classname → model.
+const char *Editor_ClassnameToModel(const char *classname)
+{
+    return classname_to_model(classname);
 }
 
 // Read the entity's "angle" key into out_angles[YAW]. Quake .map convention:

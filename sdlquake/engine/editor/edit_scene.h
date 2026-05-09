@@ -14,6 +14,9 @@
 // Forward decl so we can hold a live server edict pointer per entity without
 // having to drag in progs.h / server.h.
 struct edict_s;
+// Forward decl for cl_static_entities[] entries — flame torches and similar
+// SV_MakeStatic'd ents live here, not in sv.edicts.
+struct entity_s;
 
 #define EDIT_MAX_PLANES_PER_BRUSH   64
 #define EDIT_MAX_VERTS_PER_FACE     32
@@ -85,6 +88,13 @@ typedef struct edit_entity_s {
     // flush, or by the post-load matcher in map_io.c. Gizmo drags + kv
     // edits use this to push live state into the running game.
     struct edict_s *live_ent;
+
+    // cl_static_entities[] entry that mirrors this entity, or NULL. Set by
+    // the post-load matcher in map_io.c for ents that called SV_MakeStatic
+    // (flame torches, etc) — those have no live edict because makestatic
+    // ED_Free'd it, so the *only* runtime presence is in the client static
+    // list. Gizmo drags push the new origin here so the model visibly moves.
+    struct entity_s *live_static;
 } edit_entity_t;
 
 // One entry in the selection list. (entity, brush) is the global address;
