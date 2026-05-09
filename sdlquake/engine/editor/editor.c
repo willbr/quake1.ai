@@ -175,6 +175,14 @@ static void scaffold_build_test_room(const char *mapname)
 static void Editor_Cmd_New_f(void)
 {
     const char *name = (Cmd_Argc() >= 2) ? Cmd_Argv(1) : "test";
+
+    /* Stop whatever's currently running so the scaffold isn't drawn
+     * over a live demo. CL_Disconnect_f handles demo playback + active
+     * server shutdown; cls.demonum = -1 stops the demo auto-advance
+     * loop from immediately starting demo2. */
+    cls.demonum = -1;
+    CL_Disconnect_f();
+
     History_Clear();
     Scene_Clear();
     scaffold_build_test_room(name);
@@ -198,9 +206,12 @@ static void Editor_Cmd_Open_f(void)
         /* Fall through to the scaffold so the user has something
          * usable instead of a load error. They can immediately
          * editor_compile to see it; editor_save will write a fresh
-         * <name>.map to disk. */
+         * <name>.map to disk. Disconnect first so the scaffold isn't
+         * overlaid on a running demo / server. */
         Con_Printf("editor_load: %s not found — building scaffold scene\n",
                    path);
+        cls.demonum = -1;
+        CL_Disconnect_f();
         History_Clear();
         Scene_Clear();
         scaffold_build_test_room(name);
