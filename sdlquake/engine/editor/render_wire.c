@@ -891,6 +891,88 @@ static int entity_is_selected(int e_idx)
     return 0;
 }
 
+// Resolve an entity's angle into a unit direction vector. Returns 1 with
+// `out` filled, 0 if the entity has no angle to visualize.
+//
+// Live mode prefers the running edict: SetMovedir zeroes v.angles and
+// fills v.movedir for movers, and v.angles[1] holds the yaw for facers.
+// Map mode (and pending entities, and live-mode fallback) reads the .map
+// "angle" key directly so the user sees what they're authoring. Sentinel
+// values map to vertical: -1 → up, -2 → down — matches SetMovedir's own
+// decode in sdlquake/game/misc.c:28.
+static int entity_angle_dir(const edit_entity_t *e, vec3_t out)
+{
+    extern cvar_t editor_view_mode;
+    int view_live = (int)editor_view_mode.value == 0;
+    int k;
+
+    if (view_live && e->live_ent && !e->live_ent->free)
+    {
+        const float *md  = e->live_ent->v.movedir;
+        const float *ang = e->live_ent->v.angles;
+        if (md[0] != 0.0f || md[1] != 0.0f || md[2] != 0.0f)
+        {
+            VectorCopy(md, out);
+            return 1;
+        }
+        if (ang[1] != 0.0f)
+        {
+            float r = ang[1] * (3.14159265f / 180.0f);
+            out[0] = cosf(r); out[1] = sinf(r); out[2] = 0;
+            return 1;
+        }
+        // Fall through to the .map kv — covers facers whose live angle
+        // happens to be 0 but the .map authored a non-zero value, and
+        // pending entities with no edict yet.
+    }
+
+    for (k = 0; k < e->numkv; k++)
+    {
+        if (!strcmp(e->kv[k].key, "angle"))
+        {
+            float a = (float)atof(e->kv[k].value);
+            float r;
+            if (a == -1.0f) { out[0] = 0; out[1] = 0; out[2] =  1; return 1; }
+            if (a == -2.0f) { out[0] = 0; out[1] = 0; out[2] = -1; return 1; }
+            r = a * (3.14159265f / 180.0f);
+            out[0] = cosf(r); out[1] = sinf(r); out[2] = 0;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Per-entity facing / movedir arrow. Reads as orientation for monsters,
+// info_player_*, light torches; as motion direction for func_doors,
+// buttons, plats, triggers. Same arrow primitive as the target-link
+// pass; selected ents bypass depth so the arrow stays readable.
+static void draw_angle_arrows(void)
+{
+    int i, j;
+    vec3_t a, dir, b;
+    const float arrow_len = 24.0f;     // ~1.5 build grid cells; reads
+                                       // beyond a typical 32-unit bbox
+
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        byte color;
+        int sel, through;
+        if (Editor_EntityHidden(i)) continue;
+        // Both point ents (monsters, spawns — facing) and brush ents
+        // (func_door, button, plat — slide direction) get an arrow.
+        if (!Editor_EntityAnchor(e, a)) continue;
+        if (!entity_angle_dir(e, dir)) continue;
+
+        for (j = 0; j < 3; j++) b[j] = a[j] + dir[j] * arrow_len;
+
+        sel     = entity_is_selected(i);
+        color   = sel ? EDIT_COLOR_SELECTED : category_color(e);
+        through = sel;
+        draw_link_arrow(a, b, color, through);
+    }
+}
+
 // Walk every entity's "target" / "killtarget" keys, find each match by
 // "targetname", and draw a coloured arrow from source to target. Patrol
 // paths emerge naturally from this — a path_corner with target=next
@@ -1048,6 +1130,13 @@ void Editor_RenderScene(void)
         if (selection_bbox(bmin, bmax))
             draw_aabb_over(bmin, bmax, EDIT_COLOR_SELECTED);
     }
+
+    // Per-entity facing / movedir arrows (orientation for monsters and
+    // spawns, slide direction for func_doors). Drawn before target links
+    // so a long target arrow can layer over the short angle stub when
+    // they happen to overlap.
+    if (Editor_IsOpen())
+        draw_angle_arrows();
 
     // Target / killtarget links (incl. monster patrol paths via path_corner
     // chains). Draw last so they layer over the bbox + brush outlines.
