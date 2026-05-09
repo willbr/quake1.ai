@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_local.h"
+#include "editor.h"
 
 // only the refresh window will be updated unless these variables are flagged 
 int			scr_copytop;
@@ -896,7 +897,14 @@ void SCR_UpdateScreen (void)
 
 	D_EnableBackBufferAccess ();	// of all overlay stuff if drawing directly
 
-	if (scr_drawdialog)
+	// Hide the status bar + game HUD overlays while the editor is open so
+	// they don't cover up the brushes / gizmos. Keep the Quake console
+	// (SCR_DrawConsole) reachable so the user can still type commands.
+	if (Editor_IsOpen())
+	{
+		SCR_DrawConsole ();
+	}
+	else if (scr_drawdialog)
 	{
 		Sbar_Draw ();
 		Draw_FadeScreen ();
