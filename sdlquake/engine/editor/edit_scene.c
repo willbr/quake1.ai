@@ -589,16 +589,33 @@ void Scene_DeleteSelected(void)
         }
     }
 
-    // ED_Free any live edicts so the engine stops simulating / rendering
-    // them. Safe to call on an already-free edict in vanilla but we guard
-    // anyway. cl_static_entities entries can't be removed individually
-    // (efrag chain) and we don't try — they'll evaporate at next map
-    // load when the .map is re-parsed without that ent.
+    // ED_Free the live edict so the engine stops simulating it, then
+    // clear cl_entities[N].model — that's what CL_RelinkEntities checks
+    // before pushing into cl_visedicts each frame, so without zeroing it
+    // the engine keeps drawing the entity at its last position until the
+    // editor closes and a server frame finally networks the change.
+    // SV_MakeStatic'd ents (torches) live in cl_static_entities[] and
+    // render via the BSP-leaf efrag chain — pull the efrags + null the
+    // model to stop the render this frame.
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
-        if (delete_ent[i] && e->live_ent && !e->live_ent->free)
+        if (!delete_ent[i]) continue;
+        if (e->live_ent && !e->live_ent->free)
+        {
+            int en = NUM_FOR_EDICT(e->live_ent);
             ED_Free(e->live_ent);
+            if (en > 0 && en < cl.num_entities)
+            {
+                cl_entities[en].model     = NULL;
+                cl_entities[en].forcelink = false;
+            }
+        }
+        if (e->live_static)
+        {
+            R_RemoveEfrags(e->live_static);
+            e->live_static->model = NULL;
+        }
     }
 
     // Worldspawn brush removal first, in reverse so the lower indices
