@@ -1074,11 +1074,28 @@ void Editor_RenderScene(void)
 
     if (edit_scene.numentities == 0) return;
 
+    // If the engine's loaded worldmodel came from a recent editor_compile
+    // (i.e. it lives in the virtual-file registry), the BSP renderer is
+    // already drawing the exact same geometry we'd otherwise emit here.
+    // Skip the fill pass to avoid pure double-rendering. The wireframe
+    // pass below still runs so selection outlines + active-face highlight
+    // stay visible. When the user `map`s an arbitrary .bsp from disk
+    // without compiling, the VFS won't have an entry and we render
+    // fills as before — useful as a .map preview against a stale BSP.
+    int bsp_is_ours = 0;
+    if (cl.worldmodel && cl.worldmodel->name[0])
+    {
+        extern int Editor_VFS_Find(const char *path, void **out_bytes, int *out_size);
+        void *vbytes; int vsize;
+        if (Editor_VFS_Find(cl.worldmodel->name, &vbytes, &vsize))
+            bsp_is_ours = 1;
+    }
+
     // Pass 1: filled faces (flat-shaded or textured).
     {
         int do_flat = (style == EDIT_STYLE_FLAT || style == EDIT_STYLE_FLAT_WIRE);
         int do_tex  = (style == EDIT_STYLE_TEX  || style == EDIT_STYLE_TEX_WIRE);
-        if (do_flat || do_tex)
+        if ((do_flat || do_tex) && !bsp_is_ours)
         {
             for (i = 0; i < edit_scene.numentities; i++)
             {
