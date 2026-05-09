@@ -512,9 +512,31 @@ void Editor_GizmoMouseMove(float sx, float sy)
                 if (e->live_ent && !e->live_ent->free)
                 {
                     vec3_t o;
+                    int en;
                     Entity_GetOrigin(e, o);
                     VectorCopy(o, e->live_ent->v.origin);
                     SV_LinkEdict(e->live_ent, false);
+
+                    // sv.edicts is the server's authoritative state; the
+                    // *renderer* uses cl_entities[], filled from network
+                    // entity-update messages. While the editor pauses sim
+                    // those messages don't fire, so without this poke the
+                    // gizmo drag would only show on the editor preview —
+                    // the engine render would lag behind until the editor
+                    // closed and a server frame finally networked the move.
+                    en = NUM_FOR_EDICT(e->live_ent);
+                    if (en > 0 && en < cl.num_entities)
+                    {
+                        entity_t *ce = &cl_entities[en];
+                        VectorCopy(o, ce->origin);
+                        VectorCopy(o, ce->msg_origins[0]);
+                        VectorCopy(o, ce->msg_origins[1]);
+                        VectorCopy(e->live_ent->v.angles, ce->angles);
+                        VectorCopy(e->live_ent->v.angles, ce->msg_angles[0]);
+                        VectorCopy(e->live_ent->v.angles, ce->msg_angles[1]);
+                        ce->msgtime  = cl.mtime[0];     // not stale
+                        ce->forcelink = true;           // re-link efrags
+                    }
                 }
             }
             else
