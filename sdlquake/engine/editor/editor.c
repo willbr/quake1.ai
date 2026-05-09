@@ -84,9 +84,10 @@ cvar_t      editor_view_mode     = { "editor_view_mode", "0" };
 // Overlay toggles for the per-entity facing/movedir arrows and the
 // target/killtarget link arrows. Selection always overrides — clicking
 // an entity reveals its own arrow + the links touching it even when
-// the global toggle is off. Default both on so first-time users see
-// what's available.
-cvar_t      editor_show_angles   = { "editor_show_angles", "1" };
+// the global toggle is off. Angles default off (a screenful of arrows
+// over every monster + spawn is more clutter than insight); links
+// default on since they're rarer and authoring-relevant.
+cvar_t      editor_show_angles   = { "editor_show_angles", "0" };
 cvar_t      editor_show_links    = { "editor_show_links",  "1" };
 
 static int     s_lookmode      = 0;
