@@ -107,6 +107,13 @@ int   IG_Combo(const char *label, int *current_item, const char * const items[],
                int items_count);
 int   IG_DragFloat3(const char *label, float v[3], float speed);
 int   IG_InputFloat3(const char *label, float v[3]);
+int   IG_DragFloat (const char *label, float *v, float speed,
+                    float vmin, float vmax);
+// Item state queries — used to gate per-drag history pushes (snapshot on
+// activate, push on deactivate-after-edit so each drag becomes one undo
+// step, not hundreds).
+int   IG_IsItemActivated(void);
+int   IG_IsItemDeactivatedAfterEdit(void);
 void  IG_PushID_Int(int id);
 void  IG_PopID(void);
 

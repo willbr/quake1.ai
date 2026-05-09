@@ -7,6 +7,7 @@
 #include "quakedef.h"
 #include "imgui_bridge.h"
 #include "edit_scene.h"
+#include "edit_history.h"
 #include "editor.h"
 #include "editor_internal.h"
 
@@ -993,6 +994,173 @@ static void draw_live_state(edit_entity_t *e)
 }
 
 // -----------------------------------------------------------------------------
+// Per-face alignment widgets
+// -----------------------------------------------------------------------------
+
+// Cross-face clipboard for "Copy alignment / Paste alignment" — five floats
+// matching plane fields s_shift, t_shift, rotation, s_scale, t_scale.
+// Survives face changes; reset on editor close is fine (static = zero/one).
+static float s_clip_align[5] = { 0.0f, 0.0f, 0.0f, 1.0f, 1.0f };
+static int   s_clip_align_set = 0;
+
+// Resolve which plane the alignment widgets target: the active face if set
+// and consistent with the primary brush selection, else fall back to plane
+// 0 so the widgets are usable even before face selection ships (M2).
+// Returns -1 if no plane can be targeted (empty brush).
+static int alignment_target_plane(edit_brush_t *b, int *out_is_fallback)
+{
+    int af_e, af_b, af_p;
+    int p_ent, p_brush;
+    if (!b || b->numplanes == 0) { if (out_is_fallback) *out_is_fallback = 0; return -1; }
+    if (Scene_GetActiveFace(&af_e, &af_b, &af_p)
+     && Scene_NumSelected() == 1
+     && Scene_GetSelected(0, &p_ent, &p_brush)
+     && p_ent == af_e && p_brush == af_b
+     && af_p >= 0 && af_p < b->numplanes)
+    {
+        if (out_is_fallback) *out_is_fallback = 0;
+        return af_p;
+    }
+    if (out_is_fallback) *out_is_fallback = 1;
+    return b->numfaces > 0 ? b->faces[0].plane_idx : 0;
+}
+
+// Find the face whose plane_idx matches `plane_idx`, return NULL if none
+// (degenerate plane that produced no face).
+static const edit_face_t *face_for_plane(const edit_brush_t *b, int plane_idx)
+{
+    int k;
+    for (k = 0; k < b->numfaces; k++)
+        if (b->faces[k].plane_idx == plane_idx) return &b->faces[k];
+    return NULL;
+}
+
+// "Fit to face": stretch the texture to span the face's projected extent
+// exactly once. Resets rotation to 0 (fit math is undefined under non-zero
+// rotation; document and revisit if it bites).
+static void apply_fit_to_face(edit_brush_t *b, int plane_idx)
+{
+    edit_plane_t *p;
+    const edit_face_t *f;
+    texture_t *tex;
+    vec3_t s_ax, t_ax;
+    float s_min, s_max, t_min, t_max, s_extent, t_extent;
+    int   k;
+    if (!b || plane_idx < 0 || plane_idx >= b->numplanes) return;
+    p = &b->planes[plane_idx];
+    f = face_for_plane(b, plane_idx);
+    tex = Editor_PlaneTexture(p);
+    if (!f || !tex || tex->width == 0 || tex->height == 0) return;
+
+    Editor_PlaneBaseAxes(p, s_ax, t_ax);
+
+    s_min =  1e30f; s_max = -1e30f;
+    t_min =  1e30f; t_max = -1e30f;
+    for (k = 0; k < f->numverts; k++)
+    {
+        float s = DotProduct(f->verts[k], s_ax);
+        float t = DotProduct(f->verts[k], t_ax);
+        if (s < s_min) s_min = s;
+        if (s > s_max) s_max = s;
+        if (t < t_min) t_min = t;
+        if (t > t_max) t_max = t;
+    }
+    s_extent = s_max - s_min;
+    t_extent = t_max - t_min;
+    if (s_extent < 1e-3f || t_extent < 1e-3f) return;   // zero-area face
+
+    p->rotation = 0.0f;
+    p->s_scale  = s_extent / (float)tex->width;
+    p->t_scale  = t_extent / (float)tex->height;
+    // u(v) = DotProduct(v,s_ax)/s_scale + s_shift, want u=0 at s_min:
+    p->s_shift  = -s_min / p->s_scale;
+    p->t_shift  = -t_min / p->t_scale;
+}
+
+// One drag-float row with snapshot-on-activate so a single drag becomes one
+// undo step. `desc` ends up in the history label.
+static void draw_align_drag(const char *label, float *v, float speed,
+                            float vmin, float vmax, const char *desc)
+{
+    IG_SetNextItemWidth(140);
+    IG_DragFloat(label, v, speed, vmin, vmax);
+    if (IG_IsItemActivated())
+        History_Push(desc);
+}
+
+static void draw_face_alignment(edit_brush_t *b)
+{
+    int   plane_idx;
+    int   is_fallback;
+    edit_plane_t *p;
+    char  buf[96];
+
+    plane_idx = alignment_target_plane(b, &is_fallback);
+    if (plane_idx < 0) return;
+    p = &b->planes[plane_idx];
+
+    IG_Separator();
+    if (is_fallback)
+        snprintf(buf, sizeof(buf),
+                 "alignment (face plane %d — fallback; face mode coming)",
+                 plane_idx);
+    else
+        snprintf(buf, sizeof(buf), "alignment (active face plane %d)", plane_idx);
+    IG_TextUnformatted(buf);
+
+    IG_PushID_Int(plane_idx + 5000);
+    draw_align_drag("s_shift",  &p->s_shift,  0.1f,  -1.0e6f, 1.0e6f, "face s_shift");
+    draw_align_drag("t_shift",  &p->t_shift,  0.1f,  -1.0e6f, 1.0e6f, "face t_shift");
+    draw_align_drag("rotation", &p->rotation, 0.5f, -1.0e4f, 1.0e4f, "face rotation");
+    draw_align_drag("s_scale",  &p->s_scale,  0.01f, -1.0e4f, 1.0e4f, "face s_scale");
+    draw_align_drag("t_scale",  &p->t_scale,  0.01f, -1.0e4f, 1.0e4f, "face t_scale");
+
+    if (IG_Button("Reset"))
+    {
+        History_Push("face align reset");
+        p->s_shift = 0.0f;
+        p->t_shift = 0.0f;
+        p->rotation = 0.0f;
+        p->s_scale = 1.0f;
+        p->t_scale = 1.0f;
+    }
+    IG_SameLine(0, -1);
+    if (IG_Button("Fit"))
+    {
+        History_Push("face fit");
+        apply_fit_to_face(b, plane_idx);
+    }
+    IG_SameLine(0, -1);
+    if (IG_Button("Copy"))
+    {
+        s_clip_align[0] = p->s_shift;
+        s_clip_align[1] = p->t_shift;
+        s_clip_align[2] = p->rotation;
+        s_clip_align[3] = p->s_scale;
+        s_clip_align[4] = p->t_scale;
+        s_clip_align_set = 1;
+    }
+    IG_SameLine(0, -1);
+    if (s_clip_align_set)
+    {
+        if (IG_Button("Paste"))
+        {
+            History_Push("face align paste");
+            p->s_shift  = s_clip_align[0];
+            p->t_shift  = s_clip_align[1];
+            p->rotation = s_clip_align[2];
+            p->s_scale  = s_clip_align[3];
+            p->t_scale  = s_clip_align[4];
+        }
+    }
+    else
+    {
+        IG_TextUnformatted("(Paste: empty)");
+    }
+    IG_PopID();
+}
+
+// -----------------------------------------------------------------------------
 // Inspector
 // -----------------------------------------------------------------------------
 
@@ -1131,6 +1299,8 @@ static void draw_inspector(void)
                 IG_PopID();
             }
         }
+
+        draw_face_alignment(b);
     }
     else
     {

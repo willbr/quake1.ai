@@ -114,6 +114,13 @@ int  IG_InputFloat3(const char *label, float v[3])
 {
     return ImGui::InputFloat3(label, v) ? 1 : 0;
 }
+int  IG_DragFloat(const char *label, float *v, float speed,
+                  float vmin, float vmax)
+{
+    return ImGui::DragFloat(label, v, speed, vmin, vmax) ? 1 : 0;
+}
+int  IG_IsItemActivated(void)            { return ImGui::IsItemActivated() ? 1 : 0; }
+int  IG_IsItemDeactivatedAfterEdit(void) { return ImGui::IsItemDeactivatedAfterEdit() ? 1 : 0; }
 void IG_PushID_Int(int id)            { ImGui::PushID(id); }
 void IG_PopID(void)                   { ImGui::PopID(); }
 

@@ -18,6 +18,9 @@ edit_scene_t edit_scene;
 void Scene_Init(void)
 {
     memset(&edit_scene, 0, sizeof(edit_scene));
+    edit_scene.active_face_ent   = -1;
+    edit_scene.active_face_brush = -1;
+    edit_scene.active_face_plane = -1;
 }
 
 void Scene_Clear(void)
@@ -33,9 +36,12 @@ void Scene_Clear(void)
     }
     if (edit_scene.entities)  { free(edit_scene.entities);  edit_scene.entities  = NULL; }
     if (edit_scene.selection) { free(edit_scene.selection); edit_scene.selection = NULL; }
-    edit_scene.numentities  = 0;
-    edit_scene.num_selected = 0;
-    edit_scene.sel_cap      = 0;
+    edit_scene.numentities       = 0;
+    edit_scene.num_selected      = 0;
+    edit_scene.sel_cap           = 0;
+    edit_scene.active_face_ent   = -1;
+    edit_scene.active_face_brush = -1;
+    edit_scene.active_face_plane = -1;
 }
 
 void Scene_Shutdown(void)
@@ -95,6 +101,43 @@ int Scene_SelectionContains(int ent, int brush)
 void Scene_SelectionClear(void)
 {
     edit_scene.num_selected = 0;
+    Scene_ClearActiveFace();
+}
+
+// -----------------------------------------------------------------------------
+// Active face
+// -----------------------------------------------------------------------------
+
+void Scene_ClearActiveFace(void)
+{
+    edit_scene.active_face_ent   = -1;
+    edit_scene.active_face_brush = -1;
+    edit_scene.active_face_plane = -1;
+}
+
+void Scene_SetActiveFace(int ent, int brush, int plane_idx)
+{
+    edit_entity_t *e;
+    edit_brush_t  *b;
+    if (Scene_NumSelected() != 1) return;
+    if (!Scene_SelectionContains(ent, brush)) return;
+    if (ent < 0 || ent >= edit_scene.numentities) return;
+    e = &edit_scene.entities[ent];
+    if (brush < 0 || brush >= e->numbrushes) return;
+    b = &e->brushes[brush];
+    if (plane_idx < 0 || plane_idx >= b->numplanes) return;
+    edit_scene.active_face_ent   = ent;
+    edit_scene.active_face_brush = brush;
+    edit_scene.active_face_plane = plane_idx;
+}
+
+int Scene_GetActiveFace(int *out_ent, int *out_brush, int *out_plane)
+{
+    if (edit_scene.active_face_plane < 0) return 0;
+    if (out_ent)   *out_ent   = edit_scene.active_face_ent;
+    if (out_brush) *out_brush = edit_scene.active_face_brush;
+    if (out_plane) *out_plane = edit_scene.active_face_plane;
+    return 1;
 }
 
 static void selection_push_unique(int ent, int brush)
@@ -151,6 +194,7 @@ void Scene_SelectionAdd(int ent, int brush)
     {
         selection_push_unique(ent, brush);
     }
+    Scene_ClearActiveFace();
 }
 
 static void selection_remove_one(int ent, int brush)
@@ -199,6 +243,7 @@ void Scene_SelectionRemove(int ent, int brush)
     {
         selection_remove_one(ent, brush);
     }
+    Scene_ClearActiveFace();
 }
 
 void Scene_SelectionToggle(int ent, int brush)
@@ -230,6 +275,7 @@ void Scene_SelectionToggle(int ent, int brush)
         else
             selection_push_unique(ent, brush);
     }
+    Scene_ClearActiveFace();
 }
 
 void Scene_ForEachBrush(Scene_BrushIter_fn cb, void *user)

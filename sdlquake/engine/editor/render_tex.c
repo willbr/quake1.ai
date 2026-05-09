@@ -206,6 +206,25 @@ void Editor_PlaneUVAxes(const edit_plane_t *p,
     *out_t_shift = p->t_shift;
 }
 
+void Editor_PlaneBaseAxes(const edit_plane_t *p, vec3_t out_s, vec3_t out_t)
+{
+    int   best = 0, i;
+    float best_dot = 0;
+    for (i = 0; i < 6; i++)
+    {
+        float d = DotProduct(p->normal, base_axes[i*3]);
+        if (d > best_dot) { best_dot = d; best = i; }
+    }
+    VectorCopy(base_axes[best*3 + 1], out_s);
+    VectorCopy(base_axes[best*3 + 2], out_t);
+}
+
+texture_t *Editor_PlaneTexture(const edit_plane_t *p)
+{
+    if (!p) return NULL;
+    return find_world_texture(p->texname);
+}
+
 // View transform.
 static void w2v(const vec3_t world, vec3_t view)
 {

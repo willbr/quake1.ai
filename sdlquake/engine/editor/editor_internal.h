@@ -80,6 +80,18 @@ void Editor_PlaneUVAxes(const struct edit_plane_s *p,
                         vec3_t out_s, vec3_t out_t,
                         float *out_s_shift, float *out_t_shift);
 
+// Unrotated base s/t axes for a plane (the QuakeEd "axial" axes chosen by
+// dominant-component of the plane normal). No rotation, no scale, unit
+// length. Used by "Fit to face" to project verts onto the canonical UV
+// frame before solving for shift/scale.
+void Editor_PlaneBaseAxes(const struct edit_plane_s *p,
+                          vec3_t out_s, vec3_t out_t);
+
+// Resolve the world texture currently mapped onto a plane's `texname`. NULL
+// if no worldmodel, the name doesn't match, or texname is empty. Used by
+// the inspector's "Fit to face" math, which needs width/height.
+struct texture_s *Editor_PlaneTexture(const struct edit_plane_s *p);
+
 // gizmo.c
 void Editor_GizmoDraw       (void);
 int  Editor_GizmoMouseDown  (float sx, float sy);   // 1 if axis grabbed

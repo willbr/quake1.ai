@@ -124,6 +124,16 @@ typedef struct edit_scene_s {
     int             num_selected;
     int             sel_cap;
 
+    // Active face — meaningful only when face mode is on AND exactly one
+    // brush is selected AND it matches (active_face_ent, active_face_brush).
+    // active_face_plane is a plane index (`b->planes[N]`), NOT a face-array
+    // index — plane indices survive Brush_Compile reorderings, face indices
+    // don't. All three are -1 when no face is active. Selection mutators
+    // call Scene_ClearActiveFace.
+    int             active_face_ent;
+    int             active_face_brush;
+    int             active_face_plane;
+
     // Round-trip filename. Set by Scene_Load. Empty until a .map has loaded.
     char            filename[256];  // absolute path on disk
     char            mapname[64];    // bare name, used for "map <name>" restart
@@ -223,6 +233,14 @@ void  Scene_SelectionClear  (void);
 void  Scene_SelectionAdd    (int ent, int brush);
 void  Scene_SelectionRemove (int ent, int brush);
 void  Scene_SelectionToggle (int ent, int brush);
+
+// Active-face state. Validated against current selection — Scene_SetActiveFace
+// is a no-op unless `Scene_NumSelected() == 1` and that one selection refers
+// to (ent, brush) and `plane_idx` is in range. plane_idx is an index into
+// `b->planes[]`; survives Brush_Compile reorderings (face indices don't).
+void  Scene_SetActiveFace   (int ent, int brush, int plane_idx);
+int   Scene_GetActiveFace   (int *out_ent, int *out_brush, int *out_plane);
+void  Scene_ClearActiveFace (void);
 
 // Group / ungroup operations.
 //   Group: move every selected brush into a new func_group entity. The
