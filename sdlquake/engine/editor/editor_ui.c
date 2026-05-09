@@ -58,6 +58,54 @@ static const char *s_entity_classes[] = {
 enum { S_ENTITY_CLASSES_N
        = (int)(sizeof(s_entity_classes) / sizeof(s_entity_classes[0])) };
 
+// World-texture name list, lazily rebuilt when cl.worldmodel changes. Both
+// the toolbar brush-tex picker and the inspector face-tex pickers feed off
+// this. Pointers borrow into worldmodel->textures[i]->name so we pay one
+// ptr-array realloc per map load.
+static const char *const *world_tex_list(int *out_count)
+{
+    static const char **names    = NULL;
+    static int          cap      = 0;
+    static int          count    = 0;
+    static void        *cached   = (void *)(intptr_t)-1;
+
+    if ((void *)cl.worldmodel != cached)
+    {
+        cached = (void *)cl.worldmodel;
+        count  = 0;
+        if (cl.worldmodel && cl.worldmodel->textures
+         && cl.worldmodel->numtextures > 0)
+        {
+            int i;
+            if (cl.worldmodel->numtextures > cap)
+            {
+                cap = cl.worldmodel->numtextures;
+                names = (const char **)realloc(names,
+                    sizeof(*names) * (size_t)cap);
+            }
+            for (i = 0; i < cl.worldmodel->numtextures; i++)
+            {
+                texture_t *t = cl.worldmodel->textures[i];
+                if (t && t->name[0]) names[count++] = t->name;
+            }
+        }
+    }
+    *out_count = count;
+    return names;
+}
+
+// Linear search for a name in the world-texture list. Returns the index, or
+// -1 if absent. Used to seed combo selection from the current texname so
+// the dropdown opens already showing the in-use texture.
+static int world_tex_index(const char *name)
+{
+    int i, n;
+    const char *const *list = world_tex_list(&n);
+    if (!name || !name[0]) return -1;
+    for (i = 0; i < n; i++) if (!strcmp(list[i], name)) return i;
+    return -1;
+}
+
 static void draw_toolbar(void)
 {
     extern cvar_t editor_render_style;
@@ -243,52 +291,19 @@ static void draw_toolbar(void)
             Cbuf_AddText(buf);
         }
     }
-    // Brush palette: texture combo + Add cube. Texture list is pulled from
-    // the loaded worldmodel each frame — names point straight into
-    // worldmodel->textures[i]->name so the combo cost is one ptr-array
-    // build per worldmodel swap. Skip slots that are NULL (parser holes)
-    // or empty-named.
+    // Brush palette: texture combo + Add cube. Names are pulled from
+    // world_tex_list(); selection mirrors the editor_brush_tex cvar.
     {
         extern cvar_t editor_brush_tex;
-        static const char **s_tex_names    = NULL;
-        static int          s_tex_cap      = 0;
-        static int          s_tex_count    = 0;
-        static void        *s_tex_world    = (void *)(intptr_t)-1;
-        int    sel = 0, i;
-
-        if ((void *)cl.worldmodel != s_tex_world)
-        {
-            s_tex_world = (void *)cl.worldmodel;
-            s_tex_count = 0;
-            if (cl.worldmodel && cl.worldmodel->textures
-             && cl.worldmodel->numtextures > 0)
-            {
-                if (cl.worldmodel->numtextures > s_tex_cap)
-                {
-                    s_tex_cap = cl.worldmodel->numtextures;
-                    s_tex_names = (const char **)realloc(s_tex_names,
-                        sizeof(*s_tex_names) * (size_t)s_tex_cap);
-                }
-                for (i = 0; i < cl.worldmodel->numtextures; i++)
-                {
-                    texture_t *t = cl.worldmodel->textures[i];
-                    if (t && t->name[0])
-                        s_tex_names[s_tex_count++] = t->name;
-                }
-            }
-        }
-
-        for (i = 0; i < s_tex_count; i++)
-        {
-            if (!strcmp(s_tex_names[i], editor_brush_tex.string))
-            { sel = i; break; }
-        }
-
+        int n;
+        const char *const *names = world_tex_list(&n);
+        int sel = world_tex_index(editor_brush_tex.string);
+        if (sel < 0) sel = 0;
         IG_SetNextItemWidth(180);
-        if (s_tex_count > 0)
+        if (n > 0)
         {
-            if (IG_Combo("brush tex", &sel, s_tex_names, s_tex_count))
-                Cvar_Set("editor_brush_tex", (char *)s_tex_names[sel]);
+            if (IG_Combo("brush tex", &sel, names, n))
+                Cvar_Set("editor_brush_tex", (char *)names[sel]);
         }
         else
         {
@@ -1072,6 +1087,47 @@ static void draw_inspector(void)
         snprintf(buf, sizeof(buf), "maxs: %.0f %.0f %.0f",
                  b->maxs[0], b->maxs[1], b->maxs[2]);
         IG_TextUnformatted(buf);
+
+        // Per-face texture picker. The texname lives on the plane so faces
+        // sharing a plane (impossible in well-formed brushes but tolerated
+        // here) update together. Picking writes the new name straight into
+        // p->texname; render_tex.c looks up the world texture per-frame so
+        // the change is visible immediately, no recompile.
+        {
+            int n;
+            const char *const *names = world_tex_list(&n);
+            int k;
+            IG_Separator();
+            IG_TextUnformatted("face textures");
+            for (k = 0; k < b->numfaces; k++)
+            {
+                edit_face_t  *f = &b->faces[k];
+                edit_plane_t *p = &b->planes[f->plane_idx];
+                int sel;
+                IG_PushID_Int(1000 + k);
+                if (n > 0)
+                {
+                    sel = world_tex_index(p->texname);
+                    if (sel < 0) sel = 0;
+                    snprintf(buf, sizeof(buf), "face %d##facetex", k);
+                    IG_SetNextItemWidth(180);
+                    if (IG_Combo(buf, &sel, names, n))
+                    {
+                        Q_strncpy(p->texname, names[sel],
+                                  EDIT_TEX_NAME_LEN - 1);
+                        p->texname[EDIT_TEX_NAME_LEN - 1] = '\0';
+                    }
+                }
+                else
+                {
+                    snprintf(buf, sizeof(buf),
+                             "face %d  %s  (no map for picker)",
+                             k, p->texname);
+                    IG_TextUnformatted(buf);
+                }
+                IG_PopID();
+            }
+        }
     }
     else
     {
