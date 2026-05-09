@@ -160,12 +160,21 @@ static void draw_line3d(const vec3_t a_world, const vec3_t b_world,
         vb[2] = NEAR_CLIP;
     }
 
-    if (!view_to_screen(va, &sx0, &sy0)) return;
-    if (!view_to_screen(vb, &sx1, &sy1)) return;
-
+    // Both endpoints are at z >= NEAR_CLIP after the clip above. Project
+    // inline rather than going through view_to_screen — the engine's
+    // NEAR_CLIP is the double literal 0.01, and assigning it to a float
+    // (va[2] = NEAR_CLIP) rounds down to ~0.0099999977. view_to_screen's
+    // `z < NEAR_CLIP` then promotes that float back to double, which IS
+    // less than 0.01, so a freshly-clipped endpoint fails the test and
+    // the entire line gets culled. Long target/path arrows with one end
+    // behind the camera disappeared entirely because of this.
     {
         float iz0 = 1.0f / va[2];
         float iz1 = 1.0f / vb[2];
+        sx0 = xcenter + xscale * va[0] * iz0;
+        sy0 = ycenter - yscale * va[1] * iz0;
+        sx1 = xcenter + xscale * vb[0] * iz1;
+        sy1 = ycenter - yscale * vb[1] * iz1;
         draw_line8((int)(sx0 + 0.5f), (int)(sy0 + 0.5f), iz0,
                    (int)(sx1 + 0.5f), (int)(sy1 + 0.5f), iz1, color, ztest);
     }
