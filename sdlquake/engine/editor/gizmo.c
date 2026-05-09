@@ -18,10 +18,17 @@ extern vec3_t r_origin;
 // Drag state
 // -----------------------------------------------------------------------------
 
-static int      s_drag_axis = -1;       // 0/1/2 = X/Y/Z, -1 = inactive
-static float    s_drag_t_start;         // closest-t-on-axis at mouse down
+// Two mutually exclusive drag modes:
+//   axis-translate: s_drag_axis = 0/1/2 (X/Y/Z)
+//   face-resize:    s_drag_plane_idx >= 0 (the plane being pushed along normal)
+// Whichever is non-negative is the active drag.
+static int      s_drag_axis = -1;
+static int      s_drag_plane_idx = -1;
+static float    s_drag_t_start;         // closest-t-on-drag-line at mouse down
 static float    s_drag_applied;         // sum of grid-snapped offsets applied so far
-static vec3_t   s_drag_origin;          // brush centroid at mouse down
+static vec3_t   s_drag_origin;          // brush centroid (translate) / face centroid (resize) at mouse down
+static vec3_t   s_drag_dir;             // axis basis vec (translate) / face normal (resize)
+static float    s_drag_start_dist;      // plane.dist at drag start (face-resize only — for absolute snap)
 
 extern cvar_t   editor_grid_snap;
 extern cvar_t   editor_grid_size;
@@ -117,6 +124,37 @@ static void axis_endpoint(const vec3_t centroid, int axis, float arrow_len, vec3
     out[axis] += arrow_len;
 }
 
+static void face_centroid(const edit_face_t *f, vec3_t out)
+{
+    int k;
+    if (f->numverts <= 0) { out[0] = out[1] = out[2] = 0; return; }
+    out[0] = out[1] = out[2] = 0;
+    for (k = 0; k < f->numverts; k++)
+    {
+        out[0] += f->verts[k][0];
+        out[1] += f->verts[k][1];
+        out[2] += f->verts[k][2];
+    }
+    out[0] /= f->numverts;
+    out[1] /= f->numverts;
+    out[2] /= f->numverts;
+}
+
+// Pick the dominant-axis colour for a face — gives the user a visual cue
+// for which way the face points (X=red, Y=yellowgreen, Z=blue).
+static byte face_axis_color(const vec3_t normal)
+{
+    static const byte axis_colors[3] = {
+        EDIT_COLOR_AXIS_X, EDIT_COLOR_AXIS_Y, EDIT_COLOR_AXIS_Z
+    };
+    float ax = fabsf(normal[0]);
+    float ay = fabsf(normal[1]);
+    float az = fabsf(normal[2]);
+    if (ax >= ay && ax >= az) return axis_colors[0];
+    if (ay >= az) return axis_colors[1];
+    return axis_colors[2];
+}
+
 // -----------------------------------------------------------------------------
 // Render
 // -----------------------------------------------------------------------------
@@ -141,12 +179,12 @@ void Editor_GizmoDraw(void)
     }
     arrow_len = pixel_to_world(dist) * 30.0f;   // ~30 pixel-equivalent length
 
+    // Translate axes — three arrows from centroid.
     for (i = 0; i < 3; i++)
     {
         byte col = (s_drag_axis == i) ? EDIT_COLOR_AXIS_HOT : axis_colors[i];
         axis_endpoint(centroid, i, arrow_len, end);
         Editor_DrawLine3DOver(centroid, end, col);
-        // small cross at the tip so the arrow head reads
         {
             vec3_t a, c;
             int u = (i + 1) % 3;
@@ -158,6 +196,60 @@ void Editor_GizmoDraw(void)
             VectorCopy(end, a); a[v] += tip;
             VectorCopy(end, c); c[v] -= tip;
             Editor_DrawLine3DOver(a, c, col);
+        }
+    }
+
+    // Face handles — small "+" cross at each face centroid plus a short
+    // outward stub along the face normal so it reads as a push handle. Each
+    // face uses the dominant-axis colour of its normal.
+    {
+        vec3_t fc, p_dist;
+        float handle_len = pixel_to_world(dist) * 12.0f;
+        int j;
+        for (i = 0; i < b->numfaces; i++)
+        {
+            const edit_face_t *f = &b->faces[i];
+            const edit_plane_t *pl = &b->planes[f->plane_idx];
+            byte col = (s_drag_plane_idx == f->plane_idx)
+                       ? EDIT_COLOR_AXIS_HOT
+                       : face_axis_color(pl->normal);
+            face_centroid(f, fc);
+
+            // Outward stub.
+            for (j = 0; j < 3; j++)
+                p_dist[j] = fc[j] + pl->normal[j] * handle_len;
+            Editor_DrawLine3DOver(fc, p_dist, col);
+
+            // Two perpendicular bars across the face centroid for the "+"
+            // — pick any two unit vectors orthogonal to the normal.
+            {
+                vec3_t u, v, a, b2;
+                float ax = fabsf(pl->normal[0]);
+                float ay = fabsf(pl->normal[1]);
+                if (ax < 0.9f && ay < 0.9f) {
+                    u[0] = 1; u[1] = 0; u[2] = 0;
+                } else {
+                    u[0] = 0; u[1] = 0; u[2] = 1;
+                }
+                {
+                    float d2 = DotProduct(u, pl->normal);
+                    u[0] -= pl->normal[0] * d2;
+                    u[1] -= pl->normal[1] * d2;
+                    u[2] -= pl->normal[2] * d2;
+                    {
+                        float l = sqrtf(u[0]*u[0]+u[1]*u[1]+u[2]*u[2]);
+                        if (l > 1e-6f) { u[0]/=l; u[1]/=l; u[2]/=l; }
+                    }
+                }
+                CrossProduct(pl->normal, u, v);
+                {
+                    float bar = handle_len * 0.6f;
+                    for (j = 0; j < 3; j++) { a[j] = fc[j] + u[j]*bar; b2[j] = fc[j] - u[j]*bar; }
+                    Editor_DrawLine3DOver(a, b2, col);
+                    for (j = 0; j < 3; j++) { a[j] = fc[j] + v[j]*bar; b2[j] = fc[j] - v[j]*bar; }
+                    Editor_DrawLine3DOver(a, b2, col);
+                }
+            }
         }
     }
 }
@@ -174,8 +266,8 @@ int Editor_GizmoMouseDown(float sx, float sy)
     vec3_t centroid;
     vec3_t r_org, r_dir;
     float dist, arrow_len, pick_world;
-    int i, best_axis = -1;
-    float best_d = 1e30f;
+    int i, best_axis = -1, best_face = -1;
+    float best_d_axis = 1e30f, best_d_face = 1e30f;
 
     if (!b || !b->valid) return 0;
 
@@ -191,9 +283,25 @@ int Editor_GizmoMouseDown(float sx, float sy)
 
     Editor_ScreenToRay(sx, sy, r_org, r_dir);
 
+    // Pass 1: face handles (preferred over axis arrows when both are near
+    // the cursor — face picks are always at the brush surface and so are
+    // closer to the eye than axis arrows centred on the centroid).
+    for (i = 0; i < b->numfaces; i++)
+    {
+        vec3_t fc;
+        float d;
+        face_centroid(&b->faces[i], fc);
+        d = point_to_ray(fc, r_org, r_dir);
+        if (d < pick_world && d < best_d_face)
+        {
+            best_d_face = d;
+            best_face = i;
+        }
+    }
+
+    // Pass 2: translate-axis arrows.
     for (i = 0; i < 3; i++)
     {
-        // Closest point on this axis line to the mouse ray.
         vec3_t l_dir = {0,0,0};
         l_dir[i] = 1.0f;
         float t = closest_t_line_ray(centroid, l_dir, r_org, r_dir);
@@ -203,76 +311,106 @@ int Editor_GizmoMouseDown(float sx, float sy)
             vec3_t pt = { centroid[0], centroid[1], centroid[2] };
             pt[i] += t;
             float d = point_to_ray(pt, r_org, r_dir);
-            if (d < pick_world && d < best_d)
+            if (d < pick_world && d < best_d_axis)
             {
-                best_d = d;
+                best_d_axis = d;
                 best_axis = i;
             }
         }
     }
+
+    // Face picks win over axis picks (the user clicked on the brush surface).
+    if (best_face >= 0)
+    {
+        const edit_face_t *f = &b->faces[best_face];
+        const edit_plane_t *pl = &b->planes[f->plane_idx];
+        vec3_t fc;
+        face_centroid(f, fc);
+        s_drag_axis      = -1;
+        s_drag_plane_idx = f->plane_idx;
+        VectorCopy(fc, s_drag_origin);
+        VectorCopy(pl->normal, s_drag_dir);
+        s_drag_start_dist = pl->dist;
+        s_drag_t_start    = closest_t_line_ray(s_drag_origin, s_drag_dir, r_org, r_dir);
+        s_drag_applied    = 0.0f;
+        return 1;
+    }
     if (best_axis < 0) return 0;
 
-    s_drag_axis = best_axis;
+    s_drag_axis      = best_axis;
+    s_drag_plane_idx = -1;
     VectorCopy(centroid, s_drag_origin);
     {
-        vec3_t l_dir = {0,0,0};
-        l_dir[best_axis] = 1.0f;
-        s_drag_t_start = closest_t_line_ray(centroid, l_dir, r_org, r_dir);
+        s_drag_dir[0] = s_drag_dir[1] = s_drag_dir[2] = 0;
+        s_drag_dir[best_axis] = 1.0f;
+        s_drag_t_start = closest_t_line_ray(s_drag_origin, s_drag_dir, r_org, r_dir);
         s_drag_applied = 0.0f;
     }
     return 1;
 }
 
+// Shared snap math. `start_basis` is the value to snap against in absolute
+// mode (the axis coord of the drag origin for translate; the plane.dist for
+// face-resize). Returns the snapped absolute offset since drag start.
+static float compute_snapped_offset(float raw_offset, float start_basis)
+{
+    if (editor_grid_snap.value != 0.0f && editor_grid_absolute.value != 0.0f)
+    {
+        float target = snap_to_grid(start_basis + raw_offset);
+        return target - start_basis;
+    }
+    return snap_to_grid(raw_offset);
+}
+
 void Editor_GizmoMouseMove(float sx, float sy)
 {
     edit_brush_t *b;
-    vec3_t r_org, r_dir, l_dir = {0,0,0};
-    vec3_t delta;
+    vec3_t r_org, r_dir, delta;
     float t_now, raw_offset, snapped_offset, step;
     int i;
-    if (s_drag_axis < 0) return;
+    if (s_drag_axis < 0 && s_drag_plane_idx < 0) return;
     b = Scene_GetSelectedBrush();
-    if (!b || !b->valid) { s_drag_axis = -1; return; }
+    if (!b || !b->valid)
+    {
+        s_drag_axis = -1;
+        s_drag_plane_idx = -1;
+        return;
+    }
 
     Editor_ScreenToRay(sx, sy, r_org, r_dir);
-    l_dir[s_drag_axis] = 1.0f;
-    t_now = closest_t_line_ray(s_drag_origin, l_dir, r_org, r_dir);
-
-    // Accumulate the raw offset since drag start. Two snap modes:
-    //   relative — snap the offset itself to grid multiples; the centroid
-    //              moves in grid steps from its starting position.
-    //   absolute — snap the centroid's *world* axis coordinate to a grid
-    //              line; brushes built off the same world grid will line up
-    //              regardless of where the drag started (good for stairs).
-    // We then apply the delta-vs-previously-applied so float drift can't
-    // accumulate.
+    t_now = closest_t_line_ray(s_drag_origin, s_drag_dir, r_org, r_dir);
     raw_offset = t_now - s_drag_t_start;
-    if (editor_grid_snap.value != 0.0f && editor_grid_absolute.value != 0.0f)
+
+    if (s_drag_plane_idx >= 0)
     {
-        float origin_axis = s_drag_origin[s_drag_axis];
-        float target_pos  = snap_to_grid(origin_axis + raw_offset);
-        snapped_offset    = target_pos - origin_axis;
+        // Face-resize. Absolute snap pins plane.dist to grid lines.
+        snapped_offset = compute_snapped_offset(raw_offset, s_drag_start_dist);
+        step = snapped_offset - s_drag_applied;
+        if (step == 0.0f) return;
+        s_drag_applied = snapped_offset;
+        Brush_TranslateFace(b, s_drag_plane_idx, step);
     }
     else
     {
-        snapped_offset = snap_to_grid(raw_offset);
+        // Axis translate. Absolute snap pins centroid axis coord to grid.
+        snapped_offset = compute_snapped_offset(raw_offset,
+                                                s_drag_origin[s_drag_axis]);
+        step = snapped_offset - s_drag_applied;
+        if (step == 0.0f) return;
+        for (i = 0; i < 3; i++) delta[i] = 0;
+        delta[s_drag_axis] = step;
+        s_drag_applied = snapped_offset;
+        Brush_Translate(b, delta);
     }
-    step = snapped_offset - s_drag_applied;
-    if (step == 0.0f) return;
-
-    for (i = 0; i < 3; i++) delta[i] = 0;
-    delta[s_drag_axis] = step;
-    s_drag_applied = snapped_offset;
-
-    Brush_Translate(b, delta);
 }
 
 void Editor_GizmoMouseUp(void)
 {
-    s_drag_axis = -1;
+    s_drag_axis      = -1;
+    s_drag_plane_idx = -1;
 }
 
 int Editor_GizmoIsActive(void)
 {
-    return s_drag_axis >= 0;
+    return s_drag_axis >= 0 || s_drag_plane_idx >= 0;
 }

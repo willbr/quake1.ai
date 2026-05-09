@@ -105,6 +105,13 @@ void  Brush_FreeFaces(edit_brush_t *b);
 // Translate every plane of a brush by `delta`.
 void  Brush_Translate(edit_brush_t *b, const vec3_t delta);
 
+// Push a single face along its plane normal by `delta` (positive grows the
+// brush, negative shrinks it). Recompiles. If the resulting brush is
+// invalid (face would clip through the opposite face), rolls back the move
+// and leaves the brush untouched. Identified by plane_idx so it survives
+// face-array reordering across recompiles.
+void  Brush_TranslateFace(edit_brush_t *b, int plane_idx, float delta);
+
 // Append a 6-plane AABB brush to the worldspawn entity (creating worldspawn
 // if absent). Updates selection to the new brush. Returns 1 on success.
 // `texname` may be NULL to default to "wbrick1_5".

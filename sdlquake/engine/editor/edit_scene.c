@@ -109,6 +109,45 @@ void Brush_Translate(edit_brush_t *b, const vec3_t delta)
     Brush_Compile(b);
 }
 
+void Brush_TranslateFace(edit_brush_t *b, int plane_idx, float delta)
+{
+    edit_plane_t *p, saved;
+    vec3_t move;
+    int j;
+    if (plane_idx < 0 || plane_idx >= b->numplanes) return;
+    if (delta == 0.0f) return;
+    p = &b->planes[plane_idx];
+    saved = *p;
+
+    move[0] = p->normal[0] * delta;
+    move[1] = p->normal[1] * delta;
+    move[2] = p->normal[2] * delta;
+
+    // Texture lock for the moving face only — same trick as Brush_Translate
+    // but scoped to this plane, so the texture stays pinned to the face as
+    // it slides along its normal.
+    {
+        vec3_t s_axis, t_axis;
+        float  s_shift, t_shift;
+        Editor_PlaneUVAxes(p, s_axis, t_axis, &s_shift, &t_shift);
+        p->s_shift -= DotProduct(move, s_axis);
+        p->t_shift -= DotProduct(move, t_axis);
+    }
+    for (j = 0; j < 3; j++)
+        VectorAdd(p->points[j], move, p->points[j]);
+
+    Brush_Compile(b);
+
+    // If the face crossed through the rest of the brush, the compile
+    // produces no faces (or fewer than expected). Roll back so the user
+    // doesn't lose their selection to an invisible degenerate.
+    if (!b->valid)
+    {
+        *p = saved;
+        Brush_Compile(b);
+    }
+}
+
 // Scene_Revert lives in map_io.c — it re-parses the in-memory snapshot text
 // captured at Scene_Load time, so it gives back the load-time scene even
 // after the user has saved over the .map on disk.
