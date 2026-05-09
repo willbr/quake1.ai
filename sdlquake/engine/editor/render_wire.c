@@ -953,6 +953,9 @@ static void draw_angle_arrows(void)
     const float arrow_len = 48.0f;     // 3 build grid cells; reads well
                                        // beyond a typical 32-unit bbox
 
+    extern cvar_t editor_view_mode;
+    int view_live = (int)editor_view_mode.value == 0;
+
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
@@ -964,9 +967,28 @@ static void draw_angle_arrows(void)
         if (!Editor_EntityAnchor(e, a)) continue;
         if (!entity_angle_dir(e, dir)) continue;
 
+        sel = entity_is_selected(i);
+
+        // Live mode: if the engine isn't going to draw a model and the
+        // bbox is suppressed (entity has a registered preview model so
+        // the bbox-pass skipped it), there's nothing visible to anchor
+        // the arrow on — skip so we don't float an orphan in space.
+        // info_player_* / info_intermission edicts are alive with
+        // v.model=NULL and trigger this case.
+        if (view_live && !sel && e->live_ent && !e->live_ent->free)
+        {
+            const char *cls = (e->classname_idx >= 0)
+                            ? e->kv[e->classname_idx].value : NULL;
+            if (classname_to_model(cls))
+            {
+                int en = NUM_FOR_EDICT(e->live_ent);
+                if (en > 0 && en < cl.num_entities && !cl_entities[en].model)
+                    continue;
+            }
+        }
+
         for (j = 0; j < 3; j++) b[j] = a[j] + dir[j] * arrow_len;
 
-        sel     = entity_is_selected(i);
         color   = sel ? EDIT_COLOR_SELECTED : category_color(e);
         through = sel;
         draw_link_arrow(a, b, color, through);
