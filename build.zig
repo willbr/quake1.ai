@@ -179,6 +179,7 @@ pub fn build(b: *std.Build) void {
             "sdlquake/vendor/qbsp/surfaces.c",
             "sdlquake/vendor/qbsp/tjunc.c",
             "sdlquake/vendor/qbsp/writebsp.c",
+            "sdlquake/vendor/qbsp/qbsp_lib.c",
         },
         .flags = qbsp_c_flags,
     });

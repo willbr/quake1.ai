@@ -29,15 +29,32 @@ char			archivedir[1024];
 =================
 Error
 
-For abnormal program terminations
+For abnormal program terminations.
+
+When called from inside qbsp_compile_to_memory, longjmps back to the
+caller with the formatted message stashed in qbsp_err_msg. When called
+from outside that scope (qbsp_err_jmp == NULL), falls back to the
+original printf+exit behaviour.
 =================
 */
+#include <setjmp.h>
+
+extern jmp_buf *qbsp_err_jmp;       /* defined in qbsp_lib.c */
+extern char     qbsp_err_msg[1024]; /* defined in qbsp_lib.c */
+
 void Error (char *error, ...)
 {
 	va_list argptr;
 
-	printf ("************ ERROR ************\n");
+	if (qbsp_err_jmp)
+	{
+		va_start (argptr, error);
+		vsnprintf (qbsp_err_msg, sizeof(qbsp_err_msg), error, argptr);
+		va_end (argptr);
+		longjmp (*qbsp_err_jmp, 1);
+	}
 
+	printf ("************ ERROR ************\n");
 	va_start (argptr,error);
 	vprintf (error,argptr);
 	va_end (argptr);

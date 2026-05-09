@@ -38,9 +38,13 @@
 #define CRC_ProcessByte    qbsp_CRC_ProcessByte
 #define CRC_Value          qbsp_CRC_Value
 
-/* qbsp.c will define qbsp_main; M1.2 will replace this with a proper
- * library entry point. For now, just rename main so it doesn't collide
- * with sys_sdl.c's main(). */
-#define main               qbsp_main
+/* qbsp.c's old main() is renamed and never called — the new entry point
+ * is qbsp_compile_to_memory in qbsp_lib.c. The rename also keeps it from
+ * colliding with sys_sdl.c's main(). */
+#define main               qbsp_main_unused
+
+/* printf / fprintf redirects live in cmdlib.h, after <stdio.h> has
+ * declared them — defining them here breaks Windows stdio.h's
+ * __format__ attribute on printf. */
 
 #endif /* QBSP_NAMESPACE_H */

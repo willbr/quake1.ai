@@ -11,6 +11,22 @@
 #include <time.h>
 #include <stdarg.h>
 
+/* Output redirect — qbsp prints progress / status / errors via printf
+ * and fprintf(stderr/stdout, ...). After the system stdio.h has
+ * declared the real names, redirect them through qbsp_con_print so the
+ * output lands in the engine's in-game console. sprintf intentionally
+ * NOT redirected — it writes to a caller-provided buffer, not stdout.
+ * Defined here (not in qbsp_namespace.h) because force-including it
+ * before stdio.h breaks Windows MinGW's __format__ attribute. */
+extern void qbsp_con_print(const char *fmt, ...);
+#define printf            qbsp_con_print
+#define fprintf(s, ...)   qbsp_con_print(__VA_ARGS__)
+/* vprintf -> drop. qbsp's Error() in cmdlib.c uses vsnprintf into a
+ * buffer (we patched that path); other vprintf calls would silently
+ * lose their output, which is fine — we only care about the formatted
+ * status / error stream from this library. */
+#define vprintf(fmt, ap)  ((void)0)
+
 #ifndef __BYTEBOOL__
 #define __BYTEBOOL__
 typedef enum {false, true} qboolean;
