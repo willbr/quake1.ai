@@ -129,6 +129,22 @@ static void draw_toolbar(void)
     }
     IG_SameLine(0, -1);
     {
+        // Fullbright toggle. Maps to the engine's r_fullbright cvar — zeroes
+        // the lightmap so world surfaces draw at full intensity (alias
+        // models still vertex-shaded; that's vanilla software-renderer
+        // behaviour). Cheat-protected only in multiplayer; r_misc.c forces
+        // it back to 0 if cl.maxclients > 1.
+        cvar_t *fb = Cvar_FindVar("r_fullbright");
+        int on = fb && fb->value != 0.0f;
+        if (IG_Checkbox("fullbright", &on))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "r_fullbright %d\n", on ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
         // Snap toggle. Cvar is float; treat any non-zero as on.
         int snap = editor_grid_snap.value != 0.0f;
         if (IG_Checkbox("snap", &snap))
