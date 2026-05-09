@@ -1539,6 +1539,39 @@ byte *COM_LoadFile (char *path, int usehunk)
 
 	buf = NULL;     // quiet compiler warning
 
+#ifdef SDLQUAKE
+	{
+		// Editor virtual-file hook: when qbsp produces an in-memory .bsp,
+		// the engine's `map foo` -> Mod_ForName -> COM_LoadStackFile chain
+		// resolves it from RAM here without ever touching disk.
+		extern int Editor_VFS_Find(const char *path, void **out_bytes, int *out_size);
+		void *vbytes; int vsize;
+		if (Editor_VFS_Find(path, &vbytes, &vsize))
+		{
+			len = vsize;
+			COM_FileBase (path, base);
+			if      (usehunk == 1) buf = Hunk_AllocName (len+1, base);
+			else if (usehunk == 2) buf = Hunk_TempAlloc (len+1);
+			else if (usehunk == 0) buf = Z_Malloc (len+1);
+			else if (usehunk == 3) buf = Cache_Alloc (loadcache, len+1, base);
+			else if (usehunk == 4)
+			{
+				if (len+1 > loadsize)
+					buf = Hunk_TempAlloc (len+1);
+				else
+					buf = loadbuf;
+			}
+			else
+				Sys_Error ("COM_LoadFile: bad usehunk");
+			if (!buf)
+				Sys_Error ("COM_LoadFile: not enough space for %s", path);
+			memcpy (buf, vbytes, len);
+			((byte *)buf)[len] = 0;
+			return buf;
+		}
+	}
+#endif
+
 // look for it in the filesystem or pack files
 	len = COM_OpenFile (path, &h);
 	if (h == -1)

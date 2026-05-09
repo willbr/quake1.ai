@@ -81,6 +81,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/r_debugdraw.c",
         "sdlquake/engine/r_bbox.c",
         "sdlquake/engine/r_paths.c",
+        "sdlquake/engine/virtual_fs.c",
         // Phase 7 in-game .map editor
         "sdlquake/engine/editor/editor.c",
         "sdlquake/engine/editor/edit_scene.c",

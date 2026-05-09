@@ -19,6 +19,8 @@
 #include "editor.h"
 #include "editor_internal.h"
 #include "hotreload.h"          // g_game_api
+#include "virtual_fs.h"         // Editor_VFS_*
+#include "qbsp_lib.h"           // qbsp_compile_to_memory
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -223,6 +225,59 @@ static void Editor_Cmd_Delete_f(void)
 static void Editor_Cmd_Undo_f(void)
 {
     if (!History_Undo()) Con_Printf("editor: nothing to undo\n");
+}
+
+// Compile the current edit_scene's .map through the in-process qbsp
+// library, register the resulting .bsp bytes as a virtual file, and
+// restart the map so the engine loads the freshly compiled geometry.
+// No .bsp ever hits disk on the engine side — the .map is the source
+// of truth (Scene_Save writes it first), the .bsp lives in RAM only.
+//
+// v1 limit: qbsp's globals are not reset between calls; running
+// editor_compile a second time in the same session may crash. Quit
+// and relaunch between attempts. M2 fixes this.
+static void Editor_Cmd_Compile_f(void)
+{
+    char  map_path[256];
+    char  bsp_vpath[64];
+    void *bytes = NULL;
+    int   size  = 0;
+    int   rc;
+
+    if (!edit_scene.mapname[0])
+    {
+        Con_Printf("editor_compile: no map loaded\n");
+        return;
+    }
+
+    snprintf(map_path,  sizeof(map_path),
+             "%s/maps/%s.map", com_gamedir, edit_scene.mapname);
+    snprintf(bsp_vpath, sizeof(bsp_vpath),
+             "maps/%s.bsp", edit_scene.mapname);
+
+    if (!Scene_Save(map_path))
+    {
+        Con_Printf("editor_compile: save to %s failed\n", map_path);
+        return;
+    }
+    Con_Printf("editor_compile: saved %s; running qbsp...\n", map_path);
+
+    rc = qbsp_compile_to_memory(map_path, &bytes, &size, NULL);
+    if (rc != 0 || !bytes)
+    {
+        Con_Printf("editor_compile: qbsp failed (rc=%d)\n", rc);
+        return;
+    }
+
+    Editor_VFS_Register(bsp_vpath, bytes, size);
+    Con_Printf("editor_compile: %s = %d bytes (virtual); reloading\n",
+               bsp_vpath, size);
+
+    {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "map %s\n", edit_scene.mapname);
+        Cbuf_AddText(buf);
+    }
 }
 
 static void Editor_Cmd_Redo_f(void)
@@ -779,6 +834,7 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_delete",  Editor_Cmd_Delete_f);
     Cmd_AddCommand("editor_undo",    Editor_Cmd_Undo_f);
     Cmd_AddCommand("editor_redo",    Editor_Cmd_Redo_f);
+    Cmd_AddCommand("editor_compile", Editor_Cmd_Compile_f);
 
     History_Init();
 
@@ -806,6 +862,7 @@ void Editor_Shutdown(void)
     extern void Editor_TexCache_Shutdown(void);
     if (!s_inited) return;
     Editor_TexCache_Shutdown();
+    Editor_VFS_Shutdown();
     Scene_Shutdown();
     s_inited = 0;
 }
