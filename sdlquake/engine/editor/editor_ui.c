@@ -59,6 +59,30 @@ static const char *s_entity_classes[] = {
 enum { S_ENTITY_CLASSES_N
        = (int)(sizeof(s_entity_classes) / sizeof(s_entity_classes[0])) };
 
+// Case-insensitive substring search. Used by the texture filter UI so
+// "wood" matches "Wood" and "BWOOD" alike. Empty needle matches anything.
+static int strstri_simple(const char *hay, const char *needle)
+{
+    int hi, ni, hL, nL;
+    if (!needle || !needle[0]) return 1;
+    if (!hay) return 0;
+    hL = (int)strlen(hay);
+    nL = (int)strlen(needle);
+    if (nL > hL) return 0;
+    for (hi = 0; hi <= hL - nL; hi++)
+    {
+        for (ni = 0; ni < nL; ni++)
+        {
+            char a = hay[hi + ni], b = needle[ni];
+            if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+            if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+            if (a != b) break;
+        }
+        if (ni == nL) return 1;
+    }
+    return 0;
+}
+
 // World-texture name list, lazily rebuilt when cl.worldmodel changes. Both
 // the toolbar brush-tex picker and the inspector face-tex pickers feed off
 // this. Pointers borrow into worldmodel->textures[i]->name so we pay one
@@ -1274,44 +1298,90 @@ static void draw_inspector(void)
                  b->maxs[0], b->maxs[1], b->maxs[2]);
         IG_TextUnformatted(buf);
 
-        // Per-face texture picker. The texname lives on the plane so faces
-        // sharing a plane (impossible in well-formed brushes but tolerated
-        // here) update together. Picking writes the new name straight into
-        // p->texname; render_tex.c looks up the world texture per-frame so
-        // the change is visible immediately, no recompile.
+        // Per-face textures. With face mode on, the picker writes only to
+        // the active face's plane; with face mode off, it writes to every
+        // face plane on the brush (so a new cube can be textured in one
+        // click). render_tex.c looks up textures per-frame, so any write
+        // here is immediately visible.
         {
             int n;
             const char *const *names = world_tex_list(&n);
             int k;
             IG_Separator();
             IG_TextUnformatted("face textures");
+            if (n == 0)
+            {
+                IG_TextUnformatted("(no map loaded)");
+            }
+            else
+            {
+                static char s_filter[64] = "";
+                int af_e, af_b, af_p;
+                int has_active = Scene_GetActiveFace(&af_e, &af_b, &af_p);
+                int p_ent, p_brush;
+                int aligned_to_active =
+                    has_active
+                    && Scene_NumSelected() == 1
+                    && Scene_GetSelected(0, &p_ent, &p_brush)
+                    && p_ent == af_e && p_brush == af_b;
+                int i;
+
+                snprintf(buf, sizeof(buf),
+                         "picker writes to: %s",
+                         aligned_to_active ? "active face only"
+                                           : "ALL faces");
+                IG_TextUnformatted(buf);
+                IG_SetNextItemWidth(180);
+                IG_InputText("filter##facetex", s_filter, sizeof(s_filter), 0);
+                IG_BeginChild("##texlist", 0, 130, 0, 0);
+                for (i = 0; i < n; i++)
+                {
+                    if (s_filter[0] && !strstri_simple(names[i], s_filter))
+                        continue;
+                    if (IG_Selectable(names[i], 0, 0))
+                    {
+                        if (aligned_to_active)
+                        {
+                            edit_brush_t *bb = b;
+                            edit_plane_t *pl;
+                            if (af_p >= 0 && af_p < bb->numplanes)
+                            {
+                                History_Push("face texture");
+                                pl = &bb->planes[af_p];
+                                Q_strncpy(pl->texname, names[i],
+                                          EDIT_TEX_NAME_LEN - 1);
+                                pl->texname[EDIT_TEX_NAME_LEN - 1] = '\0';
+                            }
+                        }
+                        else
+                        {
+                            int kk;
+                            History_Push("brush texture");
+                            for (kk = 0; kk < b->numplanes; kk++)
+                            {
+                                edit_plane_t *pl = &b->planes[kk];
+                                Q_strncpy(pl->texname, names[i],
+                                          EDIT_TEX_NAME_LEN - 1);
+                                pl->texname[EDIT_TEX_NAME_LEN - 1] = '\0';
+                            }
+                        }
+                    }
+                }
+                IG_EndChild();
+            }
+            // Per-face read-out so the user can see which face has what.
+            // Face mode click targets a face; this confirms the result.
             for (k = 0; k < b->numfaces; k++)
             {
                 edit_face_t  *f = &b->faces[k];
                 edit_plane_t *p = &b->planes[f->plane_idx];
-                int sel;
-                IG_PushID_Int(1000 + k);
-                if (n > 0)
-                {
-                    sel = world_tex_index(p->texname);
-                    if (sel < 0) sel = 0;
-                    snprintf(buf, sizeof(buf), "face %d##facetex", k);
-                    IG_SetNextItemWidth(180);
-                    if (IG_Combo(buf, &sel, names, n))
-                    {
-                        Q_strncpy(p->texname, names[sel],
-                                  EDIT_TEX_NAME_LEN - 1);
-                        p->texname[EDIT_TEX_NAME_LEN - 1] = '\0';
-                    }
-                }
-                else
-                {
-                    snprintf(buf, sizeof(buf),
-                             "face %d  %s  (no map for picker)",
-                             k, p->texname);
-                    IG_TextUnformatted(buf);
-                }
-                IG_PopID();
+                int af_e, af_b, af_p;
+                int is_active =
+                    Scene_GetActiveFace(&af_e, &af_b, &af_p)
+                    && af_p == f->plane_idx;
+                snprintf(buf, sizeof(buf), "%sface %d  %s",
+                         is_active ? "* " : "  ", k, p->texname);
+                IG_TextUnformatted(buf);
             }
         }
 
