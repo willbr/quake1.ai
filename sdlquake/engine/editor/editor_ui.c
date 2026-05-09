@@ -9,6 +9,7 @@
 #include "edit_scene.h"
 #include "edit_history.h"
 #include "edit_texcache.h"
+#include "editor_classlist.h"
 #include "editor.h"
 #include "editor_internal.h"
 
@@ -19,6 +20,8 @@
 
 // Toolbar Textures... button toggles this; consumed by draw_texture_browser.
 static int s_show_tex_browser = 0;
+// Toolbar "Add Entity..." button toggles this; consumed by draw_spawn_dialog.
+static int s_show_spawn_dialog = 0;
 
 // -----------------------------------------------------------------------------
 // Toolbar
@@ -30,38 +33,6 @@ static int s_show_tex_browser = 0;
 #define UI_TOOLBAR_H    100
 #define UI_LEFT_W       320
 #define UI_RIGHT_W      360
-
-// Entity-palette classnames offered in the toolbar combo. Anything outside
-// this list is reachable via the editor_entity_add console command.
-static const char *s_entity_classes[] = {
-    "info_player_start",
-    "info_player_deathmatch",
-    "light",
-    "monster_army",
-    "monster_dog",
-    "monster_ogre",
-    "monster_demon1",
-    "monster_shambler",
-    "monster_knight",
-    "monster_wizard",
-    "monster_zombie",
-    "weapon_supershotgun",
-    "weapon_nailgun",
-    "weapon_supernailgun",
-    "weapon_grenadelauncher",
-    "weapon_rocketlauncher",
-    "weapon_lightning",
-    "item_health",
-    "item_armor1",
-    "item_armor2",
-    "item_armorInv",
-    "item_shells",
-    "item_spikes",
-    "item_rockets",
-    "item_cells",
-};
-enum { S_ENTITY_CLASSES_N
-       = (int)(sizeof(s_entity_classes) / sizeof(s_entity_classes[0])) };
 
 // Case-insensitive substring search. Used by the texture filter UI so
 // "wood" matches "Wood" and "BWOOD" alike. Empty needle matches anything.
@@ -190,6 +161,8 @@ static void draw_toolbar(void)
     if (IG_Button("Close (F2)"))   Cbuf_AddText("editor\n");
     IG_SameLine(0, -1);
     if (IG_Button("Textures..."))  s_show_tex_browser = !s_show_tex_browser;
+    IG_SameLine(0, -1);
+    if (IG_Button("Add Entity..."))s_show_spawn_dialog = !s_show_spawn_dialog;
 
     {
         int style = (int)editor_render_style.value;
@@ -362,32 +335,16 @@ static void draw_toolbar(void)
         if (IG_Button("Hollow"))
             Cbuf_AddText("editor_brush_hollow\n");
     }
-    IG_SameLine(0, -1);
-    // Entity palette: classname combo + Add button. Sits on the next row
-    // below the main button strip. Selection persists across frames so the
-    // user can spam Add to drop several of the same kind.
     {
-        static int sel_class = 0;
-        if (sel_class < 0) sel_class = 0;
-        if (sel_class >= S_ENTITY_CLASSES_N) sel_class = S_ENTITY_CLASSES_N - 1;
-        IG_SetNextItemWidth(220);
-        IG_Combo("entity class", &sel_class, s_entity_classes,
-                 S_ENTITY_CLASSES_N);
-        IG_SameLine(0, -1);
-        if (IG_Button("Add entity"))
-        {
-            char buf[96];
-            snprintf(buf, sizeof(buf), "editor_entity_add %s\n",
-                     s_entity_classes[sel_class]);
-            Cbuf_AddText(buf);
-        }
-    }
-
-    {
-        char buf[96];
-        snprintf(buf, sizeof(buf),
-                 "loaded: %s    hold RMB to look + WASD to move",
-                 edit_scene.mapname[0] ? edit_scene.mapname : "(none)");
+        char buf[160];
+        if (Editor_IsPlacementPending())
+            snprintf(buf, sizeof(buf),
+                     "click viewport to place '%s'   (ESC to cancel)",
+                     Editor_PendingClassname());
+        else
+            snprintf(buf, sizeof(buf),
+                     "loaded: %s    hold RMB to look + WASD to move",
+                     edit_scene.mapname[0] ? edit_scene.mapname : "(none)");
         IG_TextUnformatted(buf);
     }
     IG_End();
@@ -1039,6 +996,66 @@ static void draw_live_state(edit_entity_t *e)
 }
 
 // -----------------------------------------------------------------------------
+// Spawn dialog (Add Entity...)
+// -----------------------------------------------------------------------------
+
+// Modeless picker for the next-click placement. Source list is the running
+// game DLL's spawn table — every classname the engine actually knows how
+// to spawn shows up here. Click a row → arms Editor_BeginPlaceEntity, the
+// next viewport LMB drops the entity at the cursor.
+static void draw_spawn_dialog(void)
+{
+    static char s_filter[64] = "";
+    int n = 0, i;
+    const char *const *names;
+
+    if (!s_show_spawn_dialog) return;
+
+    IG_SetNextWindowSize(360, 480, IG_Cond_FirstUseEver);
+    if (!IG_Begin("Spawn Entity", &s_show_spawn_dialog, IG_WF_None))
+    {
+        IG_End();
+        return;
+    }
+
+    names = Editor_ClassList_Get(&n);
+    if (!names || n == 0)
+    {
+        IG_TextUnformatted("(game DLL not loaded — start a server then retry)");
+        IG_End();
+        return;
+    }
+
+    if (Editor_IsPlacementPending())
+    {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "* armed: %s  (click viewport, ESC cancels)",
+                 Editor_PendingClassname());
+        IG_TextUnformatted(buf);
+    }
+    else
+    {
+        IG_TextUnformatted("pick a classname, then click in the viewport.");
+    }
+
+    IG_SetNextItemWidth(220);
+    IG_InputText("filter##spawn", s_filter, sizeof(s_filter), 0);
+
+    IG_BeginChild("##spawn_grid", 0, 0, 0, 0);
+    for (i = 0; i < n; i++)
+    {
+        if (s_filter[0] && !strstri_simple(names[i], s_filter)) continue;
+        IG_PushID_Int(i);
+        if (IG_Selectable(names[i], 0, 0))
+            Editor_BeginPlaceEntity(names[i]);
+        IG_PopID();
+    }
+    IG_EndChild();
+    IG_End();
+}
+
+// -----------------------------------------------------------------------------
 // Texture browser (thumbnail palette)
 // -----------------------------------------------------------------------------
 
@@ -1542,4 +1559,5 @@ void Editor_DrawUI(void)
     draw_brush_list();
     draw_inspector();
     draw_texture_browser();
+    draw_spawn_dialog();
 }

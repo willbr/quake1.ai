@@ -52,8 +52,9 @@ static void game_client_kill(edict_t *c)           { ClientKill(c); }
 static void game_set_new_parms(void)               { SetNewParms(); }
 static void game_set_change_parms(edict_t *c)      { SetChangeParms(c); }
 
-// Defined in spawn.c — classname dispatch table
+// Defined in spawn.c — classname dispatch table + introspection
 void game_entity_spawn(edict_t *e, const char *classname);
+const char *const *game_list_spawn_classes(int *out_count);
 
 static game_api_t s_api = {
     GAME_API_VERSION,
@@ -71,6 +72,7 @@ static game_api_t s_api = {
     game_client_kill,
     game_set_new_parms,
     game_set_change_parms,
+    game_list_spawn_classes,
 };
 
 #ifdef _WIN32

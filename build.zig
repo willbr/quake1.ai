@@ -93,6 +93,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/editor/gizmo.c",
         "sdlquake/engine/editor/editor_ui.c",
         "sdlquake/engine/editor/edit_texcache.c",
+        "sdlquake/engine/editor/editor_classlist.c",
         "sdlquake/engine/editor/collide.c",
     };
 

@@ -113,6 +113,15 @@ static vec3_t  s_cam_angles;
 static int     s_cam_mouse_dx  = 0;
 static int     s_cam_mouse_dy  = 0;
 
+// Pending entity placement (set by Editor_BeginPlaceEntity, consumed by
+// the next viewport LMB click). Empty string means nothing is pending.
+static char    s_pending_classname[64] = { 0 };
+// While the user is holding LMB after a place-click, the entity origin
+// tracks the cursor's raycast hit so they can drag the new entity to a
+// final spot in one motion. Released on LMB up.
+static int     s_placing_drag    = 0;
+static int     s_placing_ent_idx = -1;
+
 static void set_lookmode(int on);
 
 // -----------------------------------------------------------------------------
@@ -307,6 +316,34 @@ void Editor_FrameItem(int e_idx, int b_idx)
     s_camera_inited = 1;
 }
 
+// Per-classname default keyvalue prefill. Heuristic — matches the most
+// common spawn-function expectations so newly-placed entities are usable
+// without a trip through the inspector. Anything not matched gets just
+// classname + origin (Scene_AddPointEntity already wrote those).
+static void apply_classname_defaults(edit_entity_t *e, const char *cls)
+{
+    // Most facing-aware classes (monsters, items, spawn points) need an
+    // angle key; their spawn functions read v.angles[YAW] from it.
+    if (!strcmp(cls, "info_player_start")
+     || !strcmp(cls, "info_player_start2")
+     || !strcmp(cls, "info_player_deathmatch")
+     || !strcmp(cls, "info_player_coop")
+     || !strcmp(cls, "info_intermission")
+     || !strcmp(cls, "info_teleport_destination")
+     || !strncmp(cls, "monster_",    8)
+     || !strncmp(cls, "item_",       5)
+     || !strncmp(cls, "weapon_",     7)
+     || !strncmp(cls, "ammo_",       5)
+     || !strncmp(cls, "trap_",       5))
+        Entity_SetKV(e, "angle", "0");
+
+    // Lights default to 200 — reasonable medium intensity, dim enough not
+    // to wash out a small room, bright enough not to vanish in vis.
+    if (!strcmp(cls, "light")
+     || !strncmp(cls, "light_", 6))
+        Entity_SetKV(e, "light", "200");
+}
+
 // Spawn a point entity with the given classname at the camera focal point.
 // Usage: editor_entity_add <classname>
 static void Editor_Cmd_AddEntity_f(void)
@@ -322,8 +359,97 @@ static void Editor_Cmd_AddEntity_f(void)
     compute_camera_focal(origin);
     History_Push("add entity");
     if (Scene_AddPointEntity(classname, origin))
+    {
+        int idx = edit_scene.numentities - 1;
+        apply_classname_defaults(&edit_scene.entities[idx], classname);
         Con_Printf("editor: added %s at %.0f %.0f %.0f\n",
                    classname, origin[0], origin[1], origin[2]);
+    }
+}
+
+// Arm placement of `classname` for the next viewport LMB click. The toolbar
+// "Add Entity..." dialog calls this when the user picks a row. Pre-existing
+// pending placement is overwritten — useful for "actually I wanted a knight,
+// not an ogre".
+void Editor_BeginPlaceEntity(const char *classname)
+{
+    if (!classname || !classname[0]) { s_pending_classname[0] = '\0'; return; }
+    Q_strncpy(s_pending_classname, classname, (int)sizeof(s_pending_classname) - 1);
+    s_pending_classname[sizeof(s_pending_classname) - 1] = '\0';
+}
+
+void Editor_CancelPlaceEntity(void) { s_pending_classname[0] = '\0'; }
+int  Editor_IsPlacementPending(void) { return s_pending_classname[0] != '\0'; }
+const char *Editor_PendingClassname(void) { return s_pending_classname; }
+
+// Hit point for cursor placement. If the ray misses everything, falls back
+// to 128 units in front of the camera (snapped). Origin is grid-snapped on
+// success too — keeps newly-placed entities aligned with the rest of the
+// scene without making the user fiddle with snap toggles per-spawn.
+static void resolve_place_origin(float vx, float vy, vec3_t out)
+{
+    vec3_t hit, nrm;
+    float  grid = editor_grid_snap.value ? editor_grid_size.value : 0.0f;
+    int    i;
+    if (Editor_RaycastForPlacement(vx, vy, hit, nrm))
+    {
+        // Offset slightly along the surface normal so the new entity
+        // doesn't z-fight or end up half-inside the wall.
+        for (i = 0; i < 3; i++) out[i] = hit[i] + nrm[i] * 16.0f;
+    }
+    else
+    {
+        compute_camera_focal(out);
+        return;     // already snapped by compute_camera_focal
+    }
+    if (grid > 0.0f)
+        for (i = 0; i < 3; i++)
+            out[i] = floorf(out[i] / grid + 0.5f) * grid;
+}
+
+// Spawn the pending entity at the cursor and arm the place-drag state so
+// the user keeps dragging it until LMB-up. Called from the mouse-down
+// handler when s_pending_classname is non-empty.
+static void place_pending_at_cursor(float vx, float vy)
+{
+    vec3_t origin;
+    int idx;
+    char cls[64];
+    Q_strncpy(cls, s_pending_classname, (int)sizeof(cls) - 1);
+    cls[sizeof(cls) - 1] = '\0';
+    s_pending_classname[0] = '\0';
+
+    resolve_place_origin(vx, vy, origin);
+    History_Push("place entity");
+    if (!Scene_AddPointEntity(cls, origin)) return;
+    idx = edit_scene.numentities - 1;
+    apply_classname_defaults(&edit_scene.entities[idx], cls);
+    s_placing_drag    = 1;
+    s_placing_ent_idx = idx;
+}
+
+// Track-cursor update during the place-drag. Snaps to grid the same way
+// resolve_place_origin does so the drag feels like the gizmo's translate
+// drag — no surprise un-snap on release.
+static void place_drag_update(float vx, float vy)
+{
+    edit_entity_t *e;
+    vec3_t origin;
+    if (!s_placing_drag) return;
+    if (s_placing_ent_idx < 0
+     || s_placing_ent_idx >= edit_scene.numentities)
+    {
+        s_placing_drag = 0;
+        s_placing_ent_idx = -1;
+        return;
+    }
+    resolve_place_origin(vx, vy, origin);
+    e = &edit_scene.entities[s_placing_ent_idx];
+    {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%g %g %g", origin[0], origin[1], origin[2]);
+        Entity_SetKV(e, "origin", buf);
+    }
 }
 
 // Spawn a 64-unit cube at the camera focal point. New brush is appended to
@@ -695,6 +821,11 @@ void Editor_Toggle(void)
     // spawnflags), keeping the file authoritative.
     if (s_open)
     {
+        // Drop any pending placement so reopening doesn't surprise-spawn
+        // on the next viewport click.
+        s_pending_classname[0] = '\0';
+        s_placing_drag    = 0;
+        s_placing_ent_idx = -1;
         Editor_FlushPendingEntities();
         if (edit_scene.filename[0])
         {
@@ -901,6 +1032,14 @@ int Editor_ProcessEvent(void *evp)
         if (s_lookmode) return 0;
         float vx, vy;
         window_to_vid(ev->button.x, ev->button.y, &vx, &vy);
+        // Pending entity placement intercepts the click before gizmo/pick.
+        // The same mouse-down arms a follow-the-cursor drag so the user can
+        // refine the position in one motion.
+        if (s_pending_classname[0])
+        {
+            place_pending_at_cursor(vx, vy);
+            return 1;
+        }
         // Try the gizmo first; if it doesn't grab an axis, treat as a pick.
         if (Editor_GizmoMouseDown(vx, vy)) return 1;
         {
@@ -945,6 +1084,15 @@ int Editor_ProcessEvent(void *evp)
             set_lookmode(0);
             return 1;
         }
+        if (ev->button.button == SDL_BUTTON_LEFT && s_placing_drag)
+        {
+            // Drag finishes implicitly — origin already updated in the last
+            // motion event. History was pushed at place time, so the spawn
+            // + drag is one undo step.
+            s_placing_drag    = 0;
+            s_placing_ent_idx = -1;
+            return 1;
+        }
         if (ev->button.button == SDL_BUTTON_LEFT && Editor_GizmoIsActive())
         {
             Editor_GizmoMouseUp();
@@ -961,12 +1109,38 @@ int Editor_ProcessEvent(void *evp)
             s_cam_mouse_dy += (int)ev->motion.yrel;
             return 1;
         }
+        if (s_placing_drag)
+        {
+            float vx, vy;
+            window_to_vid(ev->motion.x, ev->motion.y, &vx, &vy);
+            place_drag_update(vx, vy);
+            return 1;
+        }
         if (Editor_GizmoIsActive())
         {
             float vx, vy;
             window_to_vid(ev->motion.x, ev->motion.y, &vx, &vy);
             Editor_GizmoMouseMove(vx, vy);
             return 1;
+        }
+        return 0;
+    case SDL_EVENT_KEY_DOWN:
+        // ESC cancels pending placement (or an in-progress place-drag, in
+        // which case we also wipe the just-placed entity via undo).
+        if (ev->key.scancode == SDL_SCANCODE_ESCAPE)
+        {
+            if (s_placing_drag)
+            {
+                s_placing_drag    = 0;
+                s_placing_ent_idx = -1;
+                History_Undo();
+                return 1;
+            }
+            if (s_pending_classname[0])
+            {
+                s_pending_classname[0] = '\0';
+                return 1;
+            }
         }
         return 0;
     }

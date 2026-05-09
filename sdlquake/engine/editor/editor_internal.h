@@ -67,6 +67,15 @@ void Editor_DrawLine3DOver(const vec3_t a, const vec3_t b, byte color);
 // be NULL if the caller doesn't care (e.g. brush-mode picking).
 int  Editor_PickAt       (float sx, float sy, int *out_ent, int *out_brush,
                           int *out_plane);
+
+// Raycast for entity placement: return the closest hit point along the
+// cursor ray on either the world BSP or any visible editor brush face.
+// out_hit and out_normal both required (no NULL); out_normal points out
+// of the surface. Returns 1 on hit, 0 if nothing in front of the camera
+// for the trace distance. Used by the spawn dialog to drop a new entity
+// where the user is looking.
+int  Editor_RaycastForPlacement(float sx, float sy,
+                                vec3_t out_hit, vec3_t out_normal);
 // Map a classname to its alias model path (if known). Returns NULL for
 // classes without a registered model. map_io.c uses this when binding
 // SV_MakeStatic'd entities to their cl_static_entities[] counterpart.
@@ -113,6 +122,18 @@ void Editor_BrushCentroid   (const struct edit_brush_s *b, vec3_t out);
 // entity's origin. Keeps the current view angles, so direction is preserved.
 // b_idx = -1 means "the entity itself" (point entity ref).
 void Editor_FrameItem(int e_idx, int b_idx);
+
+// editor.c — entity placement handshake. The toolbar spawn dialog calls
+// Editor_BeginPlaceEntity to arm a classname; the next viewport LMB click
+// drops the entity at the cursor's raycast hit, snaps to grid, and enters
+// a follow-the-cursor drag so the user can refine the position in one
+// motion. ESC clears the pending state (or, if a place-drag is in flight,
+// also undoes the spawn). The toolbar uses Editor_IsPlacementPending /
+// Editor_PendingClassname to render a status hint.
+void        Editor_BeginPlaceEntity (const char *classname);
+void        Editor_CancelPlaceEntity(void);
+int         Editor_IsPlacementPending(void);
+const char *Editor_PendingClassname (void);
 
 // render_wire.c — append fake entity_t records into cl_visedicts so the
 // engine renders editor preview models for any point entity that has a

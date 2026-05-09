@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 4
+#define GAME_API_VERSION 5
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -169,6 +169,12 @@ typedef struct game_api_s {
     // Level transitions
     void  (*set_new_parms)(void);
     void  (*set_change_parms)(edict_t *client);
+
+    // Editor introspection — return a NULL-terminated array of classname
+    // strings the DLL knows how to spawn. Pointers borrow into the DLL's
+    // static spawn table; valid for the DLL's lifetime. *out_count receives
+    // the entry count (excluding the trailing NULL).
+    const char *const *(*list_spawn_classes)(int *out_count);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);

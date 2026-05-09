@@ -1621,3 +1621,85 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush,
     if (out_plane) *out_plane = best_plane;
     return 1;
 }
+
+// Cursor-placement raycast. Combines a BSP trace (so we hit floors, walls,
+// and ceilings) with a face-by-face check against editor brushes (which
+// aren't in the BSP yet). Returns the closer of the two hits with its
+// outward normal, so the spawn dialog can offset the new entity slightly
+// off the surface and avoid z-fighting / wall embedding.
+int Editor_RaycastForPlacement(float sx, float sy,
+                               vec3_t out_hit, vec3_t out_normal)
+{
+    extern qboolean SV_RecursiveHullCheck (hull_t *, int, float, float,
+                                           vec3_t, vec3_t, trace_t *);
+    const float TRACE_DIST = 10000.0f;
+    vec3_t origin, dir;
+    int    have_hit = 0;
+    float  best_t = 1e30f;
+    vec3_t best_n = { 0, 0, 1 };
+    int    i, j, k;
+
+    Editor_ScreenToRay(sx, sy, origin, dir);
+
+    // World BSP trace.
+    if (cl.worldmodel)
+    {
+        trace_t trace;
+        vec3_t  start, end;
+        for (i = 0; i < 3; i++)
+        {
+            start[i] = origin[i];
+            end[i]   = origin[i] + dir[i] * TRACE_DIST;
+        }
+        memset(&trace, 0, sizeof(trace));
+        trace.fraction = 1;
+        VectorCopy(end, trace.endpos);
+        SV_RecursiveHullCheck(cl.worldmodel->hulls, 0, 0, 1, start, end, &trace);
+        if (!trace.startsolid && !trace.allsolid && trace.fraction < 1.0f)
+        {
+            float t = trace.fraction * TRACE_DIST;
+            if (t < best_t)
+            {
+                best_t = t;
+                VectorCopy(trace.plane.normal, best_n);
+                have_hit = 1;
+            }
+        }
+    }
+
+    // Editor brushes: find the nearest face hit. Skip hidden categories so
+    // the user doesn't drop an entity onto a filtered-out trigger volume.
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        if (Editor_EntityHidden(i)) continue;
+        if (Entity_IsPoint(e)) continue;
+        for (j = 0; j < e->numbrushes; j++)
+        {
+            edit_brush_t *b = &e->brushes[j];
+            if (!b->valid) continue;
+            for (k = 0; k < b->numfaces; k++)
+            {
+                edit_face_t *f = &b->faces[k];
+                edit_plane_t *pl = &b->planes[f->plane_idx];
+                float t;
+                if (!ray_vs_face(origin, dir,
+                                 (const vec3_t *)f->verts, f->numverts,
+                                 pl->normal, pl->dist, &t))
+                    continue;
+                if (t < best_t)
+                {
+                    best_t = t;
+                    VectorCopy(pl->normal, best_n);
+                    have_hit = 1;
+                }
+            }
+        }
+    }
+
+    if (!have_hit) return 0;
+    for (i = 0; i < 3; i++)
+        out_hit[i] = origin[i] + dir[i] * best_t;
+    VectorCopy(best_n, out_normal);
+    return 1;
+}

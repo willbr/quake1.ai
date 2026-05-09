@@ -251,3 +251,27 @@ void game_entity_spawn(edict_t *e, const char *classname)
     }
     // Unknown classname: silently skip (matching original VM behaviour)
 }
+
+// Editor introspection — returns the NULL-terminated array of classname
+// strings the engine's editor browses. Lazy-built on first call from the
+// same s_spawns[] table game_entity_spawn dispatches against; built once
+// per DLL load (the names array is static and the underlying classname
+// pointers are static-lifetime literals in s_spawns[]).
+const char *const *game_list_spawn_classes(int *out_count)
+{
+    static const char *names[sizeof(s_spawns)/sizeof(s_spawns[0])];
+    static int         count = -1;
+
+    if (count < 0) {
+        int n = (int)(sizeof(s_spawns)/sizeof(s_spawns[0]));
+        int i, c = 0;
+        for (i = 0; i < n; i++) {
+            if (!s_spawns[i].classname) break;
+            names[c++] = s_spawns[i].classname;
+        }
+        names[c] = NULL;
+        count = c;
+    }
+    if (out_count) *out_count = count;
+    return names;
+}
