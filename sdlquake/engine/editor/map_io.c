@@ -282,24 +282,35 @@ static int parse_scene_text(char *src)
         }
     }
 
-    // Match each parsed point entity to its live server edict. We pair on
-    // classname + closest origin (within ~64 units) since spawn functions
-    // sometimes nudge the origin (DropToFloor on items, for example), so
-    // exact float-equality misses too much. Brush entities and metadata
-    // info_* are skipped — neither needs a live link.
+    // Match each parsed point entity to its live server edict. Brush
+    // entities (func_door, func_plat, func_button, etc.) come through here
+    // as point entities because the BSP entity string strips inline brush
+    // blocks — the only thing left is "model" "*N", which uniquely names
+    // the brushmodel. We pair on that when present, since multiple doors
+    // typically share v.origin = (0,0,0) and a closest-origin match
+    // collapses every door to the first edict. For non-brushmodel ents we
+    // fall back to classname + closest origin (within ~64u) — spawn
+    // functions sometimes nudge origins (DropToFloor on items, for
+    // example), so exact float-equality misses too much.
     if (sv.active)
     {
-        int i, j;
+        int i, j, k;
         for (i = 0; i < edit_scene.numentities; i++)
         {
             edit_entity_t *e = &edit_scene.entities[i];
             const char *cls;
+            const char *model_kv = NULL;
+            int         by_model;
             vec3_t o;
             edict_t *best = NULL;
             float    best_d2 = 64.0f * 64.0f;
             if (!Entity_IsPoint(e)) continue;
             if (e->classname_idx < 0) continue;
             cls = e->kv[e->classname_idx].value;
+            for (k = 0; k < e->numkv; k++)
+                if (!strcmp(e->kv[k].key, "model"))
+                    { model_kv = e->kv[k].value; break; }
+            by_model = (model_kv && model_kv[0] == '*');
             Entity_GetOrigin(e, o);
             for (j = 1; j < sv.num_edicts; j++)
             {
@@ -308,6 +319,15 @@ static int parse_scene_text(char *src)
                 if (ed->free) continue;
                 if (!ed->v.classname) continue;
                 if (strcmp(ed->v.classname, cls) != 0) continue;
+                if (by_model)
+                {
+                    // Brushmodel reference is unique per edict — exact
+                    // string match is the only correct disambiguation.
+                    if (!ed->v.model) continue;
+                    if (strcmp(ed->v.model, model_kv) != 0) continue;
+                    best = ed;
+                    break;
+                }
                 dx = ed->v.origin[0] - o[0];
                 dy = ed->v.origin[1] - o[1];
                 dz = ed->v.origin[2] - o[2];
