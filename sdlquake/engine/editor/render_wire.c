@@ -968,6 +968,84 @@ static float world_pick_occlusion(const vec3_t origin, const vec3_t dir)
     return trace.fraction * TRACE_DIST;
 }
 
+// "Visible only" filter — combines a frustum check (entity bbox projects
+// into the viewport with at least one corner in-bounds) and a world
+// occlusion trace (line of sight from camera to bbox center, no wall in
+// between). Used by the Brushes panel "visible" toggle. Always returns 1
+// (visible) when the camera is inside solid geometry — otherwise the user
+// could end up with nothing on screen.
+int Editor_EntityInView(int e_idx)
+{
+    extern qboolean SV_RecursiveHullCheck (hull_t *, int, float, float,
+                                           vec3_t, vec3_t, trace_t *);
+    edit_entity_t *e;
+    vec3_t pmin, pmax, center, start, end, corner;
+    trace_t trace;
+    float sx, sy;
+    int W, H, k, j, found;
+    int any_in_screen;
+
+    if (e_idx < 0 || e_idx >= edit_scene.numentities) return 1;
+    e = &edit_scene.entities[e_idx];
+
+    // Get world-space bbox.
+    if (Entity_IsPoint(e))
+    {
+        point_entity_bbox(e, pmin, pmax);
+    }
+    else
+    {
+        // Brush entity: union of valid brushes' compiled bboxes.
+        pmin[0] = pmin[1] = pmin[2] =  1e30f;
+        pmax[0] = pmax[1] = pmax[2] = -1e30f;
+        found = 0;
+        for (j = 0; j < e->numbrushes; j++)
+        {
+            edit_brush_t *b = &e->brushes[j];
+            if (!b->valid) continue;
+            for (k = 0; k < 3; k++)
+            {
+                if (b->mins[k] < pmin[k]) pmin[k] = b->mins[k];
+                if (b->maxs[k] > pmax[k]) pmax[k] = b->maxs[k];
+            }
+            found = 1;
+        }
+        if (!found) return 1;       // worldspawn-only / metadata — never hide
+    }
+
+    for (k = 0; k < 3; k++) center[k] = (pmin[k] + pmax[k]) * 0.5f;
+
+    // Frustum: any of the 8 bbox corners must project into the viewport.
+    W = (int)vid.width;
+    H = (int)vid.height;
+    any_in_screen = 0;
+    for (j = 0; j < 8; j++)
+    {
+        corner[0] = (j & 1) ? pmax[0] : pmin[0];
+        corner[1] = (j & 2) ? pmax[1] : pmin[1];
+        corner[2] = (j & 4) ? pmax[2] : pmin[2];
+        if (Editor_ProjectWorld(corner, &sx, &sy))
+        {
+            if (sx >= 0 && sx < W && sy >= 0 && sy < H) { any_in_screen = 1; break; }
+        }
+    }
+    if (!any_in_screen) return 0;
+
+    // Occlusion: world-trace from camera to bbox center.
+    if (cl.worldmodel)
+    {
+        VectorCopy(r_origin, start);
+        VectorCopy(center,   end);
+        memset(&trace, 0, sizeof(trace));
+        trace.fraction = 1;
+        VectorCopy(end, trace.endpos);
+        SV_RecursiveHullCheck(cl.worldmodel->hulls, 0, 0, 1, start, end, &trace);
+        if (trace.startsolid || trace.allsolid) return 1;   // camera in solid
+        if (trace.fraction < 0.99f) return 0;               // wall in the way
+    }
+    return 1;
+}
+
 int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
 {
     vec3_t origin, dir;

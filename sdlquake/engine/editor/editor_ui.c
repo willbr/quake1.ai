@@ -223,6 +223,11 @@ static void draw_toolbar(void)
 // but the array entry exists so EDIT_CAT_OTHER indexing is uniform.
 static int s_hide_cat[EDIT_CAT_COUNT] = { 0 };
 
+// "Visible only" toggle — when on, anything outside the camera frustum
+// or occluded by world geometry is hidden, regardless of category. Useful
+// for "what's actually in front of me right now" while authoring a room.
+static int s_visible_only = 0;
+
 int Editor_EntityHidden(int e_idx)
 {
     int cat;
@@ -230,8 +235,9 @@ int Editor_EntityHidden(int e_idx)
     if (e_idx < 0 || e_idx >= edit_scene.numentities) return 0;
     e = &edit_scene.entities[e_idx];
     cat = Editor_EntityCategory(e);
-    if (cat <= 0 || cat >= EDIT_CAT_COUNT) return 0;
-    return s_hide_cat[cat];
+    if (cat > 0 && cat < EDIT_CAT_COUNT && s_hide_cat[cat]) return 1;
+    if (s_visible_only && !Editor_EntityInView(e_idx)) return 1;
+    return 0;
 }
 
 static void draw_brush_list(void)
@@ -289,6 +295,8 @@ static void draw_brush_list(void)
         if (IG_Checkbox("misc",     &hide_misc))    s_hide_cat[EDIT_CAT_MISC]    = hide_misc;
         IG_SameLine(0, -1);
         if (IG_Checkbox("info",     &hide_info))    s_hide_cat[EDIT_CAT_INFO]    = hide_info;
+        // "Visible only" — orthogonal to category filters; AND'd with them.
+        if (IG_Checkbox("visible only", &s_visible_only)) { /* applied next frame */ }
     }
     IG_Separator();
 

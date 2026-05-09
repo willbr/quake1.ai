@@ -108,8 +108,14 @@ void Editor_PushPreviewEntities(void);
 int  Editor_EntityCategory(const struct edit_entity_s *e);
 
 // editor_ui.c — 1 if the user filtered out this entity's category in the
-// Brushes panel checkboxes. Render / pick / list paths skip filtered
+// Brushes panel checkboxes, or it's outside the camera frustum / behind a
+// wall when "visible only" is on. Render / pick / list paths skip filtered
 // entities.
 int  Editor_EntityHidden  (int e_idx);
+
+// render_wire.c — 1 if the entity is in front of the camera, projects into
+// the viewport, and isn't occluded by the world BSP. Used by the "visible
+// only" filter.
+int  Editor_EntityInView  (int e_idx);
 
 #endif // EDITOR_INTERNAL_H
