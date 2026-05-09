@@ -468,13 +468,27 @@ void Editor_GizmoDraw(void)
     // Rotation rings — three circles, one per world axis, at the pivot
     // (= centroid). Radius matches the translate-arrow length so the rings
     // outline the arrow tips. The active rotate axis (during a drag) goes
-    // hot-white; otherwise each ring takes its axis colour.
+    // hot-white; otherwise each ring takes its axis colour. Pitch (X) and
+    // roll (Y) rings only show when the selection contains at least one
+    // brush — for pure point-entity selections those axes don't do
+    // anything (entity_apply_yaw_delta only handles yaw), so showing them
+    // would mislead the user into clicking dead handles.
     {
         float ring_r = arrow_len;
+        int has_brush = 0;
+        int k, e_sel, b_sel;
+        for (k = 0; k < Scene_NumSelected(); k++)
+            if (Scene_GetSelected(k, &e_sel, &b_sel) && b_sel >= 0)
+            {
+                has_brush = 1;
+                break;
+            }
         for (i = 0; i < 3; i++)
         {
-            byte col = (s_drag_rotate_axis == i)
-                       ? EDIT_COLOR_AXIS_HOT : axis_colors[i];
+            byte col;
+            if (!has_brush && i != 2) continue;
+            col = (s_drag_rotate_axis == i)
+                  ? EDIT_COLOR_AXIS_HOT : axis_colors[i];
             draw_rotation_ring(centroid, i, ring_r, col);
         }
     }
@@ -539,23 +553,37 @@ int Editor_GizmoMouseDown(float sx, float sy)
     // Pass 2: rotation rings. For each axis, intersect the click ray with
     // the world-axis-aligned plane through the centroid (perpendicular to
     // that axis); if the in-plane radial distance is close to ring_r, hit.
-    for (i = 0; i < 3; i++)
+    // Skip pitch/roll rings when there's no brush in the selection — those
+    // rings aren't drawn for point-only selections (entity yaw is the only
+    // rotation we apply for them) and we shouldn't pick what we don't draw.
     {
-        vec3_t hit;
-        float du, dv, r_in;
-        int u, v;
-        if (!ray_vs_axis_plane(i, centroid, r_org, r_dir, hit)) continue;
-        u = (i + 1) % 3;
-        v = (i + 2) % 3;
-        du = hit[u] - centroid[u];
-        dv = hit[v] - centroid[v];
-        r_in = sqrtf(du * du + dv * dv);
-        {
-            float d = fabsf(r_in - ring_r);
-            if (d < pick_world && d < best_d_ring)
+        int has_brush = 0;
+        int k, e_sel, b_sel;
+        for (k = 0; k < Scene_NumSelected(); k++)
+            if (Scene_GetSelected(k, &e_sel, &b_sel) && b_sel >= 0)
             {
-                best_d_ring  = d;
-                best_ring_axis = i;
+                has_brush = 1;
+                break;
+            }
+        for (i = 0; i < 3; i++)
+        {
+            vec3_t hit;
+            float du, dv, r_in;
+            int u, v;
+            if (!has_brush && i != 2) continue;
+            if (!ray_vs_axis_plane(i, centroid, r_org, r_dir, hit)) continue;
+            u = (i + 1) % 3;
+            v = (i + 2) % 3;
+            du = hit[u] - centroid[u];
+            dv = hit[v] - centroid[v];
+            r_in = sqrtf(du * du + dv * dv);
+            {
+                float d = fabsf(r_in - ring_r);
+                if (d < pick_world && d < best_d_ring)
+                {
+                    best_d_ring  = d;
+                    best_ring_axis = i;
+                }
             }
         }
     }
