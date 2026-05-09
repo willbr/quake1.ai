@@ -702,6 +702,13 @@ void Editor_PreRender(void)
     // the gizmo / selection touch any stale state.
     editor_check_map_change();
 
+    // Push fake editor preview entities into cl_visedicts so the engine
+    // renders alias + brushmodel previews via its normal entity pipeline.
+    // Must happen after CL_RelinkEntities reset the list (which is in
+    // host.c earlier in the frame) and before R_EdgeDrawing dispatches
+    // brushmodel entries.
+    Editor_PushPreviewEntities();
+
     // First frame after opening the editor: latch the current view into the
     // camera state so free-fly mode starts where the player was standing.
     if (!s_camera_inited)

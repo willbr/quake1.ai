@@ -342,13 +342,17 @@ static const edit_class_info_t s_class_info[] = {
     {"light_flame_large_yellow",     "progs/flame2.mdl",   {-8,-8,-8}, {8,8,8}},
     {"light_flame_small_yellow",     "progs/flame2.mdl",   {-8,-8,-8}, {8,8,8}},
     {"light_flame_small_white",      "progs/flame2.mdl",   {-8,-8,-8}, {8,8,8}},
-    // .bsp ammo boxes (item_health/shells/spikes/rockets/cells) have no
-    // alias model preview; their bbox in-game is {0,0,0}–{32,32,56}.
-    {"item_health",             NULL, {0,0,0},  {32,32,56}},
-    {"item_shells",             NULL, {0,0,0},  {32,32,56}},
-    {"item_spikes",             NULL, {0,0,0},  {32,32,56}},
-    {"item_rockets",            NULL, {0,0,0},  {32,32,56}},
-    {"item_cells",              NULL, {0,0,0},  {32,32,56}},
+    // .bsp ammo / health boxes. Spawn functions pick a variant by spawn
+    // flag (small vs big); we use the small/medium default — the user
+    // can always set spawnflags 1 for the alternate at game time, the
+    // editor preview is just an at-a-glance "what is this".
+    {"item_health",             "maps/b_bh25.bsp",     {0,0,0},  {32,32,56}},
+    {"item_shells",             "maps/b_shell0.bsp",   {0,0,0},  {32,32,56}},
+    {"item_spikes",             "maps/b_nail0.bsp",    {0,0,0},  {32,32,56}},
+    {"item_rockets",            "maps/b_rock0.bsp",    {0,0,0},  {32,32,56}},
+    {"item_cells",              "maps/b_batt0.bsp",    {0,0,0},  {32,32,56}},
+    // End-game runes.
+    {"item_sigil",              "progs/end1.mdl",      {-16,-16,-24}, {16,16,32}},
 };
 
 static const edit_class_info_t *find_class(const char *classname)
@@ -367,19 +371,26 @@ static const edit_class_info_t *find_class(const char *classname)
 // and SV_LinkEdict put the real bbox into v.absmin/absmax. Falls back
 // to the per-class table (weapons / monsters / players) and then to a
 // centred ±16 cube for unrecognised classnames.
-// Compute the alias model's frame-0 bounding box in model-local space.
-// WinQuake's Mod_LoadAliasModel hardcodes mod->mins/maxs to ±16 ("FIXME:
-// do this right" in the upstream comment), so we have to read the per-
-// frame bboxmin/bboxmax bytes directly and de-quantise them via the
-// model's scale + scale_origin. Frame 0 is enough for a wire bbox —
-// wandering monsters animate within a few units of the rest pose.
-static int alias_local_bbox(model_t *m, vec3_t out_mins, vec3_t out_maxs)
+// Compute model-local bounds for any model the editor cares about. For
+// alias models WinQuake hardcodes mod->mins/maxs to ±16 ("FIXME: do this
+// right" — model.c:1641), so we have to read the per-frame trivertx_t
+// bboxmin/bboxmax and de-quantise via mdl_t scale + scale_origin. For
+// brush models (b_shell0.bsp etc) mod->mins/maxs are real, set by
+// Mod_LoadBrushModel from the BSP submodel.
+static int model_local_bbox(model_t *m, vec3_t out_mins, vec3_t out_maxs)
 {
     aliashdr_t        *pahdr;
     mdl_t             *pmdl;
     maliasframedesc_t *frame;
     int                i;
-    if (!m || m->type != mod_alias) return 0;
+    if (!m) return 0;
+    if (m->type == mod_brush)
+    {
+        if (m->maxs[0] <= m->mins[0]) return 0;
+        for (i = 0; i < 3; i++) { out_mins[i] = m->mins[i]; out_maxs[i] = m->maxs[i]; }
+        return 1;
+    }
+    if (m->type != mod_alias) return 0;
     pahdr = (aliashdr_t *)Mod_Extradata(m);
     if (!pahdr) return 0;
     pmdl  = (mdl_t *)((byte *)pahdr + pahdr->model);
@@ -416,7 +427,7 @@ static void point_entity_bbox(const edit_entity_t *e,
     // SV_MakeStatic'd ents (flame torches) — read the alias model's actual
     // frame-0 vertex bounds and translate to the static entity's origin.
     if (e->live_static && e->live_static->model
-        && alias_local_bbox(e->live_static->model, am, ax))
+        && model_local_bbox(e->live_static->model, am, ax))
     {
         for (i = 0; i < 3; i++)
         {
@@ -436,7 +447,7 @@ static void point_entity_bbox(const edit_entity_t *e,
     if (ci && ci->modelpath)
     {
         model_t *m = Mod_ForName((char *)ci->modelpath, false);
-        if (m && alias_local_bbox(m, am, ax))
+        if (m && model_local_bbox(m, am, ax))
         {
             for (i = 0; i < 3; i++)
             {
@@ -559,47 +570,78 @@ static byte *editor_player_colormap(const char *classname)
     return NULL;
 }
 
-// Render a single alias model at the entity's origin. Mirrors the software
-// renderer's case mod_alias path in R_DrawEntitiesOnList.
-static void draw_point_entity_model(const edit_entity_t *e, const char *modelpath)
+// Pool of fake entity_t records pushed into cl_visedicts each frame so the
+// engine renders editor previews via its normal alias / brushmodel pipeline.
+// Sized generously — most maps have <100 entities and we only push those
+// without a live counterpart.
+#define EDIT_PREVIEW_MAX 256
+static entity_t s_preview_pool[EDIT_PREVIEW_MAX];
+
+// Editor_PushPreviewEntities — append fake entities to cl_visedicts so that
+// the engine's R_DrawBEntitiesOnList (mod_brush) and R_DrawEntitiesOnList
+// (mod_alias / mod_sprite) render every editor entity that has a model but
+// no live counterpart yet. Skip ents the engine already renders (live edict
+// via cl_entities[N], or static via cl_static_entities → R_StoreEfrags).
+//
+// Called from Editor_PreRender, which fires inside R_RenderView_ AFTER
+// CL_RelinkEntities has reset cl_numvisedicts and BEFORE R_EdgeDrawing
+// processes brushmodels — exactly the window the engine itself uses to
+// fill the visedicts list.
+void Editor_PushPreviewEntities(void)
 {
-    static entity_t fake_ent;       // reused across the per-frame loop
-    model_t *m;
-    alight_t lighting;
-    float    lightvec[3] = { -1, 0, 0 };
-    byte    *player_cmap = NULL;
-    int      j;
+    int i;
+    int n_pushed = 0;
+    extern int       cl_numvisedicts;
+    extern entity_t *cl_visedicts[];
 
-    m = Mod_ForName((char *)modelpath, false);
-    if (!m || m->type != mod_alias) return;
+    if (!Editor_IsOpen()) return;
+    if (!cl.worldmodel) return;
 
-    if (e->classname_idx >= 0)
-        player_cmap = editor_player_colormap(e->kv[e->classname_idx].value);
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        const char    *cls;
+        const edit_class_info_t *ci;
+        model_t       *m;
+        entity_t      *ent;
+        byte          *player_cmap = NULL;
 
-    memset(&fake_ent, 0, sizeof(fake_ent));
-    Entity_GetOrigin(e, fake_ent.origin);
-    parse_entity_angles(e, fake_ent.angles);
-    fake_ent.model    = m;
-    fake_ent.frame    = 0;
-    fake_ent.skinnum  = 0;
-    fake_ent.colormap = player_cmap ? player_cmap : vid.colormap;
-    fake_ent.trivial_accept = 0;
+        if (!Entity_IsPoint(e)) continue;
+        if (e->classname_idx < 0) continue;
 
-    currententity = &fake_ent;
-    VectorCopy(fake_ent.origin, r_entorigin);
-    VectorSubtract(r_origin, r_entorigin, modelorg);
+        // Engine already renders these — pushing another copy would double
+        // the model in the framebuffer. live_static is rendered via the
+        // efrag chain (R_StoreEfrags during BSP walk).
+        if (e->live_ent && !e->live_ent->free) continue;
+        if (e->live_static) continue;
 
-    if (!R_AliasCheckBBox()) return;
+        cls = e->kv[e->classname_idx].value;
+        ci  = find_class(cls);
+        if (!ci || !ci->modelpath) continue;
 
-    j = R_LightPoint(fake_ent.origin);
-    lighting.ambientlight = j;
-    lighting.shadelight   = j;
-    lighting.plightvec    = lightvec;
-    if (lighting.ambientlight > 128) lighting.ambientlight = 128;
-    if (lighting.ambientlight + lighting.shadelight > 192)
-        lighting.shadelight = 192 - lighting.ambientlight;
+        m = Mod_ForName((char *)ci->modelpath, false);
+        if (!m) continue;
+        if (m->type != mod_alias && m->type != mod_brush && m->type != mod_sprite)
+            continue;
 
-    R_AliasDrawModel(&lighting);
+        if (n_pushed >= EDIT_PREVIEW_MAX) break;
+        if (cl_numvisedicts >= MAX_VISEDICTS) break;
+
+        ent = &s_preview_pool[n_pushed++];
+        memset(ent, 0, sizeof(*ent));
+        Entity_GetOrigin(e, ent->origin);
+        parse_entity_angles(e, ent->angles);
+        ent->model   = m;
+        ent->frame   = 0;
+        ent->skinnum = 0;
+
+        // Per-classname player skin tinting (info_player_start brown,
+        // _coop green, _deathmatch red, _teleport_destination purple).
+        player_cmap   = editor_player_colormap(cls);
+        ent->colormap = player_cmap ? player_cmap : vid.colormap;
+
+        cl_visedicts[cl_numvisedicts++] = ent;
+    }
 }
 
 // Union bbox of every selected brush + point entity. Returns 1 if at least
@@ -706,34 +748,19 @@ void Editor_RenderScene(void)
         }
     }
 
-    // Pass 3: point entity preview. Only meaningful while the editor is
-    // open — once it closes the engine takes over rendering live edicts
-    // and a static editor copy on top would just duplicate them. With
-    // the editor open we always preview so the user can manipulate
-    // metadata entities (info_player_start), still see what they
-    // already placed (paused free-fly camera leaves spawned monsters
-    // mostly static), and visualise unspawned items waiting for the
-    // close-time flush.
+    // Pass 3: point-entity wire AABB. Model previews themselves are
+    // rendered by the engine — Editor_PushPreviewEntities (called from
+    // PreRender) appends fake entities into cl_visedicts so both alias
+    // (R_DrawEntitiesOnList) and brushmodel (R_DrawBEntitiesOnList)
+    // dispatch happens through the standard pipeline. We only draw the
+    // bbox here, gated to "selected, or no model registered" so the
+    // user gets a visible marker for lights / metadata ents but doesn't
+    // see a noisy box around every visible model in the world. Selected
+    // stays depth-bypassed so the user can find their picked item even
+    // when it's behind a wall; unselected is depth-tested so walls
+    // properly occlude.
     if (Editor_IsOpen())
     {
-        for (i = 0; i < edit_scene.numentities; i++)
-        {
-            edit_entity_t *e = &edit_scene.entities[i];
-            const char *cls, *mpath;
-            if (!Entity_IsPoint(e)) continue;
-            if (e->classname_idx < 0) continue;
-            cls = e->kv[e->classname_idx].value;
-            mpath = classname_to_model(cls);
-            if (mpath) draw_point_entity_model(e, mpath);
-        }
-
-        // Wire AABB. Always for selected (so selection is visible on top
-        // of the model). Otherwise only when no model preview rendered
-        // (no class entry, e.g. light) — duplicate boxes would be noise.
-        // Depth-test for unselected so walls properly occlude — being
-        // able to see every light bbox in the level through geometry was
-        // too noisy. Selected stays depth-bypassed so the user can find
-        // their picked item even when it's behind a wall.
         for (i = 0; i < edit_scene.numentities; i++)
         {
             edit_entity_t *e = &edit_scene.entities[i];

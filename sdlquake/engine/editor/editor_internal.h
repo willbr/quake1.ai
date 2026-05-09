@@ -62,4 +62,10 @@ void Editor_BrushCentroid   (const struct edit_brush_s *b, vec3_t out);
 // b_idx = -1 means "the entity itself" (point entity ref).
 void Editor_FrameItem(int e_idx, int b_idx);
 
+// render_wire.c — append fake entity_t records into cl_visedicts so the
+// engine renders editor preview models for any point entity that has a
+// modelpath but no live counterpart yet. Called from Editor_PreRender,
+// inside R_RenderView_ between CL_RelinkEntities and R_EdgeDrawing.
+void Editor_PushPreviewEntities(void);
+
 #endif // EDITOR_INTERNAL_H
