@@ -216,6 +216,25 @@ static void draw_toolbar(void)
 // Brush list
 // -----------------------------------------------------------------------------
 
+// Per-category hide flag, indexed by EDIT_CAT_*. Persists across panel
+// re-opens within a session. Default is everything visible. The
+// "OTHER" slot covers worldspawn / func_* / misc_* / etc — we don't
+// expose a checkbox for it (hiding worldspawn would render the level
+// invisible), but the array entry exists so EDIT_CAT_OTHER indexing
+// is uniform.
+static int s_hide_cat[EDIT_CAT_COUNT] = { 0, 0, 0, 0, 0, 0 };
+
+int Editor_EntityHidden(int e_idx)
+{
+    int cat;
+    edit_entity_t *e;
+    if (e_idx < 0 || e_idx >= edit_scene.numentities) return 0;
+    e = &edit_scene.entities[e_idx];
+    cat = Editor_EntityCategory(e);
+    if (cat <= 0 || cat >= EDIT_CAT_COUNT) return 0;
+    return s_hide_cat[cat];
+}
+
 static void draw_brush_list(void)
 {
     int i, j;
@@ -242,10 +261,30 @@ static void draw_brush_list(void)
     IG_TextUnformatted(buf);
     IG_Separator();
 
+    // Filter checkboxes — "Hide X". Inverted so unchecked = visible
+    // (the default state) reads naturally. Lay them out two per row.
+    {
+        int hide_trig    = s_hide_cat[EDIT_CAT_TRIGGER];
+        int hide_light   = s_hide_cat[EDIT_CAT_LIGHT];
+        int hide_spawn   = s_hide_cat[EDIT_CAT_SPAWN];
+        int hide_item    = s_hide_cat[EDIT_CAT_ITEM];
+        int hide_monster = s_hide_cat[EDIT_CAT_MONSTER];
+        IG_TextUnformatted("Hide:");
+        if (IG_Checkbox("triggers", &hide_trig))    s_hide_cat[EDIT_CAT_TRIGGER] = hide_trig;
+        IG_SameLine(0, -1);
+        if (IG_Checkbox("lights",   &hide_light))   s_hide_cat[EDIT_CAT_LIGHT]   = hide_light;
+        if (IG_Checkbox("spawns",   &hide_spawn))   s_hide_cat[EDIT_CAT_SPAWN]   = hide_spawn;
+        IG_SameLine(0, -1);
+        if (IG_Checkbox("items",    &hide_item))    s_hide_cat[EDIT_CAT_ITEM]    = hide_item;
+        if (IG_Checkbox("monsters", &hide_monster)) s_hide_cat[EDIT_CAT_MONSTER] = hide_monster;
+    }
+    IG_Separator();
+
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
         const char *cls = "(no classname)";
+        if (Editor_EntityHidden(i)) continue;
         if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
 
         IG_PushID_Int(i);

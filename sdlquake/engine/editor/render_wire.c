@@ -228,21 +228,39 @@ static void draw_brush(const edit_brush_t *b, byte color, int through)
 #define EDIT_COLOR_BRUSH        15      // off-white      (235,235,235)
 #define EDIT_COLOR_SELECTED     192     // bright yellow  (255,243, 27)
 
-// Map a classname to a category color so the user can read entity types at a
-// glance from the bbox alone. Triggers (red), spawn points (blue), lights
-// (gold) etc. Unknown classes fall back to off-white.
-static byte classname_color(const char *cls)
+// Classify by classname for bbox color + filter checkboxes. Single source
+// of truth — classname_color and the UI's category-skip logic both index
+// into this.
+int Editor_EntityCategory(const edit_entity_t *e)
 {
-    if (!cls) return EDIT_COLOR_DEFAULT;
-    if (!strncmp(cls, "trigger_", 8))    return EDIT_COLOR_TRIGGER;
-    if (!strncmp(cls, "info_player_", 12)) return EDIT_COLOR_SPAWN;
-    if (!strcmp (cls, "info_teleport_destination")) return EDIT_COLOR_SPAWN;
-    if (!strcmp (cls, "info_intermission"))         return EDIT_COLOR_SPAWN;
-    if (!strncmp(cls, "light",   5))     return EDIT_COLOR_LIGHT;
-    if (!strncmp(cls, "item_",   5))     return EDIT_COLOR_ITEM;
-    if (!strncmp(cls, "weapon_", 7))     return EDIT_COLOR_ITEM;
-    if (!strncmp(cls, "ammo_",   5))     return EDIT_COLOR_ITEM;
-    return EDIT_COLOR_DEFAULT;
+    const char *cls;
+    if (!e || e->classname_idx < 0) return EDIT_CAT_OTHER;
+    cls = e->kv[e->classname_idx].value;
+    if (!cls) return EDIT_CAT_OTHER;
+    if (!strncmp(cls, "trigger_", 8))                return EDIT_CAT_TRIGGER;
+    if (!strncmp(cls, "info_player_", 12))           return EDIT_CAT_SPAWN;
+    if (!strcmp (cls, "info_teleport_destination")) return EDIT_CAT_SPAWN;
+    if (!strcmp (cls, "info_intermission"))          return EDIT_CAT_SPAWN;
+    if (!strncmp(cls, "light",    5))                return EDIT_CAT_LIGHT;
+    if (!strncmp(cls, "monster_", 8))                return EDIT_CAT_MONSTER;
+    if (!strncmp(cls, "item_",    5))                return EDIT_CAT_ITEM;
+    if (!strncmp(cls, "weapon_",  7))                return EDIT_CAT_ITEM;
+    if (!strncmp(cls, "ammo_",    5))                return EDIT_CAT_ITEM;
+    return EDIT_CAT_OTHER;
+}
+
+// Pick the bbox color for an entity by category.
+static byte category_color(const edit_entity_t *e)
+{
+    switch (Editor_EntityCategory(e))
+    {
+        case EDIT_CAT_TRIGGER: return EDIT_COLOR_TRIGGER;
+        case EDIT_CAT_LIGHT:   return EDIT_COLOR_LIGHT;
+        case EDIT_CAT_SPAWN:   return EDIT_COLOR_SPAWN;
+        case EDIT_CAT_ITEM:    return EDIT_COLOR_ITEM;
+        case EDIT_CAT_MONSTER: return EDIT_COLOR_MONSTER;
+        default:               return EDIT_COLOR_DEFAULT;
+    }
 }
 
 // Render styles: index into editor_render_style cvar.
@@ -625,6 +643,7 @@ void Editor_PushPreviewEntities(void)
 
         if (!Entity_IsPoint(e)) continue;
         if (e->classname_idx < 0) continue;
+        if (Editor_EntityHidden(i)) continue;
 
         // Engine already renders these — pushing another copy would double
         // the model in the framebuffer. live_static is rendered via the
@@ -786,12 +805,13 @@ void Editor_RenderScene(void)
             int is_sel, has_model;
             byte color;
             if (!Entity_IsPoint(e)) continue;
+            if (Editor_EntityHidden(i)) continue;
             is_sel = Scene_SelectionContains(i, -1);
             if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
             has_model = classname_to_model(cls) != NULL;
             if (!is_sel && has_model) continue;
             point_entity_bbox(e, pmin, pmax);
-            color = is_sel ? EDIT_COLOR_SELECTED : classname_color(cls);
+            color = is_sel ? EDIT_COLOR_SELECTED : category_color(e);
             draw_aabb_ex(pmin, pmax, color, is_sel);
         }
     }
@@ -938,6 +958,7 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
+        if (Editor_EntityHidden(i)) continue;        // category-filtered out
         if (Entity_IsPoint(e))
         {
             vec3_t pmin, pmax;

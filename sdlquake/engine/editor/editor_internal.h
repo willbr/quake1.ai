@@ -29,6 +29,19 @@ struct edit_plane_s;
                                         // (Quake palette has no usable green
                                         // — pink-purple is the next-most
                                         // distinct hue from the others.)
+#define EDIT_COLOR_MONSTER      232     // dark orange       (183, 51, 15) — monster_*
+
+// Category index for filtering / colour-coding. Order is stable; UI
+// checkboxes index into a parallel filter array.
+enum {
+    EDIT_CAT_OTHER = 0,     // worldspawn, func_*, info_null/notnull, misc
+    EDIT_CAT_TRIGGER,       // trigger_*
+    EDIT_CAT_LIGHT,         // light, light_*
+    EDIT_CAT_SPAWN,         // info_player_*, info_teleport_destination, info_intermission
+    EDIT_CAT_ITEM,          // item_*, weapon_*, ammo_*
+    EDIT_CAT_MONSTER,       // monster_*
+    EDIT_CAT_COUNT
+};
 
 // render_wire.c
 int  Editor_ProjectWorld (const vec3_t world, float *out_sx, float *out_sy);
@@ -79,5 +92,14 @@ void Editor_FrameItem(int e_idx, int b_idx);
 // modelpath but no live counterpart yet. Called from Editor_PreRender,
 // inside R_RenderView_ between CL_RelinkEntities and R_EdgeDrawing.
 void Editor_PushPreviewEntities(void);
+
+// render_wire.c — classify a classname into one of EDIT_CAT_*. Used for
+// bbox color and filter checkboxes.
+int  Editor_EntityCategory(const struct edit_entity_s *e);
+
+// editor_ui.c — 1 if the user filtered out this entity's category in the
+// Brushes panel checkboxes. Render / pick / list paths skip filtered
+// entities.
+int  Editor_EntityHidden  (int e_idx);
 
 #endif // EDITOR_INTERNAL_H
