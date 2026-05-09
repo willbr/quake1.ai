@@ -228,6 +228,35 @@ static int s_hide_cat[EDIT_CAT_COUNT] = { 0 };
 // for "what's actually in front of me right now" while authoring a room.
 static int s_visible_only = 0;
 
+// Difficulty / mode preview. -1 = no filter (show all entities); 0/1/2 =
+// skill 0/1/2 (easy/normal/hard, where hard also covers nightmare since
+// vanilla shares the bit); 3 = deathmatch. Filters against the universal
+// NOT_EASY/NOT_NORMAL/NOT_HARD/NOT_DEATHMATCH spawnflag bits so the user
+// can preview which entities will actually spawn at each difficulty.
+static int s_skill_filter = -1;
+
+static int entity_hidden_by_skill(const edit_entity_t *e)
+{
+    int idx, sf;
+    if (s_skill_filter < 0) return 0;
+    idx = -1;
+    {
+        int k;
+        for (k = 0; k < e->numkv; k++)
+            if (!strcmp(e->kv[k].key, "spawnflags")) { idx = k; break; }
+    }
+    if (idx < 0) return 0;
+    sf = atoi(e->kv[idx].value);
+    switch (s_skill_filter)
+    {
+    case 0: return (sf &  256) != 0;   // NOT_EASY
+    case 1: return (sf &  512) != 0;   // NOT_NORMAL
+    case 2: return (sf & 1024) != 0;   // NOT_HARD (and nightmare)
+    case 3: return (sf & 2048) != 0;   // NOT_DEATHMATCH
+    }
+    return 0;
+}
+
 int Editor_EntityHidden(int e_idx)
 {
     int cat;
@@ -237,6 +266,7 @@ int Editor_EntityHidden(int e_idx)
     cat = Editor_EntityCategory(e);
     if (cat > 0 && cat < EDIT_CAT_COUNT && s_hide_cat[cat]) return 1;
     if (s_visible_only && !Editor_EntityInView(e_idx)) return 1;
+    if (entity_hidden_by_skill(e)) return 1;
     return 0;
 }
 
@@ -264,6 +294,21 @@ static void draw_brush_list(void)
                  edit_scene.numentities, total);
     }
     IG_TextUnformatted(buf);
+    IG_Separator();
+
+    // Difficulty preview dropdown. Index 0 = "All" (no filter); indices
+    // 1..4 map to skill_filter 0..3.
+    {
+        static const char *preview_items[] = {
+            "All", "Easy", "Normal", "Hard / Nightmare", "Deathmatch"
+        };
+        int sel = s_skill_filter + 1;
+        if (sel < 0) sel = 0;
+        if (sel >= 5) sel = 4;
+        IG_SetNextItemWidth(160);
+        if (IG_Combo("preview", &sel, preview_items, 5))
+            s_skill_filter = sel - 1;
+    }
     IG_Separator();
 
     // Filter checkboxes — "Hide X". Inverted so unchecked = visible
