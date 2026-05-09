@@ -543,42 +543,45 @@ void Editor_RenderScene(void)
         }
     }
 
-    // Pass 3a: point entity model preview. Only for entities that haven't
-    // been realised as live edicts yet (spawned == 0) — once the engine
-    // owns them, R_DrawEntitiesOnList renders the real animated model and
-    // a static editor copy on top would just be visual noise.
-    for (i = 0; i < edit_scene.numentities; i++)
+    // Pass 3: point entity preview. Only meaningful while the editor is
+    // open — once it closes the engine takes over rendering live edicts
+    // and a static editor copy on top would just duplicate them. With
+    // the editor open we always preview so the user can manipulate
+    // metadata entities (info_player_start), still see what they
+    // already placed (paused free-fly camera leaves spawned monsters
+    // mostly static), and visualise unspawned items waiting for the
+    // close-time flush.
+    if (Editor_IsOpen())
     {
-        edit_entity_t *e = &edit_scene.entities[i];
-        const char *cls, *mpath;
-        if (!Entity_IsPoint(e)) continue;
-        if (e->spawned) continue;
-        if (e->classname_idx < 0) continue;
-        cls = e->kv[e->classname_idx].value;
-        mpath = classname_to_model(cls);
-        if (!mpath) continue;
-        draw_point_entity_model(e, mpath);
-    }
+        for (i = 0; i < edit_scene.numentities; i++)
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            const char *cls, *mpath;
+            if (!Entity_IsPoint(e)) continue;
+            if (e->classname_idx < 0) continue;
+            cls = e->kv[e->classname_idx].value;
+            mpath = classname_to_model(cls);
+            if (mpath) draw_point_entity_model(e, mpath);
+        }
 
-    // Pass 3b: wire AABB for point entities. Selected items always draw
-    // so the user has a visible selection marker; unselected items only
-    // draw when (a) no model preview rendered (no class entry) AND (b)
-    // not yet spawned — spawned entities are visible via the engine's
-    // own rendering, so an extra box would double up.
-    for (i = 0; i < edit_scene.numentities; i++)
-    {
-        edit_entity_t *e = &edit_scene.entities[i];
-        const char *cls = NULL;
-        vec3_t pmin, pmax;
-        int is_sel, has_model;
-        if (!Entity_IsPoint(e)) continue;
-        is_sel = Scene_SelectionContains(i, -1);
-        if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
-        has_model = classname_to_model(cls) != NULL;
-        if (!is_sel && (e->spawned || has_model)) continue;
-        point_entity_bbox(e, pmin, pmax);
-        draw_aabb_over(pmin, pmax,
-                       is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
+        // Wire AABB. Always for selected (so selection is visible on top
+        // of the model). Otherwise only when no model preview rendered
+        // (no class entry, e.g. light) — duplicate boxes would be noise.
+        for (i = 0; i < edit_scene.numentities; i++)
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            const char *cls = NULL;
+            vec3_t pmin, pmax;
+            int is_sel, has_model;
+            if (!Entity_IsPoint(e)) continue;
+            is_sel = Scene_SelectionContains(i, -1);
+            if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
+            has_model = classname_to_model(cls) != NULL;
+            if (!is_sel && has_model) continue;
+            point_entity_bbox(e, pmin, pmax);
+            draw_aabb_over(pmin, pmax,
+                           is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
+        }
     }
 
     // Combined selection bbox (only when more than one item selected).
