@@ -11,16 +11,19 @@
 #include <time.h>
 #include <stdarg.h>
 
-/* Output redirect — qbsp prints progress / status / errors via printf
- * and fprintf(stderr/stdout, ...). After the system stdio.h has
- * declared the real names, redirect them through qbsp_con_print so the
- * output lands in the engine's in-game console. sprintf intentionally
- * NOT redirected — it writes to a caller-provided buffer, not stdout.
+/* Output redirect — qbsp's printf calls land in the engine console.
+ * fprintf is intentionally NOT redirected: every fprintf call site in
+ * qbsp writes to a real FILE * (hull files, portal files, leak files)
+ * — never to stderr/stdout. Routing fprintf through Con_Printf would
+ * silently swallow the hull-file output, leaving ReadClipHull(1) to
+ * parse an empty test.h1 and bail.
+ *
+ * sprintf is also untouched (writes to caller-provided buffer).
  * Defined here (not in qbsp_namespace.h) because force-including it
- * before stdio.h breaks Windows MinGW's __format__ attribute. */
+ * before stdio.h breaks Windows MinGW's __format__ attribute on
+ * printf's declaration. */
 extern void qbsp_con_print(const char *fmt, ...);
 #define printf            qbsp_con_print
-#define fprintf(s, ...)   qbsp_con_print(__VA_ARGS__)
 /* vprintf -> drop. qbsp's Error() in cmdlib.c uses vsnprintf into a
  * buffer (we patched that path); other vprintf calls would silently
  * lose their output, which is fine — we only care about the formatted
