@@ -245,9 +245,10 @@ void Editor_RegisterCvars(void)
     Cvar_RegisterVariable(&editor_render_style);
 }
 
-// Draw the 12 edges of an AABB as world-space lines, depth-bypassed so it
-// reads as an overlay even when geometry sits in front of it.
-static void draw_aabb_over(const vec3_t mins, const vec3_t maxs, byte color)
+// Draw the 12 edges of an AABB. `through` = 1 → depth-bypass overlay (read
+// through walls); 0 → depth-tested (occluded by world geometry like normal).
+static void draw_aabb_ex(const vec3_t mins, const vec3_t maxs,
+                         byte color, int through)
 {
     vec3_t c[8];
     int i;
@@ -263,7 +264,15 @@ static void draw_aabb_over(const vec3_t mins, const vec3_t maxs, byte color)
         c[i][2] = (i & 4) ? maxs[2] : mins[2];
     }
     for (i = 0; i < 12; i++)
-        Editor_DrawLine3DOver(c[edges[i][0]], c[edges[i][1]], color);
+    {
+        if (through) Editor_DrawLine3DOver(c[edges[i][0]], c[edges[i][1]], color);
+        else         Editor_DrawLine3D    (c[edges[i][0]], c[edges[i][1]], color);
+    }
+}
+
+static void draw_aabb_over(const vec3_t mins, const vec3_t maxs, byte color)
+{
+    draw_aabb_ex(mins, maxs, color, 1);
 }
 
 // Per-classname info: model path + entity-local bbox. Bbox values mirror
@@ -567,6 +576,10 @@ void Editor_RenderScene(void)
         // Wire AABB. Always for selected (so selection is visible on top
         // of the model). Otherwise only when no model preview rendered
         // (no class entry, e.g. light) — duplicate boxes would be noise.
+        // Depth-test for unselected so walls properly occlude — being
+        // able to see every light bbox in the level through geometry was
+        // too noisy. Selected stays depth-bypassed so the user can find
+        // their picked item even when it's behind a wall.
         for (i = 0; i < edit_scene.numentities; i++)
         {
             edit_entity_t *e = &edit_scene.entities[i];
@@ -579,8 +592,9 @@ void Editor_RenderScene(void)
             has_model = classname_to_model(cls) != NULL;
             if (!is_sel && has_model) continue;
             point_entity_bbox(e, pmin, pmax);
-            draw_aabb_over(pmin, pmax,
-                           is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
+            draw_aabb_ex(pmin, pmax,
+                         is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH,
+                         is_sel);
         }
     }
 
