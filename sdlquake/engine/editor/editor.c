@@ -266,6 +266,17 @@ void Editor_Shutdown(void)
 void Editor_Toggle(void)
 {
     if (!s_inited) return;
+
+    // Closing the editor: auto-save the .map first if a file is loaded.
+    // No-ops cleanly when we never loaded one (filename empty).
+    if (s_open && edit_scene.filename[0])
+    {
+        if (Scene_Save(edit_scene.filename))
+            Con_Printf("editor: auto-saved %s\n", edit_scene.filename);
+        else
+            Con_Printf("editor: auto-save failed for %s\n", edit_scene.filename);
+    }
+
     s_open = !s_open;
 
     // Editor open requires the dev overlay to be open (ImGui receives input,
