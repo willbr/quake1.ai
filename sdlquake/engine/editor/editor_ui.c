@@ -340,15 +340,19 @@ static void draw_toolbar(void)
             Cbuf_AddText("editor_brush_hollow\n");
     }
     {
-        char buf[160];
+        char buf[200];
+        float fps = IG_GetFramerate();
         if (Editor_IsPlacementPending())
             snprintf(buf, sizeof(buf),
-                     "click viewport to place '%s'   (ESC to cancel)",
-                     Editor_PendingClassname());
+                     "click viewport to place '%s'   (ESC to cancel)   "
+                     "[%.0f fps]",
+                     Editor_PendingClassname(), fps);
         else
             snprintf(buf, sizeof(buf),
-                     "loaded: %s    hold RMB to look + WASD to move",
-                     edit_scene.mapname[0] ? edit_scene.mapname : "(none)");
+                     "loaded: %s    hold RMB to look + WASD to move   "
+                     "[%.0f fps  %.1f ms]",
+                     edit_scene.mapname[0] ? edit_scene.mapname : "(none)",
+                     fps, 1000.0f / fps);
         IG_TextUnformatted(buf);
     }
     IG_End();
