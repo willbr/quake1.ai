@@ -167,6 +167,14 @@ int   Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs,
 // becomes the new entity. Returns 1 on success.
 int   Scene_AddPointEntity(const char *classname, const vec3_t origin);
 
+// Remove every selected entity (and, for worldspawn, every selected brush)
+// from the scene. Live edicts are ED_Free'd so the engine stops simulating
+// them. Worldspawn itself is never removed even if it ends up in the
+// selection — only its selected brushes go. Selection is cleared on exit
+// since indices into the pre-delete layout would be stale. No-op if nothing
+// is selected.
+void  Scene_DeleteSelected (void);
+
 // Point-entity helpers. "Point entity" here means any entity with no brushes
 // (info_player_start, light, monster_*, etc).
 int   Entity_IsPoint        (const edit_entity_t *e);

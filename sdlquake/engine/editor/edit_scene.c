@@ -533,6 +533,113 @@ int Scene_AddPointEntity(const char *classname, const vec3_t origin)
 }
 
 // -----------------------------------------------------------------------------
+// Delete
+// -----------------------------------------------------------------------------
+
+void Scene_DeleteSelected(void)
+{
+    int i, j, k, n_sel = Scene_NumSelected();
+    int worldspawn = -1;
+    int *delete_ent;
+    int *delete_brush = NULL;
+
+    if (n_sel == 0) return;
+
+    // Worldspawn is special — never delete the entity itself, only its
+    // selected brushes. (Deleting worldspawn would orphan every brush
+    // that should belong to the world geometry.)
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        if (e->classname_idx >= 0
+         && !strcmp(e->kv[e->classname_idx].value, "worldspawn"))
+        {
+            worldspawn = i;
+            break;
+        }
+    }
+
+    delete_ent = (int *)calloc(edit_scene.numentities, sizeof(int));
+    if (!delete_ent) return;
+    if (worldspawn >= 0 && edit_scene.entities[worldspawn].numbrushes > 0)
+    {
+        delete_brush = (int *)calloc(
+            edit_scene.entities[worldspawn].numbrushes, sizeof(int));
+        if (!delete_brush) { free(delete_ent); return; }
+    }
+
+    // Build the deletion plan. For non-worldspawn entries we always
+    // delete the whole entity (Scene_SelectionAdd group-expanded to
+    // every brush already, so there's no per-brush deletion for brush
+    // entities). Worldspawn gets per-brush deletion.
+    for (i = 0; i < n_sel; i++)
+    {
+        int e_idx, b_idx;
+        if (!Scene_GetSelected(i, &e_idx, &b_idx)) continue;
+        if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
+        if (e_idx == worldspawn)
+        {
+            if (b_idx >= 0 && delete_brush
+             && b_idx < edit_scene.entities[worldspawn].numbrushes)
+                delete_brush[b_idx] = 1;
+        }
+        else
+        {
+            delete_ent[e_idx] = 1;
+        }
+    }
+
+    // ED_Free any live edicts so the engine stops simulating / rendering
+    // them. Safe to call on an already-free edict in vanilla but we guard
+    // anyway. cl_static_entities entries can't be removed individually
+    // (efrag chain) and we don't try — they'll evaporate at next map
+    // load when the .map is re-parsed without that ent.
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        if (delete_ent[i] && e->live_ent && !e->live_ent->free)
+            ED_Free(e->live_ent);
+    }
+
+    // Worldspawn brush removal first, in reverse so the lower indices
+    // we still need to process stay valid.
+    if (worldspawn >= 0 && delete_brush)
+    {
+        edit_entity_t *ws = &edit_scene.entities[worldspawn];
+        for (j = ws->numbrushes - 1; j >= 0; j--)
+        {
+            if (!delete_brush[j]) continue;
+            Brush_FreeFaces(&ws->brushes[j]);
+            for (k = j; k < ws->numbrushes - 1; k++)
+                ws->brushes[k] = ws->brushes[k + 1];
+            ws->numbrushes--;
+        }
+    }
+
+    // Entity removal (reverse for the same reason).
+    for (i = edit_scene.numentities - 1; i >= 0; i--)
+    {
+        if (!delete_ent[i]) continue;
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            if (e->kv) free(e->kv);
+            for (k = 0; k < e->numbrushes; k++)
+                Brush_FreeFaces(&e->brushes[k]);
+            if (e->brushes) free(e->brushes);
+        }
+        for (k = i; k < edit_scene.numentities - 1; k++)
+            edit_scene.entities[k] = edit_scene.entities[k + 1];
+        edit_scene.numentities--;
+    }
+
+    free(delete_ent);
+    if (delete_brush) free(delete_brush);
+
+    // Selection indices reference the pre-delete layout — discard.
+    Scene_SelectionClear();
+}
+
+// -----------------------------------------------------------------------------
 // Group / Ungroup
 // -----------------------------------------------------------------------------
 

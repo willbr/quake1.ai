@@ -140,6 +140,20 @@ void IN_ProcessEvents(void)
                     Editor_Toggle();
                 break;
             }
+            // Editor delete: Delete or Backspace removes the current
+            // selection. Gated on editor open + ImGui not capturing the
+            // keyboard (otherwise the Inspector text fields would lose
+            // characters). No Ctrl required — destructive but undoable.
+            if ((ev.key.scancode == SDL_SCANCODE_DELETE
+              || ev.key.scancode == SDL_SCANCODE_BACKSPACE)
+                && Editor_IsOpen()
+                && key_dest == key_game
+                && !IG_WantCaptureKeyboard())
+            {
+                if (ev.key.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat)
+                    Cbuf_AddText("editor_delete\n");
+                break;
+            }
             // Editor undo/redo: Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y). Gated on
             // editor open + key_game so we don't fight console paste etc.
             if (ev.key.scancode == SDL_SCANCODE_Z

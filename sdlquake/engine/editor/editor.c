@@ -183,6 +183,17 @@ static void Editor_Cmd_Ungroup_f(void)
     Scene_UngroupSelected();
 }
 
+static void Editor_Cmd_Delete_f(void)
+{
+    if (Scene_NumSelected() == 0)
+    {
+        Con_Printf("editor: nothing selected\n");
+        return;
+    }
+    History_Push("delete");
+    Scene_DeleteSelected();
+}
+
 static void Editor_Cmd_Undo_f(void)
 {
     if (!History_Undo()) Con_Printf("editor: nothing to undo\n");
@@ -557,6 +568,7 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_entity_add",     Editor_Cmd_AddEntity_f);
     Cmd_AddCommand("editor_group",   Editor_Cmd_Group_f);
     Cmd_AddCommand("editor_ungroup", Editor_Cmd_Ungroup_f);
+    Cmd_AddCommand("editor_delete",  Editor_Cmd_Delete_f);
     Cmd_AddCommand("editor_undo",    Editor_Cmd_Undo_f);
     Cmd_AddCommand("editor_redo",    Editor_Cmd_Redo_f);
 

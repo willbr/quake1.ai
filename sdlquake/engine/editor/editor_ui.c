@@ -107,6 +107,8 @@ static void draw_toolbar(void)
     IG_SameLine(0, -1);
     if (IG_Button("Ungroup"))      Cbuf_AddText("editor_ungroup\n");
     IG_SameLine(0, -1);
+    if (IG_Button("Delete (Del)")) Cbuf_AddText("editor_delete\n");
+    IG_SameLine(0, -1);
     if (IG_Button("Undo"))         Cbuf_AddText("editor_undo\n");
     IG_SameLine(0, -1);
     if (IG_Button("Redo"))         Cbuf_AddText("editor_redo\n");
