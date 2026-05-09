@@ -498,6 +498,18 @@ void Editor_GizmoMouseMove(float sx, float sy)
             if (b_idx < 0)
             {
                 Entity_TranslateOrigin(e, delta);
+                // Push the new origin into the live edict so the engine
+                // renders it at the dragged position. Sim is paused while
+                // the gizmo is active (free-fly always pauses; fps mode
+                // gates LMB on lookmode-off which means RMB-up = paused),
+                // so we don't fight monster AI here.
+                if (e->live_ent && !e->live_ent->free)
+                {
+                    vec3_t o;
+                    Entity_GetOrigin(e, o);
+                    VectorCopy(o, e->live_ent->v.origin);
+                    SV_LinkEdict(e->live_ent, false);
+                }
             }
             else
             {

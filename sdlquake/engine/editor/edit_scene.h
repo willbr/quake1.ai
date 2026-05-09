@@ -11,6 +11,10 @@
 
 #include "mathlib.h" // vec3_t
 
+// Forward decl so we can hold a live server edict pointer per entity without
+// having to drag in progs.h / server.h.
+struct edict_s;
+
 #define EDIT_MAX_PLANES_PER_BRUSH   64
 #define EDIT_MAX_VERTS_PER_FACE     32
 #define EDIT_TEX_NAME_LEN           32
@@ -76,6 +80,11 @@ typedef struct edit_entity_s {
     //     the engine's normal load-from-file flow) or already flushed by
     //     Editor_FlushPendingEntities. Not persisted to disk.
     int         spawned;
+
+    // Server edict that mirrors this entity, or NULL. Set by the spawn
+    // flush, or by the post-load matcher in map_io.c. Gizmo drags + kv
+    // edits use this to push live state into the running game.
+    struct edict_s *live_ent;
 } edit_entity_t;
 
 // One entry in the selection list. (entity, brush) is the global address;

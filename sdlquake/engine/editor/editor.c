@@ -359,6 +359,11 @@ static int spawn_one_pending(edit_entity_t *e)
     // The spawn function usually calls SV_SetOrigin / SV_SetSize which link
     // automatically; relink defensively for the rare cases that don't.
     SV_LinkEdict(ent, false);
+
+    // Cache the edict so subsequent gizmo drags / kv edits push live state
+    // into this same entity (otherwise re-spawning is the only way to
+    // affect a placed monster's origin).
+    e->live_ent = ent;
     return 1;
 }
 

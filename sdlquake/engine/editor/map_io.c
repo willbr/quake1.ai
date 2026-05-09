@@ -275,7 +275,44 @@ static int parse_scene_text(char *src)
             // just parsed matches what the server already knows about) or
             // is brush-only and never had a server edict. Either way, the
             // editor shouldn't attempt to spawn it again on close.
-            e->spawned = 1;
+            e->spawned  = 1;
+            e->live_ent = NULL;     // re-linked below
+        }
+    }
+
+    // Match each parsed point entity to its live server edict. We pair on
+    // classname + closest origin (within ~64 units) since spawn functions
+    // sometimes nudge the origin (DropToFloor on items, for example), so
+    // exact float-equality misses too much. Brush entities and metadata
+    // info_* are skipped — neither needs a live link.
+    if (sv.active)
+    {
+        int i, j;
+        for (i = 0; i < edit_scene.numentities; i++)
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            const char *cls;
+            vec3_t o;
+            edict_t *best = NULL;
+            float    best_d2 = 64.0f * 64.0f;
+            if (!Entity_IsPoint(e)) continue;
+            if (e->classname_idx < 0) continue;
+            cls = e->kv[e->classname_idx].value;
+            Entity_GetOrigin(e, o);
+            for (j = 1; j < sv.num_edicts; j++)
+            {
+                edict_t *ed = EDICT_NUM(j);
+                float dx, dy, dz, d2;
+                if (ed->free) continue;
+                if (!ed->v.classname) continue;
+                if (strcmp(ed->v.classname, cls) != 0) continue;
+                dx = ed->v.origin[0] - o[0];
+                dy = ed->v.origin[1] - o[1];
+                dz = ed->v.origin[2] - o[2];
+                d2 = dx*dx + dy*dy + dz*dz;
+                if (d2 < best_d2) { best_d2 = d2; best = ed; }
+            }
+            e->live_ent = best;
         }
     }
     return ok;
