@@ -266,22 +266,102 @@ static void draw_aabb_over(const vec3_t mins, const vec3_t maxs, byte color)
         Editor_DrawLine3DOver(c[edges[i][0]], c[edges[i][1]], color);
 }
 
-// Half-extent of the wireframe AABB drawn at a point entity's origin and
-// used as its pick volume. Same value for all classnames in M6a; can grow
-// per-class later (player bbox, light point cube) once we have spawn data.
-#define EDIT_POINT_HALF 16.0f
+// Per-classname info: model path + entity-local bbox. Bbox values mirror
+// SV_SetSize calls in sdlquake/game so the editor's wire box wraps the
+// actual model in the same way the runtime entity will. Anything missing
+// from the table falls back to a centered ±16 cube.
+typedef struct {
+    const char *classname;
+    const char *modelpath;      // NULL => no model preview, just bbox
+    vec3_t      mins, maxs;     // entity-local
+} edit_class_info_t;
+
+// Hull-2 (large monsters): mirrors VEC_HULL2_* in the engine.
+#define BBM2_MIN { -32, -32, -24 }
+#define BBM2_MAX {  32,  32,  64 }
+// Player / hull-1 default.
+#define BB1_MIN  { -16, -16, -24 }
+#define BB1_MAX  {  16,  16,  32 }
+// Soldier-class monsters.
+#define BBM1_MIN { -16, -16, -24 }
+#define BBM1_MAX {  16,  16,  40 }
+// Weapons / armor (origin at base).
+#define BBW_MIN  { -16, -16,   0 }
+#define BBW_MAX  {  16,  16,  56 }
+// Default unknown class.
+#define BBDEF_MIN { -16, -16, -16 }
+#define BBDEF_MAX {  16,  16,  16 }
+
+static const edit_class_info_t s_class_info[] = {
+    {"info_player_start",       "progs/player.mdl",  BB1_MIN,  BB1_MAX},
+    {"info_player_deathmatch",  "progs/player.mdl",  BB1_MIN,  BB1_MAX},
+    {"info_teleport_destination","progs/player.mdl", BB1_MIN,  BB1_MAX},
+    {"monster_army",            "progs/soldier.mdl", BBM1_MIN, BBM1_MAX},
+    {"monster_dog",             "progs/dog.mdl",     {-32,-32,-24}, {32,32,40}},
+    {"monster_ogre",            "progs/ogre.mdl",    BBM2_MIN, BBM2_MAX},
+    {"monster_demon1",          "progs/demon.mdl",   BBM2_MIN, BBM2_MAX},
+    {"monster_shambler",        "progs/shambler.mdl",BBM2_MIN, BBM2_MAX},
+    {"monster_knight",          "progs/knight.mdl",  BBM1_MIN, BBM1_MAX},
+    {"monster_wizard",          "progs/wizard.mdl",  BBM1_MIN, BBM1_MAX},
+    {"monster_zombie",          "progs/zombie.mdl",  BBM1_MIN, BBM1_MAX},
+    {"monster_enforcer",        "progs/enforcer.mdl",BBM1_MIN, BBM1_MAX},
+    {"monster_hell_knight",     "progs/hknight.mdl", BBM1_MIN, BBM1_MAX},
+    {"monster_fish",            "progs/fish.mdl",    {-16,-16,-24}, {16,16,24}},
+    {"monster_boss",            "progs/boss.mdl",    {-128,-128,-24}, {128,128,256}},
+    {"weapon_supershotgun",     "progs/g_shot.mdl",  BBW_MIN, BBW_MAX},
+    {"weapon_nailgun",          "progs/g_nail.mdl",  BBW_MIN, BBW_MAX},
+    {"weapon_supernailgun",     "progs/g_nail2.mdl", BBW_MIN, BBW_MAX},
+    {"weapon_grenadelauncher",  "progs/g_rock.mdl",  BBW_MIN, BBW_MAX},
+    {"weapon_rocketlauncher",   "progs/g_rock2.mdl", BBW_MIN, BBW_MAX},
+    {"weapon_lightning",        "progs/g_light.mdl", BBW_MIN, BBW_MAX},
+    {"item_armor1",             "progs/armor.mdl",   BBW_MIN, BBW_MAX},
+    {"item_armor2",             "progs/armor.mdl",   BBW_MIN, BBW_MAX},
+    {"item_armorInv",           "progs/armor.mdl",   BBW_MIN, BBW_MAX},
+    {"item_artifact_super_damage",   "progs/quaddama.mdl", BB1_MIN, BB1_MAX},
+    {"item_artifact_invisibility",   "progs/invisibl.mdl", BB1_MIN, BB1_MAX},
+    {"item_artifact_invulnerability","progs/invulner.mdl", BB1_MIN, BB1_MAX},
+    {"item_artifact_envirosuit",     "progs/suit.mdl",     BB1_MIN, BB1_MAX},
+    {"item_torch_small_walltorch",   "progs/flame.mdl",    {-8,-8,-8}, {8,8,8}},
+    // .bsp ammo boxes (item_health/shells/spikes/rockets/cells) have no
+    // alias model preview; their bbox in-game is {0,0,0}–{32,32,56}.
+    {"item_health",             NULL, {0,0,0},  {32,32,56}},
+    {"item_shells",             NULL, {0,0,0},  {32,32,56}},
+    {"item_spikes",             NULL, {0,0,0},  {32,32,56}},
+    {"item_rockets",            NULL, {0,0,0},  {32,32,56}},
+    {"item_cells",              NULL, {0,0,0},  {32,32,56}},
+};
+
+static const edit_class_info_t *find_class(const char *classname)
+{
+    int i;
+    if (!classname) return NULL;
+    for (i = 0; i < (int)(sizeof(s_class_info) / sizeof(s_class_info[0])); i++)
+        if (!strcmp(s_class_info[i].classname, classname)) return &s_class_info[i];
+    return NULL;
+}
 
 // Compute the world-space AABB used to display + pick a point entity.
+// Uses the per-class table when available so the wire box wraps the
+// actual spawn bbox (weapons sit above origin, players span around it).
 static void point_entity_bbox(const edit_entity_t *e,
                               vec3_t out_mins, vec3_t out_maxs)
 {
+    static const vec3_t default_min = BBDEF_MIN;
+    static const vec3_t default_max = BBDEF_MAX;
+    const float *mn = default_min, *mx = default_max;
+    const edit_class_info_t *ci;
     vec3_t o;
     int i;
     Entity_GetOrigin(e, o);
+    if (e->classname_idx >= 0)
+    {
+        ci = find_class(e->kv[e->classname_idx].value);
+        if (ci) { mn = ci->mins; mx = ci->maxs; }
+    }
     for (i = 0; i < 3; i++)
     {
-        out_mins[i] = o[i] - EDIT_POINT_HALF;
-        out_maxs[i] = o[i] + EDIT_POINT_HALF;
+        out_mins[i] = o[i] + mn[i];
+        out_maxs[i] = o[i] + mx[i];
     }
 }
 
@@ -293,54 +373,13 @@ static void point_entity_bbox(const edit_entity_t *e,
 // QuakeC spawn function. While editing we want to *see* what the user
 // placed, so we render the alias model directly through the engine's
 // software pipeline using a transient currententity. Loaded on demand via
-// Mod_ForName — anything not in s_model_table or that fails to load falls
+// Mod_ForName — anything not in s_class_info (or with NULL modelpath) falls
 // back to the plain wire AABB.
-
-static const struct {
-    const char *classname;
-    const char *modelpath;
-} s_model_table[] = {
-    {"info_player_start",       "progs/player.mdl"},
-    {"info_player_deathmatch",  "progs/player.mdl"},
-    {"info_teleport_destination","progs/player.mdl"},
-    {"monster_army",            "progs/soldier.mdl"},
-    {"monster_dog",             "progs/dog.mdl"},
-    {"monster_ogre",            "progs/ogre.mdl"},
-    {"monster_demon1",          "progs/demon.mdl"},
-    {"monster_shambler",        "progs/shambler.mdl"},
-    {"monster_knight",          "progs/knight.mdl"},
-    {"monster_wizard",          "progs/wizard.mdl"},
-    {"monster_zombie",          "progs/zombie.mdl"},
-    {"monster_enforcer",        "progs/enforcer.mdl"},
-    {"monster_hell_knight",     "progs/hknight.mdl"},
-    {"monster_fish",            "progs/fish.mdl"},
-    {"monster_boss",            "progs/boss.mdl"},
-    {"weapon_supershotgun",     "progs/g_shot.mdl"},
-    {"weapon_nailgun",          "progs/g_nail.mdl"},
-    {"weapon_supernailgun",     "progs/g_nail2.mdl"},
-    {"weapon_grenadelauncher",  "progs/g_rock.mdl"},
-    {"weapon_rocketlauncher",   "progs/g_rock2.mdl"},
-    {"weapon_lightning",        "progs/g_light.mdl"},
-    {"item_armor1",             "progs/armor.mdl"},
-    {"item_armor2",             "progs/armor.mdl"},
-    {"item_armorInv",           "progs/armor.mdl"},
-    {"item_artifact_super_damage",      "progs/quaddama.mdl"},
-    {"item_artifact_invisibility",      "progs/invisibl.mdl"},
-    {"item_artifact_invulnerability",   "progs/invulner.mdl"},
-    {"item_artifact_envirosuit",        "progs/suit.mdl"},
-    {"item_torch_small_walltorch",      "progs/flame.mdl"},
-    // .bsp ammo boxes (item_health/shells/spikes/rockets/cells) are brush
-    // models, not alias — they fall back to the wire AABB for now.
-};
 
 static const char *classname_to_model(const char *classname)
 {
-    int i;
-    if (!classname) return NULL;
-    for (i = 0; i < (int)(sizeof(s_model_table) / sizeof(s_model_table[0])); i++)
-        if (!strcmp(s_model_table[i].classname, classname))
-            return s_model_table[i].modelpath;
-    return NULL;
+    const edit_class_info_t *ci = find_class(classname);
+    return ci ? ci->modelpath : NULL;
 }
 
 // Read the entity's "angle" key into out_angles[YAW]. Quake .map convention:
