@@ -373,7 +373,7 @@ static void point_entity_bbox(const edit_entity_t *e,
     static const vec3_t default_min = BBDEF_MIN;
     static const vec3_t default_max = BBDEF_MAX;
     const float *mn = default_min, *mx = default_max;
-    const edit_class_info_t *ci;
+    const edit_class_info_t *ci = NULL;
     vec3_t o;
     int i;
 
@@ -388,12 +388,50 @@ static void point_entity_bbox(const edit_entity_t *e,
         }
     }
 
+    // SV_MakeStatic'd ents (flame torches) have no live edict, so live_ent
+    // can't supply the bbox. The static-entity counterpart already holds
+    // the loaded alias model — use its vertex bounds so the wire box
+    // wraps the actual flame instead of a fixed ±8 cube.
+    if (e->live_static && e->live_static->model)
+    {
+        model_t *m = e->live_static->model;
+        if (m->maxs[0] > m->mins[0] || m->maxs[1] > m->mins[1] || m->maxs[2] > m->mins[2])
+        {
+            for (i = 0; i < 3; i++)
+            {
+                out_mins[i] = e->live_static->origin[i] + m->mins[i];
+                out_maxs[i] = e->live_static->origin[i] + m->maxs[i];
+            }
+            return;
+        }
+    }
+
     Entity_GetOrigin(e, o);
     if (e->classname_idx >= 0)
-    {
         ci = find_class(e->kv[e->classname_idx].value);
-        if (ci) { mn = ci->mins; mx = ci->maxs; }
+
+    // Editor preview: when we know the model path but have no live entity
+    // to read absmin/absmax from (info_* metadata, just-placed-not-yet-
+    // spawned items), prefer the loaded model's own vertex bounds. The
+    // per-class table values are SV_SetSize gameplay bboxes — fine for
+    // monsters but coarsely wrong for tall narrow models like torches,
+    // since the table forced a ±8 cube. Mod_ForName is cheap on cache hit
+    // (the preview pass already loaded these models this frame).
+    if (ci && ci->modelpath)
+    {
+        model_t *m = Mod_ForName((char *)ci->modelpath, false);
+        if (m && (m->maxs[0] > m->mins[0] || m->maxs[1] > m->mins[1] || m->maxs[2] > m->mins[2]))
+        {
+            for (i = 0; i < 3; i++)
+            {
+                out_mins[i] = o[i] + m->mins[i];
+                out_maxs[i] = o[i] + m->maxs[i];
+            }
+            return;
+        }
     }
+
+    if (ci) { mn = ci->mins; mx = ci->maxs; }
     for (i = 0; i < 3; i++)
     {
         out_mins[i] = o[i] + mn[i];
