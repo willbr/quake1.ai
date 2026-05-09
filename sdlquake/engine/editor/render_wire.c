@@ -848,14 +848,48 @@ static int ray_vs_aabb(const vec3_t origin, const vec3_t dir,
     return 1;
 }
 
+// World occlusion for the picker. Cast a long ray against the BSP point hull
+// and return the world-units distance to the first solid surface, so the
+// caller can reject editor hits past it. Returns 1e30 (no occlusion) when:
+//   - no worldmodel (shouldn't happen when the editor is open),
+//   - the camera origin is already inside solid geometry (free-fly through
+//     a wall — without this escape the user couldn't pick anything from
+//     inside the void),
+//   - the ray misses everything for the full trace distance.
+static float world_pick_occlusion(const vec3_t origin, const vec3_t dir)
+{
+    extern qboolean SV_RecursiveHullCheck (hull_t *, int, float, float,
+                                           vec3_t, vec3_t, trace_t *);
+    const float TRACE_DIST = 10000.0f;
+    trace_t trace;
+    vec3_t  end;
+    vec3_t  start;
+    int     i;
+    if (!cl.worldmodel) return 1e30f;
+    for (i = 0; i < 3; i++)
+    {
+        start[i] = origin[i];
+        end[i]   = origin[i] + dir[i] * TRACE_DIST;
+    }
+    memset(&trace, 0, sizeof(trace));
+    trace.fraction = 1;
+    VectorCopy(end, trace.endpos);
+    SV_RecursiveHullCheck(cl.worldmodel->hulls, 0, 0, 1, start, end, &trace);
+    if (trace.startsolid || trace.allsolid) return 1e30f;
+    if (trace.fraction >= 1.0f) return 1e30f;
+    return trace.fraction * TRACE_DIST;
+}
+
 int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
 {
     vec3_t origin, dir;
     float best_t = 1e30f;
+    float world_t;
     int best_ent = -1, best_brush = -1;
     int i, j, k;
 
     Editor_ScreenToRay(sx, sy, origin, dir);
+    world_t = world_pick_occlusion(origin, dir);
 
     for (i = 0; i < edit_scene.numentities; i++)
     {
@@ -867,7 +901,11 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
             point_entity_bbox(e, pmin, pmax);
             if (ray_vs_aabb(origin, dir, pmin, pmax, &t))
             {
-                if (t < best_t)
+                // Reject hits behind a wall — picking should match
+                // what the user can actually see. world_t is the
+                // distance to the nearest BSP surface along this ray.
+                if (t > world_t) { /* occluded */ }
+                else if (t < best_t)
                 {
                     best_t = t;
                     best_ent = i;
@@ -889,7 +927,8 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
                                 (const vec3_t *)f->verts, f->numverts,
                                 pl->normal, pl->dist, &t))
                 {
-                    if (t < best_t)
+                    if (t > world_t) { /* occluded by world */ }
+                    else if (t < best_t)
                     {
                         best_t = t;
                         best_ent = i;
