@@ -177,31 +177,55 @@ static void Editor_Cmd_Redo_f(void)
     if (!History_Redo()) Con_Printf("editor: nothing to redo\n");
 }
 
-// Spawn a 64-unit cube ~128 units in front of the camera, origin snapped to
-// a 16-unit grid so it sits cleanly on Quake's standard build grid. New
-// brush is appended to worldspawn and becomes the current selection.
-static void Editor_Cmd_AddCube_f(void)
+// Compute the focal point ~128 units in front of the camera, snapped to the
+// active grid. Used by Add cube + Add entity so newly-created items land in
+// the same place the user was looking.
+static void compute_camera_focal(vec3_t out)
 {
     extern vec3_t r_origin, vpn;
-    vec3_t center, mins, maxs;
     int i;
-    const float DIST = 128.0f;
-    const float HALF = 32.0f;       // 64-unit cube
-    // Snap to the live grid_size when grid_snap is on; otherwise place at the
-    // unsnapped focal point. Cap at 16 if grid is unreasonable so we don't
-    // jump the user halfway across the map on a 128-unit grid by surprise.
     float grid = editor_grid_snap.value ? editor_grid_size.value : 0.0f;
-
+    const float DIST = 128.0f;
     for (i = 0; i < 3; i++)
     {
         float c = r_origin[i] + vpn[i] * DIST;
-        if (grid > 0.0f)
-            c = floorf(c / grid + 0.5f) * grid;
-        center[i] = c;
-        mins[i]   = c - HALF;
-        maxs[i]   = c + HALF;
+        if (grid > 0.0f) c = floorf(c / grid + 0.5f) * grid;
+        out[i] = c;
     }
+}
 
+// Spawn a point entity with the given classname at the camera focal point.
+// Usage: editor_entity_add <classname>
+static void Editor_Cmd_AddEntity_f(void)
+{
+    vec3_t origin;
+    const char *classname;
+    if (Cmd_Argc() < 2)
+    {
+        Con_Printf("usage: editor_entity_add <classname>\n");
+        return;
+    }
+    classname = Cmd_Argv(1);
+    compute_camera_focal(origin);
+    History_Push("add entity");
+    if (Scene_AddPointEntity(classname, origin))
+        Con_Printf("editor: added %s at %.0f %.0f %.0f\n",
+                   classname, origin[0], origin[1], origin[2]);
+}
+
+// Spawn a 64-unit cube at the camera focal point. New brush is appended to
+// worldspawn and becomes the current selection.
+static void Editor_Cmd_AddCube_f(void)
+{
+    vec3_t center, mins, maxs;
+    int i;
+    const float HALF = 32.0f;       // 64-unit cube
+    compute_camera_focal(center);
+    for (i = 0; i < 3; i++)
+    {
+        mins[i] = center[i] - HALF;
+        maxs[i] = center[i] + HALF;
+    }
     History_Push("add cube");
     if (Scene_AddCubeBrush(mins, maxs, NULL))
         Con_Printf("editor: added cube at %.0f %.0f %.0f\n",
@@ -281,6 +305,7 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
     Cmd_AddCommand("editor_textures", Editor_Cmd_Textures_f);
     Cmd_AddCommand("editor_brush_add_cube", Editor_Cmd_AddCube_f);
+    Cmd_AddCommand("editor_entity_add",     Editor_Cmd_AddEntity_f);
     Cmd_AddCommand("editor_group",   Editor_Cmd_Group_f);
     Cmd_AddCommand("editor_ungroup", Editor_Cmd_Ungroup_f);
     Cmd_AddCommand("editor_undo",    Editor_Cmd_Undo_f);

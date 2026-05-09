@@ -138,6 +138,19 @@ void  Brush_TranslateFace(edit_brush_t *b, int plane_idx, float delta);
 int   Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs,
                          const char *texname);
 
+// Append a point entity (no brushes) with classname + origin keys. Selection
+// becomes the new entity. Returns 1 on success.
+int   Scene_AddPointEntity(const char *classname, const vec3_t origin);
+
+// Point-entity helpers. "Point entity" here means any entity with no brushes
+// (info_player_start, light, monster_*, etc).
+int   Entity_IsPoint        (const edit_entity_t *e);
+// Reads "origin" key into `out`. Returns 1 if the key existed; 0 (and zeros
+// `out`) otherwise.
+int   Entity_GetOrigin      (const edit_entity_t *e, vec3_t out);
+// Adds `delta` to the entity's origin. Creates the "origin" key if missing.
+void  Entity_TranslateOrigin(edit_entity_t *e, const vec3_t delta);
+
 // Selection helpers. The list-based API treats the *primary* (last-added)
 // brush as the focal one — that's what GetSelected{Brush,Entity} return,
 // so single-select call sites remain valid.

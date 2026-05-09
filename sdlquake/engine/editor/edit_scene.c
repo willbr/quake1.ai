@@ -114,22 +114,34 @@ static void selection_push_unique(int ent, int brush)
 // Brush entities other than worldspawn act as a single group: selecting any
 // brush in them selects all of them. That covers both editor-created
 // func_group containers and gameplay entities (func_door, func_button…)
-// where the multiple brushes are conceptually one object.
-static int entity_is_group(int ent)
+// where the multiple brushes are conceptually one object. Point entities
+// (no brushes) are handled separately: they're stored as (ent, -1) refs.
+static int entity_is_brush_group(int ent)
 {
     edit_entity_t *e;
     if (ent < 0 || ent >= edit_scene.numentities) return 0;
     e = &edit_scene.entities[ent];
+    if (e->numbrushes == 0) return 0;       // point entity, not a brush group
     if (e->classname_idx < 0) return 0;
     return strcmp(e->kv[e->classname_idx].value, "worldspawn") != 0;
 }
 
+int Entity_IsPoint(const edit_entity_t *e)
+{
+    return e && e->numbrushes == 0;
+}
+
 void Scene_SelectionAdd(int ent, int brush)
 {
+    edit_entity_t *e;
     if (ent < 0 || ent >= edit_scene.numentities) return;
-    if (entity_is_group(ent))
+    e = &edit_scene.entities[ent];
+    if (Entity_IsPoint(e))
     {
-        edit_entity_t *e = &edit_scene.entities[ent];
+        selection_push_unique(ent, -1);
+    }
+    else if (entity_is_brush_group(ent))
+    {
         int j;
         for (j = 0; j < e->numbrushes; j++)
             selection_push_unique(ent, j);
@@ -158,7 +170,15 @@ static void selection_remove_one(int ent, int brush)
 
 void Scene_SelectionRemove(int ent, int brush)
 {
-    if (entity_is_group(ent))
+    edit_entity_t *e;
+    if (ent < 0 || ent >= edit_scene.numentities) return;
+    e = &edit_scene.entities[ent];
+    if (Entity_IsPoint(e))
+    {
+        selection_remove_one(ent, -1);
+        return;
+    }
+    if (entity_is_brush_group(ent))
     {
         // Remove every selection entry for this entity.
         int i = 0;
@@ -182,7 +202,18 @@ void Scene_SelectionRemove(int ent, int brush)
 
 void Scene_SelectionToggle(int ent, int brush)
 {
-    if (entity_is_group(ent))
+    edit_entity_t *e;
+    if (ent < 0 || ent >= edit_scene.numentities) return;
+    e = &edit_scene.entities[ent];
+    if (Entity_IsPoint(e))
+    {
+        if (Scene_SelectionContains(ent, -1))
+            selection_remove_one(ent, -1);
+        else
+            selection_push_unique(ent, -1);
+        return;
+    }
+    if (entity_is_brush_group(ent))
     {
         // Whole group toggles.
         int has = 0, i;
@@ -408,6 +439,86 @@ int Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs, const char *texname
     e->numbrushes++;
     Scene_SelectionClear();
     Scene_SelectionAdd(wi, e->numbrushes - 1);
+    return 1;
+}
+
+// -----------------------------------------------------------------------------
+// Point entities
+// -----------------------------------------------------------------------------
+
+int Entity_GetOrigin(const edit_entity_t *e, vec3_t out)
+{
+    out[0] = out[1] = out[2] = 0;
+    if (!e || e->origin_idx < 0) return 0;
+    {
+        // Quake .map origin format is three space-separated floats. sscanf
+        // tolerates extra whitespace and missing fields (zeros the rest).
+        const char *v = e->kv[e->origin_idx].value;
+        float a = 0, b = 0, c = 0;
+        sscanf(v, "%f %f %f", &a, &b, &c);
+        out[0] = a; out[1] = b; out[2] = c;
+    }
+    return 1;
+}
+
+// Find the kv slot for `key`. Returns the index, or -1 if absent.
+static int kv_find(edit_entity_t *e, const char *key)
+{
+    int i;
+    for (i = 0; i < e->numkv; i++)
+        if (!strcmp(e->kv[i].key, key)) return i;
+    return -1;
+}
+
+// Append a kv slot with `key` initialised; the caller fills in the value.
+// Returns the new index. Refreshes classname_idx / origin_idx if relevant.
+static int kv_append(edit_entity_t *e, const char *key)
+{
+    int idx = e->numkv;
+    e->kv = (edit_kv_t *)realloc(e->kv, (idx + 1) * sizeof(edit_kv_t));
+    memset(&e->kv[idx], 0, sizeof(edit_kv_t));
+    Q_strncpy(e->kv[idx].key, key, EDIT_KEY_LEN - 1);
+    e->numkv++;
+    if (!strcmp(key, "classname")) e->classname_idx = idx;
+    else if (!strcmp(key, "origin")) e->origin_idx = idx;
+    return idx;
+}
+
+void Entity_TranslateOrigin(edit_entity_t *e, const vec3_t delta)
+{
+    vec3_t o;
+    int idx;
+    if (!e) return;
+    Entity_GetOrigin(e, o);
+    o[0] += delta[0]; o[1] += delta[1]; o[2] += delta[2];
+    idx = e->origin_idx;
+    if (idx < 0) idx = kv_append(e, "origin");
+    snprintf(e->kv[idx].value, EDIT_VAL_LEN, "%g %g %g", o[0], o[1], o[2]);
+}
+
+int Scene_AddPointEntity(const char *classname, const vec3_t origin)
+{
+    edit_entity_t e;
+    int idx;
+    if (!classname || !classname[0]) return 0;
+
+    memset(&e, 0, sizeof(e));
+    e.classname_idx = -1;
+    e.origin_idx    = -1;
+    kv_append(&e, "classname");
+    Q_strncpy(e.kv[0].value, classname, EDIT_VAL_LEN - 1);
+    kv_append(&e, "origin");
+    snprintf(e.kv[1].value, EDIT_VAL_LEN, "%g %g %g",
+             origin[0], origin[1], origin[2]);
+
+    edit_scene.entities = (edit_entity_t *)realloc(edit_scene.entities,
+        (edit_scene.numentities + 1) * sizeof(edit_entity_t));
+    idx = edit_scene.numentities;
+    edit_scene.entities[idx] = e;
+    edit_scene.numentities++;
+
+    Scene_SelectionClear();
+    Scene_SelectionAdd(idx, -1);
     return 1;
 }
 

@@ -21,9 +21,41 @@
 // Layout constants (in window pixels). Toolbar runs across the top; brush
 // list anchors the bottom-left, inspector the bottom-right.
 #define UI_PAD          10
-#define UI_TOOLBAR_H    72
+#define UI_TOOLBAR_H    100
 #define UI_LEFT_W       320
 #define UI_RIGHT_W      360
+
+// Entity-palette classnames offered in the toolbar combo. Anything outside
+// this list is reachable via the editor_entity_add console command.
+static const char *s_entity_classes[] = {
+    "info_player_start",
+    "info_player_deathmatch",
+    "light",
+    "monster_army",
+    "monster_dog",
+    "monster_ogre",
+    "monster_demon1",
+    "monster_shambler",
+    "monster_knight",
+    "monster_wizard",
+    "monster_zombie",
+    "weapon_supershotgun",
+    "weapon_nailgun",
+    "weapon_supernailgun",
+    "weapon_grenadelauncher",
+    "weapon_rocketlauncher",
+    "weapon_lightning",
+    "item_health",
+    "item_armor1",
+    "item_armor2",
+    "item_armorInv",
+    "item_shells",
+    "item_spikes",
+    "item_rockets",
+    "item_cells",
+};
+enum { S_ENTITY_CLASSES_N
+       = (int)(sizeof(s_entity_classes) / sizeof(s_entity_classes[0])) };
 
 static void draw_toolbar(void)
 {
@@ -150,6 +182,26 @@ static void draw_toolbar(void)
             Cbuf_AddText(buf);
         }
     }
+    // Entity palette: classname combo + Add button. Sits on the next row
+    // below the main button strip. Selection persists across frames so the
+    // user can spam Add to drop several of the same kind.
+    {
+        static int sel_class = 0;
+        if (sel_class < 0) sel_class = 0;
+        if (sel_class >= S_ENTITY_CLASSES_N) sel_class = S_ENTITY_CLASSES_N - 1;
+        IG_SetNextItemWidth(220);
+        IG_Combo("entity class", &sel_class, s_entity_classes,
+                 S_ENTITY_CLASSES_N);
+        IG_SameLine(0, -1);
+        if (IG_Button("Add entity"))
+        {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "editor_entity_add %s\n",
+                     s_entity_classes[sel_class]);
+            Cbuf_AddText(buf);
+        }
+    }
+
     {
         char buf[96];
         snprintf(buf, sizeof(buf),
@@ -197,31 +249,56 @@ static void draw_brush_list(void)
         if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
 
         IG_PushID_Int(i);
-        snprintf(buf, sizeof(buf), "[%d] %s", i, cls);
-        IG_TextUnformatted(buf);
-
-        for (j = 0; j < e->numbrushes; j++)
+        if (Entity_IsPoint(e))
         {
-            int sel = Scene_SelectionContains(i, j);
-            edit_brush_t *b = &e->brushes[j];
-            snprintf(buf, sizeof(buf),
-                     "  brush %d (%d planes, %d faces)##b%d_%d",
-                     j, b->numplanes, b->numfaces, i, j);
+            // Point entity: header itself is the selectable. Clicking it
+            // selects (i, -1) so the gizmo anchors at its origin.
+            int sel = Scene_SelectionContains(i, -1);
+            snprintf(buf, sizeof(buf), "[%d] %s##e%d", i, cls, i);
             if (IG_Selectable(buf, sel, 0))
             {
-                // Match the 3D-viewport semantics: shift toggles, plain
-                // click replaces. SDL_GetModState reads OS keyboard state
-                // so it works regardless of which window has focus.
                 SDL_Keymod mod = SDL_GetModState();
                 int shift = (mod & SDL_KMOD_SHIFT) != 0;
                 if (shift)
                 {
-                    Scene_SelectionToggle(i, j);
+                    Scene_SelectionToggle(i, -1);
                 }
                 else
                 {
                     Scene_SelectionClear();
-                    Scene_SelectionAdd(i, j);
+                    Scene_SelectionAdd(i, -1);
+                }
+            }
+        }
+        else
+        {
+            snprintf(buf, sizeof(buf), "[%d] %s", i, cls);
+            IG_TextUnformatted(buf);
+
+            for (j = 0; j < e->numbrushes; j++)
+            {
+                int sel = Scene_SelectionContains(i, j);
+                edit_brush_t *b = &e->brushes[j];
+                snprintf(buf, sizeof(buf),
+                         "  brush %d (%d planes, %d faces)##b%d_%d",
+                         j, b->numplanes, b->numfaces, i, j);
+                if (IG_Selectable(buf, sel, 0))
+                {
+                    // Match the 3D-viewport semantics: shift toggles,
+                    // plain click replaces. SDL_GetModState reads OS
+                    // keyboard state so it works regardless of which
+                    // window has focus.
+                    SDL_Keymod mod = SDL_GetModState();
+                    int shift = (mod & SDL_KMOD_SHIFT) != 0;
+                    if (shift)
+                    {
+                        Scene_SelectionToggle(i, j);
+                    }
+                    else
+                    {
+                        Scene_SelectionClear();
+                        Scene_SelectionAdd(i, j);
+                    }
                 }
             }
         }

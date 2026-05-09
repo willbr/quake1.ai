@@ -266,27 +266,58 @@ static void draw_aabb_over(const vec3_t mins, const vec3_t maxs, byte color)
         Editor_DrawLine3DOver(c[edges[i][0]], c[edges[i][1]], color);
 }
 
-// Union bbox of every selected brush. Returns 1 if at least one valid
-// brush contributed, 0 otherwise.
+// Half-extent of the wireframe AABB drawn at a point entity's origin and
+// used as its pick volume. Same value for all classnames in M6a; can grow
+// per-class later (player bbox, light point cube) once we have spawn data.
+#define EDIT_POINT_HALF 16.0f
+
+// Compute the world-space AABB used to display + pick a point entity.
+static void point_entity_bbox(const edit_entity_t *e,
+                              vec3_t out_mins, vec3_t out_maxs)
+{
+    vec3_t o;
+    int i;
+    Entity_GetOrigin(e, o);
+    for (i = 0; i < 3; i++)
+    {
+        out_mins[i] = o[i] - EDIT_POINT_HALF;
+        out_maxs[i] = o[i] + EDIT_POINT_HALF;
+    }
+}
+
+// Union bbox of every selected brush + point entity. Returns 1 if at least
+// one valid item contributed.
 static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
 {
     int i, n = 0, e_idx, b_idx, k;
+    vec3_t pmin, pmax;
     out_mins[0] = out_mins[1] = out_mins[2] =  1e30f;
     out_maxs[0] = out_maxs[1] = out_maxs[2] = -1e30f;
     for (i = 0; i < Scene_NumSelected(); i++)
     {
         edit_brush_t *b;
         edit_entity_t *e;
+        const float *mn, *mx;
         if (!Scene_GetSelected(i, &e_idx, &b_idx)) continue;
         if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
         e = &edit_scene.entities[e_idx];
-        if (b_idx < 0 || b_idx >= e->numbrushes) continue;
-        b = &e->brushes[b_idx];
-        if (!b->valid) continue;
+        if (b_idx < 0)
+        {
+            // Point entity ref.
+            point_entity_bbox(e, pmin, pmax);
+            mn = pmin; mx = pmax;
+        }
+        else
+        {
+            if (b_idx >= e->numbrushes) continue;
+            b = &e->brushes[b_idx];
+            if (!b->valid) continue;
+            mn = b->mins; mx = b->maxs;
+        }
         for (k = 0; k < 3; k++)
         {
-            if (b->mins[k] < out_mins[k]) out_mins[k] = b->mins[k];
-            if (b->maxs[k] > out_maxs[k]) out_maxs[k] = b->maxs[k];
+            if (mn[k] < out_mins[k]) out_mins[k] = mn[k];
+            if (mx[k] > out_maxs[k]) out_maxs[k] = mx[k];
         }
         n++;
     }
@@ -358,7 +389,21 @@ void Editor_RenderScene(void)
         }
     }
 
-    // Combined selection bbox (only when more than one brush selected).
+    // Pass 3: point entities (always wire AABB, depth-bypassed so they read
+    // as overlays even inside brushes).
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        vec3_t pmin, pmax;
+        int is_sel;
+        if (!Entity_IsPoint(e)) continue;
+        is_sel = Scene_SelectionContains(i, -1);
+        point_entity_bbox(e, pmin, pmax);
+        draw_aabb_over(pmin, pmax,
+                       is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
+    }
+
+    // Combined selection bbox (only when more than one item selected).
     if (multi)
     {
         vec3_t bmin, bmax;
@@ -425,6 +470,35 @@ static int ray_vs_face(const vec3_t origin, const vec3_t dir,
     return 1;
 }
 
+// Slab-test ray vs AABB. Returns 1 on hit; *out_t is the entry t (or the
+// near-clipped t if origin is inside the box).
+static int ray_vs_aabb(const vec3_t origin, const vec3_t dir,
+                       const vec3_t mins, const vec3_t maxs, float *out_t)
+{
+    float tmin = -1e30f, tmax = 1e30f;
+    int i;
+    for (i = 0; i < 3; i++)
+    {
+        if (fabsf(dir[i]) < 1e-9f)
+        {
+            if (origin[i] < mins[i] || origin[i] > maxs[i]) return 0;
+        }
+        else
+        {
+            float inv = 1.0f / dir[i];
+            float t1 = (mins[i] - origin[i]) * inv;
+            float t2 = (maxs[i] - origin[i]) * inv;
+            if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
+            if (t1 > tmin) tmin = t1;
+            if (t2 < tmax) tmax = t2;
+            if (tmin > tmax) return 0;
+        }
+    }
+    if (tmax < 0.001f) return 0;
+    *out_t = tmin > 0.001f ? tmin : tmax;
+    return 1;
+}
+
 int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
 {
     vec3_t origin, dir;
@@ -437,6 +511,22 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
+        if (Entity_IsPoint(e))
+        {
+            vec3_t pmin, pmax;
+            float t;
+            point_entity_bbox(e, pmin, pmax);
+            if (ray_vs_aabb(origin, dir, pmin, pmax, &t))
+            {
+                if (t < best_t)
+                {
+                    best_t = t;
+                    best_ent = i;
+                    best_brush = -1;
+                }
+            }
+            continue;
+        }
         for (j = 0; j < e->numbrushes; j++)
         {
             edit_brush_t *b = &e->brushes[j];

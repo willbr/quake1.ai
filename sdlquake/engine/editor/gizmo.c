@@ -160,8 +160,9 @@ static byte face_axis_color(const vec3_t normal)
 // Render
 // -----------------------------------------------------------------------------
 
-// Average of all selected brushes' centroids — used as the translate-gizmo
-// anchor when multi-select is active.
+// Average of all selected items' centroids — used as the translate-gizmo
+// anchor when multi-select is active. Brushes contribute their face-vertex
+// centroid; point entities contribute their origin.
 static int selection_centroid(vec3_t out)
 {
     int i, n = 0;
@@ -169,14 +170,23 @@ static int selection_centroid(vec3_t out)
     out[0] = out[1] = out[2] = 0;
     for (i = 0; i < Scene_NumSelected(); i++)
     {
+        edit_entity_t *e;
+        vec3_t c;
         if (!Scene_GetSelected(i, &e_idx, &b_idx)) continue;
         if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
-        edit_entity_t *e = &edit_scene.entities[e_idx];
-        if (b_idx < 0 || b_idx >= e->numbrushes) continue;
-        edit_brush_t *b = &e->brushes[b_idx];
-        if (!b->valid) continue;
-        vec3_t c;
-        Editor_BrushCentroid(b, c);
+        e = &edit_scene.entities[e_idx];
+        if (b_idx < 0)
+        {
+            Entity_GetOrigin(e, c);
+        }
+        else
+        {
+            edit_brush_t *b;
+            if (b_idx >= e->numbrushes) continue;
+            b = &e->brushes[b_idx];
+            if (!b->valid) continue;
+            Editor_BrushCentroid(b, c);
+        }
         out[0] += c[0]; out[1] += c[1]; out[2] += c[2];
         n++;
     }
@@ -185,9 +195,31 @@ static int selection_centroid(vec3_t out)
     return 1;
 }
 
+// Resolve the translate-gizmo anchor for the *primary* selection. Returns
+// 1 on success; out_brush is non-null only when the primary is a brush
+// (face handles draw + face-resize pick depend on it).
+static int primary_anchor(vec3_t out, edit_brush_t **out_brush)
+{
+    edit_brush_t  *b = Scene_GetSelectedBrush();
+    edit_entity_t *e = Scene_GetSelectedEntity();
+    if (out_brush) *out_brush = NULL;
+    if (b && b->valid)
+    {
+        Editor_BrushCentroid(b, out);
+        if (out_brush) *out_brush = b;
+        return 1;
+    }
+    if (e && Entity_IsPoint(e))
+    {
+        Entity_GetOrigin(e, out);
+        return 1;
+    }
+    return 0;
+}
+
 void Editor_GizmoDraw(void)
 {
-    edit_brush_t *b = Scene_GetSelectedBrush();
+    edit_brush_t *b = NULL;
     vec3_t centroid, end;
     float dist, arrow_len;
     static const byte axis_colors[3] = {
@@ -195,17 +227,18 @@ void Editor_GizmoDraw(void)
     };
     int i;
     int multi = Scene_NumSelected() > 1;
-    if (!b || !b->valid) return;
 
     // Anchor on the selection centroid for multi-select; use the primary
-    // brush's centroid for single (preserves the old 1-brush behaviour).
+    // item's centroid (brush or point entity origin) for single. Face
+    // handles only render when the primary is a brush.
     if (multi)
     {
         if (!selection_centroid(centroid)) return;
+        b = Scene_GetSelectedBrush();      // may be NULL (e.g. point ent primary)
     }
     else
     {
-        Editor_BrushCentroid(b, centroid);
+        if (!primary_anchor(centroid, &b)) return;
     }
     {
         vec3_t d;
@@ -238,9 +271,9 @@ void Editor_GizmoDraw(void)
     // Face handles — small "+" cross at each face centroid plus a short
     // outward stub along the face normal so it reads as a push handle. Each
     // face uses the dominant-axis colour of its normal. Skip in multi-
-    // select: face-resize is single-brush only, so showing handles on the
-    // primary while ignoring the rest would be misleading.
-    if (!multi)
+    // select: face-resize is single-brush only. Skip when primary isn't a
+    // brush (point entities have no faces).
+    if (!multi && b && b->valid)
     {
         vec3_t fc, p_dist;
         float handle_len = pixel_to_world(dist) * 12.0f;
@@ -301,7 +334,7 @@ void Editor_GizmoDraw(void)
 
 int Editor_GizmoMouseDown(float sx, float sy)
 {
-    edit_brush_t *b = Scene_GetSelectedBrush();
+    edit_brush_t *b = NULL;
     vec3_t centroid;
     vec3_t r_org, r_dir;
     float dist, arrow_len, pick_world;
@@ -309,15 +342,14 @@ int Editor_GizmoMouseDown(float sx, float sy)
     float best_d_axis = 1e30f, best_d_face = 1e30f;
     int multi = Scene_NumSelected() > 1;
 
-    if (!b || !b->valid) return 0;
-
     if (multi)
     {
         if (!selection_centroid(centroid)) return 0;
+        b = Scene_GetSelectedBrush();      // may be NULL
     }
     else
     {
-        Editor_BrushCentroid(b, centroid);
+        if (!primary_anchor(centroid, &b)) return 0;
     }
     {
         vec3_t d;
@@ -335,7 +367,8 @@ int Editor_GizmoMouseDown(float sx, float sy)
     // closer to the eye than axis arrows centred on the centroid). Face
     // resize is single-brush only; in multi-select we skip face pick so
     // the user can't grab one face thinking it'll resize all of them.
-    for (i = 0; !multi && i < b->numfaces; i++)
+    // Also requires a brush primary (point entities have no faces).
+    for (i = 0; !multi && b && b->valid && i < b->numfaces; i++)
     {
         vec3_t fc;
         float d;
@@ -416,18 +449,10 @@ static float compute_snapped_offset(float raw_offset, float start_basis)
 
 void Editor_GizmoMouseMove(float sx, float sy)
 {
-    edit_brush_t *b;
     vec3_t r_org, r_dir, delta;
     float t_now, raw_offset, snapped_offset, step;
     int i;
     if (s_drag_axis < 0 && s_drag_plane_idx < 0) return;
-    b = Scene_GetSelectedBrush();
-    if (!b || !b->valid)
-    {
-        s_drag_axis = -1;
-        s_drag_plane_idx = -1;
-        return;
-    }
 
     Editor_ScreenToRay(sx, sy, r_org, r_dir);
     t_now = closest_t_line_ray(s_drag_origin, s_drag_dir, r_org, r_dir);
@@ -435,7 +460,14 @@ void Editor_GizmoMouseMove(float sx, float sy)
 
     if (s_drag_plane_idx >= 0)
     {
-        // Face-resize. Absolute snap pins plane.dist to grid lines.
+        // Face-resize. Brush-only: drag was started from a face handle and
+        // the gizmo guards face picks behind the primary-is-brush check.
+        edit_brush_t *b = Scene_GetSelectedBrush();
+        if (!b || !b->valid)
+        {
+            s_drag_plane_idx = -1;
+            return;
+        }
         snapped_offset = compute_snapped_offset(raw_offset, s_drag_start_dist);
         step = snapped_offset - s_drag_applied;
         if (step == 0.0f) return;
@@ -445,7 +477,8 @@ void Editor_GizmoMouseMove(float sx, float sy)
     else
     {
         // Axis translate. Absolute snap pins centroid axis coord to grid.
-        // In multi-select, every selected brush moves by the same delta.
+        // Every selected ref moves by the same delta — brushes via
+        // Brush_Translate, point entities via Entity_TranslateOrigin.
         int n_sel, k, e_idx, b_idx;
         snapped_offset = compute_snapped_offset(raw_offset,
                                                 s_drag_origin[s_drag_axis]);
@@ -458,15 +491,22 @@ void Editor_GizmoMouseMove(float sx, float sy)
         n_sel = Scene_NumSelected();
         for (k = 0; k < n_sel; k++)
         {
-            edit_brush_t *bs;
             edit_entity_t *e;
             if (!Scene_GetSelected(k, &e_idx, &b_idx)) continue;
             if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
             e = &edit_scene.entities[e_idx];
-            if (b_idx < 0 || b_idx >= e->numbrushes) continue;
-            bs = &e->brushes[b_idx];
-            if (!bs->valid) continue;
-            Brush_Translate(bs, delta);
+            if (b_idx < 0)
+            {
+                Entity_TranslateOrigin(e, delta);
+            }
+            else
+            {
+                edit_brush_t *bs;
+                if (b_idx >= e->numbrushes) continue;
+                bs = &e->brushes[b_idx];
+                if (!bs->valid) continue;
+                Brush_Translate(bs, delta);
+            }
         }
     }
 }
