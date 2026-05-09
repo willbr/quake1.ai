@@ -448,6 +448,30 @@ static int model_local_bbox(model_t *m, vec3_t out_mins, vec3_t out_maxs)
     return 1;
 }
 
+int Editor_EntityAnchor(const edit_entity_t *e, vec3_t out)
+{
+    if (!e) return 0;
+    if (Entity_GetOrigin(e, out)) return 1;
+    if (e->live_ent && !e->live_ent->free)
+    {
+        const float *amn = e->live_ent->v.absmin;
+        const float *amx = e->live_ent->v.absmax;
+        if (amx[0] > amn[0] || amx[1] > amn[1] || amx[2] > amn[2])
+        {
+            out[0] = (amn[0] + amx[0]) * 0.5f;
+            out[1] = (amn[1] + amx[1]) * 0.5f;
+            out[2] = (amn[2] + amx[2]) * 0.5f;
+            return 1;
+        }
+    }
+    if (e->live_static)
+    {
+        VectorCopy(e->live_static->origin, out);
+        return 1;
+    }
+    return 0;
+}
+
 static void point_entity_bbox(const edit_entity_t *e,
                               vec3_t out_mins, vec3_t out_maxs)
 {
@@ -722,11 +746,14 @@ static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
         e = &edit_scene.entities[e_idx];
         if (b_idx < 0)
         {
-            // Point entity ref. Skip if it has no origin (e.g. an empty
-            // func_group) — point_entity_bbox would synthesize a stub bbox
-            // around (0,0,0) and drag the union there.
-            vec3_t o;
-            if (!Entity_GetOrigin(e, o)) continue;
+            // Point entity ref. Skip if there's no resolvable position
+            // (e.g. an empty func_group with no origin and no edict) so
+            // the union doesn't get pulled toward (0,0,0). BSP-loaded
+            // brush entities (no .map brushes, no origin key, but a live
+            // edict) flow through point_entity_bbox which uses the
+            // edict's absmin/absmax.
+            vec3_t anchor;
+            if (!Editor_EntityAnchor(e, anchor)) continue;
             point_entity_bbox(e, pmin, pmax);
             mn = pmin; mx = pmax;
         }

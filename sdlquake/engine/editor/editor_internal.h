@@ -118,4 +118,12 @@ int  Editor_EntityHidden  (int e_idx);
 // only" filter.
 int  Editor_EntityInView  (int e_idx);
 
+// render_wire.c — resolve a single anchor point for an entity. Tries (in
+// order): the .map "origin" key, the live edict's absmin/absmax center
+// (for BSP-loaded brush entities like func_bossgate which have no .map
+// brushes and no origin key but a valid v.absmin/v.absmax), and the
+// SV_MakeStatic'd entity's origin. Returns 0 if no resolvable position
+// exists (e.g. an empty func_group with no brushes / no kv / no edict).
+int  Editor_EntityAnchor  (const struct edit_entity_s *e, vec3_t out);
+
 #endif // EDITOR_INTERNAL_H
