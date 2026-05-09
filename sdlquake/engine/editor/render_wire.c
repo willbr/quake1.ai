@@ -352,8 +352,12 @@ static const edit_class_info_t *find_class(const char *classname)
 }
 
 // Compute the world-space AABB used to display + pick a point entity.
-// Uses the per-class table when available so the wire box wraps the
-// actual spawn bbox (weapons sit above origin, players span around it).
+// First preference: live edict's absmin/absmax (set by SV_LinkEdict).
+// This is what makes brush entities like func_door pickable — their
+// origin is (0,0,0) but their brushmodel lives elsewhere in the world,
+// and SV_LinkEdict put the real bbox into v.absmin/absmax. Falls back
+// to the per-class table (weapons / monsters / players) and then to a
+// centred ±16 cube for unrecognised classnames.
 static void point_entity_bbox(const edit_entity_t *e,
                               vec3_t out_mins, vec3_t out_maxs)
 {
@@ -363,6 +367,18 @@ static void point_entity_bbox(const edit_entity_t *e,
     const edit_class_info_t *ci;
     vec3_t o;
     int i;
+
+    if (e->live_ent && !e->live_ent->free)
+    {
+        const float *amn = e->live_ent->v.absmin;
+        const float *amx = e->live_ent->v.absmax;
+        if (amx[0] > amn[0] || amx[1] > amn[1] || amx[2] > amn[2])
+        {
+            for (i = 0; i < 3; i++) { out_mins[i] = amn[i]; out_maxs[i] = amx[i]; }
+            return;
+        }
+    }
+
     Entity_GetOrigin(e, o);
     if (e->classname_idx >= 0)
     {

@@ -294,42 +294,14 @@ static void Editor_Cmd_Status_f(void)
 // -----------------------------------------------------------------------------
 //
 // When the user does `+map start` and opens the editor without first running
-// editor_load, edit_scene is empty and they see no entities. Build a virtual
-// scene directly from sv.edicts so monsters / lights / players / triggers
-// are immediately selectable and draggable. Brushes from the BSP stay
-// outside edit_scene (the engine renders them as part of cl.worldmodel).
-
-static void populate_entity_from_edict(edict_t *ed, edit_entity_t *e)
-{
-    char buf[256];
-    memset(e, 0, sizeof(*e));
-    e->classname_idx = -1;
-    e->origin_idx    = -1;
-    e->live_ent      = ed;
-    e->spawned       = 1;       // already in the world
-
-    if (ed->v.classname && ed->v.classname[0])
-        Entity_SetKV(e, "classname", ed->v.classname);
-
-    snprintf(buf, sizeof(buf), "%g %g %g",
-             ed->v.origin[0], ed->v.origin[1], ed->v.origin[2]);
-    Entity_SetKV(e, "origin", buf);
-
-    if (ed->v.angles[1] != 0)
-    {
-        snprintf(buf, sizeof(buf), "%g", ed->v.angles[1]);
-        Entity_SetKV(e, "angle", buf);
-    }
-    if (ed->v.spawnflags != 0)
-    {
-        snprintf(buf, sizeof(buf), "%g", ed->v.spawnflags);
-        Entity_SetKV(e, "spawnflags", buf);
-    }
-    if (ed->v.target && ed->v.target[0])
-        Entity_SetKV(e, "target", ed->v.target);
-    if (ed->v.targetname && ed->v.targetname[0])
-        Entity_SetKV(e, "targetname", ed->v.targetname);
-}
+// editor_load, edit_scene is empty and they see no entities. We populate by
+// parsing the BSP's embedded entity string (sv.worldmodel->entities) — that
+// gives us the original .map kv lists for *every* entity, including lights
+// that the spawn function freed (no-targetname static lights are deliberately
+// dropped at server start) and brush entities (doors/buttons) whose actual
+// brushmodel lives in the BSP. The post-parse linker in map_io.c matches each
+// entity to its live sv.edicts entry by classname + nearest origin so live_ent
+// is set where available.
 
 static void Editor_PopulateFromServer(void);
 
@@ -367,33 +339,22 @@ static void editor_check_map_change(void)
 
 static void Editor_PopulateFromServer(void)
 {
-    int i, n;
-    if (!sv.active) return;
-    Scene_Clear();
+    if (!sv.active || !sv.worldmodel || !sv.worldmodel->entities) return;
     History_Clear();
 
-    // Conservative upper bound for the entities array; we'll only fill the
-    // slots that pass the filter loop below.
-    edit_scene.entities = (edit_entity_t *)malloc(
-        sv.num_edicts * sizeof(edit_entity_t));
-    n = 0;
-    for (i = 1; i < sv.num_edicts; i++)         // 1: skip worldspawn
+    // parse_scene_text inside Scene_DeserializeText calls Scene_Clear, marks
+    // every parsed entity spawned=1, and runs the live-edict matcher (so
+    // brush entities' live_ent points at the func_door edict whose absmin/
+    // absmax we use for picking).
+    if (!Scene_DeserializeText(sv.worldmodel->entities))
     {
-        edict_t *ed = EDICT_NUM(i);
-        if (ed->free) continue;
-        if (!ed->v.classname || !ed->v.classname[0]) continue;
-        // Brush entities (func_door etc) own a BSP submodel — kv editing is
-        // useful but we don't pull their brushes into edit_scene; their
-        // visuals come from the engine's bmodel pipeline.
-        populate_entity_from_edict(ed, &edit_scene.entities[n]);
-        n++;
+        Con_Printf("editor: failed to parse worldmodel entities\n");
+        return;
     }
-    edit_scene.numentities = n;
 
-    // Track the current map so the Restart button + a future explicit
-    // editor_save know what to write to. Filename stays empty so auto-save
-    // on close stays a no-op — overwriting id1/maps/<name>.map silently
-    // would destroy any existing source .map (test.map etc.).
+    // mapname for Restart map + a future explicit editor_save. Filename
+    // stays empty so close-time auto-save is a no-op — overwriting an
+    // existing id1/maps/<name>.map source file silently would destroy work.
     if (sv.name[0])
     {
         size_t l = strlen(sv.name);
@@ -403,8 +364,9 @@ static void Editor_PopulateFromServer(void)
     }
     edit_scene.filename[0] = '\0';
 
-    Con_Printf("editor: populated %d entities from running server (%s)\n",
-               n, edit_scene.mapname[0] ? edit_scene.mapname : "(no name)");
+    Con_Printf("editor: populated %d entities from worldmodel (%s)\n",
+               edit_scene.numentities,
+               edit_scene.mapname[0] ? edit_scene.mapname : "(no name)");
 }
 
 // -----------------------------------------------------------------------------
