@@ -301,9 +301,11 @@ static int parse_scene_text(char *src)
             const char *cls;
             const char *model_kv = NULL;
             int         by_model;
-            vec3_t o;
-            edict_t *best = NULL;
-            float    best_d2 = 64.0f * 64.0f;
+            int         have_expected_bbox = 0;
+            vec3_t      o;
+            vec3_t      expected_absmin = {0,0,0}, expected_absmax = {0,0,0};
+            edict_t    *best = NULL;
+            float       best_d2 = 64.0f * 64.0f;
             if (!Entity_IsPoint(e)) continue;
             if (e->classname_idx < 0) continue;
             cls = e->kv[e->classname_idx].value;
@@ -312,31 +314,83 @@ static int parse_scene_text(char *src)
                     { model_kv = e->kv[k].value; break; }
             by_model = (model_kv && model_kv[0] == '*');
             Entity_GetOrigin(e, o);
-            for (j = 1; j < sv.num_edicts; j++)
+
+            // Pre-compute expected absmin/absmax from the BSP submodel that
+            // "*N" names. Used as a bbox-equality fallback for brush ents
+            // whose spawn function wiped v.model (triggers — InitTrigger
+            // sets v.model = "" and v.modelindex = 0 to make them invisible
+            // to clients, so the strcmp path can't reach them). absmin/
+            // absmax was last computed by SV_LinkEdict during SV_SetModel
+            // and stays at the brush bbox afterwards.
+            if (by_model && cl.worldmodel && cl.worldmodel->submodels)
             {
-                edict_t *ed = EDICT_NUM(j);
-                float dx, dy, dz, d2;
-                if (ed->free) continue;
-                if (by_model)
+                int sub = atoi(model_kv + 1);
+                if (sub > 0 && sub < cl.worldmodel->numsubmodels)
                 {
-                    // Brushmodel reference is unique per edict — match
-                    // purely on it. We deliberately skip the classname
-                    // check here: spawn_func_door rewrites v.classname
-                    // to "door" (and plat → "plat", train → "train") for
-                    // QC findradius chaining, so the BSP entity string
-                    // ("func_door") never matches the live edict.
+                    dmodel_t *m = &cl.worldmodel->submodels[sub];
+                    int a;
+                    for (a = 0; a < 3; a++)
+                    {
+                        expected_absmin[a] = o[a] + m->mins[a];
+                        expected_absmax[a] = o[a] + m->maxs[a];
+                    }
+                    have_expected_bbox = 1;
+                }
+            }
+
+            // Pass 1: exact ed->v.model strcmp ("*N" preserved, e.g. doors,
+            // plats, buttons). Wins outright when found.
+            if (by_model)
+            {
+                for (j = 1; j < sv.num_edicts; j++)
+                {
+                    edict_t *ed = EDICT_NUM(j);
+                    if (ed->free) continue;
                     if (!ed->v.model) continue;
                     if (strcmp(ed->v.model, model_kv) != 0) continue;
                     best = ed;
                     break;
                 }
-                if (!ed->v.classname) continue;
-                if (strcmp(ed->v.classname, cls) != 0) continue;
-                dx = ed->v.origin[0] - o[0];
-                dy = ed->v.origin[1] - o[1];
-                dz = ed->v.origin[2] - o[2];
-                d2 = dx*dx + dy*dy + dz*dz;
-                if (d2 < best_d2) { best_d2 = d2; best = ed; }
+            }
+            // Pass 2: bbox-equality fallback for brush ents with cleared
+            // model field (triggers). Skip the classname strcmp here —
+            // tolerant in case of future spawn-time renames; the brush
+            // bbox is the authoritative key.
+            if (!best && by_model && have_expected_bbox)
+            {
+                float bb_best = 1.0f * 1.0f;     // 1u squared per-axis tolerance
+                for (j = 1; j < sv.num_edicts; j++)
+                {
+                    edict_t *ed = EDICT_NUM(j);
+                    float d2 = 0;
+                    int   a;
+                    if (ed->free) continue;
+                    for (a = 0; a < 3; a++)
+                    {
+                        float dn = ed->v.absmin[a] - expected_absmin[a];
+                        float dx = ed->v.absmax[a] - expected_absmax[a];
+                        d2 += dn*dn + dx*dx;
+                    }
+                    if (d2 < bb_best) { bb_best = d2; best = ed; }
+                }
+            }
+            // Pass 3: classname + closest origin (items, monsters that have
+            // no model="*N").
+            if (!best && !by_model)
+            {
+                for (j = 1; j < sv.num_edicts; j++)
+                {
+                    edict_t *ed = EDICT_NUM(j);
+                    float dx, dy, dz, d2;
+                    if (ed->free) continue;
+                    if (!ed->v.classname) continue;
+                    if (strcmp(ed->v.classname, cls) != 0) continue;
+                    dx = ed->v.origin[0] - o[0];
+                    dy = ed->v.origin[1] - o[1];
+                    dz = ed->v.origin[2] - o[2];
+                    d2 = dx*dx + dy*dy + dz*dz;
+                    if (d2 < best_d2) { best_d2 = d2; best = ed; }
+                }
             }
             e->live_ent = best;
         }
