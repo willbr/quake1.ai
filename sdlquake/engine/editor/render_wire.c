@@ -711,22 +711,24 @@ void Editor_PushPreviewEntities(void)
         if (e->classname_idx < 0) continue;
         if (Editor_EntityHidden(i)) continue;
 
-        // The engine renders the edict at its current (possibly AI-moved)
-        // position; we render the preview at the .map origin. View modes:
-        //   live: show what's running. Skip preview when an edict already
-        //         exists so we don't double-draw at two different places.
-        //   map:  show what the .map says. Scrub the engine's visedict for
-        //         this entity and push our preview at the .map origin.
-        // For live_ent we use cl_entities[N].model as the authoritative
-        // "engine will render this" check — info_player_* metadata edicts
-        // are alive but have v.model=NULL, and we still want to preview
-        // those.
-        if (e->live_ent && !e->live_ent->free)
+        // View modes:
+        //   live: show what's running. The engine already knows about every
+        //         entity that has a live edict or static counterpart; we
+        //         skip those entirely so live mode = "what the game shows".
+        //         Metadata edicts (info_player_*, info_intermission) are
+        //         alive with v.model=NULL — invisible in the running game,
+        //         so live mode hides them too. Only purely-pending entities
+        //         (just added via Add entity, no live counterpart yet) get
+        //         a preview.
+        //   map:  show what the .map text says. Push a preview at the .map
+        //         origin and scrub the engine's cl_visedicts entry for this
+        //         entity so the live model doesn't double-draw.
+        if (view_map)
         {
-            int en = NUM_FOR_EDICT(e->live_ent);
-            if (en > 0 && en < cl.num_entities && cl_entities[en].model)
+            if (e->live_ent && !e->live_ent->free)
             {
-                if (view_map)
+                int en = NUM_FOR_EDICT(e->live_ent);
+                if (en > 0 && en < cl.num_entities && cl_entities[en].model)
                 {
                     int k;
                     for (k = 0; k < cl_numvisedicts; k++)
@@ -737,18 +739,19 @@ void Editor_PushPreviewEntities(void)
                             break;
                         }
                     }
-                    // fall through: push preview at .map origin
-                }
-                else
-                {
-                    continue;
                 }
             }
+            // SV_MakeStatic'd ents (torches) don't move so .map == efrag
+            // position; the efrag chain already draws them at the .map
+            // origin, no preview needed and we'd have to walk the chain to
+            // scrub them anyway.
+            if (e->live_static) continue;
         }
-        // SV_MakeStatic'd ents (torches) don't move, so .map origin == live
-        // origin == efrag origin. Skip in both modes — no double-render risk
-        // and we'd have to walk the efrag chain to scrub them anyway.
-        if (e->live_static) continue;
+        else
+        {
+            if (e->live_ent && !e->live_ent->free) continue;
+            if (e->live_static) continue;
+        }
 
         cls = e->kv[e->classname_idx].value;
         ci  = find_class(cls);
