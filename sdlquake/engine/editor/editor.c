@@ -227,102 +227,137 @@ static void Editor_Cmd_Undo_f(void)
     if (!History_Undo()) Con_Printf("editor: nothing to undo\n");
 }
 
-// qbsp's WriteMiptex resolves the worldspawn "wad" key with raw fopen,
-// so any referenced WAD file must exist on the real filesystem at
-// <gamedir>/<wad>. Quake's WADs live inside id1/pak0.pak and are read
-// by the engine via COM_LoadFile; qbsp can't see them. This helper
-// pulls each named WAD out of the PAK on demand and drops a copy on
-// disk so qbsp finds it. Once written, the file persists across
-// sessions.
-static int extract_wad_from_pak(const char *wad_relpath)
+// qbsp's WriteMiptex needs <gamedir>/<wad> on disk to look up texture
+// sizes for surface UV math + to embed pixel data into the .bsp. id
+// never shipped gfx/base.wad in the runtime PAK — that file is the
+// qbsp-time texture source, used only by level-design tools. The
+// runtime engine has the same textures embedded in each .bsp's miptex
+// lump, exposed through cl.worldmodel->textures[].
+//
+// Synthesize a WAD2 from the running worldmodel: every texture the
+// engine has loaded becomes a lump. Any brush the user authored in
+// the editor's texture picker references one of these (the picker
+// sources from the same array), so qbsp will resolve every texture
+// the .map names. Re-emitted on each editor_compile in case the
+// engine has switched maps.
+/* WAD2 lumpinfo type tag for "miptex". File-scope so gnu89 is happy. */
+#define WAD2_TYP_MIPTEX 0x44
+
+/* WAD2 lumpinfo_t — 32 bytes on disk. */
+typedef struct wad2_lumpinfo_s {
+    int  filepos;
+    int  disksize;
+    int  size;
+    char type;
+    char compression;
+    char pad[2];
+    char name[16];
+} wad2_lumpinfo_t;
+
+static int write_wad2_from_worldmodel(const char *out_path)
 {
-    char  abs_path[1024];
+
     FILE *f;
-    byte *bytes;
-    int   size;
-    int   i;
+    int   i, n_lumps = 0, body_size = 0;
+    int   header_size = 12;
+    int   *lump_size  = NULL;     /* per-texture body size (header + mips) */
+    int   *lump_pos   = NULL;     /* per-texture filepos */
 
-    snprintf(abs_path, sizeof(abs_path), "%s/%s", com_gamedir, wad_relpath);
-
-    f = fopen(abs_path, "rb");
-    if (f) { fclose(f); return 0; }       /* already on disk */
-
-    bytes = COM_LoadHunkFile((char *)wad_relpath);
-    if (!bytes)
+    if (!cl.worldmodel || !cl.worldmodel->textures
+     || cl.worldmodel->numtextures <= 0)
     {
-        Con_Printf("editor_compile: %s missing from disk and PAK\n",
-                   wad_relpath);
+        Con_Printf("editor_compile: no worldmodel textures to dump\n");
         return 1;
     }
-    size = com_filesize;
 
-    /* mkdir parents (one level up — gfx/ etc) */
+    /* First pass: size the buffer + count valid lumps. */
     {
-        char dir[1024];
-        Q_strncpy(dir, abs_path, sizeof(dir) - 1);
-        dir[sizeof(dir) - 1] = '\0';
-        for (i = (int)strlen(dir) - 1; i > 0; i--)
+        int nt = cl.worldmodel->numtextures;
+        lump_size = (int *)calloc(nt, sizeof(int));
+        lump_pos  = (int *)calloc(nt, sizeof(int));
+        for (i = 0; i < nt; i++)
         {
-            if (dir[i] == '/' || dir[i] == '\\') { dir[i] = '\0'; break; }
+            texture_t *t = cl.worldmodel->textures[i];
+            int sz;
+            if (!t || !t->name[0]) continue;
+            sz = 40                                            /* miptex header */
+               + (int)(t->width * t->height)                   /* mip 0 */
+               + (int)((t->width >> 1) * (t->height >> 1))     /* mip 1 */
+               + (int)((t->width >> 2) * (t->height >> 2))     /* mip 2 */
+               + (int)((t->width >> 3) * (t->height >> 3));    /* mip 3 */
+            lump_size[i] = sz;
+            lump_pos [i] = header_size + body_size;
+            body_size   += sz;
+            n_lumps++;
         }
-        Sys_mkdir(dir);                   /* engine helper; ok if exists */
     }
 
-    f = fopen(abs_path, "wb");
+    f = fopen(out_path, "wb");
     if (!f)
     {
-        Con_Printf("editor_compile: can't write %s\n", abs_path);
+        Con_Printf("editor_compile: can't open %s for write\n", out_path);
+        free(lump_size); free(lump_pos);
         return 1;
     }
-    fwrite(bytes, 1, size, f);
-    fclose(f);
-    Con_Printf("editor_compile: extracted %s (%d bytes)\n", wad_relpath, size);
-    return 0;
-}
 
-// Scan a .map's worldspawn for the "wad" key value; semicolon-separated
-// list of relative WAD paths. Extract each from the PAK so qbsp can
-// load them. Quake-1 maps typically reference one WAD ("gfx/base.wad");
-// some custom maps multi-list with ";" — handle both.
-static void extract_wads_for_map(const char *map_path)
-{
-    FILE *f;
-    char  buf[8192];
-    int   nread;
-    char *p, *end;
-
-    f = fopen(map_path, "rb");
-    if (!f) return;
-    nread = (int)fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    if (nread <= 0) return;
-    buf[nread] = '\0';
-
-    /* Worldspawn is the first entity; "wad" key is in its kv list near
-     * the top. Substring scan is fine — qbsp does the proper parse
-     * later. */
-    p = strstr(buf, "\"wad\"");
-    if (!p) return;
-    p += 5;
-    while (*p && *p != '"') p++;
-    if (!*p) return;
-    p++;                                  /* skip opening quote */
-    end = strchr(p, '"');
-    if (!end) return;
-    *end = '\0';
-
-    while (*p)
+    /* Header. */
     {
-        char  one[256];
-        char *semi = strchr(p, ';');
-        size_t n = semi ? (size_t)(semi - p) : strlen(p);
-        if (n >= sizeof(one)) n = sizeof(one) - 1;
-        memcpy(one, p, n);
-        one[n] = '\0';
-        if (one[0]) extract_wad_from_pak(one);
-        if (!semi) break;
-        p = semi + 1;
+        char hdr[12];
+        int  infotableofs = header_size + body_size;
+        memcpy(hdr, "WAD2", 4);
+        memcpy(hdr + 4, &n_lumps, 4);
+        memcpy(hdr + 8, &infotableofs, 4);
+        fwrite(hdr, 1, 12, f);
     }
+
+    /* Body — one miptex per texture in worldmodel order. */
+    for (i = 0; i < cl.worldmodel->numtextures; i++)
+    {
+        texture_t *t = cl.worldmodel->textures[i];
+        unsigned   off[4];
+        int        k;
+        if (!t || !t->name[0]) continue;
+        /* Miptex offsets are relative to the start of the miptex
+         * (NOT relative to texture_t). Our miptex is 40 bytes
+         * before the mip-0 pixel data. */
+        off[0] = 40;
+        off[1] = off[0] + t->width * t->height;
+        off[2] = off[1] + (t->width >> 1) * (t->height >> 1);
+        off[3] = off[2] + (t->width >> 2) * (t->height >> 2);
+        fwrite(t->name, 1, 16, f);
+        fwrite(&t->width,  1, 4, f);
+        fwrite(&t->height, 1, 4, f);
+        fwrite(off, 1, 16, f);
+        for (k = 0; k < 4; k++)
+        {
+            const byte *src = (const byte *)t + t->offsets[k];
+            int  npix = (int)((t->width >> k) * (t->height >> k));
+            fwrite(src, 1, (size_t)npix, f);
+        }
+    }
+
+    /* Directory. */
+    for (i = 0; i < cl.worldmodel->numtextures; i++)
+    {
+        texture_t *t = cl.worldmodel->textures[i];
+        wad2_lumpinfo_t li;
+        if (!t || !t->name[0]) continue;
+        memset(&li, 0, sizeof(li));
+        li.filepos     = lump_pos [i];
+        li.disksize    = lump_size[i];
+        li.size        = lump_size[i];
+        li.type        = (char)WAD2_TYP_MIPTEX;
+        li.compression = 0;
+        memcpy(li.name, t->name, 16);
+        fwrite(&li, 1, sizeof(li), f);
+    }
+
+    fclose(f);
+    free(lump_size);
+    free(lump_pos);
+    Con_Printf("editor_compile: wrote %s (%d textures, %d bytes)\n",
+               out_path, n_lumps, header_size + body_size + n_lumps * 32);
+    return 0;
 }
 
 // Compile the current edit_scene's .map through the in-process qbsp
@@ -360,9 +395,21 @@ static void Editor_Cmd_Compile_f(void)
         return;
     }
 
-    /* qbsp's WAD lookup uses raw fopen — extract any PAK-only WADs to
-     * disk so it can find them. One-time per WAD per gamedir. */
-    extract_wads_for_map(map_path);
+    /* qbsp's WAD lookup uses raw fopen. id never shipped gfx/base.wad
+     * in the PAK — runtime textures live in each .bsp's miptex lump.
+     * Synthesize a WAD2 from the running worldmodel's textures so qbsp
+     * has something to read from disk. The .map's "wad" key is a stock
+     * "gfx/base.wad" that the editor's serializer emits. */
+    {
+        char wad_path[1024];
+        snprintf(wad_path, sizeof(wad_path), "%s/gfx/base.wad", com_gamedir);
+        Sys_mkdir(va("%s/gfx", com_gamedir));
+        if (write_wad2_from_worldmodel(wad_path) != 0)
+        {
+            Con_Printf("editor_compile: WAD synthesis failed\n");
+            return;
+        }
+    }
 
     Con_Printf("editor_compile: saved %s; running qbsp...\n", map_path);
 
@@ -761,11 +808,12 @@ static void editor_check_map_change(void)
 
     if (edit_scene.filename[0])
     {
-        // User-loaded scene (editor_load): keep their entities, but every
-        // live_ent / live_static pointer references the old sv.edicts /
-        // cl_static_entities which is now reused for new entities. Null
-        // them so the gizmo doesn't drag a random unrelated edict, and
-        // clear the selection for the same reason.
+        // User-loaded scene (editor_load): keep their entities AND
+        // their mapname (the .map the user explicitly loaded is their
+        // authoring target — even when the engine is running a
+        // different .bsp). Just null the live_ent / live_static
+        // pointers since they reference the old sv.edicts /
+        // cl_static_entities which has been reused.
         int i;
         Scene_SelectionClear();
         for (i = 0; i < edit_scene.numentities; i++)
@@ -773,10 +821,10 @@ static void editor_check_map_change(void)
             edit_scene.entities[i].live_ent    = NULL;
             edit_scene.entities[i].live_static = NULL;
         }
-        Q_strncpy(edit_scene.mapname, sv.name, sizeof(edit_scene.mapname) - 1);
-        edit_scene.mapname[sizeof(edit_scene.mapname) - 1] = '\0';
-        Con_Printf("editor: map changed to %s; cleared selection + live links\n",
-                   sv.name);
+        Con_Printf("editor: engine map changed to %s; "
+                   "cleared selection + live links "
+                   "(authoring target stays %s)\n",
+                   sv.name, edit_scene.mapname[0] ? edit_scene.mapname : "(none)");
         return;
     }
 
