@@ -256,6 +256,10 @@ pub fn build(b: *std.Build) void {
     // ---------------------------------------------------------------------------
     const run = b.addRunArtifact(exe);
     run.step.dependOn(b.getInstallStep());
+    // Pin cwd to the project root so id1/ resolves regardless of which
+    // subdir the user invoked zig from. The engine's basedir comes from
+    // SDL_GetCurrentDirectory() at startup.
+    run.setCwd(b.path(""));
     if (b.args) |args| run.addArgs(args);
     b.step("run", "Build and run Quake").dependOn(&run.step);
 

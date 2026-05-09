@@ -124,6 +124,16 @@ void IN_ProcessEvents(void)
                     Editor_Toggle();
                 break;
             }
+            // Esc closes the editor if it's open. Swallow the event so it
+            // doesn't also pop the Quake menu underneath.
+            if (ev.key.scancode == SDL_SCANCODE_ESCAPE
+                && Editor_IsOpen()
+                && !IG_WantCaptureKeyboard())
+            {
+                if (ev.key.type == SDL_EVENT_KEY_DOWN)
+                    Editor_Toggle();
+                break;
+            }
 
             // Overlay open and not in editor FPS look mode — keys are
             // ImGui-only.

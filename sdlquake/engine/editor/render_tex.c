@@ -12,10 +12,10 @@
 //   3. divide by (s_scale, t_scale) so they become "texels per world unit".
 //   4. add (s_shift, t_shift) at lookup time.
 //
-// We sample a built-in 64x64 procedural grid pattern (palette indices) so
-// every face has visible UV detail without needing a texture WAD.
-// Loading real textures is a follow-up — the math is the same once we
-// have a byte[texw*texh].
+// Texture pixels come from cl.worldmodel->textures[] — i.e. the BSP miptex
+// lump of whatever map is currently loaded. .map texnames are matched by
+// case-insensitive basename. If a name doesn't resolve we fall back to a
+// 64x64 procedural grid so faces stay visible.
 
 #include "quakedef.h"
 #include "r_local.h"        // NEAR_CLIP
@@ -24,19 +24,26 @@
 
 #include <math.h>
 #include <string.h>
+#include <ctype.h>
 
 extern vec3_t   vpn, vright, vup;
 extern vec3_t   r_origin;
 extern float    xcenter, ycenter;
 extern float    xscale, yscale;
 
-#define TEX_W       64
-#define TEX_H       64
-#define TEX_W_MASK  (TEX_W - 1)
-#define TEX_H_MASK  (TEX_H - 1)
+#define GRID_W      64
+#define GRID_H      64
 #define MAX_VERTS   (EDIT_MAX_VERTS_PER_FACE + 4)
 
-static byte s_tex[TEX_W * TEX_H];
+static byte s_grid[GRID_W * GRID_H];
+
+// Resolved sampler for one face: either a real BSP texture's mip0 pixels or
+// the procedural fallback grid. Built per-face by resolve_face_tex().
+typedef struct {
+    const byte *pixels;
+    int   w, h;
+    int   wmask, hmask;     // -1 if not power-of-2 (then we modulo)
+} face_tex_t;
 
 // QuakeEd's six base axes — picks s and t world directions for the plane.
 static const vec3_t base_axes[18] = {
@@ -48,24 +55,106 @@ static const vec3_t base_axes[18] = {
     {0,-1,0}, {1, 0, 0}, {0, 0,-1}      // south   (n.y largest, -)
 };
 
-static void init_texture(void)
+static void init_grid(void)
 {
     static int done = 0;
     int s, t;
     if (done) return;
     done = 1;
-    for (t = 0; t < TEX_H; t++)
+    for (t = 0; t < GRID_H; t++)
     {
-        for (s = 0; s < TEX_W; s++)
+        for (s = 0; s < GRID_W; s++)
         {
             // 16-cell grid: thin black lines on a 2-tone gray checker.
             byte c;
             if ((s % 16) == 0 || (t % 16) == 0) c = 0;       // grid line
             else if (((s / 16) ^ (t / 16)) & 1) c = 11;      // light cell
             else                                 c = 6;       // dark cell
-            s_tex[t * TEX_W + s] = c;
+            s_grid[t * GRID_W + s] = c;
         }
     }
+}
+
+// .map texnames sometimes carry a wad-relative path like "editor/grid" or
+// "wood/wood1_5". Quake's BSP miptex names are bare ("wood1_5"), so we strip
+// to the basename before comparing.
+static const char *texname_basename(const char *n)
+{
+    const char *slash = strrchr(n, '/');
+    return slash ? slash + 1 : n;
+}
+
+static int strieq(const char *a, const char *b)
+{
+    while (*a && *b)
+    {
+        int ca = tolower((unsigned char)*a);
+        int cb = tolower((unsigned char)*b);
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+// Linear scan of cl.worldmodel->textures[] by basename. Linear is fine — a
+// BSP has at most a few hundred textures and we only call this once per face
+// per frame, not per pixel.
+static texture_t *find_world_texture(const char *texname)
+{
+    int i;
+    const char *want;
+    if (!cl.worldmodel || !cl.worldmodel->textures) return NULL;
+    want = texname_basename(texname);
+    for (i = 0; i < cl.worldmodel->numtextures; i++)
+    {
+        texture_t *t = cl.worldmodel->textures[i];
+        if (!t) continue;
+        if (strieq(t->name, want)) return t;
+    }
+    return NULL;
+}
+
+// Warn once per unique missing texname so the console doesn't spam every
+// frame. Small fixed-size circular cache; collisions just re-warn.
+#define MISSING_CACHE 64
+static char s_warned[MISSING_CACHE][16];
+static int  s_warned_n = 0;
+
+static void warn_once_missing(const char *name)
+{
+    int i;
+    const char *base = texname_basename(name);
+    for (i = 0; i < s_warned_n && i < MISSING_CACHE; i++)
+        if (strieq(s_warned[i], base)) return;
+    if (s_warned_n < MISSING_CACHE)
+    {
+        Q_strncpy(s_warned[s_warned_n], base, 15);
+        s_warned[s_warned_n][15] = 0;
+        s_warned_n++;
+    }
+    Con_Printf("editor: texture \"%s\" not in worldmodel; using grid fallback\n", base);
+}
+
+static void resolve_face_tex(const edit_plane_t *p, face_tex_t *out)
+{
+    texture_t *tx = find_world_texture(p->texname);
+    if (tx)
+    {
+        out->pixels = (const byte *)tx + tx->offsets[0];
+        out->w = (int)tx->width;
+        out->h = (int)tx->height;
+        out->wmask = ((out->w & (out->w - 1)) == 0) ? out->w - 1 : -1;
+        out->hmask = ((out->h & (out->h - 1)) == 0) ? out->h - 1 : -1;
+        return;
+    }
+    if (p->texname[0])
+        warn_once_missing(p->texname);
+    init_grid();
+    out->pixels = s_grid;
+    out->w = GRID_W;
+    out->h = GRID_H;
+    out->wmask = GRID_W - 1;
+    out->hmask = GRID_H - 1;
 }
 
 // Compute scaled+rotated s/t axes (in world space) and the s/t shifts for a
@@ -186,9 +275,9 @@ static void make_pv(const vrt_t *v, const vec3_t s_axis, const vec3_t t_axis,
     out->inv_z = inv_z;
 }
 
-// Scanline-fill a convex polygon, sampling the procedural texture per pixel
-// with perspective-correct (s, t).
-static void fill_textured(const pv_t *pv, int n)
+// Scanline-fill a convex polygon, sampling the resolved face texture per
+// pixel with perspective-correct (s, t).
+static void fill_textured(const pv_t *pv, int n, const face_tex_t *ft)
 {
     int W = (int)vid.width, H = (int)vid.height;
     int ymin = pv[0].y, ymax = pv[0].y;
@@ -256,9 +345,17 @@ static void fill_textured(const pv_t *pv, int n)
                 {
                     float u = so / iz;
                     float v = to / iz;
-                    int   us = ((int)u) & TEX_W_MASK;
-                    int   vs = ((int)v) & TEX_H_MASK;
-                    row[x] = s_tex[vs * TEX_W + us];
+                    int   ui = (int)u, vi = (int)v;
+                    int   us, vs;
+                    if (ft->wmask >= 0)
+                        us = ui & ft->wmask;
+                    else
+                        us = ((ui % ft->w) + ft->w) % ft->w;
+                    if (ft->hmask >= 0)
+                        vs = vi & ft->hmask;
+                    else
+                        vs = ((vi % ft->h) + ft->h) % ft->h;
+                    row[x] = ft->pixels[vs * ft->w + us];
                 }
                 so += ds; to += dt; iz += di;
             }
@@ -273,7 +370,6 @@ static void fill_textured(const pv_t *pv, int n)
 void Editor_TexDrawBrush(const edit_brush_t *b)
 {
     int i, k;
-    init_texture();
 
     for (i = 0; i < b->numfaces; i++)
     {
@@ -308,6 +404,8 @@ void Editor_TexDrawBrush(const edit_brush_t *b)
         for (k = 0; k < n_clip; k++)
             make_pv(&cl_v[k], s_axis, t_axis, s_shift, t_shift, &pv[k]);
 
-        fill_textured(pv, n_clip);
+        face_tex_t ft;
+        resolve_face_tex(pl, &ft);
+        fill_textured(pv, n_clip, &ft);
     }
 }

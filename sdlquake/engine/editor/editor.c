@@ -140,6 +140,28 @@ static void Editor_Cmd_Toggle_f(void)
     Editor_Toggle();
 }
 
+// List every texture in cl.worldmodel — these are the names that brush face
+// texnames in a .map will resolve against. Anything not in this list falls
+// back to the procedural grid in the textured render style.
+static void Editor_Cmd_Textures_f(void)
+{
+    int i, n = 0;
+    if (!cl.worldmodel || !cl.worldmodel->textures)
+    {
+        Con_Printf("editor_textures: no worldmodel loaded\n");
+        return;
+    }
+    for (i = 0; i < cl.worldmodel->numtextures; i++)
+    {
+        texture_t *t = cl.worldmodel->textures[i];
+        if (!t) continue;
+        Con_Printf("  %-16s %3ux%-3u\n", t->name, t->width, t->height);
+        n++;
+    }
+    Con_Printf("editor_textures: %d textures in '%s'\n",
+               n, cl.worldmodel->name);
+}
+
 static void Editor_Cmd_Status_f(void)
 {
     extern vec3_t r_origin, vpn;
@@ -189,6 +211,7 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_save",   Editor_Cmd_Save_f);
     Cmd_AddCommand("editor_revert", Editor_Cmd_Revert_f);
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
+    Cmd_AddCommand("editor_textures", Editor_Cmd_Textures_f);
 
     Cvar_RegisterVariable(&editor_camera);
 
