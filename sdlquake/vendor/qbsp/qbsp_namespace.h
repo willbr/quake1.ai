@@ -38,6 +38,19 @@
 #define CRC_ProcessByte    qbsp_CRC_ProcessByte
 #define CRC_Value          qbsp_CRC_Value
 
+/* Byte-swap functions. Engine common.c declares these as function
+ * POINTERS that get assigned at COM_Init. qbsp's cmdlib.c defines
+ * them as concrete functions. With -fcommon, the function definition
+ * silently wins, and the engine's `BigShort = ShortSwap` write lands
+ * in .text -> ACCESS_VIOLATION on startup. Rename qbsp's so the
+ * symbols stay distinct. */
+#define BigShort           qbsp_BigShort
+#define LittleShort        qbsp_LittleShort
+#define BigLong            qbsp_BigLong
+#define LittleLong         qbsp_LittleLong
+#define BigFloat           qbsp_BigFloat
+#define LittleFloat        qbsp_LittleFloat
+
 /* qbsp.c's old main() is renamed and never called — the new entry point
  * is qbsp_compile_to_memory in qbsp_lib.c. The rename also keeps it from
  * colliding with sys_sdl.c's main(). */
