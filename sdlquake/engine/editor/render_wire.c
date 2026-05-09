@@ -723,13 +723,12 @@ void Editor_PushPreviewEntities(void)
         if (Editor_EntityHidden(i)) continue;
 
         // View modes:
-        //   live: show what's running. Skip the preview when the engine is
-        //         actually going to draw the entity (cl_entities[N].model
-        //         non-NULL) so we don't double-render. Metadata edicts
-        //         like info_player_* are alive with v.model=NULL — engine
-        //         draws nothing — so we still preview them as useful
-        //         editor markers (the user can hide via the SPAWN /
-        //         INFO category filters if they're cluttering).
+        //   live: show what's running. Once an entity has a live edict the
+        //         engine's decision is the truth — if it draws something,
+        //         that's what we see (no preview); if it draws nothing
+        //         (info_player_*, info_intermission, info_null — metadata
+        //         edicts with v.model=NULL), we also draw nothing. Map
+        //         mode is where authoring markers belong.
         //   map:  show what the .map text says. Push a preview at the .map
         //         origin and scrub the engine's cl_visedicts entry for
         //         this entity so the live model doesn't double-draw.
@@ -738,25 +737,19 @@ void Editor_PushPreviewEntities(void)
             int en = NUM_FOR_EDICT(e->live_ent);
             int engine_renders =
                 (en > 0 && en < cl.num_entities && cl_entities[en].model);
+            if (!view_map) continue;        // live: defer to engine entirely
             if (engine_renders)
             {
-                if (view_map)
+                int k;
+                for (k = 0; k < cl_numvisedicts; k++)
                 {
-                    int k;
-                    for (k = 0; k < cl_numvisedicts; k++)
+                    if (cl_visedicts[k] == &cl_entities[en])
                     {
-                        if (cl_visedicts[k] == &cl_entities[en])
-                        {
-                            cl_visedicts[k] = cl_visedicts[--cl_numvisedicts];
-                            break;
-                        }
+                        cl_visedicts[k] = cl_visedicts[--cl_numvisedicts];
+                        break;
                     }
-                    // fall through to push preview at .map origin
                 }
-                else
-                {
-                    continue;   // live: engine draws it, we skip
-                }
+                // fall through to push preview at .map origin
             }
         }
         // SV_MakeStatic'd ents (torches) don't move so .map == efrag
