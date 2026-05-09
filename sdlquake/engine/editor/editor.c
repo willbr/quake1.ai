@@ -150,6 +150,9 @@ static void Editor_Cmd_Toggle_f(void)
     Editor_Toggle();
 }
 
+static void Editor_Cmd_Group_f  (void) { Scene_GroupSelected();   }
+static void Editor_Cmd_Ungroup_f(void) { Scene_UngroupSelected(); }
+
 // Spawn a 64-unit cube ~128 units in front of the camera, origin snapped to
 // a 16-unit grid so it sits cleanly on Quake's standard build grid. New
 // brush is appended to worldspawn and becomes the current selection.
@@ -253,6 +256,8 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
     Cmd_AddCommand("editor_textures", Editor_Cmd_Textures_f);
     Cmd_AddCommand("editor_brush_add_cube", Editor_Cmd_AddCube_f);
+    Cmd_AddCommand("editor_group",   Editor_Cmd_Group_f);
+    Cmd_AddCommand("editor_ungroup", Editor_Cmd_Ungroup_f);
 
     Cvar_RegisterVariable(&editor_camera);
     Cvar_RegisterVariable(&editor_grid_snap);
@@ -472,15 +477,24 @@ int Editor_ProcessEvent(void *evp)
         if (Editor_GizmoMouseDown(vx, vy)) return 1;
         {
             int e_idx, b_idx;
+            SDL_Keymod mod = SDL_GetModState();
+            int shift = (mod & SDL_KMOD_SHIFT) != 0;
             if (Editor_PickAt(vx, vy, &e_idx, &b_idx))
             {
-                edit_scene.sel_entity = e_idx;
-                edit_scene.sel_brush  = b_idx;
+                if (shift)
+                {
+                    Scene_SelectionToggle(e_idx, b_idx);
+                }
+                else
+                {
+                    Scene_SelectionClear();
+                    Scene_SelectionAdd(e_idx, b_idx);
+                }
             }
-            else
+            else if (!shift)
             {
-                edit_scene.sel_entity = -1;
-                edit_scene.sel_brush  = -1;
+                // Click on empty space with no shift = clear.
+                Scene_SelectionClear();
             }
         }
         return 1;

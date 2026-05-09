@@ -245,11 +245,59 @@ void Editor_RegisterCvars(void)
     Cvar_RegisterVariable(&editor_render_style);
 }
 
+// Draw the 12 edges of an AABB as world-space lines, depth-bypassed so it
+// reads as an overlay even when geometry sits in front of it.
+static void draw_aabb_over(const vec3_t mins, const vec3_t maxs, byte color)
+{
+    vec3_t c[8];
+    int i;
+    static const int edges[12][2] = {
+        {0,1},{1,3},{3,2},{2,0},      // bottom rectangle
+        {4,5},{5,7},{7,6},{6,4},      // top rectangle
+        {0,4},{1,5},{2,6},{3,7}       // verticals
+    };
+    for (i = 0; i < 8; i++)
+    {
+        c[i][0] = (i & 1) ? maxs[0] : mins[0];
+        c[i][1] = (i & 2) ? maxs[1] : mins[1];
+        c[i][2] = (i & 4) ? maxs[2] : mins[2];
+    }
+    for (i = 0; i < 12; i++)
+        Editor_DrawLine3DOver(c[edges[i][0]], c[edges[i][1]], color);
+}
+
+// Union bbox of every selected brush. Returns 1 if at least one valid
+// brush contributed, 0 otherwise.
+static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
+{
+    int i, n = 0, e_idx, b_idx, k;
+    out_mins[0] = out_mins[1] = out_mins[2] =  1e30f;
+    out_maxs[0] = out_maxs[1] = out_maxs[2] = -1e30f;
+    for (i = 0; i < Scene_NumSelected(); i++)
+    {
+        edit_brush_t *b;
+        edit_entity_t *e;
+        if (!Scene_GetSelected(i, &e_idx, &b_idx)) continue;
+        if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
+        e = &edit_scene.entities[e_idx];
+        if (b_idx < 0 || b_idx >= e->numbrushes) continue;
+        b = &e->brushes[b_idx];
+        if (!b->valid) continue;
+        for (k = 0; k < 3; k++)
+        {
+            if (b->mins[k] < out_mins[k]) out_mins[k] = b->mins[k];
+            if (b->maxs[k] > out_maxs[k]) out_maxs[k] = b->maxs[k];
+        }
+        n++;
+    }
+    return n > 0;
+}
+
 void Editor_RenderScene(void)
 {
     int i, j;
-    edit_brush_t *sel = Scene_GetSelectedBrush();
     int style = (int)editor_render_style.value;
+    int multi = Scene_NumSelected() > 1;
 
     if (edit_scene.numentities == 0) return;
 
@@ -287,16 +335,35 @@ void Editor_RenderScene(void)
             for (j = 0; j < e->numbrushes; j++)
             {
                 edit_brush_t *b = &e->brushes[j];
+                int is_sel = Scene_SelectionContains(i, j);
                 if (!b->valid) continue;
                 if (!brush_visible(b)) continue;
-                if (!wire_all && b != sel) continue;
-                // Selected brush's outline ignores depth so the user can
-                // always see what they have selected, even through walls.
-                draw_brush(b,
-                           (b == sel) ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH,
-                           b == sel);
+                if (!wire_all && !is_sel) continue;
+                // Multi-select hides the per-brush yellow outline — we draw
+                // a single union bbox below instead so the group reads as
+                // one thing. In single-select the per-brush outline still
+                // wins for clarity (and ignores depth so it's always seen).
+                if (multi && is_sel)
+                {
+                    if (wire_all)
+                        draw_brush(b, EDIT_COLOR_BRUSH, 0);
+                }
+                else
+                {
+                    draw_brush(b,
+                               is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH,
+                               is_sel);
+                }
             }
         }
+    }
+
+    // Combined selection bbox (only when more than one brush selected).
+    if (multi)
+    {
+        vec3_t bmin, bmax;
+        if (selection_bbox(bmin, bmax))
+            draw_aabb_over(bmin, bmax, EDIT_COLOR_SELECTED);
     }
 
     Editor_GizmoDraw();

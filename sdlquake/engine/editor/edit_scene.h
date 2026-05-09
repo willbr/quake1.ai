@@ -72,14 +72,25 @@ typedef struct edit_entity_s {
     int         origin_idx;
 } edit_entity_t;
 
+// One entry in the selection list. (entity, brush) is the global address;
+// brush is an index into entities[entity].brushes. Stable only between
+// scene mutations (Scene_Clear, brush array reallocs).
+typedef struct edit_selref_s {
+    int entity;
+    int brush;
+} edit_selref_t;
+
 // The editor scene: entity list, selection, source filename for save/revert.
 typedef struct edit_scene_s {
     int             numentities;
     edit_entity_t  *entities;       // malloc'd
 
-    // Selection. -1 = nothing selected.
-    int             sel_entity;
-    int             sel_brush;      // index into entities[sel_entity].brushes
+    // Selection list. The *primary* selection is the last entry — that's
+    // what the inspector/gizmo show as the focal item when many are
+    // selected. Empty list means nothing selected.
+    edit_selref_t  *selection;
+    int             num_selected;
+    int             sel_cap;
 
     // Round-trip filename. Set by Scene_Load. Empty until a .map has loaded.
     char            filename[256];  // absolute path on disk
@@ -118,9 +129,30 @@ void  Brush_TranslateFace(edit_brush_t *b, int plane_idx, float delta);
 int   Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs,
                          const char *texname);
 
-// Selection helpers.
+// Selection helpers. The list-based API treats the *primary* (last-added)
+// brush as the focal one — that's what GetSelected{Brush,Entity} return,
+// so single-select call sites remain valid.
 edit_brush_t *Scene_GetSelectedBrush(void);
 edit_entity_t *Scene_GetSelectedEntity(void);
+int   Scene_NumSelected     (void);
+int   Scene_GetSelected     (int i, int *out_ent, int *out_brush); // 1 = ok
+int   Scene_SelectionContains(int ent, int brush);
+void  Scene_SelectionClear  (void);
+// Add / Remove / Toggle. For non-worldspawn entities, these treat the whole
+// entity as one group: adding any one brush adds them all, removing or
+// toggling does the same.
+void  Scene_SelectionAdd    (int ent, int brush);
+void  Scene_SelectionRemove (int ent, int brush);
+void  Scene_SelectionToggle (int ent, int brush);
+
+// Group / ungroup operations.
+//   Group: move every selected brush into a new func_group entity. The
+//          new entity becomes the selection.
+//   Ungroup: for each selected brush whose owning entity is a func_group,
+//            move it into the worldspawn entity. Other classnames left
+//            untouched (their grouping has gameplay semantics).
+void  Scene_GroupSelected   (void);
+void  Scene_UngroupSelected (void);
 
 // Iterate every brush with its owning entity. cb returns 0 to stop.
 typedef int (*Scene_BrushIter_fn)(edit_entity_t *e, int e_idx,

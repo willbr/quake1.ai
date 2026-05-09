@@ -17,8 +17,6 @@ edit_scene_t edit_scene;
 void Scene_Init(void)
 {
     memset(&edit_scene, 0, sizeof(edit_scene));
-    edit_scene.sel_entity = -1;
-    edit_scene.sel_brush  = -1;
 }
 
 void Scene_Clear(void)
@@ -32,10 +30,11 @@ void Scene_Clear(void)
             Brush_FreeFaces(&e->brushes[j]);
         if (e->brushes) { free(e->brushes); e->brushes = NULL; }
     }
-    if (edit_scene.entities) { free(edit_scene.entities); edit_scene.entities = NULL; }
-    edit_scene.numentities = 0;
-    edit_scene.sel_entity  = -1;
-    edit_scene.sel_brush   = -1;
+    if (edit_scene.entities)  { free(edit_scene.entities);  edit_scene.entities  = NULL; }
+    if (edit_scene.selection) { free(edit_scene.selection); edit_scene.selection = NULL; }
+    edit_scene.numentities  = 0;
+    edit_scene.num_selected = 0;
+    edit_scene.sel_cap      = 0;
 }
 
 void Scene_Shutdown(void)
@@ -49,22 +48,156 @@ void Scene_Shutdown(void)
 // Selection
 // -----------------------------------------------------------------------------
 
+// Primary = last entry in the selection list. Single-select call sites
+// just see the last-clicked brush, which matches the old behaviour.
+static int primary_ent  (void) { return edit_scene.num_selected ? edit_scene.selection[edit_scene.num_selected - 1].entity : -1; }
+static int primary_brush(void) { return edit_scene.num_selected ? edit_scene.selection[edit_scene.num_selected - 1].brush  : -1; }
+
 edit_brush_t *Scene_GetSelectedBrush(void)
 {
+    int e_idx = primary_ent();
+    int b_idx = primary_brush();
     edit_entity_t *e;
-    if (edit_scene.sel_entity < 0 || edit_scene.sel_entity >= edit_scene.numentities)
-        return NULL;
-    e = &edit_scene.entities[edit_scene.sel_entity];
-    if (edit_scene.sel_brush < 0 || edit_scene.sel_brush >= e->numbrushes)
-        return NULL;
-    return &e->brushes[edit_scene.sel_brush];
+    if (e_idx < 0 || e_idx >= edit_scene.numentities) return NULL;
+    e = &edit_scene.entities[e_idx];
+    if (b_idx < 0 || b_idx >= e->numbrushes) return NULL;
+    return &e->brushes[b_idx];
 }
 
 edit_entity_t *Scene_GetSelectedEntity(void)
 {
-    if (edit_scene.sel_entity < 0 || edit_scene.sel_entity >= edit_scene.numentities)
-        return NULL;
-    return &edit_scene.entities[edit_scene.sel_entity];
+    int e_idx = primary_ent();
+    if (e_idx < 0 || e_idx >= edit_scene.numentities) return NULL;
+    return &edit_scene.entities[e_idx];
+}
+
+int Scene_NumSelected(void) { return edit_scene.num_selected; }
+
+int Scene_GetSelected(int i, int *out_ent, int *out_brush)
+{
+    if (i < 0 || i >= edit_scene.num_selected) return 0;
+    *out_ent   = edit_scene.selection[i].entity;
+    *out_brush = edit_scene.selection[i].brush;
+    return 1;
+}
+
+int Scene_SelectionContains(int ent, int brush)
+{
+    int i;
+    for (i = 0; i < edit_scene.num_selected; i++)
+        if (edit_scene.selection[i].entity == ent
+            && edit_scene.selection[i].brush == brush)
+            return 1;
+    return 0;
+}
+
+void Scene_SelectionClear(void)
+{
+    edit_scene.num_selected = 0;
+}
+
+static void selection_push_unique(int ent, int brush)
+{
+    if (Scene_SelectionContains(ent, brush)) return;
+    if (edit_scene.num_selected >= edit_scene.sel_cap)
+    {
+        int new_cap = edit_scene.sel_cap ? edit_scene.sel_cap * 2 : 8;
+        edit_scene.selection = (edit_selref_t *)realloc(
+            edit_scene.selection, new_cap * sizeof(edit_selref_t));
+        edit_scene.sel_cap = new_cap;
+    }
+    edit_scene.selection[edit_scene.num_selected].entity = ent;
+    edit_scene.selection[edit_scene.num_selected].brush  = brush;
+    edit_scene.num_selected++;
+}
+
+// Brush entities other than worldspawn act as a single group: selecting any
+// brush in them selects all of them. That covers both editor-created
+// func_group containers and gameplay entities (func_door, func_button…)
+// where the multiple brushes are conceptually one object.
+static int entity_is_group(int ent)
+{
+    edit_entity_t *e;
+    if (ent < 0 || ent >= edit_scene.numentities) return 0;
+    e = &edit_scene.entities[ent];
+    if (e->classname_idx < 0) return 0;
+    return strcmp(e->kv[e->classname_idx].value, "worldspawn") != 0;
+}
+
+void Scene_SelectionAdd(int ent, int brush)
+{
+    if (ent < 0 || ent >= edit_scene.numentities) return;
+    if (entity_is_group(ent))
+    {
+        edit_entity_t *e = &edit_scene.entities[ent];
+        int j;
+        for (j = 0; j < e->numbrushes; j++)
+            selection_push_unique(ent, j);
+    }
+    else
+    {
+        selection_push_unique(ent, brush);
+    }
+}
+
+static void selection_remove_one(int ent, int brush)
+{
+    int i, j;
+    for (i = 0; i < edit_scene.num_selected; i++)
+    {
+        if (edit_scene.selection[i].entity == ent
+            && edit_scene.selection[i].brush == brush)
+        {
+            for (j = i + 1; j < edit_scene.num_selected; j++)
+                edit_scene.selection[j - 1] = edit_scene.selection[j];
+            edit_scene.num_selected--;
+            return;
+        }
+    }
+}
+
+void Scene_SelectionRemove(int ent, int brush)
+{
+    if (entity_is_group(ent))
+    {
+        // Remove every selection entry for this entity.
+        int i = 0;
+        while (i < edit_scene.num_selected)
+        {
+            if (edit_scene.selection[i].entity == ent)
+            {
+                int j;
+                for (j = i + 1; j < edit_scene.num_selected; j++)
+                    edit_scene.selection[j - 1] = edit_scene.selection[j];
+                edit_scene.num_selected--;
+            }
+            else i++;
+        }
+    }
+    else
+    {
+        selection_remove_one(ent, brush);
+    }
+}
+
+void Scene_SelectionToggle(int ent, int brush)
+{
+    if (entity_is_group(ent))
+    {
+        // Whole group toggles.
+        int has = 0, i;
+        for (i = 0; i < edit_scene.num_selected; i++)
+            if (edit_scene.selection[i].entity == ent) { has = 1; break; }
+        if (has) Scene_SelectionRemove(ent, brush);
+        else     Scene_SelectionAdd   (ent, brush);
+    }
+    else
+    {
+        if (Scene_SelectionContains(ent, brush))
+            selection_remove_one(ent, brush);
+        else
+            selection_push_unique(ent, brush);
+    }
 }
 
 void Scene_ForEachBrush(Scene_BrushIter_fn cb, void *user)
@@ -273,7 +406,173 @@ int Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs, const char *texname
     }
 
     e->numbrushes++;
-    edit_scene.sel_entity = wi;
-    edit_scene.sel_brush  = e->numbrushes - 1;
+    Scene_SelectionClear();
+    Scene_SelectionAdd(wi, e->numbrushes - 1);
     return 1;
+}
+
+// -----------------------------------------------------------------------------
+// Group / Ungroup
+// -----------------------------------------------------------------------------
+
+// Move a brush's data from src->brushes[src_idx] into dst->brushes (appended).
+// Removes the slot from src by shifting later brushes down. After this, all
+// brush indices >= src_idx in src shift down by one.
+static void move_brush(edit_entity_t *src, int src_idx, edit_entity_t *dst)
+{
+    edit_brush_t b = src->brushes[src_idx];
+    int j;
+    dst->brushes = (edit_brush_t *)realloc(dst->brushes,
+        (dst->numbrushes + 1) * sizeof(edit_brush_t));
+    dst->brushes[dst->numbrushes++] = b;
+    for (j = src_idx + 1; j < src->numbrushes; j++)
+        src->brushes[j - 1] = src->brushes[j];
+    src->numbrushes--;
+}
+
+void Scene_GroupSelected(void)
+{
+    int i, n_moved = 0, src_ent;
+    edit_entity_t group_e;
+    int new_ent_idx;
+
+    if (edit_scene.num_selected == 0)
+    {
+        Con_Printf("editor: nothing selected to group\n");
+        return;
+    }
+
+    // Snapshot the (entity, brush) pairs so we can iterate stably even as
+    // brush arrays shift under us.
+    edit_selref_t *snap = (edit_selref_t *)malloc(
+        edit_scene.num_selected * sizeof(edit_selref_t));
+    int n = edit_scene.num_selected;
+    for (i = 0; i < n; i++) snap[i] = edit_scene.selection[i];
+
+    // Build the new func_group entity (kv list with classname only).
+    memset(&group_e, 0, sizeof(group_e));
+    group_e.kv = (edit_kv_t *)calloc(1, sizeof(edit_kv_t));
+    Q_strncpy(group_e.kv[0].key,   "classname",  EDIT_KEY_LEN - 1);
+    Q_strncpy(group_e.kv[0].value, "func_group", EDIT_VAL_LEN - 1);
+    group_e.numkv         = 1;
+    group_e.classname_idx = 0;
+    group_e.origin_idx    = -1;
+
+    // Append entity slot (don't move into it yet — we need a stable pointer).
+    edit_scene.entities = (edit_entity_t *)realloc(edit_scene.entities,
+        (edit_scene.numentities + 1) * sizeof(edit_entity_t));
+    new_ent_idx = edit_scene.numentities;
+    edit_scene.entities[new_ent_idx] = group_e;
+    edit_scene.numentities++;
+
+    // Process moves in reverse-index order so removal-shifts within the
+    // same source entity don't invalidate later-indexed brushes. Sort the
+    // snapshot by (ent desc, brush desc) — small N, simple bubble sort.
+    {
+        int a, c;
+        for (a = 0; a < n; a++)
+            for (c = a + 1; c < n; c++)
+            {
+                int swap = 0;
+                if (snap[a].entity < snap[c].entity) swap = 1;
+                else if (snap[a].entity == snap[c].entity
+                         && snap[a].brush < snap[c].brush) swap = 1;
+                if (swap)
+                {
+                    edit_selref_t t = snap[a]; snap[a] = snap[c]; snap[c] = t;
+                }
+            }
+    }
+
+    for (i = 0; i < n; i++)
+    {
+        src_ent = snap[i].entity;
+        if (src_ent == new_ent_idx) continue;       // already there (paranoia)
+        if (src_ent < 0 || src_ent >= edit_scene.numentities) continue;
+        move_brush(&edit_scene.entities[src_ent], snap[i].brush,
+                   &edit_scene.entities[new_ent_idx]);
+        n_moved++;
+    }
+    free(snap);
+
+    // New selection: every brush in the new group entity.
+    Scene_SelectionClear();
+    Scene_SelectionAdd(new_ent_idx, 0);
+
+    Con_Printf("editor: grouped %d brushes into func_group\n", n_moved);
+}
+
+void Scene_UngroupSelected(void)
+{
+    int i, n, n_moved = 0;
+    int wi;
+    edit_selref_t *snap;
+    if (edit_scene.num_selected == 0)
+    {
+        Con_Printf("editor: nothing selected to ungroup\n");
+        return;
+    }
+
+    wi = worldspawn_index();    // creates if needed
+
+    n = edit_scene.num_selected;
+    snap = (edit_selref_t *)malloc(n * sizeof(edit_selref_t));
+    for (i = 0; i < n; i++) snap[i] = edit_scene.selection[i];
+
+    // Reverse order, same as group.
+    {
+        int a, c;
+        for (a = 0; a < n; a++)
+            for (c = a + 1; c < n; c++)
+            {
+                int swap = 0;
+                if (snap[a].entity < snap[c].entity) swap = 1;
+                else if (snap[a].entity == snap[c].entity
+                         && snap[a].brush < snap[c].brush) swap = 1;
+                if (swap)
+                {
+                    edit_selref_t t = snap[a]; snap[a] = snap[c]; snap[c] = t;
+                }
+            }
+    }
+
+    Scene_SelectionClear();
+    for (i = 0; i < n; i++)
+    {
+        edit_entity_t *e;
+        const char *cls;
+        if (snap[i].entity == wi) continue;     // already worldspawn
+        if (snap[i].entity < 0 || snap[i].entity >= edit_scene.numentities) continue;
+        e = &edit_scene.entities[snap[i].entity];
+        if (e->classname_idx < 0) continue;
+        cls = e->kv[e->classname_idx].value;
+        // Only ungroup func_group (editor containers). Leave func_door etc.
+        // alone — their grouping has gameplay meaning.
+        if (strcmp(cls, "func_group") != 0) continue;
+        move_brush(e, snap[i].brush, &edit_scene.entities[wi]);
+        n_moved++;
+    }
+    free(snap);
+
+    // Drop now-empty func_group containers so the brushes panel doesn't
+    // accumulate ghost entries. Iterate backwards so removal-shift doesn't
+    // skip anything.
+    {
+        int e_idx, j;
+        for (e_idx = edit_scene.numentities - 1; e_idx >= 0; e_idx--)
+        {
+            edit_entity_t *e = &edit_scene.entities[e_idx];
+            if (e->numbrushes != 0) continue;
+            if (e->classname_idx < 0) continue;
+            if (strcmp(e->kv[e->classname_idx].value, "func_group") != 0) continue;
+            if (e->kv) free(e->kv);
+            if (e->brushes) free(e->brushes);
+            for (j = e_idx + 1; j < edit_scene.numentities; j++)
+                edit_scene.entities[j - 1] = edit_scene.entities[j];
+            edit_scene.numentities--;
+        }
+    }
+
+    Con_Printf("editor: ungrouped %d brushes back into worldspawn\n", n_moved);
+    // Selection is left empty since indices are now stale — user can re-pick.
 }

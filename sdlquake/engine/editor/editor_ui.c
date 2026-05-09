@@ -10,6 +10,7 @@
 #include "editor.h"
 #include "editor_internal.h"
 
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -67,6 +68,10 @@ static void draw_toolbar(void)
     // 16-unit grid. The console command does the camera math too — keep them
     // in sync.
     if (IG_Button("Add cube"))     Cbuf_AddText("editor_brush_add_cube\n");
+    IG_SameLine(0, -1);
+    if (IG_Button("Group"))        Cbuf_AddText("editor_group\n");
+    IG_SameLine(0, -1);
+    if (IG_Button("Ungroup"))      Cbuf_AddText("editor_ungroup\n");
     IG_SameLine(0, -1);
     if (IG_Button("Close (F2)"))   Cbuf_AddText("editor\n");
 
@@ -193,15 +198,27 @@ static void draw_brush_list(void)
 
         for (j = 0; j < e->numbrushes; j++)
         {
-            int sel = (i == edit_scene.sel_entity && j == edit_scene.sel_brush);
+            int sel = Scene_SelectionContains(i, j);
             edit_brush_t *b = &e->brushes[j];
             snprintf(buf, sizeof(buf),
                      "  brush %d (%d planes, %d faces)##b%d_%d",
                      j, b->numplanes, b->numfaces, i, j);
             if (IG_Selectable(buf, sel, 0))
             {
-                edit_scene.sel_entity = i;
-                edit_scene.sel_brush  = j;
+                // Match the 3D-viewport semantics: shift toggles, plain
+                // click replaces. SDL_GetModState reads OS keyboard state
+                // so it works regardless of which window has focus.
+                SDL_Keymod mod = SDL_GetModState();
+                int shift = (mod & SDL_KMOD_SHIFT) != 0;
+                if (shift)
+                {
+                    Scene_SelectionToggle(i, j);
+                }
+                else
+                {
+                    Scene_SelectionClear();
+                    Scene_SelectionAdd(i, j);
+                }
             }
         }
         IG_PopID();
@@ -255,11 +272,17 @@ static void draw_inspector(void)
     if (b)
     {
         vec3_t centroid;
+        int n_sel = Scene_NumSelected();
         Editor_BrushCentroid(b, centroid);
+        if (n_sel > 1)
+        {
+            snprintf(buf, sizeof(buf),
+                     "%d brushes selected (showing primary)",
+                     n_sel);
+            IG_TextUnformatted(buf);
+        }
         snprintf(buf, sizeof(buf),
-                 "brush %d/%d  planes=%d  faces=%d",
-                 edit_scene.sel_brush,
-                 e->numbrushes,
+                 "brush planes=%d  faces=%d",
                  b->numplanes, b->numfaces);
         IG_TextUnformatted(buf);
         snprintf(buf, sizeof(buf), "centroid: %.0f %.0f %.0f",

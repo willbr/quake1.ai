@@ -159,6 +159,31 @@ static byte face_axis_color(const vec3_t normal)
 // Render
 // -----------------------------------------------------------------------------
 
+// Average of all selected brushes' centroids — used as the translate-gizmo
+// anchor when multi-select is active.
+static int selection_centroid(vec3_t out)
+{
+    int i, n = 0;
+    int e_idx, b_idx;
+    out[0] = out[1] = out[2] = 0;
+    for (i = 0; i < Scene_NumSelected(); i++)
+    {
+        if (!Scene_GetSelected(i, &e_idx, &b_idx)) continue;
+        if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
+        edit_entity_t *e = &edit_scene.entities[e_idx];
+        if (b_idx < 0 || b_idx >= e->numbrushes) continue;
+        edit_brush_t *b = &e->brushes[b_idx];
+        if (!b->valid) continue;
+        vec3_t c;
+        Editor_BrushCentroid(b, c);
+        out[0] += c[0]; out[1] += c[1]; out[2] += c[2];
+        n++;
+    }
+    if (n == 0) return 0;
+    out[0] /= n; out[1] /= n; out[2] /= n;
+    return 1;
+}
+
 void Editor_GizmoDraw(void)
 {
     edit_brush_t *b = Scene_GetSelectedBrush();
@@ -168,9 +193,19 @@ void Editor_GizmoDraw(void)
         EDIT_COLOR_AXIS_X, EDIT_COLOR_AXIS_Y, EDIT_COLOR_AXIS_Z
     };
     int i;
+    int multi = Scene_NumSelected() > 1;
     if (!b || !b->valid) return;
 
-    Editor_BrushCentroid(b, centroid);
+    // Anchor on the selection centroid for multi-select; use the primary
+    // brush's centroid for single (preserves the old 1-brush behaviour).
+    if (multi)
+    {
+        if (!selection_centroid(centroid)) return;
+    }
+    else
+    {
+        Editor_BrushCentroid(b, centroid);
+    }
     {
         vec3_t d;
         VectorSubtract(centroid, r_origin, d);
@@ -201,7 +236,10 @@ void Editor_GizmoDraw(void)
 
     // Face handles — small "+" cross at each face centroid plus a short
     // outward stub along the face normal so it reads as a push handle. Each
-    // face uses the dominant-axis colour of its normal.
+    // face uses the dominant-axis colour of its normal. Skip in multi-
+    // select: face-resize is single-brush only, so showing handles on the
+    // primary while ignoring the rest would be misleading.
+    if (!multi)
     {
         vec3_t fc, p_dist;
         float handle_len = pixel_to_world(dist) * 12.0f;
@@ -268,10 +306,18 @@ int Editor_GizmoMouseDown(float sx, float sy)
     float dist, arrow_len, pick_world;
     int i, best_axis = -1, best_face = -1;
     float best_d_axis = 1e30f, best_d_face = 1e30f;
+    int multi = Scene_NumSelected() > 1;
 
     if (!b || !b->valid) return 0;
 
-    Editor_BrushCentroid(b, centroid);
+    if (multi)
+    {
+        if (!selection_centroid(centroid)) return 0;
+    }
+    else
+    {
+        Editor_BrushCentroid(b, centroid);
+    }
     {
         vec3_t d;
         VectorSubtract(centroid, r_origin, d);
@@ -285,8 +331,10 @@ int Editor_GizmoMouseDown(float sx, float sy)
 
     // Pass 1: face handles (preferred over axis arrows when both are near
     // the cursor — face picks are always at the brush surface and so are
-    // closer to the eye than axis arrows centred on the centroid).
-    for (i = 0; i < b->numfaces; i++)
+    // closer to the eye than axis arrows centred on the centroid). Face
+    // resize is single-brush only; in multi-select we skip face pick so
+    // the user can't grab one face thinking it'll resize all of them.
+    for (i = 0; !multi && i < b->numfaces; i++)
     {
         vec3_t fc;
         float d;
@@ -393,6 +441,8 @@ void Editor_GizmoMouseMove(float sx, float sy)
     else
     {
         // Axis translate. Absolute snap pins centroid axis coord to grid.
+        // In multi-select, every selected brush moves by the same delta.
+        int n_sel, k, e_idx, b_idx;
         snapped_offset = compute_snapped_offset(raw_offset,
                                                 s_drag_origin[s_drag_axis]);
         step = snapped_offset - s_drag_applied;
@@ -400,7 +450,20 @@ void Editor_GizmoMouseMove(float sx, float sy)
         for (i = 0; i < 3; i++) delta[i] = 0;
         delta[s_drag_axis] = step;
         s_drag_applied = snapped_offset;
-        Brush_Translate(b, delta);
+
+        n_sel = Scene_NumSelected();
+        for (k = 0; k < n_sel; k++)
+        {
+            edit_brush_t *bs;
+            edit_entity_t *e;
+            if (!Scene_GetSelected(k, &e_idx, &b_idx)) continue;
+            if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
+            e = &edit_scene.entities[e_idx];
+            if (b_idx < 0 || b_idx >= e->numbrushes) continue;
+            bs = &e->brushes[b_idx];
+            if (!bs->valid) continue;
+            Brush_Translate(bs, delta);
+        }
     }
 }
 

@@ -75,16 +75,22 @@ void IN_ProcessEvents(void)
     SDL_Event ev;
     while (SDL_PollEvent(&ev))
     {
-        // Tab cycles editor camera modes (free-fly <-> fps). Suppress before
-        // ImGui or Quake see it so it doesn't double-fire as widget focus
-        // change or scoreboard. Don't intercept while typing into an ImGui
-        // text input.
-        if (ev.type == SDL_EVENT_KEY_DOWN
-            && ev.key.scancode == SDL_SCANCODE_TAB
-            && Editor_IsOpen()
+        // Tab is editor-only when key input is going to the game: opens the
+        // editor when closed, cycles camera mode (free-fly <-> fps) when
+        // open. Pass through to Quake when the console / menu / chat is up
+        // so Tab-completion in the console still works. Same for ImGui
+        // text inputs.
+        if (ev.key.scancode == SDL_SCANCODE_TAB
+            && key_dest == key_game
             && !IG_WantCaptureKeyboard())
         {
-            Editor_CycleCameraMode();
+            if (ev.type == SDL_EVENT_KEY_DOWN)
+            {
+                if (Editor_IsOpen()) Editor_CycleCameraMode();
+                else                 Editor_Toggle();
+            }
+            // Also swallow KEY_UP so Quake's default +showscores binding
+            // doesn't see a release without a press and latch on.
             continue;
         }
 
