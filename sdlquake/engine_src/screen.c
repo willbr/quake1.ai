@@ -246,9 +246,15 @@ static void SCR_CalcRefdef (void)
 	r_refdef.fov_x = scr_fov.value;
 	r_refdef.fov_y = CalcFov (r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
 
-// intermission is always full screen	
+// intermission is always full screen
 	if (cl.intermission)
 		size = 120;
+	else if (Editor_IsOpen())
+		size = 120;             // expand world view to cover the HUD area;
+		                        // we hide Sbar in SCR_UpdateScreen so without
+		                        // this the bottom strip never gets redrawn
+		                        // each frame and editor bboxes smear over
+		                        // stale HUD pixels.
 	else
 		size = scr_viewsize.value;
 

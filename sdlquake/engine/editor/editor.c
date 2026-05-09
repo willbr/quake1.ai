@@ -609,6 +609,13 @@ void Editor_Toggle(void)
     else if (!s_open && ImguiLayer_IsOpen())
         ImguiLayer_Toggle();
 
+    // SCR_CalcRefdef inspects Editor_IsOpen() to expand scr_vrect to
+    // fullscreen (sb_lines = 0) while we're open, so the world view
+    // overdraws the HUD strip and bbox lines don't smear on stale Sbar
+    // pixels. Without this poke the cached sb_lines / scr_vrect from
+    // before the toggle stays in effect until viewsize/fov changes.
+    vid.recalc_refdef = 1;
+
     // Re-latch the camera on the next pre-render and drop any residual
     // look-mode capture.
     s_camera_inited = 0;
