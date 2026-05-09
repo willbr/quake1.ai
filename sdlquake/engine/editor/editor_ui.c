@@ -218,11 +218,10 @@ static void draw_toolbar(void)
 
 // Per-category hide flag, indexed by EDIT_CAT_*. Persists across panel
 // re-opens within a session. Default is everything visible. The
-// "OTHER" slot covers worldspawn / func_* / misc_* / etc — we don't
-// expose a checkbox for it (hiding worldspawn would render the level
-// invisible), but the array entry exists so EDIT_CAT_OTHER indexing
-// is uniform.
-static int s_hide_cat[EDIT_CAT_COUNT] = { 0, 0, 0, 0, 0, 0 };
+// "OTHER" slot covers worldspawn / misc_* / etc — we don't expose a
+// checkbox for it (hiding worldspawn would render the level invisible),
+// but the array entry exists so EDIT_CAT_OTHER indexing is uniform.
+static int s_hide_cat[EDIT_CAT_COUNT] = { 0 };
 
 int Editor_EntityHidden(int e_idx)
 {
@@ -269,6 +268,8 @@ static void draw_brush_list(void)
         int hide_spawn   = s_hide_cat[EDIT_CAT_SPAWN];
         int hide_item    = s_hide_cat[EDIT_CAT_ITEM];
         int hide_monster = s_hide_cat[EDIT_CAT_MONSTER];
+        int hide_func    = s_hide_cat[EDIT_CAT_FUNC];
+        int hide_sound   = s_hide_cat[EDIT_CAT_SOUND];
         IG_TextUnformatted("Hide:");
         if (IG_Checkbox("triggers", &hide_trig))    s_hide_cat[EDIT_CAT_TRIGGER] = hide_trig;
         IG_SameLine(0, -1);
@@ -277,6 +278,9 @@ static void draw_brush_list(void)
         IG_SameLine(0, -1);
         if (IG_Checkbox("items",    &hide_item))    s_hide_cat[EDIT_CAT_ITEM]    = hide_item;
         if (IG_Checkbox("monsters", &hide_monster)) s_hide_cat[EDIT_CAT_MONSTER] = hide_monster;
+        IG_SameLine(0, -1);
+        if (IG_Checkbox("funcs",    &hide_func))    s_hide_cat[EDIT_CAT_FUNC]    = hide_func;
+        if (IG_Checkbox("sounds",   &hide_sound))   s_hide_cat[EDIT_CAT_SOUND]   = hide_sound;
     }
     IG_Separator();
 

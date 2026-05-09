@@ -246,6 +246,8 @@ int Editor_EntityCategory(const edit_entity_t *e)
     if (!strncmp(cls, "item_",    5))                return EDIT_CAT_ITEM;
     if (!strncmp(cls, "weapon_",  7))                return EDIT_CAT_ITEM;
     if (!strncmp(cls, "ammo_",    5))                return EDIT_CAT_ITEM;
+    if (!strncmp(cls, "func_",    5))                return EDIT_CAT_FUNC;
+    if (!strncmp(cls, "ambient_", 8))                return EDIT_CAT_SOUND;
     return EDIT_CAT_OTHER;
 }
 
@@ -259,6 +261,8 @@ static byte category_color(const edit_entity_t *e)
         case EDIT_CAT_SPAWN:   return EDIT_COLOR_SPAWN;
         case EDIT_CAT_ITEM:    return EDIT_COLOR_ITEM;
         case EDIT_CAT_MONSTER: return EDIT_COLOR_MONSTER;
+        case EDIT_CAT_FUNC:    return EDIT_COLOR_FUNC;
+        case EDIT_CAT_SOUND:   return EDIT_COLOR_SOUND;
         default:               return EDIT_COLOR_DEFAULT;
     }
 }
