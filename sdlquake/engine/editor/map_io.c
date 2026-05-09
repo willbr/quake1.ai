@@ -526,6 +526,7 @@ int Scene_Serialize(char **out_text, int *out_len)
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
+        if (e->transient) continue;     // runtime-only handle, not authored
         sbuf_printf(&s, "{\n");
         for (j = 0; j < e->numkv; j++)
             sbuf_printf(&s, "\"%s\" \"%s\"\n", e->kv[j].key, e->kv[j].value);

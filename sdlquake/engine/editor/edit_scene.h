@@ -84,6 +84,13 @@ typedef struct edit_entity_s {
     //     Editor_FlushPendingEntities. Not persisted to disk.
     int         spawned;
 
+    // 1 = synthesised on-the-fly to give the user a selection handle on a
+    //     runtime-spawned edict (rocket, spike, gib, dropped backpack, …)
+    //     that has no .map source. classname + origin are populated from
+    //     the live edict; the entry is excluded from .map save and dropped
+    //     when the live edict gets ED_Free'd.
+    int         transient;
+
     // Server edict that mirrors this entity, or NULL. Set by the spawn
     // flush, or by the post-load matcher in map_io.c. Gizmo drags + kv
     // edits use this to push live state into the running game.

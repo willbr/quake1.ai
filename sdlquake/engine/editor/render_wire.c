@@ -1375,9 +1375,11 @@ int Editor_EntityInView(int e_idx)
 // an item the .map authored (item_health, item_shells, …); ED_Free 0.5s
 // later the slot is reallocated for a runtime-spawned projectile (spike /
 // missile / grenade). Without this, picking against `live_ent->v.absmin/
-// absmax` would let the user click rockets and nails as if they were the
-// long-gone item. After detach, point_entity_bbox falls back to the .map
-// origin path — that's what the user authored, so it's the correct anchor.
+// absmax` would let the user click "the item" but actually be selecting a
+// rocket flying past. After detach, point_entity_bbox falls back to the
+// .map origin path — that's what the user authored, so it's the correct
+// anchor for the original item. The rocket itself is reachable via the
+// runtime-edict pick pass below, which materialises a transient entry.
 static void detach_stale_live_ent(edit_entity_t *e)
 {
     const char *cls;
@@ -1390,19 +1392,83 @@ static void detach_stale_live_ent(edit_entity_t *e)
         e->live_ent = NULL;
 }
 
-// Dead-monster filter for picking. Once a monster_* dies its corpse stays
-// at SOLID_NOT (vanilla death anims) or gets ThrowHead'd to a head model
-// that's also SOLID_NOT — either way, `solid == SOLID_NOT` on a monster_*
-// is a clean "this is a corpse" signal. Caller has already detached stale
-// live_ents so this only fires on the real surviving edict.
-static int entity_is_dead_corpse(const edit_entity_t *e)
+// Reap transient entries whose underlying live edict went away (rocket
+// detonated, gib settled and freed, …). Without this, every picked-then-
+// gone projectile leaves a permanent ghost at its last classname/origin.
+// Reaped in-place; later passes are still walking edit_scene.numentities
+// so we shift down. Selection refs into the moved range get cleared by
+// Scene_DeleteSelected style logic — but easier: we never reap an entry
+// that's currently selected, the user will lose interest soon enough.
+static void reap_dead_transients(void)
 {
-    const char *cls;
-    if (!e->live_ent || e->live_ent->free) return 0;
-    if (e->classname_idx < 0) return 0;
-    cls = e->kv[e->classname_idx].value;
-    if (strncmp(cls, "monster_", 8) != 0) return 0;
-    return e->live_ent->v.solid == SOLID_NOT;
+    int i, w;
+    for (i = 0, w = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        if (e->transient
+         && (!e->live_ent || e->live_ent->free)
+         && !Scene_SelectionContains(i, -1))
+        {
+            // Free per-entity allocations; brushes never set on transients.
+            free(e->kv);
+            continue;
+        }
+        if (w != i) edit_scene.entities[w] = *e;
+        w++;
+    }
+    edit_scene.numentities = w;
+}
+
+// Look up an existing transient for `ed`; if none, append one. Returns the
+// index in edit_scene.entities, or -1 on allocation failure. Live state
+// (classname + origin) is captured into kv just so Inspector + the brush
+// list have something to display; subsequent live-mode reads pull straight
+// from `live_ent` so the kv copy is purely cosmetic.
+static int find_or_create_transient(edict_t *ed)
+{
+    int i;
+    char buf[64];
+    edit_entity_t *e;
+
+    if (!ed || ed->free) return -1;
+
+    for (i = 0; i < edit_scene.numentities; i++)
+        if (edit_scene.entities[i].live_ent == ed
+         && edit_scene.entities[i].transient)
+            return i;
+
+    edit_scene.entities = (edit_entity_t *)realloc(edit_scene.entities,
+        (edit_scene.numentities + 1) * sizeof(edit_entity_t));
+    if (!edit_scene.entities) return -1;
+
+    i = edit_scene.numentities;
+    e = &edit_scene.entities[i];
+    memset(e, 0, sizeof(*e));
+    e->classname_idx = -1;
+    e->origin_idx    = -1;
+    e->spawned       = 1;
+    e->transient     = 1;
+    e->live_ent      = ed;
+
+    Entity_SetKV(e, "classname",
+                 ed->v.classname ? ed->v.classname : "(runtime)");
+    snprintf(buf, sizeof(buf), "%g %g %g",
+             ed->v.origin[0], ed->v.origin[1], ed->v.origin[2]);
+    Entity_SetKV(e, "origin", buf);
+
+    edit_scene.numentities++;
+    return i;
+}
+
+// True iff any edit_scene entry's live_ent points to `ed`. Used to skip
+// edicts that already have a .map-authored handle, so the transient pass
+// only fires for genuinely runtime-only ents.
+static int edict_is_already_bound(const edict_t *ed)
+{
+    int i;
+    for (i = 0; i < edit_scene.numentities; i++)
+        if (edit_scene.entities[i].live_ent == ed) return 1;
+    return 0;
 }
 
 int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
@@ -1413,6 +1479,8 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
     int best_ent = -1, best_brush = -1;
     int i, j, k;
 
+    reap_dead_transients();
+
     Editor_ScreenToRay(sx, sy, origin, dir);
     world_t = world_pick_occlusion(origin, dir);
 
@@ -1421,7 +1489,6 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
         edit_entity_t *e = &edit_scene.entities[i];
         if (Editor_EntityHidden(i)) continue;        // category-filtered out
         detach_stale_live_ent(e);                    // rocket/spike took our slot?
-        if (entity_is_dead_corpse(e)) continue;      // dead monster — uninteresting
         if (Entity_IsPoint(e))
         {
             vec3_t pmin, pmax;
@@ -1466,6 +1533,39 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
             }
         }
     }
+
+    // Second pass: runtime-spawned edicts (rockets, spikes, grenades, gibs,
+    // dropped backpacks, summoned monsters, …) that have no .map source.
+    // These are the things `find_or_create_transient` materialises into a
+    // selectable handle. We require a non-degenerate absmin/absmax — fresh
+    // edicts (or temp ents) often have collapsed bboxes and would pass the
+    // ray test at the wrong place.
+    if (sv.active)
+    {
+        int n;
+        for (n = 1; n < sv.num_edicts; n++)
+        {
+            edict_t *ed = EDICT_NUM(n);
+            const float *amn, *amx;
+            float t;
+            int idx;
+            if (ed->free) continue;
+            if (edict_is_already_bound(ed)) continue;
+            amn = ed->v.absmin;
+            amx = ed->v.absmax;
+            if (amx[0] <= amn[0] || amx[1] <= amn[1] || amx[2] <= amn[2])
+                continue;
+            if (!ray_vs_aabb(origin, dir, amn, amx, &t)) continue;
+            if (t > world_t) continue;       // wall in the way
+            if (t >= best_t) continue;
+            idx = find_or_create_transient(ed);
+            if (idx < 0) continue;
+            best_t = t;
+            best_ent = idx;
+            best_brush = -1;
+        }
+    }
+
     if (best_ent < 0) return 0;
     if (out_ent)   *out_ent   = best_ent;
     if (out_brush) *out_brush = best_brush;
