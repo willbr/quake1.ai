@@ -11,6 +11,7 @@
 #include "editor_internal.h"
 
 #include <SDL3/SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -737,6 +738,170 @@ static void draw_spawnflags_section(edit_entity_t *e)
 }
 
 // -----------------------------------------------------------------------------
+// Live state readout — runtime fields that aren't in the .map kv. Read-only:
+// gives the user a debugging view of what the engine is actually doing with
+// the selected entity right now (animation frame, AI target, velocity, …).
+// Refreshes every UI tick — values move while the sim is running.
+// -----------------------------------------------------------------------------
+
+static const char *solid_name(int s)
+{
+    switch (s)
+    {
+    case SOLID_NOT:      return "NOT";
+    case SOLID_TRIGGER:  return "TRIGGER";
+    case SOLID_BBOX:     return "BBOX";
+    case SOLID_SLIDEBOX: return "SLIDEBOX";
+    case SOLID_BSP:      return "BSP";
+    default:             return "?";
+    }
+}
+
+static const char *movetype_name(int mt)
+{
+    static const char *names[] = {
+        "NONE", "ANGLENOCLIP", "ANGLECLIP", "WALK", "STEP", "FLY",
+        "TOSS", "PUSH", "NOCLIP", "FLYMISSILE", "BOUNCE"
+    };
+    if (mt >= 0 && mt < (int)(sizeof(names) / sizeof(names[0])))
+        return names[mt];
+    return "?";
+}
+
+static const char *deadflag_name(int df)
+{
+    switch (df)
+    {
+    case DEAD_NO:    return "NO";
+    case DEAD_DYING: return "DYING";
+    case DEAD_DEAD:  return "DEAD";
+    case 3:          return "RESPAWNABLE";
+    default:         return "?";
+    }
+}
+
+static void format_flags(int flags, char *out, int out_sz)
+{
+    static const struct { int bit; const char *name; } tab[] = {
+        {FL_FLY,           "FLY"},
+        {FL_SWIM,          "SWIM"},
+        {FL_CONVEYOR,      "CONVEYOR"},
+        {FL_CLIENT,        "CLIENT"},
+        {FL_INWATER,       "INWATER"},
+        {FL_MONSTER,       "MONSTER"},
+        {FL_GODMODE,       "GODMODE"},
+        {FL_NOTARGET,      "NOTARGET"},
+        {FL_ITEM,          "ITEM"},
+        {FL_ONGROUND,      "ONGROUND"},
+        {FL_PARTIALGROUND, "PARTGND"},
+        {FL_WATERJUMP,     "WATERJUMP"},
+        {FL_JUMPRELEASED,  "JMPREL"},
+    };
+    int i, n = 0;
+    out[0] = 0;
+    for (i = 0; i < (int)(sizeof(tab) / sizeof(tab[0])); i++)
+    {
+        if (flags & tab[i].bit)
+        {
+            int w = snprintf(out + n, out_sz - n, "%s%s",
+                             n ? "|" : "", tab[i].name);
+            if (w < 0 || w >= out_sz - n) break;
+            n += w;
+        }
+    }
+    if (out[0] == 0) snprintf(out, out_sz, "(none)");
+}
+
+// Resolve a v.enemy / v.owner / v.goalentity link to a printable label.
+// Sentinel: edict 0 is the world edict, treated as "(none)" here so the
+// reader doesn't see a meaningless "worldspawn" link on every monster
+// without a current target.
+static void format_edict_link(edict_t *ed, char *out, int out_sz)
+{
+    int idx;
+    if (!ed || ed->free) { snprintf(out, out_sz, "(none)"); return; }
+    idx = NUM_FOR_EDICT(ed);
+    if (idx == 0) { snprintf(out, out_sz, "(none)"); return; }
+    snprintf(out, out_sz, "%s [#%d]",
+             ed->v.classname ? ed->v.classname : "?", idx);
+}
+
+static void draw_live_state(edit_entity_t *e)
+{
+    extern cvar_t editor_view_mode;
+    edict_t *ed;
+    char buf[160];
+    int en;
+
+    // Live state only makes sense in live mode + with a real edict bound.
+    // Map mode would be misleading — the user is reading what the .map
+    // says, not what the engine is doing.
+    if ((int)editor_view_mode.value != 0) return;
+    ed = e->live_ent;
+    if (!ed || ed->free) return;
+
+    IG_Separator();
+    IG_TextUnformatted("live state");
+
+    en = NUM_FOR_EDICT(ed);
+    snprintf(buf, sizeof(buf), "edict #%d  %s / %s",
+             en, solid_name((int)ed->v.solid),
+             movetype_name((int)ed->v.movetype));
+    IG_TextUnformatted(buf);
+
+    if (ed->v.health != 0 || ed->v.max_health != 0)
+    {
+        snprintf(buf, sizeof(buf), "health %g / %g  takedamage %d  deadflag %s",
+                 ed->v.health, ed->v.max_health,
+                 (int)ed->v.takedamage,
+                 deadflag_name((int)ed->v.deadflag));
+        IG_TextUnformatted(buf);
+    }
+
+    {
+        const float *v = ed->v.velocity;
+        float mag = sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+        if (mag > 0.5f)
+        {
+            snprintf(buf, sizeof(buf), "vel %.0f  (%.0f %.0f %.0f)",
+                     mag, v[0], v[1], v[2]);
+            IG_TextUnformatted(buf);
+        }
+    }
+
+    {
+        char flagsbuf[128];
+        format_flags((int)ed->v.flags, flagsbuf, sizeof(flagsbuf));
+        snprintf(buf, sizeof(buf), "frame %d  flags %s",
+                 (int)ed->v.frame, flagsbuf);
+        IG_TextUnformatted(buf);
+    }
+
+    if (ed->v.nextthink > 0)
+    {
+        float dt = ed->v.nextthink - sv.time;
+        snprintf(buf, sizeof(buf), "nextthink in %.2fs", dt);
+        IG_TextUnformatted(buf);
+    }
+
+    if (ed->v.enemy)
+    {
+        char who[64];
+        format_edict_link(ed->v.enemy, who, sizeof(who));
+        snprintf(buf, sizeof(buf), "enemy: %s", who);
+        IG_TextUnformatted(buf);
+    }
+
+    if (ed->v.owner)
+    {
+        char who[64];
+        format_edict_link(ed->v.owner, who, sizeof(who));
+        snprintf(buf, sizeof(buf), "owner: %s", who);
+        IG_TextUnformatted(buf);
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Inspector
 // -----------------------------------------------------------------------------
 
@@ -839,6 +1004,8 @@ static void draw_inspector(void)
     {
         IG_TextUnformatted("(point entity — no brushes)");
     }
+
+    draw_live_state(e);
 
     IG_End();
 }
