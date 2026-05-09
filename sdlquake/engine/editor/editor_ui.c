@@ -340,13 +340,35 @@ static void draw_inspector(void)
     IG_TextUnformatted("entity keys");
     IG_Separator();
 
-    for (i = 0; i < e->numkv; i++)
+    // classname first (always), then origin, then everything else in kv
+    // array order. Most parsers happen to put classname first already, but
+    // for entities populated from worldmodel->entities the order can vary,
+    // and reading "classname" should never require scanning a long list.
     {
-        IG_PushID_Int(i);
-        snprintf(buf, sizeof(buf), "%s##key", e->kv[i].key);
-        IG_SetNextItemWidth(180);
-        IG_InputText(buf, e->kv[i].value, EDIT_VAL_LEN, IG_ITF_EnterReturnsTrue);
-        IG_PopID();
+        int order[3] = { e->classname_idx, e->origin_idx, -1 };
+        int j;
+        for (j = 0; j < 2; j++)
+        {
+            int idx = order[j];
+            if (idx < 0 || idx >= e->numkv) continue;
+            IG_PushID_Int(idx);
+            snprintf(buf, sizeof(buf), "%s##key", e->kv[idx].key);
+            IG_SetNextItemWidth(180);
+            IG_InputText(buf, e->kv[idx].value, EDIT_VAL_LEN,
+                         IG_ITF_EnterReturnsTrue);
+            IG_PopID();
+        }
+        for (i = 0; i < e->numkv; i++)
+        {
+            if (i == e->classname_idx) continue;
+            if (i == e->origin_idx)    continue;
+            IG_PushID_Int(i);
+            snprintf(buf, sizeof(buf), "%s##key", e->kv[i].key);
+            IG_SetNextItemWidth(180);
+            IG_InputText(buf, e->kv[i].value, EDIT_VAL_LEN,
+                         IG_ITF_EnterReturnsTrue);
+            IG_PopID();
+        }
     }
     IG_Separator();
 
