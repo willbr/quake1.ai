@@ -96,6 +96,11 @@ cvar_t      editor_show_links    = { "editor_show_links",  "1" };
 // or set to a name that isn't in the loaded worldmodel.
 cvar_t      editor_brush_tex     = { "editor_brush_tex", "wbrick1_5" };
 
+// Wall thickness used by the "hollow" operation (Scene_HollowBrush).
+// 16 units fits the standard build grid and keeps a 64-unit cube
+// hollow-able (thickness * 2 must stay below the smallest extent).
+cvar_t      editor_brush_hollow_thickness = { "editor_brush_hollow_thickness", "16" };
+
 static int     s_lookmode      = 0;
 static int     s_camera_inited = 0;
 static vec3_t  s_cam_origin;
@@ -337,6 +342,31 @@ static void Editor_Cmd_AddCube_f(void)
         Con_Printf("editor: added cube at %.0f %.0f %.0f tex='%s'\n",
                    center[0], center[1], center[2],
                    tex ? tex : "(default)");
+}
+
+// Convert the primary-selected brush into a hollow room (6 wall slabs with
+// thickness `editor_brush_hollow_thickness`). Source brush is replaced; new
+// walls become the selection.
+static void Editor_Cmd_Hollow_f(void)
+{
+    int e_idx, b_idx;
+    float thickness;
+    extern cvar_t editor_brush_hollow_thickness;
+    if (Scene_NumSelected() == 0
+     || !Scene_GetSelected(Scene_NumSelected() - 1, &e_idx, &b_idx))
+    {
+        Con_Printf("editor: hollow: nothing selected\n");
+        return;
+    }
+    if (b_idx < 0)
+    {
+        Con_Printf("editor: hollow: select a brush, not an entity\n");
+        return;
+    }
+    thickness = editor_brush_hollow_thickness.value;
+    History_Push("hollow brush");
+    if (Scene_HollowBrush(e_idx, b_idx, thickness))
+        Con_Printf("editor: hollowed brush (thickness %g)\n", thickness);
 }
 
 // List every texture in cl.worldmodel — these are the names that brush face
@@ -596,6 +626,7 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
     Cmd_AddCommand("editor_textures", Editor_Cmd_Textures_f);
     Cmd_AddCommand("editor_brush_add_cube", Editor_Cmd_AddCube_f);
+    Cmd_AddCommand("editor_brush_hollow",   Editor_Cmd_Hollow_f);
     Cmd_AddCommand("editor_entity_add",     Editor_Cmd_AddEntity_f);
     Cmd_AddCommand("editor_group",   Editor_Cmd_Group_f);
     Cmd_AddCommand("editor_ungroup", Editor_Cmd_Ungroup_f);
@@ -613,6 +644,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_show_angles);
     Cvar_RegisterVariable(&editor_show_links);
     Cvar_RegisterVariable(&editor_brush_tex);
+    Cvar_RegisterVariable(&editor_brush_hollow_thickness);
 
     {
         extern void Editor_RegisterCvars(void);

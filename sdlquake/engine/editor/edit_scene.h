@@ -176,6 +176,14 @@ void  Brush_TranslateFace(edit_brush_t *b, int plane_idx, float delta);
 int   Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs,
                          const char *texname);
 
+// Replace a single solid brush with 6 wall slabs sharing the same outer
+// bbox — the classic "make hollow" room-from-cube operation. Walls inherit
+// the source brush's first plane texname; thickness <= 0 defaults to 16
+// units; if thickness * 2 >= any axis extent, the call fails. The 6 new
+// wall brushes go to worldspawn regardless of the source brush's owning
+// entity; selection becomes the 6 new walls. Returns 1 on success.
+int   Scene_HollowBrush(int e_idx, int b_idx, float thickness);
+
 // Append a point entity (no brushes) with classname + origin keys. Selection
 // becomes the new entity. Returns 1 on success.
 int   Scene_AddPointEntity(const char *classname, const vec3_t origin);

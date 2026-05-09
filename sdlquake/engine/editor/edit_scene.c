@@ -408,6 +408,47 @@ static void set_plane(edit_plane_t *pl,
     pl->t_scale = 1;
 }
 
+// Internal: write 6 axis-aligned plane definitions for the cube spanning
+// mins..maxs into `b`, then compile. `b` must be memset already. Returns 1
+// on a successful compile (i.e. the cube has volume), 0 otherwise.
+static int build_cube_brush(edit_brush_t *b,
+                            const vec3_t mins, const vec3_t maxs,
+                            const char *tex)
+{
+    // Three points per face, chosen so cross(p0-p1, p2-p1) gives the
+    // outward normal — qbsp's "CCW from outside" convention. Each pX is
+    // one of the 8 cube corners written as (x_idx, y_idx, z_idx) with
+    // idx 0=mins, 1=maxs.
+    static const int verts[6][3][3] = {
+        { {1,1,1}, {1,1,0}, {1,0,0} },   // +X
+        { {0,0,1}, {0,0,0}, {0,1,0} },   // -X
+        { {0,1,1}, {0,1,0}, {1,1,0} },   // +Y
+        { {1,0,1}, {1,0,0}, {0,0,0} },   // -Y
+        { {1,1,1}, {1,0,1}, {0,0,1} },   // +Z
+        { {0,1,0}, {0,0,0}, {1,0,0} },   // -Z
+    };
+    int f, v;
+    const vec_t *axis[2];
+    if (maxs[0] <= mins[0] || maxs[1] <= mins[1] || maxs[2] <= mins[2])
+        return 0;
+    axis[0] = mins;
+    axis[1] = maxs;
+    for (f = 0; f < 6; f++)
+    {
+        vec3_t pp[3];
+        for (v = 0; v < 3; v++)
+        {
+            pp[v][0] = axis[verts[f][v][0]][0];
+            pp[v][1] = axis[verts[f][v][1]][1];
+            pp[v][2] = axis[verts[f][v][2]][2];
+        }
+        set_plane(&b->planes[f], pp[0], pp[1], pp[2], tex);
+    }
+    b->numplanes = 6;
+    Brush_Compile(b);
+    return b->valid;
+}
+
 int Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs, const char *texname)
 {
     int wi;
@@ -415,8 +456,6 @@ int Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs, const char *texname
     edit_brush_t *b;
     const char *tex = texname && texname[0] ? texname : "wbrick1_5";
 
-    // Sanity: maxs must be strictly greater than mins on every axis or the
-    // plane intersection will collapse to nothing.
     if (maxs[0] <= mins[0] || maxs[1] <= mins[1] || maxs[2] <= mins[2])
     {
         Con_Printf("editor: Scene_AddCubeBrush: maxs <= mins\n");
@@ -430,46 +469,7 @@ int Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs, const char *texname
     b = &e->brushes[e->numbrushes];
     memset(b, 0, sizeof(*b));
 
-    {
-        // Three points per face, chosen so cross(p0-p1, p2-p1) gives the
-        // outward normal — qbsp's "CCW from outside" convention. The 6 face
-        // entries below are (face, p0, p1, p2) where each pX is one of the
-        // 8 cube corners written as (x_idx, y_idx, z_idx) with idx 0=mins,
-        // 1=maxs.
-        static const int verts[6][3][3] = {
-            // +X
-            { {1,1,1}, {1,1,0}, {1,0,0} },
-            // -X
-            { {0,0,1}, {0,0,0}, {0,1,0} },
-            // +Y
-            { {0,1,1}, {0,1,0}, {1,1,0} },
-            // -Y
-            { {1,0,1}, {1,0,0}, {0,0,0} },
-            // +Z
-            { {1,1,1}, {1,0,1}, {0,0,1} },
-            // -Z
-            { {0,1,0}, {0,0,0}, {1,0,0} },
-        };
-        int f, v;
-        const vec_t *axis[2];
-        axis[0] = mins;
-        axis[1] = maxs;
-        for (f = 0; f < 6; f++)
-        {
-            vec3_t pp[3];
-            for (v = 0; v < 3; v++)
-            {
-                pp[v][0] = axis[verts[f][v][0]][0];
-                pp[v][1] = axis[verts[f][v][1]][1];
-                pp[v][2] = axis[verts[f][v][2]][2];
-            }
-            set_plane(&b->planes[f], pp[0], pp[1], pp[2], tex);
-        }
-    }
-    b->numplanes = 6;
-
-    Brush_Compile(b);
-    if (!b->valid)
+    if (!build_cube_brush(b, mins, maxs, tex))
     {
         Con_Printf("editor: Scene_AddCubeBrush: compile produced no faces\n");
         return 0;
@@ -478,6 +478,92 @@ int Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs, const char *texname
     e->numbrushes++;
     Scene_SelectionClear();
     Scene_SelectionAdd(wi, e->numbrushes - 1);
+    return 1;
+}
+
+// Replace a solid brush with 6 wall slabs spanning the same outer bbox —
+// a "make hollow" operation. The walls are axis-disjoint so they never
+// overlap (floor + ceiling cover the full XY extent; ±Y walls cover full
+// X minus the corner-space taken by ±X walls). Each wall inherits the
+// source brush's plane[0] texname so the user keeps their texture choice.
+// Walls always go to worldspawn — even if the source was in a func_*,
+// putting wall slabs on a non-world entity is rarely what the user wants.
+int Scene_HollowBrush(int e_idx, int b_idx, float thickness)
+{
+    edit_entity_t *e, *ws;
+    edit_brush_t *src;
+    vec3_t mins, maxs, wmin[6], wmax[6];
+    char tex[EDIT_TEX_NAME_LEN];
+    int wi, k;
+
+    if (e_idx < 0 || e_idx >= edit_scene.numentities) return 0;
+    e = &edit_scene.entities[e_idx];
+    if (b_idx < 0 || b_idx >= e->numbrushes) return 0;
+    src = &e->brushes[b_idx];
+    if (!src->valid)
+    {
+        Con_Printf("editor: Scene_HollowBrush: source brush is invalid\n");
+        return 0;
+    }
+
+    if (thickness <= 0.0f) thickness = 16.0f;
+    VectorCopy(src->mins, mins);
+    VectorCopy(src->maxs, maxs);
+    if (thickness * 2.0f >= maxs[0] - mins[0]
+     || thickness * 2.0f >= maxs[1] - mins[1]
+     || thickness * 2.0f >= maxs[2] - mins[2])
+    {
+        Con_Printf("editor: Scene_HollowBrush: thickness %g leaves no room\n",
+                   thickness);
+        return 0;
+    }
+
+    Q_strncpy(tex,
+              src->planes[0].texname[0] ? src->planes[0].texname : "wbrick1_5",
+              EDIT_TEX_NAME_LEN - 1);
+    tex[EDIT_TEX_NAME_LEN - 1] = '\0';
+
+    // Floor / ceiling — full XY extent.
+    wmin[0][0]=mins[0]; wmin[0][1]=mins[1]; wmin[0][2]=mins[2];
+    wmax[0][0]=maxs[0]; wmax[0][1]=maxs[1]; wmax[0][2]=mins[2]+thickness;
+    wmin[1][0]=mins[0]; wmin[1][1]=mins[1]; wmin[1][2]=maxs[2]-thickness;
+    wmax[1][0]=maxs[0]; wmax[1][1]=maxs[1]; wmax[1][2]=maxs[2];
+    // -Y / +Y walls — full X, fit between floor and ceiling.
+    wmin[2][0]=mins[0]; wmin[2][1]=mins[1];           wmin[2][2]=mins[2]+thickness;
+    wmax[2][0]=maxs[0]; wmax[2][1]=mins[1]+thickness; wmax[2][2]=maxs[2]-thickness;
+    wmin[3][0]=mins[0]; wmin[3][1]=maxs[1]-thickness; wmin[3][2]=mins[2]+thickness;
+    wmax[3][0]=maxs[0]; wmax[3][1]=maxs[1];           wmax[3][2]=maxs[2]-thickness;
+    // -X / +X walls — fit between floor/ceiling and the Y walls.
+    wmin[4][0]=mins[0];           wmin[4][1]=mins[1]+thickness; wmin[4][2]=mins[2]+thickness;
+    wmax[4][0]=mins[0]+thickness; wmax[4][1]=maxs[1]-thickness; wmax[4][2]=maxs[2]-thickness;
+    wmin[5][0]=maxs[0]-thickness; wmin[5][1]=mins[1]+thickness; wmin[5][2]=mins[2]+thickness;
+    wmax[5][0]=maxs[0];           wmax[5][1]=maxs[1]-thickness; wmax[5][2]=maxs[2]-thickness;
+
+    // Drop the source brush first (face arrays freed). Selection refs to
+    // the deleted index will be invalidated by the SelectionClear below.
+    Brush_FreeFaces(src);
+    for (k = b_idx; k < e->numbrushes - 1; k++)
+        e->brushes[k] = e->brushes[k + 1];
+    e->numbrushes--;
+
+    wi = worldspawn_index();
+    ws = &edit_scene.entities[wi];
+    ws->brushes = (edit_brush_t *)realloc(ws->brushes,
+        (ws->numbrushes + 6) * sizeof(edit_brush_t));
+
+    Scene_SelectionClear();
+    for (k = 0; k < 6; k++)
+    {
+        edit_brush_t *b = &ws->brushes[ws->numbrushes];
+        memset(b, 0, sizeof(*b));
+        if (!build_cube_brush(b, wmin[k], wmax[k], tex))
+        {
+            Con_Printf("editor: Scene_HollowBrush: wall %d failed to compile\n", k);
+            continue;
+        }
+        Scene_SelectionAdd(wi, ws->numbrushes);
+        ws->numbrushes++;
+    }
     return 1;
 }
 

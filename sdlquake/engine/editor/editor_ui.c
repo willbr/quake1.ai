@@ -312,6 +312,9 @@ static void draw_toolbar(void)
         IG_SameLine(0, -1);
         if (IG_Button("Add cube"))
             Cbuf_AddText("editor_brush_add_cube\n");
+        IG_SameLine(0, -1);
+        if (IG_Button("Hollow"))
+            Cbuf_AddText("editor_brush_hollow\n");
     }
     IG_SameLine(0, -1);
     // Entity palette: classname combo + Add button. Sits on the next row
