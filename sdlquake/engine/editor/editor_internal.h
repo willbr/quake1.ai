@@ -23,7 +23,8 @@ struct edit_plane_s;
 // trigger volumes from light markers from spawn points at a glance.
 #define EDIT_COLOR_DEFAULT      15      // off-white
 #define EDIT_COLOR_TRIGGER      251     // bright red    — gameplay logic volumes
-#define EDIT_COLOR_LIGHT        207     // golden yellow — light_*
+#define EDIT_COLOR_LIGHT        224     // bright orange — light_* (flame-start
+                                        //                 colour from r_part.c)
 #define EDIT_COLOR_SPAWN        244     // light blue    — info_player_* etc
 #define EDIT_COLOR_ITEM         79      // green         — item_* / weapon_* / armor
 
