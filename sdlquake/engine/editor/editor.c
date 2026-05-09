@@ -320,16 +320,31 @@ void Editor_FrameItem(int e_idx, int b_idx)
 // common spawn-function expectations so newly-placed entities are usable
 // without a trip through the inspector. Anything not matched gets just
 // classname + origin (Scene_AddPointEntity already wrote those).
-static void apply_classname_defaults(edit_entity_t *e, const char *cls)
+//
+// Public so editor_ui.c can call it after Scene_WrapBrushesIntoEntity —
+// brush entities need an angle key the same way point movers/items do.
+void Editor_ApplyClassnameDefaults(edit_entity_t *e, const char *cls)
 {
-    // Most facing-aware classes (monsters, items, spawn points) need an
-    // angle key; their spawn functions read v.angles[YAW] from it.
+    // Most facing-aware classes (monsters, items, spawn points, brush
+    // movers) need an angle key; their spawn functions read v.angles[YAW]
+    // and SetMovedir(e) converts it to a unit vector along world axes.
+    // Special values: -1 = up, -2 = down. We default to 0 (east) which
+    // matches the engine's own SetMovedir behaviour when angle is absent;
+    // making it explicit means the user sees a value to edit.
+    //
+    // func_plat / func_train / func_door_secret intentionally omitted —
+    // they don't read angle (plat is always vertical, train follows
+    // path_corners, secret door has its own SECRET_1ST_LEFT spawnflag
+    // for direction).
     if (!strcmp(cls, "info_player_start")
      || !strcmp(cls, "info_player_start2")
      || !strcmp(cls, "info_player_deathmatch")
      || !strcmp(cls, "info_player_coop")
      || !strcmp(cls, "info_intermission")
      || !strcmp(cls, "info_teleport_destination")
+     || !strcmp(cls, "func_door")
+     || !strcmp(cls, "func_button")
+     || !strcmp(cls, "trigger_push")
      || !strncmp(cls, "monster_",    8)
      || !strncmp(cls, "item_",       5)
      || !strncmp(cls, "weapon_",     7)
@@ -361,7 +376,7 @@ static void Editor_Cmd_AddEntity_f(void)
     if (Scene_AddPointEntity(classname, origin))
     {
         int idx = edit_scene.numentities - 1;
-        apply_classname_defaults(&edit_scene.entities[idx], classname);
+        Editor_ApplyClassnameDefaults(&edit_scene.entities[idx], classname);
         Con_Printf("editor: added %s at %.0f %.0f %.0f\n",
                    classname, origin[0], origin[1], origin[2]);
     }
@@ -423,7 +438,7 @@ static void place_pending_at_cursor(float vx, float vy)
     History_Push("place entity");
     if (!Scene_AddPointEntity(cls, origin)) return;
     idx = edit_scene.numentities - 1;
-    apply_classname_defaults(&edit_scene.entities[idx], cls);
+    Editor_ApplyClassnameDefaults(&edit_scene.entities[idx], cls);
     s_placing_drag    = 1;
     s_placing_ent_idx = idx;
 }

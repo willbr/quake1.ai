@@ -135,6 +135,13 @@ void        Editor_CancelPlaceEntity(void);
 int         Editor_IsPlacementPending(void);
 const char *Editor_PendingClassname (void);
 
+// editor.c — fill in sensible default kvs for `cls` on `e` (e.g. light gets
+// `light "200"`, doors/buttons get `angle "0"`). Idempotent — re-running
+// it on the same entity overwrites the same keys. Called by point-entity
+// placement and by the brush-entity wrap path.
+struct edit_entity_s;
+void Editor_ApplyClassnameDefaults(struct edit_entity_s *e, const char *cls);
+
 // render_wire.c — append fake entity_t records into cl_visedicts so the
 // engine renders editor preview models for any point entity that has a
 // modelpath but no live counterpart yet. Called from Editor_PreRender,

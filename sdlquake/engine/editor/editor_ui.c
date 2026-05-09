@@ -1130,7 +1130,13 @@ static void draw_wrap_dialog(void)
         if (IG_Selectable(names[i], 0, 0))
         {
             History_Push("wrap entity");
-            Scene_WrapBrushesIntoEntity(names[i]);
+            if (Scene_WrapBrushesIntoEntity(names[i]))
+            {
+                int new_idx = edit_scene.numentities - 1;
+                if (new_idx >= 0)
+                    Editor_ApplyClassnameDefaults(
+                        &edit_scene.entities[new_idx], names[i]);
+            }
             s_show_wrap_dialog = 0;
         }
         IG_PopID();
