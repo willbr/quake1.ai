@@ -543,15 +543,16 @@ void Editor_RenderScene(void)
         }
     }
 
-    // Pass 3a: point entity models. When we have a model for the classname
-    // we render it through the alias path so the user sees the actual
-    // monster / weapon / item shape they placed; otherwise we'll fall
-    // through to the wire-AABB pass below.
+    // Pass 3a: point entity model preview. Only for entities that haven't
+    // been realised as live edicts yet (spawned == 0) — once the engine
+    // owns them, R_DrawEntitiesOnList renders the real animated model and
+    // a static editor copy on top would just be visual noise.
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
         const char *cls, *mpath;
         if (!Entity_IsPoint(e)) continue;
+        if (e->spawned) continue;
         if (e->classname_idx < 0) continue;
         cls = e->kv[e->classname_idx].value;
         mpath = classname_to_model(cls);
@@ -560,9 +561,10 @@ void Editor_RenderScene(void)
     }
 
     // Pass 3b: wire AABB for point entities. Selected items always draw
-    // (so the user has a visible selection marker even on top of the
-    // model); unselected items only draw when no model rendered, since
-    // the box would otherwise duplicate the model's silhouette.
+    // so the user has a visible selection marker; unselected items only
+    // draw when (a) no model preview rendered (no class entry) AND (b)
+    // not yet spawned — spawned entities are visible via the engine's
+    // own rendering, so an extra box would double up.
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
@@ -573,7 +575,7 @@ void Editor_RenderScene(void)
         is_sel = Scene_SelectionContains(i, -1);
         if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
         has_model = classname_to_model(cls) != NULL;
-        if (has_model && !is_sel) continue;
+        if (!is_sel && (e->spawned || has_model)) continue;
         point_entity_bbox(e, pmin, pmax);
         draw_aabb_over(pmin, pmax,
                        is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);

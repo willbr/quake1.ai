@@ -35,9 +35,17 @@ int svb_model_bounds(int i, float *mins, float *maxs)
 
 void svb_load_model(int i, const char *name)
 {
+    model_t *m;
     if (i < 0 || i >= MAX_MODELS) return;
-    if (sv.models[i]) return;            /* already loaded */
-    sv.models[i] = Mod_ForName((char *)name, false);
+    if (sv.models[i] && cl.model_precache[i]) return;   /* fully synced */
+    m = Mod_ForName((char *)name, false);
+    if (!sv.models[i])           sv.models[i]         = m;
+    /* Mid-game precaches (e.g. editor-spawned monsters mid-session) need
+     * to mirror cl.model_precache too — otherwise the client renderer
+     * looks up modelindex N and finds NULL, so the entity is invisible.
+     * Signon will memset+refill cl.model_precache afterwards on a fresh
+     * map load, so writing early is safe. */
+    if (!cl.model_precache[i])   cl.model_precache[i] = m;
 }
 
 const char *svb_sound_precache(int i)   { return sv.sound_precache[i]; }
