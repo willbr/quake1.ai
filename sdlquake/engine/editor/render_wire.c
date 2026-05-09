@@ -987,7 +987,10 @@ static void draw_angle_arrows(void)
 
         for (j = 0; j < 3; j++) b[j] = a[j] + dir[j] * arrow_len;
 
-        color   = sel ? EDIT_COLOR_SELECTED : category_color(e);
+        // White when selected — the bright-yellow EDIT_COLOR_SELECTED reads
+        // too close to the gizmo's yellow Y-axis line on top of the same
+        // entity. White stands clear of the axis colours.
+        color   = sel ? EDIT_COLOR_AXIS_HOT : category_color(e);
         through = sel;
         draw_link_arrow(a, b, color, through);
     }
