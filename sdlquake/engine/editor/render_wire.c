@@ -828,6 +828,101 @@ static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
     return n > 0;
 }
 
+// Line + small V-arrowhead at the target end. The arrowhead lets the user
+// read direction on patrol-path chains (path_corner → path_corner) at a
+// glance — a plain line would be ambiguous about which end is the source.
+static void draw_link_arrow(const vec3_t a, const vec3_t b, byte color)
+{
+    vec3_t dir, right, world_up = {0, 0, 1};
+    float len, r2, head;
+    int j;
+
+    Editor_DrawLine3DOver(a, b, color);
+
+    VectorSubtract(b, a, dir);
+    len = sqrtf(DotProduct(dir, dir));
+    if (len < 4.0f) return;
+    for (j = 0; j < 3; j++) dir[j] /= len;
+
+    // Perpendicular to dir, in the plane containing world up. Falls back
+    // to a world-X cross when the line is nearly vertical.
+    CrossProduct(dir, world_up, right);
+    r2 = DotProduct(right, right);
+    if (r2 < 0.01f)
+    {
+        vec3_t world_x = {1, 0, 0};
+        CrossProduct(dir, world_x, right);
+        r2 = DotProduct(right, right);
+        if (r2 < 0.01f) return;
+    }
+    {
+        float r = sqrtf(r2);
+        for (j = 0; j < 3; j++) right[j] /= r;
+    }
+
+    // Pixel-ish arrowhead size: 10% of line length, clamped so it stays
+    // readable on tiny links and doesn't dominate long ones.
+    head = len * 0.1f;
+    if (head > 32.0f) head = 32.0f;
+    if (head <  4.0f) head = 4.0f;
+    {
+        vec3_t tail, lp, rp;
+        VectorMA(b, -head, dir, tail);
+        VectorMA(tail,  head * 0.4f, right, rp);
+        VectorMA(tail, -head * 0.4f, right, lp);
+        Editor_DrawLine3DOver(b, rp, color);
+        Editor_DrawLine3DOver(b, lp, color);
+    }
+}
+
+// Walk every entity's "target" / "killtarget" keys, find each match by
+// "targetname", and draw a coloured arrow from source to target. Patrol
+// paths emerge naturally from this — a path_corner with target=next
+// chains to the next path_corner, etc. The check is O(N²) per pair but
+// runs only while the editor is open + paused, on ≤ a few hundred ents.
+static void draw_target_links(void)
+{
+    int i, j, k, m;
+    vec3_t a, b;
+
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        if (Editor_EntityHidden(i)) continue;
+        if (!Editor_EntityAnchor(e, a)) continue;
+
+        for (j = 0; j < e->numkv; j++)
+        {
+            const char *key = e->kv[j].key;
+            const char *val = e->kv[j].value;
+            byte color;
+
+            if      (!strcmp(key, "target"))     color = EDIT_COLOR_AXIS_Z;   // 244 light blue
+            else if (!strcmp(key, "killtarget")) color = EDIT_COLOR_AXIS_X;   // 251 red
+            else continue;
+            if (!val[0]) continue;
+
+            for (k = 0; k < edit_scene.numentities; k++)
+            {
+                edit_entity_t *t;
+                if (k == i) continue;
+                t = &edit_scene.entities[k];
+                if (Editor_EntityHidden(k)) continue;
+                for (m = 0; m < t->numkv; m++)
+                {
+                    if (!strcmp(t->kv[m].key, "targetname")
+                     && !strcmp(t->kv[m].value, val))
+                    {
+                        if (Editor_EntityAnchor(t, b))
+                            draw_link_arrow(a, b, color);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
 void Editor_RenderScene(void)
 {
     int i, j;
@@ -932,6 +1027,11 @@ void Editor_RenderScene(void)
         if (selection_bbox(bmin, bmax))
             draw_aabb_over(bmin, bmax, EDIT_COLOR_SELECTED);
     }
+
+    // Target / killtarget links (incl. monster patrol paths via path_corner
+    // chains). Draw last so they layer over the bbox + brush outlines.
+    if (Editor_IsOpen())
+        draw_target_links();
 
     Editor_GizmoDraw();
 }
