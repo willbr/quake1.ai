@@ -573,6 +573,101 @@ static int kv_lookup(const edit_entity_t *e, const char *key)
     return -1;
 }
 
+// Inspector edits update e->kv[i].value directly via IG_InputText. For
+// most keys that's enough — the engine reads them at next map load. But
+// for fields the running engine + renderer is already using (origin,
+// angle/angles), the live edict and the cl_entities mirror need a poke
+// or the typed value won't visibly take effect until close+reopen. The
+// gizmo paths already sync these; this helper does the same for direct
+// kv edits.
+static void inspector_sync_live(edit_entity_t *e, const char *key,
+                                const char *val)
+{
+    if (!e->live_ent || e->live_ent->free) return;
+
+    if (!strcmp(key, "origin"))
+    {
+        float x = 0, y = 0, z = 0;
+        if (sscanf(val, "%f %f %f", &x, &y, &z) < 3) return;
+        e->live_ent->v.origin[0] = x;
+        e->live_ent->v.origin[1] = y;
+        e->live_ent->v.origin[2] = z;
+        SV_LinkEdict(e->live_ent, false);
+        {
+            int en = NUM_FOR_EDICT(e->live_ent);
+            if (en > 0 && en < cl.num_entities)
+            {
+                entity_t *ce = &cl_entities[en];
+                ce->origin[0] = x; ce->origin[1] = y; ce->origin[2] = z;
+                VectorCopy(ce->origin, ce->msg_origins[0]);
+                VectorCopy(ce->origin, ce->msg_origins[1]);
+                ce->msgtime  = cl.mtime[0];
+                ce->forcelink = true;
+            }
+        }
+        return;
+    }
+
+    if (!strcmp(key, "angle") || !strcmp(key, "angles"))
+    {
+        float pitch = 0, yaw = 0, roll = 0;
+        int parsed = 0;
+        if (!strcmp(key, "angle"))
+        {
+            float a = (float)atof(val);
+            // -1 / -2 sentinels: SetMovedir would have set vertical
+            // movedir at spawn. Mirror that here so movers re-aim
+            // correctly.
+            if (a == -1.0f || a == -2.0f)
+            {
+                e->live_ent->v.angles[0] = 0;
+                e->live_ent->v.angles[1] = 0;
+                e->live_ent->v.angles[2] = 0;
+                e->live_ent->v.movedir[0] = 0;
+                e->live_ent->v.movedir[1] = 0;
+                e->live_ent->v.movedir[2] = (a == -1.0f) ? 1.0f : -1.0f;
+                goto sync_cl;
+            }
+            yaw = a;
+            parsed = 1;
+        }
+        else
+        {
+            if (sscanf(val, "%f %f %f", &pitch, &yaw, &roll) >= 1) parsed = 1;
+        }
+        if (!parsed) return;
+        e->live_ent->v.angles[0] = pitch;
+        e->live_ent->v.angles[1] = yaw;
+        e->live_ent->v.angles[2] = roll;
+
+        // Rebuild v.movedir from the new angles for movers (any entity
+        // whose movedir was already non-zero has been through SetMovedir).
+        // Non-movers leave movedir at (0,0,0) so this is a no-op for them.
+        {
+            float *md = e->live_ent->v.movedir;
+            if (md[0] != 0.0f || md[1] != 0.0f || md[2] != 0.0f)
+            {
+                vec3_t fwd, right, up;
+                AngleVectors(e->live_ent->v.angles, fwd, right, up);
+                VectorCopy(fwd, md);
+            }
+        }
+sync_cl:
+        {
+            int en = NUM_FOR_EDICT(e->live_ent);
+            if (en > 0 && en < cl.num_entities)
+            {
+                entity_t *ce = &cl_entities[en];
+                VectorCopy(e->live_ent->v.angles, ce->angles);
+                VectorCopy(e->live_ent->v.angles, ce->msg_angles[0]);
+                VectorCopy(e->live_ent->v.angles, ce->msg_angles[1]);
+                ce->msgtime  = cl.mtime[0];
+                ce->forcelink = true;
+            }
+        }
+    }
+}
+
 // Render the spawnflags section: class-specific checkboxes (if known),
 // universal skill/DM checkboxes, and a raw integer fallback. Mutates the
 // "spawnflags" kv (creating it on first toggle) and pushes the new value to
@@ -691,8 +786,9 @@ static void draw_inspector(void)
             IG_PushID_Int(idx);
             snprintf(buf, sizeof(buf), "%s##key", e->kv[idx].key);
             IG_SetNextItemWidth(180);
-            IG_InputText(buf, e->kv[idx].value, EDIT_VAL_LEN,
-                         IG_ITF_EnterReturnsTrue);
+            if (IG_InputText(buf, e->kv[idx].value, EDIT_VAL_LEN,
+                             IG_ITF_EnterReturnsTrue))
+                inspector_sync_live(e, e->kv[idx].key, e->kv[idx].value);
             IG_PopID();
         }
         for (i = 0; i < e->numkv; i++)
@@ -703,8 +799,9 @@ static void draw_inspector(void)
             IG_PushID_Int(i);
             snprintf(buf, sizeof(buf), "%s##key", e->kv[i].key);
             IG_SetNextItemWidth(180);
-            IG_InputText(buf, e->kv[i].value, EDIT_VAL_LEN,
-                         IG_ITF_EnterReturnsTrue);
+            if (IG_InputText(buf, e->kv[i].value, EDIT_VAL_LEN,
+                             IG_ITF_EnterReturnsTrue))
+                inspector_sync_live(e, e->kv[i].key, e->kv[i].value);
             IG_PopID();
         }
     }
