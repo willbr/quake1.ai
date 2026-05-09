@@ -367,6 +367,31 @@ static const edit_class_info_t *find_class(const char *classname)
 // and SV_LinkEdict put the real bbox into v.absmin/absmax. Falls back
 // to the per-class table (weapons / monsters / players) and then to a
 // centred ±16 cube for unrecognised classnames.
+// Compute the alias model's frame-0 bounding box in model-local space.
+// WinQuake's Mod_LoadAliasModel hardcodes mod->mins/maxs to ±16 ("FIXME:
+// do this right" in the upstream comment), so we have to read the per-
+// frame bboxmin/bboxmax bytes directly and de-quantise them via the
+// model's scale + scale_origin. Frame 0 is enough for a wire bbox —
+// wandering monsters animate within a few units of the rest pose.
+static int alias_local_bbox(model_t *m, vec3_t out_mins, vec3_t out_maxs)
+{
+    aliashdr_t        *pahdr;
+    mdl_t             *pmdl;
+    maliasframedesc_t *frame;
+    int                i;
+    if (!m || m->type != mod_alias) return 0;
+    pahdr = (aliashdr_t *)Mod_Extradata(m);
+    if (!pahdr) return 0;
+    pmdl  = (mdl_t *)((byte *)pahdr + pahdr->model);
+    frame = &pahdr->frames[0];
+    for (i = 0; i < 3; i++)
+    {
+        out_mins[i] = (float)frame->bboxmin.v[i] * pmdl->scale[i] + pmdl->scale_origin[i];
+        out_maxs[i] = (float)frame->bboxmax.v[i] * pmdl->scale[i] + pmdl->scale_origin[i];
+    }
+    return 1;
+}
+
 static void point_entity_bbox(const edit_entity_t *e,
                               vec3_t out_mins, vec3_t out_maxs)
 {
@@ -374,7 +399,7 @@ static void point_entity_bbox(const edit_entity_t *e,
     static const vec3_t default_max = BBDEF_MAX;
     const float *mn = default_min, *mx = default_max;
     const edit_class_info_t *ci = NULL;
-    vec3_t o;
+    vec3_t o, am, ax;
     int i;
 
     if (e->live_ent && !e->live_ent->free)
@@ -388,44 +413,35 @@ static void point_entity_bbox(const edit_entity_t *e,
         }
     }
 
-    // SV_MakeStatic'd ents (flame torches) have no live edict, so live_ent
-    // can't supply the bbox. The static-entity counterpart already holds
-    // the loaded alias model — use its vertex bounds so the wire box
-    // wraps the actual flame instead of a fixed ±8 cube.
-    if (e->live_static && e->live_static->model)
+    // SV_MakeStatic'd ents (flame torches) — read the alias model's actual
+    // frame-0 vertex bounds and translate to the static entity's origin.
+    if (e->live_static && e->live_static->model
+        && alias_local_bbox(e->live_static->model, am, ax))
     {
-        model_t *m = e->live_static->model;
-        if (m->maxs[0] > m->mins[0] || m->maxs[1] > m->mins[1] || m->maxs[2] > m->mins[2])
+        for (i = 0; i < 3; i++)
         {
-            for (i = 0; i < 3; i++)
-            {
-                out_mins[i] = e->live_static->origin[i] + m->mins[i];
-                out_maxs[i] = e->live_static->origin[i] + m->maxs[i];
-            }
-            return;
+            out_mins[i] = e->live_static->origin[i] + am[i];
+            out_maxs[i] = e->live_static->origin[i] + ax[i];
         }
+        return;
     }
 
     Entity_GetOrigin(e, o);
     if (e->classname_idx >= 0)
         ci = find_class(e->kv[e->classname_idx].value);
 
-    // Editor preview: when we know the model path but have no live entity
-    // to read absmin/absmax from (info_* metadata, just-placed-not-yet-
-    // spawned items), prefer the loaded model's own vertex bounds. The
-    // per-class table values are SV_SetSize gameplay bboxes — fine for
-    // monsters but coarsely wrong for tall narrow models like torches,
-    // since the table forced a ±8 cube. Mod_ForName is cheap on cache hit
-    // (the preview pass already loaded these models this frame).
+    // Editor preview path: load the model and use its real vertex bounds
+    // (Mod_ForName is a cache hit — draw_point_entity_model already
+    // loaded it this frame).
     if (ci && ci->modelpath)
     {
         model_t *m = Mod_ForName((char *)ci->modelpath, false);
-        if (m && (m->maxs[0] > m->mins[0] || m->maxs[1] > m->mins[1] || m->maxs[2] > m->mins[2]))
+        if (m && alias_local_bbox(m, am, ax))
         {
             for (i = 0; i < 3; i++)
             {
-                out_mins[i] = o[i] + m->mins[i];
-                out_maxs[i] = o[i] + m->maxs[i];
+                out_mins[i] = o[i] + am[i];
+                out_maxs[i] = o[i] + ax[i];
             }
             return;
         }
