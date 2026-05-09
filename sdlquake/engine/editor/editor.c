@@ -186,6 +186,16 @@ static void Editor_Cmd_New_f(void)
     History_Clear();
     Scene_Clear();
     scaffold_build_test_room(name);
+
+    /* Auto-compile so the user lands on a rendered playable map
+     * instead of the bare console — the editor's render hooks need a
+     * cl.worldmodel, which only exists after SV_SpawnServer loads a
+     * .bsp. The Cbuf defers editor_compile by one frame, which gives
+     * CL_Disconnect_f's state changes time to settle. M1 limit
+     * applies: this consumes the session's one qbsp call, so a
+     * subsequent editor_compile after edits may crash until M2's
+     * globals-reset ships. */
+    Cbuf_AddText("editor_compile\n");
 }
 
 static void Editor_Cmd_Open_f(void)
@@ -204,10 +214,10 @@ static void Editor_Cmd_Open_f(void)
     if (!Scene_Load(path))
     {
         /* Fall through to the scaffold so the user has something
-         * usable instead of a load error. They can immediately
-         * editor_compile to see it; editor_save will write a fresh
-         * <name>.map to disk. Disconnect first so the scaffold isn't
-         * overlaid on a running demo / server. */
+         * usable instead of a load error. Auto-compile + load so the
+         * editor's render path has a worldmodel to draw against
+         * (otherwise the user lands on the empty console with no
+         * viewport). editor_save will later write a fresh <name>.map. */
         Con_Printf("editor_load: %s not found — building scaffold scene\n",
                    path);
         cls.demonum = -1;
@@ -215,6 +225,7 @@ static void Editor_Cmd_Open_f(void)
         History_Clear();
         Scene_Clear();
         scaffold_build_test_room(name);
+        Cbuf_AddText("editor_compile\n");
         return;
     }
 
