@@ -51,6 +51,11 @@ static void draw_toolbar(void)
         Cbuf_AddText(buf);
     }
     IG_SameLine(0, -1);
+    // Spawn a 64-unit cube ~128 units in front of the camera, snapped to a
+    // 16-unit grid. The console command does the camera math too — keep them
+    // in sync.
+    if (IG_Button("Add cube"))     Cbuf_AddText("editor_brush_add_cube\n");
+    IG_SameLine(0, -1);
     if (IG_Button("Close (F2)"))   Cbuf_AddText("editor\n");
 
     {

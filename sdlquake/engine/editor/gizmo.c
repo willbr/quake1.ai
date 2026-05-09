@@ -132,7 +132,7 @@ void Editor_GizmoDraw(void)
     {
         byte col = (s_drag_axis == i) ? EDIT_COLOR_AXIS_HOT : axis_colors[i];
         axis_endpoint(centroid, i, arrow_len, end);
-        Editor_DrawLine3D(centroid, end, col);
+        Editor_DrawLine3DOver(centroid, end, col);
         // small cross at the tip so the arrow head reads
         {
             vec3_t a, c;
@@ -141,10 +141,10 @@ void Editor_GizmoDraw(void)
             float tip = arrow_len * 0.15f;
             VectorCopy(end, a); a[u] += tip;
             VectorCopy(end, c); c[u] -= tip;
-            Editor_DrawLine3D(a, c, col);
+            Editor_DrawLine3DOver(a, c, col);
             VectorCopy(end, a); a[v] += tip;
             VectorCopy(end, c); c[v] -= tip;
-            Editor_DrawLine3D(a, c, col);
+            Editor_DrawLine3DOver(a, c, col);
         }
     }
 }

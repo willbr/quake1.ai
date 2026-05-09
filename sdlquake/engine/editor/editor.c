@@ -140,6 +140,34 @@ static void Editor_Cmd_Toggle_f(void)
     Editor_Toggle();
 }
 
+// Spawn a 64-unit cube ~128 units in front of the camera, origin snapped to
+// a 16-unit grid so it sits cleanly on Quake's standard build grid. New
+// brush is appended to worldspawn and becomes the current selection.
+static void Editor_Cmd_AddCube_f(void)
+{
+    extern vec3_t r_origin, vpn;
+    vec3_t center, mins, maxs;
+    int i;
+    const float DIST = 128.0f;
+    const float HALF = 32.0f;       // 64-unit cube
+    const float GRID = 16.0f;
+
+    for (i = 0; i < 3; i++)
+    {
+        float c = r_origin[i] + vpn[i] * DIST;
+        // floor() to nearest grid step. Round to grid by casting to int and
+        // multiplying — works for negative coords because floor() is signed.
+        c = floorf(c / GRID + 0.5f) * GRID;
+        center[i] = c;
+        mins[i]   = c - HALF;
+        maxs[i]   = c + HALF;
+    }
+
+    if (Scene_AddCubeBrush(mins, maxs, NULL))
+        Con_Printf("editor: added cube at %.0f %.0f %.0f\n",
+                   center[0], center[1], center[2]);
+}
+
 // List every texture in cl.worldmodel — these are the names that brush face
 // texnames in a .map will resolve against. Anything not in this list falls
 // back to the procedural grid in the textured render style.
@@ -212,6 +240,7 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_revert", Editor_Cmd_Revert_f);
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
     Cmd_AddCommand("editor_textures", Editor_Cmd_Textures_f);
+    Cmd_AddCommand("editor_brush_add_cube", Editor_Cmd_AddCube_f);
 
     Cvar_RegisterVariable(&editor_camera);
 

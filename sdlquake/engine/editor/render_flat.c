@@ -5,10 +5,10 @@
 // palette index. The shade index is a Lambert dot against a fixed world
 // light direction, so faces pointing toward the light come out brighter.
 //
-// Intentionally pretty: no z-buffer, faces overdraw in scene order. With
-// editor brushes that don't depth-overlap each other this is fine; for the
-// rare overlapping case a back-to-front sort would help but isn't worth the
-// cost at editor scales.
+// Per-pixel depth test+write against the engine's d_pzbuffer using the
+// standard Quake convention (izi = (int)(1/z * 0x8000), pass = "existing
+// <= new"). That way editor brushes occlude / are occluded by the BSP world
+// behind them and by each other without needing a manual sort.
 
 #include "quakedef.h"
 #include "r_local.h"        // NEAR_CLIP
@@ -21,6 +21,8 @@ extern vec3_t   vpn, vright, vup;
 extern vec3_t   r_origin;
 extern float    xcenter, ycenter;
 extern float    xscale, yscale;
+extern short   *d_pzbuffer;
+extern unsigned int d_zwidth;
 
 #define FLAT_MAX_VERTS  (EDIT_MAX_VERTS_PER_FACE + 4)
 
@@ -64,64 +66,85 @@ static int clip_near(const vec3_t *in, int n_in, vec3_t *out, int max_out)
     return n_out;
 }
 
-// Project view-space (X right, Y up, +Z forward) to integer screen pixels.
-static void view_to_screen_i(const vec3_t v, int *out_x, int *out_y)
+// Per-vertex projection: screen (x, y) plus inv_z for depth interpolation.
+typedef struct { int x, y; float inv_z; } pvf_t;
+
+static void project_pvf(const vec3_t v, pvf_t *out)
 {
     float inv_z = 1.0f / v[2];
     float sx = xcenter + (xscale * inv_z) * v[0];
     float sy = ycenter - (yscale * inv_z) * v[1];
-    *out_x = (int)(sx + 0.5f);
-    *out_y = (int)(sy + 0.5f);
+    out->x     = (int)(sx + 0.5f);
+    out->y     = (int)(sy + 0.5f);
+    out->inv_z = inv_z;
 }
 
-// Scanline-fill a convex polygon (already in screen-pixel coords) with a
-// single palette index. Uses the "min/max X per row" trick — convex polygons
-// produce exactly two edge crossings per scanline, so we just walk every
-// edge, compute the X at this row, and take min+max.
-static void fill_convex_8(const int *xs, const int *ys, int n, byte color)
+// Scanline-fill a convex polygon with a single palette index, depth-testing
+// per pixel against d_pzbuffer. inv_z is interpolated linearly in screen
+// space — fine for the editor where the ranges are small. (Quake's surface
+// renderer interpolates 1/z linearly in screen space too, then z-test.)
+static void fill_convex_8(const pvf_t *pv, int n, byte color)
 {
     int W = (int)vid.width, H = (int)vid.height;
-    int ymin = ys[0], ymax = ys[0];
+    int ymin = pv[0].y, ymax = pv[0].y;
     int i, y;
     byte *base = vid.buffer;
     int  rb   = (int)vid.rowbytes;
 
     for (i = 1; i < n; i++)
     {
-        if (ys[i] < ymin) ymin = ys[i];
-        if (ys[i] > ymax) ymax = ys[i];
+        if (pv[i].y < ymin) ymin = pv[i].y;
+        if (pv[i].y > ymax) ymax = pv[i].y;
     }
     if (ymin < 0) ymin = 0;
     if (ymax >= H) ymax = H - 1;
 
     for (y = ymin; y <= ymax; y++)
     {
-        int xL = 1 << 30, xR = -(1 << 30);
+        int   xL = 1 << 30, xR = -(1 << 30);
+        float izL = 0, izR = 0;
         for (i = 0; i < n; i++)
         {
             int j = (i + 1) % n;
-            int y0 = ys[i], y1 = ys[j];
+            int y0 = pv[i].y, y1 = pv[j].y;
             int yLo = y0 < y1 ? y0 : y1;
             int yHi = y0 > y1 ? y0 : y1;
             if (y0 == y1) continue;
             if (y < yLo || y > yHi) continue;
-            // Avoid double-counting at vertex pixels: include the lower
-            // y endpoint, exclude the upper. Standard half-open convention.
             if (y == yHi) continue;
             {
-                int x0 = xs[i], x1 = xs[j];
-                int x  = x0 + (int)((float)(x1 - x0) * (float)(y - y0) / (float)(y1 - y0));
-                if (x < xL) xL = x;
-                if (x > xR) xR = x;
+                float dt = (float)(y - y0) / (float)(y1 - y0);
+                int   x  = pv[i].x + (int)((pv[j].x - pv[i].x) * dt);
+                float iz = pv[i].inv_z + (pv[j].inv_z - pv[i].inv_z) * dt;
+                if (x < xL) { xL = x; izL = iz; }
+                if (x > xR) { xR = x; izR = iz; }
             }
         }
         if (xL > xR) continue;
-        if (xL < 0) xL = 0;
-        if (xR >= W) xR = W - 1;
         {
-            byte *row = base + y * rb;
-            int x;
-            for (x = xL; x <= xR; x++) row[x] = color;
+            int    span = xR - xL;
+            float  t_step = span > 0 ? 1.0f / (float)span : 0;
+            float  iz = izL;
+            float  di = (izR - izL) * t_step;
+            int    xa = xL < 0  ? 0     : xL;
+            int    xb = xR >= W ? W - 1 : xR;
+            byte  *row  = base + y * rb;
+            short *zrow = d_pzbuffer + y * d_zwidth;
+            int    x;
+            if (xL < 0) iz += di * (float)(-xL);
+            for (x = xa; x <= xb; x++)
+            {
+                if (iz > 1e-9f)
+                {
+                    int izi = (int)(iz * 32768.0f);
+                    if (zrow[x] <= izi)
+                    {
+                        row[x]  = color;
+                        zrow[x] = (short)izi;
+                    }
+                }
+                iz += di;
+            }
         }
     }
 }
@@ -172,11 +195,11 @@ void Editor_FlatDrawBrush(const edit_brush_t *b)
         int n_clip = clip_near(vview, f->numverts, vclip, FLAT_MAX_VERTS);
         if (n_clip < 3) continue;
 
-        // Project to integer pixels.
-        int xs[FLAT_MAX_VERTS], ys[FLAT_MAX_VERTS];
+        // Project to integer pixels (with inv_z for depth).
+        pvf_t pv[FLAT_MAX_VERTS];
         for (k = 0; k < n_clip; k++)
-            view_to_screen_i(vclip[k], &xs[k], &ys[k]);
+            project_pvf(vclip[k], &pv[k]);
 
-        fill_convex_8(xs, ys, n_clip, shade_index(pl->normal));
+        fill_convex_8(pv, n_clip, shade_index(pl->normal));
     }
 }

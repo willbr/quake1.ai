@@ -105,6 +105,12 @@ void  Brush_FreeFaces(edit_brush_t *b);
 // Translate every plane of a brush by `delta`.
 void  Brush_Translate(edit_brush_t *b, const vec3_t delta);
 
+// Append a 6-plane AABB brush to the worldspawn entity (creating worldspawn
+// if absent). Updates selection to the new brush. Returns 1 on success.
+// `texname` may be NULL to default to "wbrick1_5".
+int   Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs,
+                         const char *texname);
+
 // Selection helpers.
 edit_brush_t *Scene_GetSelectedBrush(void);
 edit_entity_t *Scene_GetSelectedEntity(void);

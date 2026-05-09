@@ -20,6 +20,8 @@ extern float        xcenter, ycenter;
 extern float        xscale, yscale;
 extern vec3_t       vpn, vright, vup;
 extern vec3_t       r_origin;
+extern short       *d_pzbuffer;
+extern unsigned int d_zwidth;
 
 // -----------------------------------------------------------------------------
 // Projection
@@ -71,49 +73,78 @@ void Editor_ScreenToRay(float sx, float sy, vec3_t out_origin, vec3_t out_dir)
 // Line drawing
 // -----------------------------------------------------------------------------
 
-// Bresenham line into vid.buffer (8-bit indexed). Clips to viewport.
-static void draw_line8(int x0, int y0, int x1, int y1, byte color)
+// Bresenham line into vid.buffer with optional per-pixel depth test against
+// d_pzbuffer. iz0/iz1 are the endpoint inv_z values; we interpolate linearly
+// across the (1 + max(|dx|,|dy|)) Bresenham steps. When ztest is 0 the line
+// is drawn unconditionally (and doesn't disturb the z-buffer).
+static void draw_line8(int x0, int y0, float iz0,
+                       int x1, int y1, float iz1,
+                       byte color, int ztest)
 {
     int W = (int)vid.width, H = (int)vid.height;
     int dx, dy, sx, sy, err, e2;
+    int adx, ady, steps;
+    float iz, di;
     byte *base = vid.buffer;
     int  rb   = (int)vid.rowbytes;
 
-    // Cohen-Sutherland-ish clip — give up on segments fully outside.
     if ((x0 < 0 && x1 < 0) || (x0 >= W && x1 >= W) ||
         (y0 < 0 && y1 < 0) || (y0 >= H && y1 >= H))
         return;
 
-    dx = abs(x1 - x0);
-    dy = -abs(y1 - y0);
+    adx = abs(x1 - x0);
+    ady = abs(y1 - y0);
+    dx = adx;
+    dy = -ady;
     sx = x0 < x1 ? 1 : -1;
     sy = y0 < y1 ? 1 : -1;
     err = dx + dy;
+    steps = adx > ady ? adx : ady;
+    iz = iz0;
+    di = steps > 0 ? (iz1 - iz0) / (float)steps : 0.0f;
 
     for (;;)
     {
         if ((unsigned)x0 < (unsigned)W && (unsigned)y0 < (unsigned)H)
-            base[y0 * rb + x0] = color;
+        {
+            if (ztest)
+            {
+                int izi = (int)(iz * 32768.0f);
+                short *zp = d_pzbuffer + y0 * d_zwidth + x0;
+                // Wireframe wins ties against opaque surfaces sharing the
+                // same plane (a brush face you've outlined draws right on
+                // top of its own fill). "<=" lets equal depth still draw.
+                if (*zp <= izi)
+                {
+                    base[y0 * rb + x0] = color;
+                    *zp = (short)izi;
+                }
+            }
+            else
+            {
+                base[y0 * rb + x0] = color;
+            }
+        }
         if (x0 == x1 && y0 == y1) break;
         e2 = 2 * err;
         if (e2 >= dy) { err += dy; x0 += sx; }
         if (e2 <= dx) { err += dx; y0 += sy; }
+        iz += di;
     }
 }
 
-// Project a world-space line, clip at the near plane in view space, then
-// Bresenham-draw. Both endpoints are passed in world space.
-void Editor_DrawLine3D(const vec3_t a_world, const vec3_t b_world, byte color)
+// Internal worker — both Editor_DrawLine3D and Editor_DrawLine3DOver share
+// this clip + project. ztest is forwarded to draw_line8.
+static void draw_line3d(const vec3_t a_world, const vec3_t b_world,
+                        byte color, int ztest)
 {
     vec3_t va, vb;
     float sx0, sy0, sx1, sy1;
     world_to_view(a_world, va);
     world_to_view(b_world, vb);
 
-    // Both behind near plane: cull.
     if (va[2] < NEAR_CLIP && vb[2] < NEAR_CLIP) return;
 
-    // Clip the segment in view space at z = NEAR_CLIP.
     if (va[2] < NEAR_CLIP)
     {
         float t = (NEAR_CLIP - va[2]) / (vb[2] - va[2]);
@@ -132,8 +163,22 @@ void Editor_DrawLine3D(const vec3_t a_world, const vec3_t b_world, byte color)
     if (!view_to_screen(va, &sx0, &sy0)) return;
     if (!view_to_screen(vb, &sx1, &sy1)) return;
 
-    draw_line8((int)(sx0 + 0.5f), (int)(sy0 + 0.5f),
-               (int)(sx1 + 0.5f), (int)(sy1 + 0.5f), color);
+    {
+        float iz0 = 1.0f / va[2];
+        float iz1 = 1.0f / vb[2];
+        draw_line8((int)(sx0 + 0.5f), (int)(sy0 + 0.5f), iz0,
+                   (int)(sx1 + 0.5f), (int)(sy1 + 0.5f), iz1, color, ztest);
+    }
+}
+
+void Editor_DrawLine3D(const vec3_t a, const vec3_t b, byte color)
+{
+    draw_line3d(a, b, color, 1);
+}
+
+void Editor_DrawLine3DOver(const vec3_t a, const vec3_t b, byte color)
+{
+    draw_line3d(a, b, color, 0);
 }
 
 // -----------------------------------------------------------------------------
@@ -158,7 +203,7 @@ static int brush_visible(const edit_brush_t *b)
     return 0;
 }
 
-static void draw_brush(const edit_brush_t *b, byte color)
+static void draw_brush(const edit_brush_t *b, byte color, int through)
 {
     int i, k;
     for (i = 0; i < b->numfaces; i++)
@@ -170,7 +215,8 @@ static void draw_brush(const edit_brush_t *b, byte color)
             const float *bb = f->verts[(k + 1) % f->numverts];
             vec3_t aw, bw;
             VectorCopy(a, aw); VectorCopy(bb, bw);
-            Editor_DrawLine3D(aw, bw, color);
+            if (through) Editor_DrawLine3DOver(aw, bw, color);
+            else         Editor_DrawLine3D    (aw, bw, color);
         }
     }
 }
@@ -244,7 +290,11 @@ void Editor_RenderScene(void)
                 if (!b->valid) continue;
                 if (!brush_visible(b)) continue;
                 if (!wire_all && b != sel) continue;
-                draw_brush(b, (b == sel) ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
+                // Selected brush's outline ignores depth so the user can
+                // always see what they have selected, even through walls.
+                draw_brush(b,
+                           (b == sel) ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH,
+                           b == sel);
             }
         }
     }

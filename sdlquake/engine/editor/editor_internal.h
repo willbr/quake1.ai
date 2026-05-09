@@ -22,6 +22,10 @@ struct edit_plane_s;
 int  Editor_ProjectWorld (const vec3_t world, float *out_sx, float *out_sy);
 void Editor_ScreenToRay  (float sx, float sy, vec3_t out_origin, vec3_t out_dir);
 void Editor_DrawLine3D   (const vec3_t a, const vec3_t b, byte color);
+// Same projection + clip, but bypasses the z-buffer so the line draws over
+// whatever's already on screen. Used by the gizmo so axis arrows stay
+// visible (and clickable) even when behind a brush.
+void Editor_DrawLine3DOver(const vec3_t a, const vec3_t b, byte color);
 int  Editor_PickAt       (float sx, float sy, int *out_ent, int *out_brush);
 
 // render_flat.c

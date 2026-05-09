@@ -30,6 +30,8 @@ extern vec3_t   vpn, vright, vup;
 extern vec3_t   r_origin;
 extern float    xcenter, ycenter;
 extern float    xscale, yscale;
+extern short   *d_pzbuffer;
+extern unsigned int d_zwidth;
 
 #define GRID_W      64
 #define GRID_H      64
@@ -331,6 +333,7 @@ static void fill_textured(const pv_t *pv, int n, const face_tex_t *ft)
             int   xa = xL < 0  ? 0     : xL;
             int   xb = xR >= W ? W - 1 : xR;
             byte *row = base + y * rb;
+            short *zrow = d_pzbuffer + y * d_zwidth;
             int   x;
             // Pre-step in case xL was clipped.
             if (xL < 0)
@@ -343,19 +346,26 @@ static void fill_textured(const pv_t *pv, int n, const face_tex_t *ft)
             {
                 if (iz > 1e-9f)
                 {
-                    float u = so / iz;
-                    float v = to / iz;
-                    int   ui = (int)u, vi = (int)v;
-                    int   us, vs;
-                    if (ft->wmask >= 0)
-                        us = ui & ft->wmask;
-                    else
-                        us = ((ui % ft->w) + ft->w) % ft->w;
-                    if (ft->hmask >= 0)
-                        vs = vi & ft->hmask;
-                    else
-                        vs = ((vi % ft->h) + ft->h) % ft->h;
-                    row[x] = ft->pixels[vs * ft->w + us];
+                    // Quake's z-buffer convention: izi = (int)(1/z * 0x8000),
+                    // bigger = closer. Pass test is "existing <= new".
+                    int izi = (int)(iz * 32768.0f);
+                    if (zrow[x] <= izi)
+                    {
+                        float u = so / iz;
+                        float v = to / iz;
+                        int   ui = (int)u, vi = (int)v;
+                        int   us, vs;
+                        if (ft->wmask >= 0)
+                            us = ui & ft->wmask;
+                        else
+                            us = ((ui % ft->w) + ft->w) % ft->w;
+                        if (ft->hmask >= 0)
+                            vs = vi & ft->hmask;
+                        else
+                            vs = ((vi % ft->h) + ft->h) % ft->h;
+                        row[x]  = ft->pixels[vs * ft->w + us];
+                        zrow[x] = (short)izi;
+                    }
                 }
                 so += ds; to += dt; iz += di;
             }
