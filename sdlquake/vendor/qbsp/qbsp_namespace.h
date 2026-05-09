@@ -1,0 +1,46 @@
+/*
+ * qbsp_namespace.h -- forced-include header (-include flag) prepended to
+ * every qbsp .c file by build.zig. Renames qbsp's exported symbols to
+ * qbsp_-prefixed versions so they don't collide at link time with the
+ * engine's identically-named functions in mathlib.c / common.c.
+ *
+ * Macro-based renaming applies to declarations, definitions, and call
+ * sites uniformly within the qbsp translation units only — engine TUs
+ * don't see this header, so they continue to refer to the unprefixed
+ * names that resolve to engine implementations.
+ *
+ * Add new entries here when a future link-time collision shows up.
+ */
+
+#ifndef QBSP_NAMESPACE_H
+#define QBSP_NAMESPACE_H
+
+/* mathlib */
+#define vec3_origin        qbsp_vec3_origin
+#define VectorCompare      qbsp_VectorCompare
+#define VectorMA           qbsp_VectorMA
+#define CrossProduct       qbsp_CrossProduct
+#define VectorNormalize    qbsp_VectorNormalize
+#define VectorInverse      qbsp_VectorInverse
+#define VectorScale        qbsp_VectorScale
+#define _DotProduct        qbsp__DotProduct
+#define _VectorSubtract    qbsp__VectorSubtract
+#define _VectorAdd         qbsp__VectorAdd
+#define _VectorCopy        qbsp__VectorCopy
+
+/* cmdlib */
+#define Q_strncasecmp      qbsp_Q_strncasecmp
+#define Q_strcasecmp       qbsp_Q_strcasecmp
+#define COM_Parse          qbsp_COM_Parse
+#define com_token          qbsp_com_token
+#define com_eof            qbsp_com_eof
+#define CRC_Init           qbsp_CRC_Init
+#define CRC_ProcessByte    qbsp_CRC_ProcessByte
+#define CRC_Value          qbsp_CRC_Value
+
+/* qbsp.c will define qbsp_main; M1.2 will replace this with a proper
+ * library entry point. For now, just rename main so it doesn't collide
+ * with sys_sdl.c's main(). */
+#define main               qbsp_main
+
+#endif /* QBSP_NAMESPACE_H */

@@ -138,6 +138,55 @@ pub fn build(b: *std.Build) void {
         .flags = platform_c_flags,
     });
 
+    // Vendored qbsp (id Software, GPLv2). Compiles in-process so the editor
+    // can recompile the .map and load the resulting .bsp without leaving the
+    // engine. Same C dialect quirks as the engine source — gnu89 + fcommon +
+    // no UB sanitizer. Suppresses the firehose of warnings 30-year-old C
+    // emits with -w.
+    const qbsp_c_flags: []const []const u8 = &.{
+        "-DWIN32",                 // gates the cmdlib.c <direct.h> path
+        "-DDOUBLEVEC_T",           // mathlib.h prefers double precision; matches qbsp's own build
+        // Forced include: prefixes qbsp's mathlib/cmdlib/main symbols with
+        // qbsp_ so they don't collide with the engine's same-named globals.
+        "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+        "-fno-strict-aliasing",
+        "-fwrapv",
+        "-std=gnu89",
+        "-fcommon",
+        "-w",
+        "-fno-sanitize=undefined",
+    };
+    // File set lifted directly from qbsp's MAKEFILE QBSPFILES = ... list:
+    // qbsp-specific (brush, csg4, ...) plus three COMMON files (cmdlib,
+    // mathlib, bspfile). polylib/scriplib/wadlib were for light/vis/
+    // texmake — including them duplicates winding helpers and breaks the
+    // link.
+    mod.addCSourceFiles(.{
+        .files = &.{
+            "sdlquake/vendor/qbsp/brush.c",
+            "sdlquake/vendor/qbsp/bspfile.c",
+            "sdlquake/vendor/qbsp/cmdlib.c",
+            "sdlquake/vendor/qbsp/csg4.c",
+            "sdlquake/vendor/qbsp/map.c",
+            "sdlquake/vendor/qbsp/mathlib.c",
+            "sdlquake/vendor/qbsp/merge.c",
+            "sdlquake/vendor/qbsp/nodraw.c",
+            "sdlquake/vendor/qbsp/outside.c",
+            "sdlquake/vendor/qbsp/portals.c",
+            "sdlquake/vendor/qbsp/qbsp.c",
+            "sdlquake/vendor/qbsp/region.c",
+            "sdlquake/vendor/qbsp/solidbsp.c",
+            "sdlquake/vendor/qbsp/surfaces.c",
+            "sdlquake/vendor/qbsp/tjunc.c",
+            "sdlquake/vendor/qbsp/writebsp.c",
+        },
+        .flags = qbsp_c_flags,
+    });
+    // Intentionally NOT on the global include path — qbsp's mathlib.h and
+    // cmdlib.h would collide with the engine's. qbsp's own .c files use
+    // `#include "..."` which clang resolves relative to the source file's
+    // directory automatically.
+
     // Dear ImGui core + SDL3/SDL_Renderer backends + our C++ bridge (no logic)
     mod.addCSourceFiles(.{
         .files = &.{
