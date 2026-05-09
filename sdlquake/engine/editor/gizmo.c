@@ -228,6 +228,24 @@ static void entity_apply_yaw_delta(edit_entity_t *e, float delta_radians)
         e->live_ent->v.angles[0] = pitch;
         e->live_ent->v.angles[1] = yaw;
         e->live_ent->v.angles[2] = roll;
+
+        // For movers (func_door / button / plat) SetMovedir ran at spawn:
+        // v.angles got zeroed and v.movedir holds a unit forward vector.
+        // The angle arrow reads v.movedir first in live mode, so just
+        // updating v.angles wouldn't visibly rotate the slide direction.
+        // Spin v.movedir's XY by the same delta so the arrow tracks the
+        // rotation. Vertical sentinels (movedir == ±Z) stay put.
+        {
+            float *md = e->live_ent->v.movedir;
+            if (md[0] != 0.0f || md[1] != 0.0f)
+            {
+                float c = cosf(delta_radians), s = sinf(delta_radians);
+                float nx = md[0] * c - md[1] * s;
+                float ny = md[0] * s + md[1] * c;
+                md[0] = nx;
+                md[1] = ny;
+            }
+        }
     }
 }
 
@@ -699,25 +717,45 @@ void Editor_GizmoMouseMove(float sx, float sy)
         if (step == 0.0f) return;
 
         n_sel = Scene_NumSelected();
-        for (k = 0; k < n_sel; k++)
+        // Yaw rotation applies once per unique entity (not once per
+        // selected brush), and only for axis 2 — avoids multiplying
+        // angle by N when a func_door's N brushes are all selected
+        // via group expansion. yaw_done[i] flips after the first hit
+        // for entity i so subsequent brush entries don't redo it.
         {
-            edit_entity_t *e;
-            if (!Scene_GetSelected(k, &e_idx, &b_idx)) continue;
-            if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
-            e = &edit_scene.entities[e_idx];
-            if (b_idx < 0)
+            int *yaw_done = (s_drag_rotate_axis == 2)
+                ? (int *)calloc(edit_scene.numentities, sizeof(int))
+                : NULL;
+            for (k = 0; k < n_sel; k++)
             {
-                if (s_drag_rotate_axis == 2)
-                    entity_apply_yaw_delta(e, step);
+                edit_entity_t *e;
+                if (!Scene_GetSelected(k, &e_idx, &b_idx)) continue;
+                if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
+                e = &edit_scene.entities[e_idx];
+                if (b_idx >= 0)
+                {
+                    edit_brush_t *bs;
+                    if (b_idx >= e->numbrushes) goto yaw_check;
+                    bs = &e->brushes[b_idx];
+                    if (!bs->valid) goto yaw_check;
+                    Brush_Rotate(bs, s_drag_rotate_axis, step, s_rotate_pivot);
+                }
+yaw_check:
+                if (yaw_done && !yaw_done[e_idx])
+                {
+                    int is_world = (e->classname_idx >= 0
+                                 && !strcmp(e->kv[e->classname_idx].value,
+                                            "worldspawn"));
+                    yaw_done[e_idx] = 1;
+                    // Worldspawn has no semantic angle; rotating its
+                    // brushes shouldn't fabricate one. All other entities
+                    // (point or brush) get their angle/movedir spun so
+                    // the editor arrow tracks the rotation.
+                    if (!is_world)
+                        entity_apply_yaw_delta(e, step);
+                }
             }
-            else
-            {
-                edit_brush_t *bs;
-                if (b_idx >= e->numbrushes) continue;
-                bs = &e->brushes[b_idx];
-                if (!bs->valid) continue;
-                Brush_Rotate(bs, s_drag_rotate_axis, step, s_rotate_pivot);
-            }
+            if (yaw_done) free(yaw_done);
         }
         return;
     }
