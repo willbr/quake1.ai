@@ -648,7 +648,21 @@ void Editor_PushPreviewEntities(void)
         // Engine already renders these — pushing another copy would double
         // the model in the framebuffer. live_static is rendered via the
         // efrag chain (R_StoreEfrags during BSP walk).
-        if (e->live_ent && !e->live_ent->free) continue;
+        //
+        // For live_ent we have to be careful: info_player_* / info_*
+        // metadata entities keep an alive edict (their spawn function is a
+        // no-op) but with v.model = NULL — so the engine *doesn't* render
+        // anything for them. Use cl_entities[N].model as the authoritative
+        // "engine will render this" check, since that's what
+        // CL_RelinkEntities uses to decide whether to push into
+        // cl_visedicts. Only skip when the engine is going to draw
+        // something itself.
+        if (e->live_ent && !e->live_ent->free)
+        {
+            int en = NUM_FOR_EDICT(e->live_ent);
+            if (en > 0 && en < cl.num_entities && cl_entities[en].model)
+                continue;
+        }
         if (e->live_static) continue;
 
         cls = e->kv[e->classname_idx].value;
