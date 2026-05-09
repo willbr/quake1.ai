@@ -121,6 +121,18 @@ int  IG_DragFloat(const char *label, float *v, float speed,
 }
 int  IG_IsItemActivated(void)            { return ImGui::IsItemActivated() ? 1 : 0; }
 int  IG_IsItemDeactivatedAfterEdit(void) { return ImGui::IsItemDeactivatedAfterEdit() ? 1 : 0; }
+int  IG_IsItemHovered(void)              { return ImGui::IsItemHovered() ? 1 : 0; }
+void IG_Image(IG_TextureID tex, float w, float h)
+{
+    ImGui::Image(ImTextureRef((ImTextureID)tex), ImVec2(w, h));
+}
+int  IG_ImageButton(const char *id, IG_TextureID tex, float w, float h)
+{
+    return ImGui::ImageButton(id, ImTextureRef((ImTextureID)tex),
+                              ImVec2(w, h)) ? 1 : 0;
+}
+void IG_BeginTooltip(void) { ImGui::BeginTooltip(); }
+void IG_EndTooltip  (void) { ImGui::EndTooltip();   }
 void IG_PushID_Int(int id)            { ImGui::PushID(id); }
 void IG_PopID(void)                   { ImGui::PopID(); }
 
@@ -138,6 +150,7 @@ void IG_SetKeyboardFocusHere(int offset) { ImGui::SetKeyboardFocusHere(offset); 
 
 // Layout queries
 float IG_GetFrameHeightWithSpacing(void) { return ImGui::GetFrameHeightWithSpacing(); }
+float IG_GetContentRegionAvailX(void)    { return ImGui::GetContentRegionAvail().x; }
 
 // Tables
 int IG_BeginTable(const char *id, int cols, int flags, float ow, float oh)

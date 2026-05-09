@@ -662,7 +662,9 @@ void Editor_Init(void)
 
 void Editor_Shutdown(void)
 {
+    extern void Editor_TexCache_Shutdown(void);
     if (!s_inited) return;
+    Editor_TexCache_Shutdown();
     Scene_Shutdown();
     s_inited = 0;
 }

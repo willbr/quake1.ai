@@ -281,7 +281,8 @@ void VID_SetDefaultMode(void)              {}
 void VID_LockBuffer(void)   {}
 void VID_UnlockBuffer(void) {}
 
-SDL_Window *VID_GetWindow(void) { return sdl_window; }
+SDL_Window   *VID_GetWindow  (void) { return sdl_window;   }
+SDL_Renderer *VID_GetRenderer(void) { return sdl_renderer; }
 
 // Loading disc overlays — not needed with SDL renderer
 void D_BeginDirectRect(int x, int y, byte *pbitmap, int width, int height)

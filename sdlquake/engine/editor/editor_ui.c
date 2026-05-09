@@ -8,6 +8,7 @@
 #include "imgui_bridge.h"
 #include "edit_scene.h"
 #include "edit_history.h"
+#include "edit_texcache.h"
 #include "editor.h"
 #include "editor_internal.h"
 
@@ -15,6 +16,9 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+
+// Toolbar Textures... button toggles this; consumed by draw_texture_browser.
+static int s_show_tex_browser = 0;
 
 // -----------------------------------------------------------------------------
 // Toolbar
@@ -184,6 +188,8 @@ static void draw_toolbar(void)
     if (IG_Button("Redo"))         Cbuf_AddText("editor_redo\n");
     IG_SameLine(0, -1);
     if (IG_Button("Close (F2)"))   Cbuf_AddText("editor\n");
+    IG_SameLine(0, -1);
+    if (IG_Button("Textures..."))  s_show_tex_browser = !s_show_tex_browser;
 
     {
         int style = (int)editor_render_style.value;
@@ -1033,6 +1039,134 @@ static void draw_live_state(edit_entity_t *e)
 }
 
 // -----------------------------------------------------------------------------
+// Texture browser (thumbnail palette)
+// -----------------------------------------------------------------------------
+
+// (s_show_tex_browser declared up by draw_toolbar — see top of file.)
+
+// Click dispatcher shared by the inspector picker and the browser. Same
+// rule both places: with face mode + active face on the primary brush,
+// write to that face's plane only; otherwise rewrite all planes of the
+// primary brush; if no brush is selected, just update the new-cube
+// default cvar.
+static void apply_texture_pick(const char *name)
+{
+    edit_brush_t  *b;
+    int af_e, af_b, af_p;
+    int p_ent, p_brush;
+    int has_active;
+    if (!name || !name[0]) return;
+    has_active = Scene_GetActiveFace(&af_e, &af_b, &af_p);
+    b = Scene_GetSelectedBrush();
+    if (b
+     && has_active
+     && Scene_NumSelected() == 1
+     && Scene_GetSelected(0, &p_ent, &p_brush)
+     && p_ent == af_e && p_brush == af_b
+     && af_p >= 0 && af_p < b->numplanes)
+    {
+        edit_plane_t *pl = &b->planes[af_p];
+        History_Push("face texture");
+        Q_strncpy(pl->texname, name, EDIT_TEX_NAME_LEN - 1);
+        pl->texname[EDIT_TEX_NAME_LEN - 1] = '\0';
+        return;
+    }
+    if (b)
+    {
+        int i;
+        History_Push("brush texture");
+        for (i = 0; i < b->numplanes; i++)
+        {
+            edit_plane_t *pl = &b->planes[i];
+            Q_strncpy(pl->texname, name, EDIT_TEX_NAME_LEN - 1);
+            pl->texname[EDIT_TEX_NAME_LEN - 1] = '\0';
+        }
+        return;
+    }
+    Cvar_Set("editor_brush_tex", (char *)name);
+}
+
+static void draw_texture_browser(void)
+{
+    static char s_filter[64] = "";
+    int n, i;
+    const char *const *names;
+    float thumb = 64.0f, pad = 8.0f, x_avail;
+    int thumbs_per_row, col;
+
+    if (!s_show_tex_browser) return;
+
+    IG_SetNextWindowSize(560, 480, IG_Cond_FirstUseEver);
+    if (!IG_Begin("Textures", &s_show_tex_browser, IG_WF_None))
+    {
+        IG_End();
+        return;
+    }
+
+    names = world_tex_list(&n);
+    if (n == 0)
+    {
+        IG_TextUnformatted("(no map loaded — load a .map then come back)");
+        IG_End();
+        return;
+    }
+
+    {
+        edit_brush_t *b = Scene_GetSelectedBrush();
+        int af_e, af_b, af_p;
+        int has_active = Scene_GetActiveFace(&af_e, &af_b, &af_p);
+        const char *target = (b && has_active) ? "active face only"
+                            : (b ? "ALL brush faces"
+                                 : "default for new cubes");
+        char buf[96];
+        snprintf(buf, sizeof(buf), "click writes to: %s", target);
+        IG_TextUnformatted(buf);
+    }
+
+    IG_SetNextItemWidth(220);
+    IG_InputText("filter##browser", s_filter, sizeof(s_filter), 0);
+
+    x_avail = IG_GetContentRegionAvailX();
+    thumbs_per_row = (int)((x_avail + pad) / (thumb + pad));
+    if (thumbs_per_row < 1) thumbs_per_row = 1;
+
+    IG_BeginChild("##texgrid", 0, 0, 0, 0);
+    col = 0;
+    for (i = 0; i < n; i++)
+    {
+        IG_TextureID tex;
+        if (s_filter[0] && !strstri_simple(names[i], s_filter)) continue;
+        tex = Editor_GetTextureThumbnail(names[i]);
+        IG_PushID_Int(i);
+        if (tex)
+        {
+            if (IG_ImageButton("t", tex, thumb, thumb))
+                apply_texture_pick(names[i]);
+        }
+        else
+        {
+            // Fallback: text-only Selectable when the thumbnail upload
+            // failed (renderer not ready, OOM, etc.).
+            if (IG_Selectable(names[i], 0, 0))
+                apply_texture_pick(names[i]);
+        }
+        if (IG_IsItemHovered())
+        {
+            IG_BeginTooltip();
+            if (tex) IG_Image(tex, 192, 192);
+            IG_TextUnformatted(names[i]);
+            IG_EndTooltip();
+        }
+        IG_PopID();
+        col++;
+        if (col >= thumbs_per_row) col = 0;
+        else                       IG_SameLine(0, pad);
+    }
+    IG_EndChild();
+    IG_End();
+}
+
+// -----------------------------------------------------------------------------
 // Per-face alignment widgets
 // -----------------------------------------------------------------------------
 
@@ -1407,4 +1541,5 @@ void Editor_DrawUI(void)
     draw_toolbar();
     draw_brush_list();
     draw_inspector();
+    draw_texture_browser();
 }

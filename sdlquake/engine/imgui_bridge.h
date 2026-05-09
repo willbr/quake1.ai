@@ -111,9 +111,22 @@ int   IG_DragFloat (const char *label, float *v, float speed,
                     float vmin, float vmax);
 // Item state queries — used to gate per-drag history pushes (snapshot on
 // activate, push on deactivate-after-edit so each drag becomes one undo
-// step, not hundreds).
+// step, not hundreds). IsItemHovered drives tooltip-on-thumbnail UX.
 int   IG_IsItemActivated(void);
 int   IG_IsItemDeactivatedAfterEdit(void);
+int   IG_IsItemHovered(void);
+
+// Image / image button. `tex` is an SDL_Texture* on the SDLRenderer3
+// backend (cast through ImTextureID). Caller owns the texture lifetime;
+// the bridge does not retain it.
+typedef void *IG_TextureID;
+void  IG_Image(IG_TextureID tex, float w, float h);
+int   IG_ImageButton(const char *id, IG_TextureID tex, float w, float h);
+
+// Tooltip on hovered item — pair these around the tooltip body.
+void  IG_BeginTooltip(void);
+void  IG_EndTooltip  (void);
+
 void  IG_PushID_Int(int id);
 void  IG_PopID(void);
 
@@ -127,6 +140,9 @@ void  IG_SetKeyboardFocusHere(int offset);
 
 // Layout queries
 float IG_GetFrameHeightWithSpacing(void);
+// Width of the current window's content region (excluding scrollbar). Used
+// to auto-wrap thumbnail grids when the user resizes the window.
+float IG_GetContentRegionAvailX(void);
 
 // Tables
 int   IG_BeginTable(const char *id, int cols, int flags,
