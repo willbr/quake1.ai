@@ -723,23 +723,24 @@ void Editor_PushPreviewEntities(void)
         if (Editor_EntityHidden(i)) continue;
 
         // View modes:
-        //   live: show what's running. The engine already knows about every
-        //         entity that has a live edict or static counterpart; we
-        //         skip those entirely so live mode = "what the game shows".
-        //         Metadata edicts (info_player_*, info_intermission) are
-        //         alive with v.model=NULL — invisible in the running game,
-        //         so live mode hides them too. Only purely-pending entities
-        //         (just added via Add entity, no live counterpart yet) get
-        //         a preview.
+        //   live: show what's running. Skip the preview when the engine is
+        //         actually going to draw the entity (cl_entities[N].model
+        //         non-NULL) so we don't double-render. Metadata edicts
+        //         like info_player_* are alive with v.model=NULL — engine
+        //         draws nothing — so we still preview them as useful
+        //         editor markers (the user can hide via the SPAWN /
+        //         INFO category filters if they're cluttering).
         //   map:  show what the .map text says. Push a preview at the .map
-        //         origin and scrub the engine's cl_visedicts entry for this
-        //         entity so the live model doesn't double-draw.
-        if (view_map)
+        //         origin and scrub the engine's cl_visedicts entry for
+        //         this entity so the live model doesn't double-draw.
+        if (e->live_ent && !e->live_ent->free)
         {
-            if (e->live_ent && !e->live_ent->free)
+            int en = NUM_FOR_EDICT(e->live_ent);
+            int engine_renders =
+                (en > 0 && en < cl.num_entities && cl_entities[en].model);
+            if (engine_renders)
             {
-                int en = NUM_FOR_EDICT(e->live_ent);
-                if (en > 0 && en < cl.num_entities && cl_entities[en].model)
+                if (view_map)
                 {
                     int k;
                     for (k = 0; k < cl_numvisedicts; k++)
@@ -750,19 +751,18 @@ void Editor_PushPreviewEntities(void)
                             break;
                         }
                     }
+                    // fall through to push preview at .map origin
+                }
+                else
+                {
+                    continue;   // live: engine draws it, we skip
                 }
             }
-            // SV_MakeStatic'd ents (torches) don't move so .map == efrag
-            // position; the efrag chain already draws them at the .map
-            // origin, no preview needed and we'd have to walk the chain to
-            // scrub them anyway.
-            if (e->live_static) continue;
         }
-        else
-        {
-            if (e->live_ent && !e->live_ent->free) continue;
-            if (e->live_static) continue;
-        }
+        // SV_MakeStatic'd ents (torches) don't move so .map == efrag
+        // position; the efrag chain draws them in both modes, no preview
+        // needed and we'd have to walk the chain to scrub them anyway.
+        if (e->live_static) continue;
 
         cls = e->kv[e->classname_idx].value;
         ci  = find_class(cls);
@@ -964,10 +964,8 @@ static void draw_angle_arrows(void)
     const float arrow_len = 48.0f;     // 3 build grid cells; reads well
                                        // beyond a typical 32-unit bbox
 
-    extern cvar_t editor_view_mode;
     extern cvar_t editor_show_angles;
-    int view_live = (int)editor_view_mode.value == 0;
-    int show_all  = editor_show_angles.value != 0.0f;
+    int show_all = editor_show_angles.value != 0.0f;
 
     for (i = 0; i < edit_scene.numentities; i++)
     {
@@ -986,24 +984,6 @@ static void draw_angle_arrows(void)
         // an entity always reveals its facing/movedir even when the
         // global "angles" checkbox is off.
         if (!show_all && !sel) continue;
-
-        // Live mode: if the engine isn't going to draw a model and the
-        // bbox is suppressed (entity has a registered preview model so
-        // the bbox-pass skipped it), there's nothing visible to anchor
-        // the arrow on — skip so we don't float an orphan in space.
-        // info_player_* / info_intermission edicts are alive with
-        // v.model=NULL and trigger this case.
-        if (view_live && !sel && e->live_ent && !e->live_ent->free)
-        {
-            const char *cls = (e->classname_idx >= 0)
-                            ? e->kv[e->classname_idx].value : NULL;
-            if (classname_to_model(cls))
-            {
-                int en = NUM_FOR_EDICT(e->live_ent);
-                if (en > 0 && en < cl.num_entities && !cl_entities[en].model)
-                    continue;
-            }
-        }
 
         for (j = 0; j < 3; j++) b[j] = a[j] + dir[j] * arrow_len;
 
