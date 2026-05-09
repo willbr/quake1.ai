@@ -145,6 +145,32 @@ static void draw_toolbar(void)
     }
     IG_SameLine(0, -1);
     {
+        // Per-entity facing / movedir arrow visibility. Selection always
+        // overrides — a clicked entity shows its arrow either way.
+        extern cvar_t editor_show_angles;
+        int on = editor_show_angles.value != 0.0f;
+        if (IG_Checkbox("angles", &on))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_show_angles %d\n", on ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        // Target / killtarget link visibility. Selection overrides per
+        // pair — a link from or to a selected ent is always drawn.
+        extern cvar_t editor_show_links;
+        int on = editor_show_links.value != 0.0f;
+        if (IG_Checkbox("links", &on))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_show_links %d\n", on ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
         // Snap toggle. Cvar is float; treat any non-zero as on.
         int snap = editor_grid_snap.value != 0.0f;
         if (IG_Checkbox("snap", &snap))

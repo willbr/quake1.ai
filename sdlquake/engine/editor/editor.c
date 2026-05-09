@@ -81,6 +81,14 @@ cvar_t      editor_grid_absolute = { "editor_grid_absolute", "1" };
 // .map origin). Default live so the editor opens looking like the game.
 cvar_t      editor_view_mode     = { "editor_view_mode", "0" };
 
+// Overlay toggles for the per-entity facing/movedir arrows and the
+// target/killtarget link arrows. Selection always overrides — clicking
+// an entity reveals its own arrow + the links touching it even when
+// the global toggle is off. Default both on so first-time users see
+// what's available.
+cvar_t      editor_show_angles   = { "editor_show_angles", "1" };
+cvar_t      editor_show_links    = { "editor_show_links",  "1" };
+
 static int     s_lookmode      = 0;
 static int     s_camera_inited = 0;
 static vec3_t  s_cam_origin;
@@ -559,6 +567,8 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_grid_size);
     Cvar_RegisterVariable(&editor_grid_absolute);
     Cvar_RegisterVariable(&editor_view_mode);
+    Cvar_RegisterVariable(&editor_show_angles);
+    Cvar_RegisterVariable(&editor_show_links);
 
     {
         extern void Editor_RegisterCvars(void);

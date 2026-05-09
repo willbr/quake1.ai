@@ -965,7 +965,9 @@ static void draw_angle_arrows(void)
                                        // beyond a typical 32-unit bbox
 
     extern cvar_t editor_view_mode;
+    extern cvar_t editor_show_angles;
     int view_live = (int)editor_view_mode.value == 0;
+    int show_all  = editor_show_angles.value != 0.0f;
 
     for (i = 0; i < edit_scene.numentities; i++)
     {
@@ -979,6 +981,11 @@ static void draw_angle_arrows(void)
         if (!entity_angle_dir(e, dir)) continue;
 
         sel = entity_is_selected(i);
+
+        // Toolbar toggle gates everything except selected ents — clicking
+        // an entity always reveals its facing/movedir even when the
+        // global "angles" checkbox is off.
+        if (!show_all && !sel) continue;
 
         // Live mode: if the engine isn't going to draw a model and the
         // bbox is suppressed (entity has a registered preview model so
@@ -1013,6 +1020,8 @@ static void draw_angle_arrows(void)
 // runs only while the editor is open + paused, on ≤ a few hundred ents.
 static void draw_target_links(void)
 {
+    extern cvar_t editor_show_links;
+    int show_all = editor_show_links.value != 0.0f;
     int i, j, k, m;
     vec3_t a, b;
 
@@ -1038,19 +1047,23 @@ static void draw_target_links(void)
             for (k = 0; k < edit_scene.numentities; k++)
             {
                 edit_entity_t *t;
+                int dst_sel, either_sel;
                 if (k == i) continue;
                 t = &edit_scene.entities[k];
                 if (Editor_EntityHidden(k)) continue;
+                dst_sel    = entity_is_selected(k);
+                either_sel = src_sel || dst_sel;
+                // Toolbar toggle gates everything except links touching
+                // the selection — a clicked entity always shows its
+                // outgoing AND incoming links even when "links" is off.
+                if (!show_all && !either_sel) continue;
                 for (m = 0; m < t->numkv; m++)
                 {
                     if (!strcmp(t->kv[m].key, "targetname")
                      && !strcmp(t->kv[m].value, val))
                     {
                         if (Editor_EntityAnchor(t, b))
-                        {
-                            int through = src_sel || entity_is_selected(k);
-                            draw_link_arrow(a, b, color, through);
-                        }
+                            draw_link_arrow(a, b, color, either_sel);
                         break;
                     }
                 }
