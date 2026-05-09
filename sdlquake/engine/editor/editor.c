@@ -227,6 +227,104 @@ static void Editor_Cmd_Undo_f(void)
     if (!History_Undo()) Con_Printf("editor: nothing to undo\n");
 }
 
+// qbsp's WriteMiptex resolves the worldspawn "wad" key with raw fopen,
+// so any referenced WAD file must exist on the real filesystem at
+// <gamedir>/<wad>. Quake's WADs live inside id1/pak0.pak and are read
+// by the engine via COM_LoadFile; qbsp can't see them. This helper
+// pulls each named WAD out of the PAK on demand and drops a copy on
+// disk so qbsp finds it. Once written, the file persists across
+// sessions.
+static int extract_wad_from_pak(const char *wad_relpath)
+{
+    char  abs_path[1024];
+    FILE *f;
+    byte *bytes;
+    int   size;
+    int   i;
+
+    snprintf(abs_path, sizeof(abs_path), "%s/%s", com_gamedir, wad_relpath);
+
+    f = fopen(abs_path, "rb");
+    if (f) { fclose(f); return 0; }       /* already on disk */
+
+    bytes = COM_LoadHunkFile((char *)wad_relpath);
+    if (!bytes)
+    {
+        Con_Printf("editor_compile: %s missing from disk and PAK\n",
+                   wad_relpath);
+        return 1;
+    }
+    size = com_filesize;
+
+    /* mkdir parents (one level up — gfx/ etc) */
+    {
+        char dir[1024];
+        Q_strncpy(dir, abs_path, sizeof(dir) - 1);
+        dir[sizeof(dir) - 1] = '\0';
+        for (i = (int)strlen(dir) - 1; i > 0; i--)
+        {
+            if (dir[i] == '/' || dir[i] == '\\') { dir[i] = '\0'; break; }
+        }
+        Sys_mkdir(dir);                   /* engine helper; ok if exists */
+    }
+
+    f = fopen(abs_path, "wb");
+    if (!f)
+    {
+        Con_Printf("editor_compile: can't write %s\n", abs_path);
+        return 1;
+    }
+    fwrite(bytes, 1, size, f);
+    fclose(f);
+    Con_Printf("editor_compile: extracted %s (%d bytes)\n", wad_relpath, size);
+    return 0;
+}
+
+// Scan a .map's worldspawn for the "wad" key value; semicolon-separated
+// list of relative WAD paths. Extract each from the PAK so qbsp can
+// load them. Quake-1 maps typically reference one WAD ("gfx/base.wad");
+// some custom maps multi-list with ";" — handle both.
+static void extract_wads_for_map(const char *map_path)
+{
+    FILE *f;
+    char  buf[8192];
+    int   nread;
+    char *p, *end;
+
+    f = fopen(map_path, "rb");
+    if (!f) return;
+    nread = (int)fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    if (nread <= 0) return;
+    buf[nread] = '\0';
+
+    /* Worldspawn is the first entity; "wad" key is in its kv list near
+     * the top. Substring scan is fine — qbsp does the proper parse
+     * later. */
+    p = strstr(buf, "\"wad\"");
+    if (!p) return;
+    p += 5;
+    while (*p && *p != '"') p++;
+    if (!*p) return;
+    p++;                                  /* skip opening quote */
+    end = strchr(p, '"');
+    if (!end) return;
+    *end = '\0';
+
+    while (*p)
+    {
+        char  one[256];
+        char *semi = strchr(p, ';');
+        size_t n = semi ? (size_t)(semi - p) : strlen(p);
+        if (n >= sizeof(one)) n = sizeof(one) - 1;
+        memcpy(one, p, n);
+        one[n] = '\0';
+        if (one[0]) extract_wad_from_pak(one);
+        if (!semi) break;
+        p = semi + 1;
+    }
+}
+
 // Compile the current edit_scene's .map through the in-process qbsp
 // library, register the resulting .bsp bytes as a virtual file, and
 // restart the map so the engine loads the freshly compiled geometry.
@@ -243,6 +341,7 @@ static void Editor_Cmd_Compile_f(void)
     void *bytes = NULL;
     int   size  = 0;
     int   rc;
+    qbsp_options_t opts;
 
     if (!edit_scene.mapname[0])
     {
@@ -260,9 +359,16 @@ static void Editor_Cmd_Compile_f(void)
         Con_Printf("editor_compile: save to %s failed\n", map_path);
         return;
     }
+
+    /* qbsp's WAD lookup uses raw fopen — extract any PAK-only WADs to
+     * disk so it can find them. One-time per WAD per gamedir. */
+    extract_wads_for_map(map_path);
+
     Con_Printf("editor_compile: saved %s; running qbsp...\n", map_path);
 
-    rc = qbsp_compile_to_memory(map_path, &bytes, &size, NULL);
+    memset(&opts, 0, sizeof(opts));
+    opts.gamedir = com_gamedir;
+    rc = qbsp_compile_to_memory(map_path, &bytes, &size, &opts);
     if (rc != 0 || !bytes)
     {
         Con_Printf("editor_compile: qbsp failed (rc=%d)\n", rc);

@@ -43,6 +43,7 @@ extern qboolean usehulls;
 extern int      subdivide_size;
 extern int      hullnum;
 extern char    *argv0;
+extern char     gamedir[1024];
 extern void     ProcessFile(char *sourcename, char *destname);
 
 /* Macro renames printf -> qbsp_con_print in qbsp_namespace.h; this is
@@ -77,6 +78,7 @@ static void reset_options_defaults(void)
 
 static void apply_options(const qbsp_options_t *opts)
 {
+    gamedir[0] = '\0';     /* default: empty, WAD lookups fail relative */
     if (!opts) return;
     if (opts->notjunc)  notjunc = true;
     if (opts->nofill)   nofill  = true;
@@ -84,6 +86,13 @@ static void apply_options(const qbsp_options_t *opts)
     if (opts->onlyents) onlyents = true;
     if (opts->verbose)  allverbose = true;
     if (opts->subdivide > 0) subdivide_size = opts->subdivide;
+    if (opts->gamedir && opts->gamedir[0])
+    {
+        size_t n = strlen(opts->gamedir);
+        if (n >= sizeof(gamedir)) n = sizeof(gamedir) - 1;
+        memcpy(gamedir, opts->gamedir, n);
+        gamedir[n] = '\0';
+    }
 }
 
 /*

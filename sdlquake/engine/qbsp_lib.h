@@ -31,6 +31,11 @@ typedef struct {
     int onlyents;       /* re-emit just the entity lump on top of an existing .bsp */
     int verbose;        /* -verbose */
     int subdivide;      /* surface subdivision threshold; 0 = qbsp default (240) */
+    /* Game dir qbsp uses to resolve relative WAD references in the
+     * worldspawn's "wad" key. WriteMiptex builds `<gamedir>/<wad>` and
+     * fopens. NULL or empty = leave qbsp's gamedir empty (legacy
+     * behaviour; fails on any map with a wad key). */
+    const char *gamedir;
 } qbsp_options_t;
 
 /*
