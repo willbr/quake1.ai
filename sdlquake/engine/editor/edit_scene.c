@@ -934,6 +934,120 @@ void Scene_GroupSelected(void)
     Con_Printf("editor: grouped %d brushes into func_group\n", n_moved);
 }
 
+int Scene_WrapBrushesIntoEntity(const char *classname)
+{
+    int     i, n, n_moved = 0;
+    int     new_ent_idx;
+    int     have_brush = 0;
+    vec3_t  cmin = { 0, 0, 0 }, cmax = { 0, 0, 0 };
+    vec3_t  origin;
+    edit_entity_t wrap_e;
+    edit_selref_t *snap;
+
+    if (!classname || !classname[0]) return 0;
+    if (edit_scene.num_selected == 0)
+    {
+        Con_Printf("editor: nothing selected to wrap\n");
+        return 0;
+    }
+
+    // Pre-compute origin over the selected brushes' bboxes BEFORE any
+    // moves so the math is stable. Skip selection entries that aren't
+    // actually brushes (b == -1, point entity).
+    for (i = 0; i < edit_scene.num_selected; i++)
+    {
+        edit_selref_t s = edit_scene.selection[i];
+        edit_brush_t *b;
+        int k;
+        if (s.entity < 0 || s.entity >= edit_scene.numentities) continue;
+        if (s.brush  < 0) continue;
+        if (s.brush  >= edit_scene.entities[s.entity].numbrushes) continue;
+        b = &edit_scene.entities[s.entity].brushes[s.brush];
+        if (!b->valid) continue;
+        for (k = 0; k < 3; k++)
+        {
+            float mid = (b->mins[k] + b->maxs[k]) * 0.5f;
+            if (!have_brush)
+            {
+                cmin[k] = cmax[k] = mid;
+            }
+            else
+            {
+                if (mid < cmin[k]) cmin[k] = mid;
+                if (mid > cmax[k]) cmax[k] = mid;
+            }
+        }
+        have_brush = 1;
+    }
+    if (!have_brush)
+    {
+        Con_Printf("editor: wrap: no brushes in selection\n");
+        return 0;
+    }
+    for (i = 0; i < 3; i++)
+        origin[i] = (cmin[i] + cmax[i]) * 0.5f;
+
+    // Build the wrapper entity (kv: classname + origin).
+    memset(&wrap_e, 0, sizeof(wrap_e));
+    wrap_e.kv = (edit_kv_t *)calloc(2, sizeof(edit_kv_t));
+    Q_strncpy(wrap_e.kv[0].key,   "classname", EDIT_KEY_LEN - 1);
+    Q_strncpy(wrap_e.kv[0].value, classname,   EDIT_VAL_LEN - 1);
+    Q_strncpy(wrap_e.kv[1].key,   "origin",    EDIT_KEY_LEN - 1);
+    snprintf  (wrap_e.kv[1].value, EDIT_VAL_LEN, "%g %g %g",
+               origin[0], origin[1], origin[2]);
+    wrap_e.numkv         = 2;
+    wrap_e.classname_idx = 0;
+    wrap_e.origin_idx    = 1;
+
+    edit_scene.entities = (edit_entity_t *)realloc(edit_scene.entities,
+        (edit_scene.numentities + 1) * sizeof(edit_entity_t));
+    new_ent_idx = edit_scene.numentities;
+    edit_scene.entities[new_ent_idx] = wrap_e;
+    edit_scene.numentities++;
+
+    // Snapshot selection (only brush refs — point selrefs were filtered
+    // out implicitly by the move loop's b < 0 check below).
+    n = edit_scene.num_selected;
+    snap = (edit_selref_t *)malloc(n * sizeof(edit_selref_t));
+    for (i = 0; i < n; i++) snap[i] = edit_scene.selection[i];
+
+    // Reverse-index sort, mirroring Scene_GroupSelected.
+    {
+        int a, c;
+        for (a = 0; a < n; a++)
+            for (c = a + 1; c < n; c++)
+            {
+                int swap = 0;
+                if (snap[a].entity < snap[c].entity) swap = 1;
+                else if (snap[a].entity == snap[c].entity
+                         && snap[a].brush < snap[c].brush) swap = 1;
+                if (swap)
+                {
+                    edit_selref_t t = snap[a]; snap[a] = snap[c]; snap[c] = t;
+                }
+            }
+    }
+
+    for (i = 0; i < n; i++)
+    {
+        int src_ent = snap[i].entity;
+        if (src_ent == new_ent_idx) continue;
+        if (src_ent < 0 || src_ent >= edit_scene.numentities) continue;
+        if (snap[i].brush < 0) continue;        // point selref, skip
+        if (snap[i].brush >= edit_scene.entities[src_ent].numbrushes) continue;
+        move_brush(&edit_scene.entities[src_ent], snap[i].brush,
+                   &edit_scene.entities[new_ent_idx]);
+        n_moved++;
+    }
+    free(snap);
+
+    Scene_SelectionClear();
+    Scene_SelectionAdd(new_ent_idx, 0);
+
+    Con_Printf("editor: wrapped %d brushes into %s\n", n_moved, classname);
+    return 1;
+}
+
 void Scene_UngroupSelected(void)
 {
     int i, n, n_moved = 0;

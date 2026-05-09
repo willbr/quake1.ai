@@ -22,6 +22,8 @@
 static int s_show_tex_browser = 0;
 // Toolbar "Add Entity..." button toggles this; consumed by draw_spawn_dialog.
 static int s_show_spawn_dialog = 0;
+// Toolbar "Wrap..." button toggles this; consumed by draw_wrap_dialog.
+static int s_show_wrap_dialog = 0;
 
 // -----------------------------------------------------------------------------
 // Toolbar
@@ -163,6 +165,8 @@ static void draw_toolbar(void)
     if (IG_Button("Textures..."))  s_show_tex_browser = !s_show_tex_browser;
     IG_SameLine(0, -1);
     if (IG_Button("Add Entity..."))s_show_spawn_dialog = !s_show_spawn_dialog;
+    IG_SameLine(0, -1);
+    if (IG_Button("Wrap..."))      s_show_wrap_dialog  = !s_show_wrap_dialog;
 
     {
         int style = (int)editor_render_style.value;
@@ -1055,6 +1059,88 @@ static void draw_spawn_dialog(void)
     IG_End();
 }
 
+// Brush-entity classname heuristic: func_*, trigger_*, misc_teleporttrain.
+// Anything else in s_spawns[] is point-entity territory (lights, monsters,
+// items, info_*, ambient_*, ...). The handful of trigger_* point entities
+// (trigger_relay, trigger_setskill) leak through but a user wrapping
+// brushes into them just gets a no-op spawn function — harmless.
+static int classname_is_brush_entity(const char *cls)
+{
+    if (!cls) return 0;
+    if (!strncmp(cls, "func_",    5)) return 1;
+    if (!strncmp(cls, "trigger_", 8)) return 1;
+    return 0;
+}
+
+// -----------------------------------------------------------------------------
+// Wrap dialog (selected brushes -> new func_*/trigger_* entity)
+// -----------------------------------------------------------------------------
+
+static void draw_wrap_dialog(void)
+{
+    static char s_filter[64] = "";
+    int n = 0, i, n_brush_classes = 0;
+    const char *const *names;
+    edit_brush_t *primary;
+
+    if (!s_show_wrap_dialog) return;
+
+    IG_SetNextWindowSize(360, 480, IG_Cond_FirstUseEver);
+    if (!IG_Begin("Wrap Brushes", &s_show_wrap_dialog, IG_WF_None))
+    {
+        IG_End();
+        return;
+    }
+
+    primary = Scene_GetSelectedBrush();
+    if (!primary)
+    {
+        IG_TextUnformatted("(select at least one brush, then pick a classname)");
+        IG_End();
+        return;
+    }
+
+    {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "wrapping %d brush%s into a new entity",
+                 Scene_NumSelected(),
+                 Scene_NumSelected() == 1 ? "" : "es");
+        IG_TextUnformatted(buf);
+    }
+
+    names = Editor_ClassList_Get(&n);
+    if (!names || n == 0)
+    {
+        IG_TextUnformatted("(game DLL not loaded — start a server then retry)");
+        IG_End();
+        return;
+    }
+
+    IG_SetNextItemWidth(220);
+    IG_InputText("filter##wrap", s_filter, sizeof(s_filter), 0);
+
+    IG_BeginChild("##wrap_grid", 0, 0, 0, 0);
+    for (i = 0; i < n; i++)
+    {
+        if (!classname_is_brush_entity(names[i])) continue;
+        if (s_filter[0] && !strstri_simple(names[i], s_filter)) continue;
+        n_brush_classes++;
+        IG_PushID_Int(i);
+        if (IG_Selectable(names[i], 0, 0))
+        {
+            History_Push("wrap entity");
+            Scene_WrapBrushesIntoEntity(names[i]);
+            s_show_wrap_dialog = 0;
+        }
+        IG_PopID();
+    }
+    IG_EndChild();
+    if (n_brush_classes == 0)
+        IG_TextUnformatted("(no func_*/trigger_* classes match your filter)");
+    IG_End();
+}
+
 // -----------------------------------------------------------------------------
 // Texture browser (thumbnail palette)
 // -----------------------------------------------------------------------------
@@ -1615,4 +1701,5 @@ void Editor_DrawUI(void)
     draw_inspector();
     draw_texture_browser();
     draw_spawn_dialog();
+    draw_wrap_dialog();
 }

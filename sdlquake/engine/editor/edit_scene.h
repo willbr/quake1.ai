@@ -255,6 +255,14 @@ void  Scene_ClearActiveFace (void);
 void  Scene_GroupSelected   (void);
 void  Scene_UngroupSelected (void);
 
+// Wrap every selected brush into a new entity with the given classname
+// (e.g. func_door, func_button, func_train). Origin is the centroid of
+// the selected brushes' AABB midpoints — what id maps use for movers'
+// rotation pivot. Selection becomes the new entity. Caller pushes
+// History before invoking. Returns 1 on success, 0 if no brushes were
+// selected or classname is empty.
+int   Scene_WrapBrushesIntoEntity(const char *classname);
+
 // Iterate every brush with its owning entity. cb returns 0 to stop.
 typedef int (*Scene_BrushIter_fn)(edit_entity_t *e, int e_idx,
                                   edit_brush_t *b, int b_idx, void *user);
