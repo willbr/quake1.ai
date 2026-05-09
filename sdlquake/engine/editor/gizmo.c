@@ -20,17 +20,22 @@ extern vec3_t r_origin;
 // Drag state
 // -----------------------------------------------------------------------------
 
-// Two mutually exclusive drag modes:
+// Three mutually exclusive drag modes:
 //   axis-translate: s_drag_axis = 0/1/2 (X/Y/Z)
 //   face-resize:    s_drag_plane_idx >= 0 (the plane being pushed along normal)
+//   axis-rotate:    s_drag_rotate_axis = 0/1/2 (X/Y/Z) — rotation around that
+//                   world axis, pivot is selection centroid at drag start
 // Whichever is non-negative is the active drag.
 static int      s_drag_axis = -1;
 static int      s_drag_plane_idx = -1;
+static int      s_drag_rotate_axis = -1;
 static float    s_drag_t_start;         // closest-t-on-drag-line at mouse down
 static float    s_drag_applied;         // sum of grid-snapped offsets applied so far
 static vec3_t   s_drag_origin;          // brush centroid (translate) / face centroid (resize) at mouse down
 static vec3_t   s_drag_dir;             // axis basis vec (translate) / face normal (resize)
 static float    s_drag_start_dist;      // plane.dist at drag start (face-resize only — for absolute snap)
+static vec3_t   s_rotate_pivot;         // selection centroid captured at rotate-drag start
+static float    s_rotate_prev_angle;    // last frame's mouse angle in radians, for incremental step rotation
 
 extern cvar_t   editor_grid_snap;
 extern cvar_t   editor_grid_size;
@@ -124,6 +129,130 @@ static void axis_endpoint(const vec3_t centroid, int axis, float arrow_len, vec3
 {
     VectorCopy(centroid, out);
     out[axis] += arrow_len;
+}
+
+// Intersect a ray with the world-axis-aligned plane through `pivot`
+// perpendicular to `axis` (0=X, 1=Y, 2=Z). Writes the intersection point
+// to `out`. Returns 1 on hit (front of camera), 0 if ray is parallel to
+// the plane or behind.
+static int ray_vs_axis_plane(int axis, const vec3_t pivot,
+                             const vec3_t r_org, const vec3_t r_dir,
+                             vec3_t out)
+{
+    float denom = r_dir[axis];
+    float t;
+    if (fabsf(denom) < 1e-6f) return 0;
+    t = (pivot[axis] - r_org[axis]) / denom;
+    if (t < 0.0f) return 0;
+    out[0] = r_org[0] + r_dir[0] * t;
+    out[1] = r_org[1] + r_dir[1] * t;
+    out[2] = r_org[2] + r_dir[2] * t;
+    return 1;
+}
+
+// Mouse-cursor angle on the rotation plane perpendicular to `axis` at
+// `pivot`. Returns 1 with `out_angle` set in radians (atan2 range), 0 if
+// the ray doesn't meet the plane in front of the camera.
+static int rotate_mouse_angle(int axis, const vec3_t pivot,
+                              const vec3_t r_org, const vec3_t r_dir,
+                              float *out_angle)
+{
+    vec3_t hit;
+    int u, v;
+    if (!ray_vs_axis_plane(axis, pivot, r_org, r_dir, hit)) return 0;
+    u = (axis + 1) % 3;
+    v = (axis + 2) % 3;
+    *out_angle = atan2f(hit[v] - pivot[v], hit[u] - pivot[u]);
+    return 1;
+}
+
+// Wrap a delta angle into (-PI, PI] so a drag that crosses the atan2
+// branch cut (e.g. user sweeps from 179° to -179°) reads as a -2° step
+// rather than a +358° step.
+static float wrap_delta(float d)
+{
+    const float PI = 3.14159265f;
+    while (d >  PI) d -= 2.0f * PI;
+    while (d < -PI) d += 2.0f * PI;
+    return d;
+}
+
+// Push a yaw delta into a point entity. Reads existing pitch/yaw/roll from
+// "angles" or scalar "angle" (anglehack: -1=up, -2=down sentinels collapse
+// to 0 on first rotation since you can't sensibly rotate them). Writes
+// back as scalar "angle" when pitch and roll are both zero (matches vanilla
+// .map convention) or as full "angles" vec3 otherwise. Live edict's
+// v.angles is also synced so the engine renders the new orientation
+// immediately.
+static void entity_apply_yaw_delta(edit_entity_t *e, float delta_radians)
+{
+    int k;
+    int angles_idx = -1, angle_idx = -1;
+    float pitch = 0, yaw = 0, roll = 0;
+    char buf[64];
+
+    for (k = 0; k < e->numkv; k++)
+    {
+        if      (!strcmp(e->kv[k].key, "angles")) angles_idx = k;
+        else if (!strcmp(e->kv[k].key, "angle"))  angle_idx  = k;
+    }
+
+    if (angles_idx >= 0)
+    {
+        sscanf(e->kv[angles_idx].value, "%f %f %f", &pitch, &yaw, &roll);
+    }
+    else if (angle_idx >= 0)
+    {
+        float a = (float)atof(e->kv[angle_idx].value);
+        if (a == -1.0f || a == -2.0f) yaw = 0;     // sentinel; collapse on first rotation
+        else                          yaw = a;
+    }
+
+    yaw += delta_radians * (180.0f / 3.14159265f);
+    while (yaw >= 360.0f) yaw -= 360.0f;
+    while (yaw <    0.0f) yaw += 360.0f;
+
+    if (pitch == 0.0f && roll == 0.0f)
+    {
+        snprintf(buf, sizeof(buf), "%g", yaw);
+        Entity_SetKV(e, "angle", buf);
+    }
+    else
+    {
+        snprintf(buf, sizeof(buf), "%g %g %g", pitch, yaw, roll);
+        Entity_SetKV(e, "angles", buf);
+    }
+
+    if (e->live_ent && !e->live_ent->free)
+    {
+        e->live_ent->v.angles[0] = pitch;
+        e->live_ent->v.angles[1] = yaw;
+        e->live_ent->v.angles[2] = roll;
+    }
+}
+
+// Polyline ring (24 segments) at `radius` perpendicular to `axis` through
+// `pivot`. Drawn with depth-bypass like the rest of the gizmo handles so
+// it's pickable even behind a wall.
+static void draw_rotation_ring(const vec3_t pivot, int axis,
+                               float radius, byte color)
+{
+    enum { N = 24 };
+    int u = (axis + 1) % 3;
+    int v = (axis + 2) % 3;
+    vec3_t prev = {0, 0, 0}, p;
+    int i;
+    const float twopi = 6.2831853f;
+    for (i = 0; i <= N; i++)
+    {
+        float t  = (float)i * twopi / (float)N;
+        float ct = cosf(t), st = sinf(t);
+        VectorCopy(pivot, p);
+        p[u] = pivot[u] + radius * ct;
+        p[v] = pivot[v] + radius * st;
+        if (i > 0) Editor_DrawLine3DOver(prev, p, color);
+        VectorCopy(p, prev);
+    }
 }
 
 static void face_centroid(const edit_face_t *f, vec3_t out)
@@ -335,6 +464,20 @@ void Editor_GizmoDraw(void)
             }
         }
     }
+
+    // Rotation rings — three circles, one per world axis, at the pivot
+    // (= centroid). Radius matches the translate-arrow length so the rings
+    // outline the arrow tips. The active rotate axis (during a drag) goes
+    // hot-white; otherwise each ring takes its axis colour.
+    {
+        float ring_r = arrow_len;
+        for (i = 0; i < 3; i++)
+        {
+            byte col = (s_drag_rotate_axis == i)
+                       ? EDIT_COLOR_AXIS_HOT : axis_colors[i];
+            draw_rotation_ring(centroid, i, ring_r, col);
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -348,9 +491,9 @@ int Editor_GizmoMouseDown(float sx, float sy)
     edit_brush_t *b = NULL;
     vec3_t centroid;
     vec3_t r_org, r_dir;
-    float dist, arrow_len, pick_world;
-    int i, best_axis = -1, best_face = -1;
-    float best_d_axis = 1e30f, best_d_face = 1e30f;
+    float dist, arrow_len, ring_r, pick_world;
+    int i, best_axis = -1, best_face = -1, best_ring_axis = -1;
+    float best_d_axis = 1e30f, best_d_face = 1e30f, best_d_ring = 1e30f;
     int multi = Scene_NumSelected() > 1;
 
     if (multi)
@@ -368,7 +511,8 @@ int Editor_GizmoMouseDown(float sx, float sy)
         dist = sqrtf(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
         if (dist < 1.0f) dist = 1.0f;
     }
-    arrow_len = pixel_to_world(dist) * 30.0f;
+    arrow_len  = pixel_to_world(dist) * 30.0f;
+    ring_r     = arrow_len;             // matches draw_rotation_ring
     pick_world = pixel_to_world(dist) * GIZMO_PICK_PIXELS;
 
     Editor_ScreenToRay(sx, sy, r_org, r_dir);
@@ -392,7 +536,31 @@ int Editor_GizmoMouseDown(float sx, float sy)
         }
     }
 
-    // Pass 2: translate-axis arrows.
+    // Pass 2: rotation rings. For each axis, intersect the click ray with
+    // the world-axis-aligned plane through the centroid (perpendicular to
+    // that axis); if the in-plane radial distance is close to ring_r, hit.
+    for (i = 0; i < 3; i++)
+    {
+        vec3_t hit;
+        float du, dv, r_in;
+        int u, v;
+        if (!ray_vs_axis_plane(i, centroid, r_org, r_dir, hit)) continue;
+        u = (i + 1) % 3;
+        v = (i + 2) % 3;
+        du = hit[u] - centroid[u];
+        dv = hit[v] - centroid[v];
+        r_in = sqrtf(du * du + dv * dv);
+        {
+            float d = fabsf(r_in - ring_r);
+            if (d < pick_world && d < best_d_ring)
+            {
+                best_d_ring  = d;
+                best_ring_axis = i;
+            }
+        }
+    }
+
+    // Pass 3: translate-axis arrows.
     for (i = 0; i < 3; i++)
     {
         vec3_t l_dir = {0,0,0};
@@ -412,7 +580,9 @@ int Editor_GizmoMouseDown(float sx, float sy)
         }
     }
 
-    // Face picks win over axis picks (the user clicked on the brush surface).
+    // Priority: face > ring > arrow. The user clicked on a brush surface
+    // (face) for resize, an outer ring for rotate, or an inner arrow for
+    // translate — the visual order matches.
     if (best_face >= 0)
     {
         const edit_face_t *f = &b->faces[best_face];
@@ -423,6 +593,7 @@ int Editor_GizmoMouseDown(float sx, float sy)
         History_Push("resize face");
         s_drag_axis      = -1;
         s_drag_plane_idx = f->plane_idx;
+        s_drag_rotate_axis = -1;
         VectorCopy(fc, s_drag_origin);
         VectorCopy(pl->normal, s_drag_dir);
         s_drag_start_dist = pl->dist;
@@ -430,11 +601,24 @@ int Editor_GizmoMouseDown(float sx, float sy)
         s_drag_applied    = 0.0f;
         return 1;
     }
+    if (best_ring_axis >= 0)
+    {
+        History_Push("rotate");
+        s_drag_axis        = -1;
+        s_drag_plane_idx   = -1;
+        s_drag_rotate_axis = best_ring_axis;
+        VectorCopy(centroid, s_rotate_pivot);
+        if (!rotate_mouse_angle(best_ring_axis, s_rotate_pivot, r_org, r_dir,
+                                &s_rotate_prev_angle))
+            s_rotate_prev_angle = 0;
+        return 1;
+    }
     if (best_axis < 0) return 0;
 
     History_Push("translate");
     s_drag_axis      = best_axis;
     s_drag_plane_idx = -1;
+    s_drag_rotate_axis = -1;
     VectorCopy(centroid, s_drag_origin);
     {
         s_drag_dir[0] = s_drag_dir[1] = s_drag_dir[2] = 0;
@@ -463,9 +647,53 @@ void Editor_GizmoMouseMove(float sx, float sy)
     vec3_t r_org, r_dir, delta;
     float t_now, raw_offset, snapped_offset, step;
     int i;
-    if (s_drag_axis < 0 && s_drag_plane_idx < 0) return;
+    if (s_drag_axis < 0 && s_drag_plane_idx < 0 && s_drag_rotate_axis < 0)
+        return;
 
     Editor_ScreenToRay(sx, sy, r_org, r_dir);
+
+    if (s_drag_rotate_axis >= 0)
+    {
+        // Axis-rotate. Project the cursor onto the rotation plane, take
+        // the signed angle from last frame's projection (wrapped to handle
+        // the atan2 branch cut), and apply that step to every selected
+        // brush around the saved pivot. Point entities only respond to
+        // yaw rotation (axis 2) — pitch/roll on a monster reads as
+        // tilted, which is rarely intended; the user can still drag X/Y
+        // rings to rotate selected brushes alongside.
+        float a_now;
+        int n_sel, k, e_idx, b_idx;
+        if (!rotate_mouse_angle(s_drag_rotate_axis, s_rotate_pivot,
+                                r_org, r_dir, &a_now))
+            return;
+        step = wrap_delta(a_now - s_rotate_prev_angle);
+        s_rotate_prev_angle = a_now;
+        if (step == 0.0f) return;
+
+        n_sel = Scene_NumSelected();
+        for (k = 0; k < n_sel; k++)
+        {
+            edit_entity_t *e;
+            if (!Scene_GetSelected(k, &e_idx, &b_idx)) continue;
+            if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
+            e = &edit_scene.entities[e_idx];
+            if (b_idx < 0)
+            {
+                if (s_drag_rotate_axis == 2)
+                    entity_apply_yaw_delta(e, step);
+            }
+            else
+            {
+                edit_brush_t *bs;
+                if (b_idx >= e->numbrushes) continue;
+                bs = &e->brushes[b_idx];
+                if (!bs->valid) continue;
+                Brush_Rotate(bs, s_drag_rotate_axis, step, s_rotate_pivot);
+            }
+        }
+        return;
+    }
+
     t_now = closest_t_line_ray(s_drag_origin, s_drag_dir, r_org, r_dir);
     raw_offset = t_now - s_drag_t_start;
 
@@ -574,11 +802,12 @@ void Editor_GizmoMouseMove(float sx, float sy)
 
 void Editor_GizmoMouseUp(void)
 {
-    s_drag_axis      = -1;
-    s_drag_plane_idx = -1;
+    s_drag_axis        = -1;
+    s_drag_plane_idx   = -1;
+    s_drag_rotate_axis = -1;
 }
 
 int Editor_GizmoIsActive(void)
 {
-    return s_drag_axis >= 0 || s_drag_plane_idx >= 0;
+    return s_drag_axis >= 0 || s_drag_plane_idx >= 0 || s_drag_rotate_axis >= 0;
 }

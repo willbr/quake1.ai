@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 edit_scene_t edit_scene;
 
@@ -270,6 +271,44 @@ void Brush_Translate(edit_brush_t *b, const vec3_t delta)
         for (j = 0; j < 3; j++)
             VectorAdd(p->points[j], delta, p->points[j]);
     }
+    Brush_Compile(b);
+}
+
+// Rotate a single point about `pivot` by `ang` radians around world axis
+// (0=X, 1=Y, 2=Z). In-place.
+static void rotate_point_about_axis(int axis, float ang,
+                                    const vec3_t pivot, vec3_t pt)
+{
+    float c = cosf(ang), s = sinf(ang);
+    float dx = pt[0] - pivot[0];
+    float dy = pt[1] - pivot[1];
+    float dz = pt[2] - pivot[2];
+    if (axis == 0)
+    {
+        pt[0] = pivot[0] + dx;
+        pt[1] = pivot[1] + dy * c - dz * s;
+        pt[2] = pivot[2] + dy * s + dz * c;
+    }
+    else if (axis == 1)
+    {
+        pt[0] = pivot[0] + dx * c + dz * s;
+        pt[1] = pivot[1] + dy;
+        pt[2] = pivot[2] - dx * s + dz * c;
+    }
+    else
+    {
+        pt[0] = pivot[0] + dx * c - dy * s;
+        pt[1] = pivot[1] + dx * s + dy * c;
+        pt[2] = pivot[2] + dz;
+    }
+}
+
+void Brush_Rotate(edit_brush_t *b, int axis, float ang, const vec3_t pivot)
+{
+    int i, k;
+    for (i = 0; i < b->numplanes; i++)
+        for (k = 0; k < 3; k++)
+            rotate_point_about_axis(axis, ang, pivot, b->planes[i].points[k]);
     Brush_Compile(b);
 }
 

@@ -150,6 +150,12 @@ void  Brush_FreeFaces(edit_brush_t *b);
 // Translate every plane of a brush by `delta`.
 void  Brush_Translate(edit_brush_t *b, const vec3_t delta);
 
+// Rotate every plane of a brush about `pivot` by `angle` radians around
+// world axis (0=X, 1=Y, 2=Z). Recompiles after — invalid output (degenerate
+// after rotation) leaves the brush with valid=0.
+void  Brush_Rotate   (edit_brush_t *b, int axis, float angle,
+                      const vec3_t pivot);
+
 // Push a single face along its plane normal by `delta` (positive grows the
 // brush, negative shrinks it). Recompiles. If the resulting brush is
 // invalid (face would clip through the opposite face), rolls back the move
