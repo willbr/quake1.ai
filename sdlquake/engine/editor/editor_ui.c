@@ -258,12 +258,15 @@ static void draw_toolbar(void)
 // would render the level invisible), but the array entry exists so
 // EDIT_CAT_OTHER indexing is uniform.
 //
-// Default hides triggers, lights, and info_* metadata — these are
-// invisible in the running game and clutter the editor view by
-// default; the user can re-enable them from the panel checkboxes.
+// Default hides triggers, lights, ambient sounds, path corners, and
+// info_* metadata — none of these have a model the engine actually
+// renders, so they just clutter the view; the user can re-enable
+// them from the panel checkboxes.
 static int s_hide_cat[EDIT_CAT_COUNT] = {
     [EDIT_CAT_TRIGGER] = 1,
     [EDIT_CAT_LIGHT]   = 1,
+    [EDIT_CAT_SOUND]   = 1,
+    [EDIT_CAT_PATH]    = 1,
     [EDIT_CAT_INFO]    = 1,
 };
 
