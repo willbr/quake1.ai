@@ -18,6 +18,15 @@ struct edit_plane_s;
 #define EDIT_COLOR_AXIS_Z       244     // light blue    (127,191,255)
 #define EDIT_COLOR_AXIS_HOT     254     // white         (255,255,255) -- hovered/dragging axis
 
+// Category colors for point-entity wire bboxes — picked for separation in
+// the Quake palette since this is what the user reads to distinguish
+// trigger volumes from light markers from spawn points at a glance.
+#define EDIT_COLOR_DEFAULT      15      // off-white
+#define EDIT_COLOR_TRIGGER      251     // bright red    — gameplay logic volumes
+#define EDIT_COLOR_LIGHT        207     // golden yellow — light_*
+#define EDIT_COLOR_SPAWN        244     // light blue    — info_player_* etc
+#define EDIT_COLOR_ITEM         79      // green         — item_* / weapon_* / armor
+
 // render_wire.c
 int  Editor_ProjectWorld (const vec3_t world, float *out_sx, float *out_sy);
 void Editor_ScreenToRay  (float sx, float sy, vec3_t out_origin, vec3_t out_dir);

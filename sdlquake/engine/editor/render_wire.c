@@ -228,6 +228,23 @@ static void draw_brush(const edit_brush_t *b, byte color, int through)
 #define EDIT_COLOR_BRUSH        15      // off-white      (235,235,235)
 #define EDIT_COLOR_SELECTED     192     // bright yellow  (255,243, 27)
 
+// Map a classname to a category color so the user can read entity types at a
+// glance from the bbox alone. Triggers (red), spawn points (blue), lights
+// (gold) etc. Unknown classes fall back to off-white.
+static byte classname_color(const char *cls)
+{
+    if (!cls) return EDIT_COLOR_DEFAULT;
+    if (!strncmp(cls, "trigger_", 8))    return EDIT_COLOR_TRIGGER;
+    if (!strncmp(cls, "info_player_", 12)) return EDIT_COLOR_SPAWN;
+    if (!strcmp (cls, "info_teleport_destination")) return EDIT_COLOR_SPAWN;
+    if (!strcmp (cls, "info_intermission"))         return EDIT_COLOR_SPAWN;
+    if (!strncmp(cls, "light",   5))     return EDIT_COLOR_LIGHT;
+    if (!strncmp(cls, "item_",   5))     return EDIT_COLOR_ITEM;
+    if (!strncmp(cls, "weapon_", 7))     return EDIT_COLOR_ITEM;
+    if (!strncmp(cls, "ammo_",   5))     return EDIT_COLOR_ITEM;
+    return EDIT_COLOR_DEFAULT;
+}
+
 // Render styles: index into editor_render_style cvar.
 enum {
     EDIT_STYLE_WIRE = 0,
@@ -767,15 +784,15 @@ void Editor_RenderScene(void)
             const char *cls = NULL;
             vec3_t pmin, pmax;
             int is_sel, has_model;
+            byte color;
             if (!Entity_IsPoint(e)) continue;
             is_sel = Scene_SelectionContains(i, -1);
             if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
             has_model = classname_to_model(cls) != NULL;
             if (!is_sel && has_model) continue;
             point_entity_bbox(e, pmin, pmax);
-            draw_aabb_ex(pmin, pmax,
-                         is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH,
-                         is_sel);
+            color = is_sel ? EDIT_COLOR_SELECTED : classname_color(cls);
+            draw_aabb_ex(pmin, pmax, color, is_sel);
         }
     }
 
