@@ -8,6 +8,7 @@
 
 #include "quakedef.h"
 #include "edit_scene.h"
+#include "edit_history.h"
 #include "editor_internal.h"
 
 #include <math.h>
@@ -374,6 +375,8 @@ int Editor_GizmoMouseDown(float sx, float sy)
         const edit_plane_t *pl = &b->planes[f->plane_idx];
         vec3_t fc;
         face_centroid(f, fc);
+        // Snapshot pre-drag state so the whole drag is one undo unit.
+        History_Push("resize face");
         s_drag_axis      = -1;
         s_drag_plane_idx = f->plane_idx;
         VectorCopy(fc, s_drag_origin);
@@ -385,6 +388,7 @@ int Editor_GizmoMouseDown(float sx, float sy)
     }
     if (best_axis < 0) return 0;
 
+    History_Push("translate");
     s_drag_axis      = best_axis;
     s_drag_plane_idx = -1;
     VectorCopy(centroid, s_drag_origin);

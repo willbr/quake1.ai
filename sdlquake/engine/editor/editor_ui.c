@@ -73,6 +73,10 @@ static void draw_toolbar(void)
     IG_SameLine(0, -1);
     if (IG_Button("Ungroup"))      Cbuf_AddText("editor_ungroup\n");
     IG_SameLine(0, -1);
+    if (IG_Button("Undo"))         Cbuf_AddText("editor_undo\n");
+    IG_SameLine(0, -1);
+    if (IG_Button("Redo"))         Cbuf_AddText("editor_redo\n");
+    IG_SameLine(0, -1);
     if (IG_Button("Close (F2)"))   Cbuf_AddText("editor\n");
 
     {

@@ -17,6 +17,7 @@
 #include "quakedef.h"
 #include "edit_scene.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -305,28 +306,67 @@ int Scene_Revert(void)
     return parse_scene_text(s_snapshot_text);
 }
 
-int Scene_Save(const char *path)
+// -----------------------------------------------------------------------------
+// Serialize / deserialize
+// -----------------------------------------------------------------------------
+
+// Growing byte buffer used to assemble the .map text in memory. Doubles on
+// overflow; the caller takes ownership of `buf` and frees it.
+typedef struct {
+    char  *buf;
+    int    len;
+    int    cap;
+} sbuf_t;
+
+static void sbuf_reserve(sbuf_t *s, int extra)
 {
-    FILE *f;
+    int need = s->len + extra + 1;          // +1 for terminator
+    if (need <= s->cap) return;
+    if (s->cap == 0) s->cap = 4096;
+    while (s->cap < need) s->cap *= 2;
+    s->buf = (char *)realloc(s->buf, s->cap);
+}
+
+static void sbuf_printf(sbuf_t *s, const char *fmt, ...)
+{
+    va_list ap;
+    int written;
+    for (;;)
+    {
+        int avail = s->cap - s->len;
+        va_start(ap, fmt);
+        written = vsnprintf(s->buf + s->len, avail, fmt, ap);
+        va_end(ap);
+        if (written >= 0 && written < avail)
+        {
+            s->len += written;
+            return;
+        }
+        // Truncated — grow and retry.
+        sbuf_reserve(s, written > 0 ? written : 1024);
+    }
+}
+
+int Scene_Serialize(char **out_text, int *out_len)
+{
+    sbuf_t s = {0};
     int i, j, k;
 
-    f = fopen(path, "wb");
-    if (!f) return 0;
-
+    sbuf_reserve(&s, 4096);
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
-        fprintf(f, "{\n");
+        sbuf_printf(&s, "{\n");
         for (j = 0; j < e->numkv; j++)
-            fprintf(f, "\"%s\" \"%s\"\n", e->kv[j].key, e->kv[j].value);
+            sbuf_printf(&s, "\"%s\" \"%s\"\n", e->kv[j].key, e->kv[j].value);
         for (j = 0; j < e->numbrushes; j++)
         {
             edit_brush_t *b = &e->brushes[j];
-            fprintf(f, "{\n");
+            sbuf_printf(&s, "{\n");
             for (k = 0; k < b->numplanes; k++)
             {
                 edit_plane_t *p = &b->planes[k];
-                fprintf(f,
+                sbuf_printf(&s,
                     "( %g %g %g ) ( %g %g %g ) ( %g %g %g ) %s %g %g %g %g %g\n",
                     p->points[0][0], p->points[0][1], p->points[0][2],
                     p->points[1][0], p->points[1][1], p->points[1][2],
@@ -334,12 +374,49 @@ int Scene_Save(const char *path)
                     p->texname[0] ? p->texname : "editor/grid",
                     p->s_shift, p->t_shift, p->rotation, p->s_scale, p->t_scale);
             }
-            fprintf(f, "}\n");
+            sbuf_printf(&s, "}\n");
         }
-        fprintf(f, "}\n");
+        sbuf_printf(&s, "}\n");
     }
-    fclose(f);
+    if (!s.buf)
+    {
+        // Empty scene — return a valid empty string.
+        s.buf = (char *)malloc(1);
+        s.cap = 1;
+    }
+    s.buf[s.len] = 0;
+    *out_text = s.buf;
+    if (out_len) *out_len = s.len;
+    return 1;
+}
 
+int Scene_DeserializeText(const char *text)
+{
+    // parse_scene_text takes a mutable buffer because COM_Parse walks it
+    // with a saved char*; copy so the caller's const text isn't disturbed.
+    char *copy = (char *)malloc(strlen(text) + 1);
+    int ok;
+    if (!copy) return 0;
+    strcpy(copy, text);
+    ok = parse_scene_text(copy);
+    free(copy);
+    return ok;
+}
+
+int Scene_Save(const char *path)
+{
+    FILE *f;
+    char *text;
+    int   len, ok;
+
+    if (!Scene_Serialize(&text, &len)) return 0;
+    f = fopen(path, "wb");
+    if (!f) { free(text); return 0; }
+    ok = ((int)fwrite(text, 1, len, f) == len);
+    fclose(f);
+    free(text);
+
+    if (!ok) return 0;
     {
         size_t n = strlen(path);
         if (n >= sizeof(edit_scene.filename)) n = sizeof(edit_scene.filename) - 1;

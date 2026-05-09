@@ -140,6 +140,31 @@ void IN_ProcessEvents(void)
                     Editor_Toggle();
                 break;
             }
+            // Editor undo/redo: Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y). Gated on
+            // editor open + key_game so we don't fight console paste etc.
+            if (ev.key.scancode == SDL_SCANCODE_Z
+                && Editor_IsOpen()
+                && key_dest == key_game
+                && !IG_WantCaptureKeyboard()
+                && (ev.key.mod & SDL_KMOD_CTRL))
+            {
+                if (ev.key.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat)
+                {
+                    if (ev.key.mod & SDL_KMOD_SHIFT) Cbuf_AddText("editor_redo\n");
+                    else                             Cbuf_AddText("editor_undo\n");
+                }
+                break;
+            }
+            if (ev.key.scancode == SDL_SCANCODE_Y
+                && Editor_IsOpen()
+                && key_dest == key_game
+                && !IG_WantCaptureKeyboard()
+                && (ev.key.mod & SDL_KMOD_CTRL))
+            {
+                if (ev.key.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat)
+                    Cbuf_AddText("editor_redo\n");
+                break;
+            }
 
             // Overlay open and not in editor FPS look mode — keys are
             // ImGui-only.

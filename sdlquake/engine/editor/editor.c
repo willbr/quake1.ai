@@ -15,6 +15,7 @@
 #include "imgui_layer.h"
 #include "imgui_bridge.h"
 #include "edit_scene.h"
+#include "edit_history.h"
 #include "editor.h"
 #include "editor_internal.h"
 
@@ -103,6 +104,10 @@ static void Editor_Cmd_Open_f(void)
         return;
     }
 
+    // Loading a new scene invalidates any prior history — undo would
+    // suddenly restore from a different map.
+    History_Clear();
+
     // Track the bare name so editor_save / Restart map can use it.
     {
         size_t n = strlen(name);
@@ -150,8 +155,27 @@ static void Editor_Cmd_Toggle_f(void)
     Editor_Toggle();
 }
 
-static void Editor_Cmd_Group_f  (void) { Scene_GroupSelected();   }
-static void Editor_Cmd_Ungroup_f(void) { Scene_UngroupSelected(); }
+static void Editor_Cmd_Group_f  (void)
+{
+    History_Push("group");
+    Scene_GroupSelected();
+}
+
+static void Editor_Cmd_Ungroup_f(void)
+{
+    History_Push("ungroup");
+    Scene_UngroupSelected();
+}
+
+static void Editor_Cmd_Undo_f(void)
+{
+    if (!History_Undo()) Con_Printf("editor: nothing to undo\n");
+}
+
+static void Editor_Cmd_Redo_f(void)
+{
+    if (!History_Redo()) Con_Printf("editor: nothing to redo\n");
+}
 
 // Spawn a 64-unit cube ~128 units in front of the camera, origin snapped to
 // a 16-unit grid so it sits cleanly on Quake's standard build grid. New
@@ -178,6 +202,7 @@ static void Editor_Cmd_AddCube_f(void)
         maxs[i]   = c + HALF;
     }
 
+    History_Push("add cube");
     if (Scene_AddCubeBrush(mins, maxs, NULL))
         Con_Printf("editor: added cube at %.0f %.0f %.0f\n",
                    center[0], center[1], center[2]);
@@ -258,6 +283,10 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_brush_add_cube", Editor_Cmd_AddCube_f);
     Cmd_AddCommand("editor_group",   Editor_Cmd_Group_f);
     Cmd_AddCommand("editor_ungroup", Editor_Cmd_Ungroup_f);
+    Cmd_AddCommand("editor_undo",    Editor_Cmd_Undo_f);
+    Cmd_AddCommand("editor_redo",    Editor_Cmd_Redo_f);
+
+    History_Init();
 
     Cvar_RegisterVariable(&editor_camera);
     Cvar_RegisterVariable(&editor_grid_snap);

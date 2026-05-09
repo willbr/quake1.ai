@@ -109,6 +109,15 @@ int   Scene_Load    (const char *path); // parses .map, replaces scene
 int   Scene_Save    (const char *path); // writes .map text
 int   Scene_Revert  (void);             // re-parse current filename
 
+// Serialize the current scene to a NUL-terminated malloc'd string in .map
+// format. Returns 1 on success; caller free()s *out_text. Length excludes
+// the terminator and is written to *out_len if non-NULL.
+int   Scene_Serialize       (char **out_text, int *out_len);
+// Replace the current scene by parsing text in .map format. The buffer must
+// be NUL-terminated; it's not retained or modified by the caller after this
+// returns. Returns 1 on success.
+int   Scene_DeserializeText (const char *text);
+
 // Brush compile (planes -> windings). Called whenever a brush mutates.
 void  Brush_Compile (edit_brush_t *b);
 void  Brush_FreeFaces(edit_brush_t *b);
