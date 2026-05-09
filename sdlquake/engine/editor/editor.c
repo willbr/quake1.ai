@@ -331,6 +331,40 @@ static void populate_entity_from_edict(edict_t *ed, edit_entity_t *e)
         Entity_SetKV(e, "targetname", ed->v.targetname);
 }
 
+static void Editor_PopulateFromServer(void);
+
+// Detect mid-session map changes (trigger_changelevel, +map, etc.) and react.
+// Live edict pointers from the previous map are now garbage — at minimum we
+// have to drop them and clear the selection. For a server-populated scene
+// (no .map filename — we built it from sv.edicts originally) we go further
+// and rebuild the whole scene from the new world.
+static void editor_check_map_change(void)
+{
+    if (!sv.active) return;
+    if (strcmp(edit_scene.mapname, sv.name) == 0
+        && edit_scene.numentities > 0) return;       // same map, scene live
+
+    if (edit_scene.filename[0])
+    {
+        // User-loaded scene (editor_load): keep their entities, but every
+        // live_ent pointer references the old sv.edicts which is now reused
+        // for new entities. Null them so the gizmo doesn't drag a random
+        // unrelated edict, and clear the selection for the same reason.
+        int i;
+        Scene_SelectionClear();
+        for (i = 0; i < edit_scene.numentities; i++)
+            edit_scene.entities[i].live_ent = NULL;
+        Q_strncpy(edit_scene.mapname, sv.name, sizeof(edit_scene.mapname) - 1);
+        edit_scene.mapname[sizeof(edit_scene.mapname) - 1] = '\0';
+        Con_Printf("editor: map changed to %s; cleared selection + live links\n",
+                   sv.name);
+        return;
+    }
+
+    // Server-populated mode (or empty scene): rebuild from the live edicts.
+    Editor_PopulateFromServer();
+}
+
 static void Editor_PopulateFromServer(void)
 {
     int i, n;
@@ -526,20 +560,12 @@ void Editor_Toggle(void)
 {
     if (!s_inited) return;
 
-    // Opening the editor without an explicit editor_load: build edit_scene
-    // from the running server's edicts so monsters / lights / players are
-    // selectable and editable. Re-runs when the map name changes (so a
-    // mid-session +map command picks up the new world). Skipped if the
-    // user already loaded a .map manually (filename non-empty), which we
-    // treat as "they explicitly chose the source".
-    if (!s_open && sv.active)
-    {
-        int need_populate = (edit_scene.numentities == 0)
-            || (edit_scene.filename[0] == '\0'
-                && strcmp(edit_scene.mapname, sv.name) != 0);
-        if (need_populate)
-            Editor_PopulateFromServer();
-    }
+    // Opening the editor: refresh edit_scene against the live server.
+    // Server-populated scenes get rebuilt against new sv.edicts when the
+    // map changed; user-loaded scenes drop their live_ent pointers so a
+    // post-map-change drag can't move a random edict.
+    if (!s_open)
+        editor_check_map_change();
 
     // Closing the editor: spawn any newly-placed point entities into the
     // live server so the player can actually touch them, then auto-save
@@ -648,6 +674,11 @@ void Editor_PreRender(void)
     extern cvar_t sensitivity, m_pitch, m_yaw;
 
     if (!s_open) return;
+
+    // Mid-session map change while the editor is open (e.g. trigger_changelevel
+    // tripped, or the user typed `map foo` in the console) — refresh before
+    // the gizmo / selection touch any stale state.
+    editor_check_map_change();
 
     // First frame after opening the editor: latch the current view into the
     // camera state so free-fly mode starts where the player was standing.
