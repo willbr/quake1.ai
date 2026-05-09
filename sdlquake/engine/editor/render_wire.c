@@ -427,6 +427,68 @@ static void parse_entity_angles(const edit_entity_t *e, vec3_t out_angles)
     }
 }
 
+// Per-classname translated colormaps for player.mdl previews — lets the user
+// tell info_player_start (singleplayer brown), _coop (green), _deathmatch
+// (red) and _teleport_destination (purple) apart at a glance. Each entry
+// caches a full VID_GRADES*256 colormap built lazily from vid.colormap by
+// remapping TOP_RANGE/BOTTOM_RANGE the same way CL_NewTranslation does for
+// network player skins. The 4-bit top/bottom values map onto 16-color bands
+// in the Quake palette (1=brown, 3=green, 4=red, 11=purple).
+
+typedef struct {
+    const char *classname;
+    byte top, bottom;
+    int  initialised;
+    byte buffer[VID_GRADES * 256];
+} editor_player_cmap_t;
+
+static editor_player_cmap_t s_player_cmaps[] = {
+    {"info_player_start",         1,  1,  0, {0}},  // brown — singleplayer
+    {"info_player_start2",        1,  1,  0, {0}},  // brown — return start
+    {"info_player_coop",          3,  3,  0, {0}},  // green — coop
+    {"info_player_deathmatch",    4,  4,  0, {0}},  // red   — DM
+    {"info_teleport_destination", 11, 11, 0, {0}},  // purple — telefrag pad
+};
+
+static byte *editor_player_colormap(const char *classname)
+{
+    int i;
+    if (!classname) return NULL;
+    for (i = 0; i < (int)(sizeof(s_player_cmaps) / sizeof(s_player_cmaps[0])); i++)
+    {
+        editor_player_cmap_t *m = &s_player_cmaps[i];
+        if (strcmp(m->classname, classname) != 0) continue;
+        if (!m->initialised)
+        {
+            int row, j;
+            int top_pal = m->top    << 4;
+            int bot_pal = m->bottom << 4;
+            byte *src = vid.colormap;
+            byte *dst = m->buffer;
+            memcpy(dst, vid.colormap, sizeof(m->buffer));
+            for (row = 0; row < VID_GRADES; row++, dst += 256, src += 256)
+            {
+                // CL_NewTranslation reverses bands at index >= 128 because
+                // the artists laid those palette ranges out backwards. We
+                // mirror that quirk here so the result reads naturally.
+                if (top_pal < 128)
+                    memcpy(dst + TOP_RANGE, src + top_pal, 16);
+                else
+                    for (j = 0; j < 16; j++)
+                        dst[TOP_RANGE + j] = src[top_pal + 15 - j];
+                if (bot_pal < 128)
+                    memcpy(dst + BOTTOM_RANGE, src + bot_pal, 16);
+                else
+                    for (j = 0; j < 16; j++)
+                        dst[BOTTOM_RANGE + j] = src[bot_pal + 15 - j];
+            }
+            m->initialised = 1;
+        }
+        return m->buffer;
+    }
+    return NULL;
+}
+
 // Render a single alias model at the entity's origin. Mirrors the software
 // renderer's case mod_alias path in R_DrawEntitiesOnList.
 static void draw_point_entity_model(const edit_entity_t *e, const char *modelpath)
@@ -435,10 +497,14 @@ static void draw_point_entity_model(const edit_entity_t *e, const char *modelpat
     model_t *m;
     alight_t lighting;
     float    lightvec[3] = { -1, 0, 0 };
+    byte    *player_cmap = NULL;
     int      j;
 
     m = Mod_ForName((char *)modelpath, false);
     if (!m || m->type != mod_alias) return;
+
+    if (e->classname_idx >= 0)
+        player_cmap = editor_player_colormap(e->kv[e->classname_idx].value);
 
     memset(&fake_ent, 0, sizeof(fake_ent));
     Entity_GetOrigin(e, fake_ent.origin);
@@ -446,7 +512,7 @@ static void draw_point_entity_model(const edit_entity_t *e, const char *modelpat
     fake_ent.model    = m;
     fake_ent.frame    = 0;
     fake_ent.skinnum  = 0;
-    fake_ent.colormap = vid.colormap;
+    fake_ent.colormap = player_cmap ? player_cmap : vid.colormap;
     fake_ent.trivial_accept = 0;
 
     currententity = &fake_ent;
