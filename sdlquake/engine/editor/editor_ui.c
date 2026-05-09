@@ -28,10 +28,22 @@ static void draw_toolbar(void)
 {
     extern cvar_t editor_render_style;
     extern cvar_t editor_camera;
+    extern cvar_t editor_grid_snap;
+    extern cvar_t editor_grid_size;
+    extern cvar_t editor_grid_absolute;
     static const char *style_items[] = {
         "wireframe", "flat", "flat+wire", "textured", "textured+wire"
     };
     static const char *camera_items[] = { "free-fly", "fps" };
+    // Quake physics constants drive the gameplay-named entries: 18 = step
+    // (max walkable step), 45 = jump apex (270²/(2*800)), 56 = player bbox
+    // height (-24 to 32). The rest are powers of 2 for the build grid.
+    static const float grid_values[] = { 1, 4, 8, 16, 18, 32, 45, 56, 64, 128 };
+    static const char *grid_items[] = {
+        "1", "4", "8", "16 (build)", "18 (step)", "32 (door)",
+        "45 (jump)", "56 (player)", "64", "128 (room)"
+    };
+    enum { GRID_N = (int)(sizeof(grid_values) / sizeof(grid_values[0])) };
 
     float disp_w = 1280, disp_h = 720;
     IG_GetDisplaySize(&disp_w, &disp_h);
@@ -69,6 +81,48 @@ static void draw_toolbar(void)
         {
             char buf[64];
             snprintf(buf, sizeof(buf), "editor_render_style %d\n", style);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        // Snap toggle. Cvar is float; treat any non-zero as on.
+        int snap = editor_grid_snap.value != 0.0f;
+        if (IG_Checkbox("snap", &snap))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_grid_snap %d\n", snap ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        // Absolute snap mode — snap the brush centroid to world grid lines
+        // (useful for stairs / lining brushes up across drags). Off ⇒ snap
+        // is relative to the drag-start position.
+        int abs = editor_grid_absolute.value != 0.0f;
+        if (IG_Checkbox("abs", &abs))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_grid_absolute %d\n", abs ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        // Grid size dropdown. Find current size in the preset list; if it's
+        // not a preset (user set a custom value), select index 0 visually but
+        // don't overwrite the cvar unless they pick something.
+        int sel = -1, k;
+        float cur = editor_grid_size.value;
+        for (k = 0; k < GRID_N; k++)
+            if (grid_values[k] == cur) { sel = k; break; }
+        if (sel < 0) sel = 0;
+        IG_SetNextItemWidth(140);
+        if (IG_Combo("grid", &sel, grid_items, GRID_N))
+        {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "editor_grid_size %g\n", grid_values[sel]);
             Cbuf_AddText(buf);
         }
     }

@@ -62,6 +62,16 @@ static int  s_inited = 0;
 // "look mode" (relative-mouse capture).
 cvar_t      editor_camera = { "editor_camera", "0" };
 
+// Grid snap state. When grid_snap is 1, gizmo drags + new-cube placement
+// snap to multiples of grid_size in world units. Default 16 matches the
+// QuakeEd build grid. When grid_absolute is 1, the snapped position is the
+// brush centroid's *world coordinate* on the dragged axis (so brushes line
+// up across drag operations — useful for stairs); when 0, snapping is
+// relative to the centroid at drag start.
+cvar_t      editor_grid_snap     = { "editor_grid_snap", "1" };
+cvar_t      editor_grid_size     = { "editor_grid_size", "16" };
+cvar_t      editor_grid_absolute = { "editor_grid_absolute", "1" };
+
 static int     s_lookmode      = 0;
 static int     s_camera_inited = 0;
 static vec3_t  s_cam_origin;
@@ -150,14 +160,16 @@ static void Editor_Cmd_AddCube_f(void)
     int i;
     const float DIST = 128.0f;
     const float HALF = 32.0f;       // 64-unit cube
-    const float GRID = 16.0f;
+    // Snap to the live grid_size when grid_snap is on; otherwise place at the
+    // unsnapped focal point. Cap at 16 if grid is unreasonable so we don't
+    // jump the user halfway across the map on a 128-unit grid by surprise.
+    float grid = editor_grid_snap.value ? editor_grid_size.value : 0.0f;
 
     for (i = 0; i < 3; i++)
     {
         float c = r_origin[i] + vpn[i] * DIST;
-        // floor() to nearest grid step. Round to grid by casting to int and
-        // multiplying — works for negative coords because floor() is signed.
-        c = floorf(c / GRID + 0.5f) * GRID;
+        if (grid > 0.0f)
+            c = floorf(c / grid + 0.5f) * grid;
         center[i] = c;
         mins[i]   = c - HALF;
         maxs[i]   = c + HALF;
@@ -243,6 +255,9 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_brush_add_cube", Editor_Cmd_AddCube_f);
 
     Cvar_RegisterVariable(&editor_camera);
+    Cvar_RegisterVariable(&editor_grid_snap);
+    Cvar_RegisterVariable(&editor_grid_size);
+    Cvar_RegisterVariable(&editor_grid_absolute);
 
     {
         extern void Editor_RegisterCvars(void);

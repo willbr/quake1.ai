@@ -19,8 +19,21 @@ extern vec3_t r_origin;
 // -----------------------------------------------------------------------------
 
 static int      s_drag_axis = -1;       // 0/1/2 = X/Y/Z, -1 = inactive
-static float    s_drag_t0;              // closest-t-on-axis at mouse down
+static float    s_drag_t_start;         // closest-t-on-axis at mouse down
+static float    s_drag_applied;         // sum of grid-snapped offsets applied so far
 static vec3_t   s_drag_origin;          // brush centroid at mouse down
+
+extern cvar_t   editor_grid_snap;
+extern cvar_t   editor_grid_size;
+extern cvar_t   editor_grid_absolute;
+
+static float snap_to_grid(float v)
+{
+    if (editor_grid_snap.value == 0) return v;
+    float g = editor_grid_size.value;
+    if (g <= 0.0f) return v;
+    return floorf(v / g + 0.5f) * g;
+}
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -204,7 +217,8 @@ int Editor_GizmoMouseDown(float sx, float sy)
     {
         vec3_t l_dir = {0,0,0};
         l_dir[best_axis] = 1.0f;
-        s_drag_t0 = closest_t_line_ray(centroid, l_dir, r_org, r_dir);
+        s_drag_t_start = closest_t_line_ray(centroid, l_dir, r_org, r_dir);
+        s_drag_applied = 0.0f;
     }
     return 1;
 }
@@ -214,7 +228,7 @@ void Editor_GizmoMouseMove(float sx, float sy)
     edit_brush_t *b;
     vec3_t r_org, r_dir, l_dir = {0,0,0};
     vec3_t delta;
-    float t_now;
+    float t_now, raw_offset, snapped_offset, step;
     int i;
     if (s_drag_axis < 0) return;
     b = Scene_GetSelectedBrush();
@@ -224,9 +238,31 @@ void Editor_GizmoMouseMove(float sx, float sy)
     l_dir[s_drag_axis] = 1.0f;
     t_now = closest_t_line_ray(s_drag_origin, l_dir, r_org, r_dir);
 
+    // Accumulate the raw offset since drag start. Two snap modes:
+    //   relative — snap the offset itself to grid multiples; the centroid
+    //              moves in grid steps from its starting position.
+    //   absolute — snap the centroid's *world* axis coordinate to a grid
+    //              line; brushes built off the same world grid will line up
+    //              regardless of where the drag started (good for stairs).
+    // We then apply the delta-vs-previously-applied so float drift can't
+    // accumulate.
+    raw_offset = t_now - s_drag_t_start;
+    if (editor_grid_snap.value != 0.0f && editor_grid_absolute.value != 0.0f)
+    {
+        float origin_axis = s_drag_origin[s_drag_axis];
+        float target_pos  = snap_to_grid(origin_axis + raw_offset);
+        snapped_offset    = target_pos - origin_axis;
+    }
+    else
+    {
+        snapped_offset = snap_to_grid(raw_offset);
+    }
+    step = snapped_offset - s_drag_applied;
+    if (step == 0.0f) return;
+
     for (i = 0; i < 3; i++) delta[i] = 0;
-    delta[s_drag_axis] = t_now - s_drag_t0;
-    s_drag_t0 = t_now;
+    delta[s_drag_axis] = step;
+    s_drag_applied = snapped_offset;
 
     Brush_Translate(b, delta);
 }
