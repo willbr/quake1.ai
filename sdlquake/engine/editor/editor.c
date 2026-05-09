@@ -195,6 +195,55 @@ static void compute_camera_focal(vec3_t out)
     }
 }
 
+// Center the free-fly camera on the chosen item and back off enough to
+// frame it. Called by editor_ui.c when the user double-clicks a row in the
+// Brushes panel — we don't change view angles, so the user's looking
+// direction is preserved; only camera origin moves so the item sits
+// directly ahead. In FPS mode this still updates the latched cam state, so
+// switching back to free-fly puts you on the framed view.
+void Editor_FrameItem(int e_idx, int b_idx)
+{
+    extern vec3_t vpn;
+    edit_entity_t *e;
+    vec3_t target = {0,0,0};
+    float  diag = 64.0f;
+    float  dist;
+    int    i;
+
+    if (e_idx < 0 || e_idx >= edit_scene.numentities) return;
+    e = &edit_scene.entities[e_idx];
+
+    if (b_idx < 0)
+    {
+        // Whole-entity ref. Point entity → origin; brush entity → its
+        // selectable header isn't itself selectable, so this branch only
+        // fires for point entities.
+        Entity_GetOrigin(e, target);
+        diag = 96.0f;       // a friendly default; bbox is small for items
+    }
+    else
+    {
+        edit_brush_t *b;
+        if (b_idx >= e->numbrushes) return;
+        b = &e->brushes[b_idx];
+        if (!b->valid) return;
+        Editor_BrushCentroid(b, target);
+        for (i = 0; i < 3; i++)
+        {
+            float d = b->maxs[i] - b->mins[i];
+            if (d > diag) diag = d;
+        }
+    }
+
+    dist = diag * 1.5f + 64.0f;
+    for (i = 0; i < 3; i++)
+        s_cam_origin[i] = target[i] - vpn[i] * dist;
+
+    // Mark the cam state initialised so the next PreRender doesn't latch
+    // back to the player's view and overwrite our work. Angles untouched.
+    s_camera_inited = 1;
+}
+
 // Spawn a point entity with the given classname at the camera focal point.
 // Usage: editor_entity_add <classname>
 static void Editor_Cmd_AddEntity_f(void)

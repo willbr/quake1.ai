@@ -253,9 +253,10 @@ static void draw_brush_list(void)
         {
             // Point entity: header itself is the selectable. Clicking it
             // selects (i, -1) so the gizmo anchors at its origin.
+            // Double-click frames the camera on it.
             int sel = Scene_SelectionContains(i, -1);
             snprintf(buf, sizeof(buf), "[%d] %s##e%d", i, cls, i);
-            if (IG_Selectable(buf, sel, 0))
+            if (IG_Selectable(buf, sel, IG_SF_AllowDoubleClick))
             {
                 SDL_Keymod mod = SDL_GetModState();
                 int shift = (mod & SDL_KMOD_SHIFT) != 0;
@@ -268,6 +269,8 @@ static void draw_brush_list(void)
                     Scene_SelectionClear();
                     Scene_SelectionAdd(i, -1);
                 }
+                if (IG_IsMouseDoubleClicked(0))
+                    Editor_FrameItem(i, -1);
             }
         }
         else
@@ -282,7 +285,7 @@ static void draw_brush_list(void)
                 snprintf(buf, sizeof(buf),
                          "  brush %d (%d planes, %d faces)##b%d_%d",
                          j, b->numplanes, b->numfaces, i, j);
-                if (IG_Selectable(buf, sel, 0))
+                if (IG_Selectable(buf, sel, IG_SF_AllowDoubleClick))
                 {
                     // Match the 3D-viewport semantics: shift toggles,
                     // plain click replaces. SDL_GetModState reads OS
@@ -299,6 +302,8 @@ static void draw_brush_list(void)
                         Scene_SelectionClear();
                         Scene_SelectionAdd(i, j);
                     }
+                    if (IG_IsMouseDoubleClicked(0))
+                        Editor_FrameItem(i, j);
                 }
             }
         }

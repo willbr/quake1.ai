@@ -56,4 +56,10 @@ int  Editor_GizmoIsActive   (void);
 // the brush has no faces.
 void Editor_BrushCentroid   (const struct edit_brush_s *b, vec3_t out);
 
+// editor.c — center the free-fly camera on the (e_idx, b_idx) item and back
+// off enough to frame it. Uses brush[b_idx] when b_idx >= 0, else the
+// entity's origin. Keeps the current view angles, so direction is preserved.
+// b_idx = -1 means "the entity itself" (point entity ref).
+void Editor_FrameItem(int e_idx, int b_idx);
+
 #endif // EDITOR_INTERNAL_H

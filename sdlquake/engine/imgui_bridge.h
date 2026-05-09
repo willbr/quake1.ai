@@ -39,6 +39,11 @@
 #define IG_TCF_WidthFixed   (1<<4)
 
 // ---------------------------------------------------------------------------
+// ImGuiSelectableFlags subset
+// ---------------------------------------------------------------------------
+#define IG_SF_AllowDoubleClick (1<<2)
+
+// ---------------------------------------------------------------------------
 // ImGuiInputTextFlags subset
 // ---------------------------------------------------------------------------
 #define IG_ITF_EnterReturnsTrue    (1<<6)
@@ -72,6 +77,7 @@ void  IG_SetIniFilename(const char *path);   // pass NULL to disable .ini
 float IG_GetFramerate(void);
 int   IG_WantCaptureMouse(void);    // 1 if ImGui currently owns the mouse
 int   IG_WantCaptureKeyboard(void); // 1 if a text widget is focused
+int   IG_IsMouseDoubleClicked(int button); // 1 if button was just double-clicked
 void  IG_GetDisplaySize(float *w, float *h);
 
 // Frame lifecycle
