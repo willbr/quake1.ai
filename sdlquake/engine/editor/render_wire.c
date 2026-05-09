@@ -722,7 +722,11 @@ static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
         e = &edit_scene.entities[e_idx];
         if (b_idx < 0)
         {
-            // Point entity ref.
+            // Point entity ref. Skip if it has no origin (e.g. an empty
+            // func_group) — point_entity_bbox would synthesize a stub bbox
+            // around (0,0,0) and drag the union there.
+            vec3_t o;
+            if (!Entity_GetOrigin(e, o)) continue;
             point_entity_bbox(e, pmin, pmax);
             mn = pmin; mx = pmax;
         }

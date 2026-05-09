@@ -163,7 +163,9 @@ static byte face_axis_color(const vec3_t normal)
 
 // Average of all selected items' centroids — used as the translate-gizmo
 // anchor when multi-select is active. Brushes contribute their face-vertex
-// centroid; point entities contribute their origin.
+// centroid; point entities contribute their origin. Entries with no
+// resolvable position (e.g. an empty func_group with no brushes and no
+// origin key) are skipped so they don't drag the average to (0,0,0).
 static int selection_centroid(vec3_t out)
 {
     int i, n = 0;
@@ -178,7 +180,7 @@ static int selection_centroid(vec3_t out)
         e = &edit_scene.entities[e_idx];
         if (b_idx < 0)
         {
-            Entity_GetOrigin(e, c);
+            if (!Entity_GetOrigin(e, c)) continue;
         }
         else
         {
@@ -198,7 +200,9 @@ static int selection_centroid(vec3_t out)
 
 // Resolve the translate-gizmo anchor for the *primary* selection. Returns
 // 1 on success; out_brush is non-null only when the primary is a brush
-// (face handles draw + face-resize pick depend on it).
+// (face handles draw + face-resize pick depend on it). Returns 0 when the
+// primary has no resolvable position (e.g. an empty func_group) so the
+// caller skips the gizmo entirely instead of pinning it at world origin.
 static int primary_anchor(vec3_t out, edit_brush_t **out_brush)
 {
     edit_brush_t  *b = Scene_GetSelectedBrush();
@@ -211,10 +215,7 @@ static int primary_anchor(vec3_t out, edit_brush_t **out_brush)
         return 1;
     }
     if (e && Entity_IsPoint(e))
-    {
-        Entity_GetOrigin(e, out);
-        return 1;
-    }
+        return Entity_GetOrigin(e, out);
     return 0;
 }
 
