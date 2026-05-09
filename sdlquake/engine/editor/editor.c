@@ -241,11 +241,31 @@ void Editor_FrameItem(int e_idx, int b_idx)
 
     if (b_idx < 0)
     {
-        // Whole-entity ref. Point entity → origin; brush entity → its
-        // selectable header isn't itself selectable, so this branch only
-        // fires for point entities.
-        Entity_GetOrigin(e, target);
-        diag = 96.0f;       // a friendly default; bbox is small for items
+        // Whole-entity ref. Use Editor_EntityAnchor so BSP-loaded brush
+        // entities (func_bossgate / func_door from a .bsp without .map
+        // source — numbrushes==0, no "origin" key, geometry only in
+        // live_ent->v.absmin/absmax) frame correctly. Falling back to
+        // Entity_GetOrigin alone teleported the camera to world origin
+        // because brush entities don't have an origin key.
+        if (!Editor_EntityAnchor(e, target)) return;
+        // Diagonal: live edict's absmin/absmax for brush entities;
+        // otherwise the friendly default for point entity items.
+        if (e->live_ent && !e->live_ent->free)
+        {
+            const float *amn = e->live_ent->v.absmin;
+            const float *amx = e->live_ent->v.absmax;
+            if (amx[0] > amn[0] || amx[1] > amn[1] || amx[2] > amn[2])
+            {
+                int i;
+                for (i = 0; i < 3; i++)
+                {
+                    float d = amx[i] - amn[i];
+                    if (d > diag) diag = d;
+                }
+            }
+            else diag = 96.0f;
+        }
+        else diag = 96.0f;
     }
     else
     {
