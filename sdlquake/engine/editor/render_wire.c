@@ -831,15 +831,20 @@ static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
 // Line + small V-arrowhead at the target end. The arrowhead lets the user
 // read direction on patrol-path chains (path_corner → path_corner) at a
 // glance — a plain line would be ambiguous about which end is the source.
-// Depth-tested (not -Over) so walls properly occlude the link — keeps the
-// 3D viewport readable on dense maps where many ents target each other.
-static void draw_link_arrow(const vec3_t a, const vec3_t b, byte color)
+// `through` = 1 → bypass depth (used when either endpoint is selected, so
+// the user can trace selected ents' links even when occluded by walls);
+// 0 → depth-tested so walls hide the line and the viewport stays readable
+// on dense maps.
+static void draw_link_arrow(const vec3_t a, const vec3_t b, byte color,
+                            int through)
 {
     vec3_t dir, right, world_up = {0, 0, 1};
     float len, r2, head;
     int j;
+    void (*line)(const vec3_t, const vec3_t, byte)
+        = through ? Editor_DrawLine3DOver : Editor_DrawLine3D;
 
-    Editor_DrawLine3D(a, b, color);
+    line(a, b, color);
 
     VectorSubtract(b, a, dir);
     len = sqrtf(DotProduct(dir, dir));
@@ -872,9 +877,18 @@ static void draw_link_arrow(const vec3_t a, const vec3_t b, byte color)
         VectorMA(b, -head, dir, tail);
         VectorMA(tail,  head * 0.4f, right, rp);
         VectorMA(tail, -head * 0.4f, right, lp);
-        Editor_DrawLine3D(b, rp, color);
-        Editor_DrawLine3D(b, lp, color);
+        line(b, rp, color);
+        line(b, lp, color);
     }
+}
+
+static int entity_is_selected(int e_idx)
+{
+    int i, e_sel, b_sel;
+    for (i = 0; i < Scene_NumSelected(); i++)
+        if (Scene_GetSelected(i, &e_sel, &b_sel) && e_sel == e_idx)
+            return 1;
+    return 0;
 }
 
 // Walk every entity's "target" / "killtarget" keys, find each match by
@@ -890,8 +904,10 @@ static void draw_target_links(void)
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
+        int src_sel;
         if (Editor_EntityHidden(i)) continue;
         if (!Editor_EntityAnchor(e, a)) continue;
+        src_sel = entity_is_selected(i);
 
         for (j = 0; j < e->numkv; j++)
         {
@@ -916,7 +932,10 @@ static void draw_target_links(void)
                      && !strcmp(t->kv[m].value, val))
                     {
                         if (Editor_EntityAnchor(t, b))
-                            draw_link_arrow(a, b, color);
+                        {
+                            int through = src_sel || entity_is_selected(k);
+                            draw_link_arrow(a, b, color, through);
+                        }
                         break;
                     }
                 }
