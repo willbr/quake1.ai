@@ -177,18 +177,32 @@ static float wrap_delta(float d)
     return d;
 }
 
-// Push a yaw delta into a point entity. Reads existing pitch/yaw/roll from
-// "angles" or scalar "angle" (anglehack: -1=up, -2=down sentinels collapse
-// to 0 on first rotation since you can't sensibly rotate them). Writes
-// back as scalar "angle" when pitch and roll are both zero (matches vanilla
-// .map convention) or as full "angles" vec3 otherwise. Live edict's
-// v.angles is also synced so the engine renders the new orientation
-// immediately.
-static void entity_apply_yaw_delta(edit_entity_t *e, float delta_radians)
+// Rotate a 3-vec around world axis (0=X, 1=Y, 2=Z) by ang radians, in place.
+static void rotate_vec_axis(int axis, float ang, vec3_t v)
+{
+    float c = cosf(ang), s = sinf(ang);
+    float x = v[0], y = v[1], z = v[2];
+    if (axis == 0)      { v[1] = y * c - z * s; v[2] = y * s + z * c; }
+    else if (axis == 1) { v[0] = x * c + z * s; v[2] = -x * s + z * c; }
+    else                { v[0] = x * c - y * s; v[1] = x * s + y * c; }
+}
+
+// Apply a rotation delta to a point entity's facing / movedir. `axis` is a
+// world axis (0=X, 1=Y, 2=Z). For yaw (Z) we just spin v.angles[1]. For
+// pitch/roll we rebuild pitch+yaw from the rotated v.movedir (movers) or
+// from a synthesised forward vector derived from existing angles (facers
+// with no movedir — monsters etc., where pitch/roll is normally hidden
+// behind the gating logic but this still needs to be safe). Writes the
+// .map kv back as scalar "angle" when pitch/roll collapse to 0, full
+// "angles" vec3 otherwise. Live edict v.angles + v.movedir synced.
+static void entity_apply_rotation_delta(edit_entity_t *e, int axis,
+                                        float delta_radians)
 {
     int k;
     int angles_idx = -1, angle_idx = -1;
     float pitch = 0, yaw = 0, roll = 0;
+    vec3_t dir = {1, 0, 0};
+    int have_movedir = 0;
     char buf[64];
 
     for (k = 0; k < e->numkv; k++)
@@ -198,19 +212,49 @@ static void entity_apply_yaw_delta(edit_entity_t *e, float delta_radians)
     }
 
     if (angles_idx >= 0)
-    {
         sscanf(e->kv[angles_idx].value, "%f %f %f", &pitch, &yaw, &roll);
-    }
     else if (angle_idx >= 0)
     {
         float a = (float)atof(e->kv[angle_idx].value);
-        if (a == -1.0f || a == -2.0f) yaw = 0;     // sentinel; collapse on first rotation
+        if (a == -1.0f || a == -2.0f) yaw = 0;     // sentinel collapses on first rotation
         else                          yaw = a;
     }
 
-    yaw += delta_radians * (180.0f / 3.14159265f);
+    // Source the direction we're rotating: prefer the live edict's
+    // movedir (set by SetMovedir for func_door/button/plat — angles[1]
+    // was zeroed at that point so reading from kv would read stale).
+    if (e->live_ent && !e->live_ent->free)
+    {
+        const float *md = e->live_ent->v.movedir;
+        if (md[0] != 0.0f || md[1] != 0.0f || md[2] != 0.0f)
+        {
+            VectorCopy(md, dir);
+            have_movedir = 1;
+        }
+    }
+    if (!have_movedir)
+    {
+        // Synthesise from angles: forward = (cos(yaw)cos(pitch), sin(yaw)cos(pitch), -sin(pitch))
+        float yr = yaw   * (3.14159265f / 180.0f);
+        float pr = pitch * (3.14159265f / 180.0f);
+        dir[0] = cosf(pr) * cosf(yr);
+        dir[1] = cosf(pr) * sinf(yr);
+        dir[2] = -sinf(pr);
+    }
+
+    rotate_vec_axis(axis, delta_radians, dir);
+
+    // Re-extract pitch + yaw from the rotated direction. Roll is fully
+    // ambiguous from forward alone; carry whatever roll the .map had.
+    {
+        float horiz = sqrtf(dir[0] * dir[0] + dir[1] * dir[1]);
+        pitch = -atan2f(dir[2], horiz) * (180.0f / 3.14159265f);
+        if (horiz > 1e-4f) yaw = atan2f(dir[1], dir[0]) * (180.0f / 3.14159265f);
+    }
     while (yaw >= 360.0f) yaw -= 360.0f;
     while (yaw <    0.0f) yaw += 360.0f;
+    while (pitch >  180.0f) pitch -= 360.0f;
+    while (pitch < -180.0f) pitch += 360.0f;
 
     if (pitch == 0.0f && roll == 0.0f)
     {
@@ -228,24 +272,8 @@ static void entity_apply_yaw_delta(edit_entity_t *e, float delta_radians)
         e->live_ent->v.angles[0] = pitch;
         e->live_ent->v.angles[1] = yaw;
         e->live_ent->v.angles[2] = roll;
-
-        // For movers (func_door / button / plat) SetMovedir ran at spawn:
-        // v.angles got zeroed and v.movedir holds a unit forward vector.
-        // The angle arrow reads v.movedir first in live mode, so just
-        // updating v.angles wouldn't visibly rotate the slide direction.
-        // Spin v.movedir's XY by the same delta so the arrow tracks the
-        // rotation. Vertical sentinels (movedir == ±Z) stay put.
-        {
-            float *md = e->live_ent->v.movedir;
-            if (md[0] != 0.0f || md[1] != 0.0f)
-            {
-                float c = cosf(delta_radians), s = sinf(delta_radians);
-                float nx = md[0] * c - md[1] * s;
-                float ny = md[0] * s + md[1] * c;
-                md[0] = nx;
-                md[1] = ny;
-            }
-        }
+        if (have_movedir)
+            VectorCopy(dir, e->live_ent->v.movedir);
     }
 }
 
@@ -493,18 +521,33 @@ void Editor_GizmoDraw(void)
     // would mislead the user into clicking dead handles.
     {
         float ring_r = arrow_len;
-        int has_brush = 0;
+        int show_pitch_roll = 0;
         int k, e_sel, b_sel;
+        // Pitch/roll only show when rotating non-yaw makes sense:
+        //   - any selected ent has a brush (worldspawn brushes, .map-
+        //     authored func brushes), OR
+        //   - any selected ent is a func_* (BSP-loaded brush entities
+        //     have numbrushes==0 in our scene but their movedir is
+        //     still rotatable via entity_apply_rotation_delta).
         for (k = 0; k < Scene_NumSelected(); k++)
-            if (Scene_GetSelected(k, &e_sel, &b_sel) && b_sel >= 0)
+        {
+            if (!Scene_GetSelected(k, &e_sel, &b_sel)) continue;
+            if (b_sel >= 0) { show_pitch_roll = 1; break; }
+            if (e_sel >= 0 && e_sel < edit_scene.numentities)
             {
-                has_brush = 1;
-                break;
+                edit_entity_t *se = &edit_scene.entities[e_sel];
+                if (se->classname_idx >= 0
+                 && !strncmp(se->kv[se->classname_idx].value, "func_", 5))
+                {
+                    show_pitch_roll = 1;
+                    break;
+                }
             }
+        }
         for (i = 0; i < 3; i++)
         {
             byte col;
-            if (!has_brush && i != 2) continue;
+            if (!show_pitch_roll && i != 2) continue;
             col = (s_drag_rotate_axis == i)
                   ? EDIT_COLOR_AXIS_HOT : axis_colors[i];
             draw_rotation_ring(centroid, i, ring_r, col);
@@ -571,24 +614,32 @@ int Editor_GizmoMouseDown(float sx, float sy)
     // Pass 2: rotation rings. For each axis, intersect the click ray with
     // the world-axis-aligned plane through the centroid (perpendicular to
     // that axis); if the in-plane radial distance is close to ring_r, hit.
-    // Skip pitch/roll rings when there's no brush in the selection — those
-    // rings aren't drawn for point-only selections (entity yaw is the only
-    // rotation we apply for them) and we shouldn't pick what we don't draw.
+    // Pitch/roll picks gated to "rotation makes sense" — same rule as the
+    // ring-draw pass: any brush in selection OR any func_* classname.
     {
-        int has_brush = 0;
+        int show_pitch_roll = 0;
         int k, e_sel, b_sel;
         for (k = 0; k < Scene_NumSelected(); k++)
-            if (Scene_GetSelected(k, &e_sel, &b_sel) && b_sel >= 0)
+        {
+            if (!Scene_GetSelected(k, &e_sel, &b_sel)) continue;
+            if (b_sel >= 0) { show_pitch_roll = 1; break; }
+            if (e_sel >= 0 && e_sel < edit_scene.numentities)
             {
-                has_brush = 1;
-                break;
+                edit_entity_t *se = &edit_scene.entities[e_sel];
+                if (se->classname_idx >= 0
+                 && !strncmp(se->kv[se->classname_idx].value, "func_", 5))
+                {
+                    show_pitch_roll = 1;
+                    break;
+                }
             }
+        }
         for (i = 0; i < 3; i++)
         {
             vec3_t hit;
             float du, dv, r_in;
             int u, v;
-            if (!has_brush && i != 2) continue;
+            if (!show_pitch_roll && i != 2) continue;
             if (!ray_vs_axis_plane(i, centroid, r_org, r_dir, hit)) continue;
             u = (i + 1) % 3;
             v = (i + 2) % 3;
@@ -717,15 +768,16 @@ void Editor_GizmoMouseMove(float sx, float sy)
         if (step == 0.0f) return;
 
         n_sel = Scene_NumSelected();
-        // Yaw rotation applies once per unique entity (not once per
-        // selected brush), and only for axis 2 — avoids multiplying
-        // angle by N when a func_door's N brushes are all selected
-        // via group expansion. yaw_done[i] flips after the first hit
-        // for entity i so subsequent brush entries don't redo it.
+        // Apply rotation per unique entity (not per brush) — so a
+        // func_door whose N brushes are group-selected gets one angle
+        // bump, not N. ang_done[i] flips after first hit. For yaw (Z)
+        // we update every non-worldspawn entity. For pitch/roll (X/Y)
+        // we only update func_*-classed entities — pitch on a monster
+        // looks like a tipped-over corpse (rarely the user's intent),
+        // but on a func it rotates the slide direction in 3D, useful
+        // for re-orienting a downward-mover (movedir = -Z).
         {
-            int *yaw_done = (s_drag_rotate_axis == 2)
-                ? (int *)calloc(edit_scene.numentities, sizeof(int))
-                : NULL;
+            int *ang_done = (int *)calloc(edit_scene.numentities, sizeof(int));
             for (k = 0; k < n_sel; k++)
             {
                 edit_entity_t *e;
@@ -735,27 +787,25 @@ void Editor_GizmoMouseMove(float sx, float sy)
                 if (b_idx >= 0)
                 {
                     edit_brush_t *bs;
-                    if (b_idx >= e->numbrushes) goto yaw_check;
+                    if (b_idx >= e->numbrushes) goto ang_check;
                     bs = &e->brushes[b_idx];
-                    if (!bs->valid) goto yaw_check;
+                    if (!bs->valid) goto ang_check;
                     Brush_Rotate(bs, s_drag_rotate_axis, step, s_rotate_pivot);
                 }
-yaw_check:
-                if (yaw_done && !yaw_done[e_idx])
+ang_check:
+                if (!ang_done[e_idx])
                 {
-                    int is_world = (e->classname_idx >= 0
-                                 && !strcmp(e->kv[e->classname_idx].value,
-                                            "worldspawn"));
-                    yaw_done[e_idx] = 1;
-                    // Worldspawn has no semantic angle; rotating its
-                    // brushes shouldn't fabricate one. All other entities
-                    // (point or brush) get their angle/movedir spun so
-                    // the editor arrow tracks the rotation.
-                    if (!is_world)
-                        entity_apply_yaw_delta(e, step);
+                    const char *cls = (e->classname_idx >= 0)
+                                    ? e->kv[e->classname_idx].value : NULL;
+                    int is_world = cls && !strcmp(cls, "worldspawn");
+                    int is_func  = cls && !strncmp(cls, "func_", 5);
+                    ang_done[e_idx] = 1;
+                    if (is_world) continue;
+                    if (s_drag_rotate_axis == 2 || is_func)
+                        entity_apply_rotation_delta(e, s_drag_rotate_axis, step);
                 }
             }
-            if (yaw_done) free(yaw_done);
+            free(ang_done);
         }
         return;
     }
