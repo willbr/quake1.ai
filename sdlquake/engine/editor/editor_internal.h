@@ -21,12 +21,14 @@ struct edit_plane_s;
 // Category colors for point-entity wire bboxes — picked for separation in
 // the Quake palette since this is what the user reads to distinguish
 // trigger volumes from light markers from spawn points at a glance.
-#define EDIT_COLOR_DEFAULT      15      // off-white
-#define EDIT_COLOR_TRIGGER      251     // bright red    — gameplay logic volumes
-#define EDIT_COLOR_LIGHT        224     // bright orange — light_* (flame-start
-                                        //                 colour from r_part.c)
-#define EDIT_COLOR_SPAWN        244     // light blue    — info_player_* etc
-#define EDIT_COLOR_ITEM         79      // green         — item_* / weapon_* / armor
+#define EDIT_COLOR_DEFAULT      15      // off-white         (235,235,235)
+#define EDIT_COLOR_TRIGGER      251     // bright red        (255,  0,  0) — gameplay volumes
+#define EDIT_COLOR_LIGHT        109     // orange-gold       (223,171, 39) — light_*
+#define EDIT_COLOR_SPAWN        244     // light blue        (127,191,255) — info_player_*
+#define EDIT_COLOR_ITEM         144     // pink-purple       (187,115,159) — item_/weapon_/ammo_
+                                        // (Quake palette has no usable green
+                                        // — pink-purple is the next-most
+                                        // distinct hue from the others.)
 
 // render_wire.c
 int  Editor_ProjectWorld (const vec3_t world, float *out_sx, float *out_sy);
