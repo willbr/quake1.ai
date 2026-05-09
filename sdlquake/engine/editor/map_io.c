@@ -317,17 +317,21 @@ static int parse_scene_text(char *src)
                 edict_t *ed = EDICT_NUM(j);
                 float dx, dy, dz, d2;
                 if (ed->free) continue;
-                if (!ed->v.classname) continue;
-                if (strcmp(ed->v.classname, cls) != 0) continue;
                 if (by_model)
                 {
-                    // Brushmodel reference is unique per edict — exact
-                    // string match is the only correct disambiguation.
+                    // Brushmodel reference is unique per edict — match
+                    // purely on it. We deliberately skip the classname
+                    // check here: spawn_func_door rewrites v.classname
+                    // to "door" (and plat → "plat", train → "train") for
+                    // QC findradius chaining, so the BSP entity string
+                    // ("func_door") never matches the live edict.
                     if (!ed->v.model) continue;
                     if (strcmp(ed->v.model, model_kv) != 0) continue;
                     best = ed;
                     break;
                 }
+                if (!ed->v.classname) continue;
+                if (strcmp(ed->v.classname, cls) != 0) continue;
                 dx = ed->v.origin[0] - o[0];
                 dy = ed->v.origin[1] - o[1];
                 dz = ed->v.origin[2] - o[2];
