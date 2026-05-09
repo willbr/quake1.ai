@@ -64,10 +64,12 @@ static void draw_toolbar(void)
     extern cvar_t editor_grid_snap;
     extern cvar_t editor_grid_size;
     extern cvar_t editor_grid_absolute;
+    extern cvar_t editor_view_mode;
     static const char *style_items[] = {
         "wireframe", "flat", "flat+wire", "textured", "textured+wire"
     };
     static const char *camera_items[] = { "free-fly", "fps" };
+    static const char *view_items[]   = { "live", "map" };
     // Quake physics constants drive the gameplay-named entries: 18 = step
     // (max walkable step), 45 = jump apex (270²/(2*800)), 56 = player bbox
     // height (-24 to 32). The rest are powers of 2 for the build grid.
@@ -179,6 +181,24 @@ static void draw_toolbar(void)
         {
             char buf[32];
             snprintf(buf, sizeof(buf), "editor_camera %d\n", cam);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        // View mode: show running edicts ("live") vs .map text ("map").
+        // Eliminates double-rendering when AI has moved a monster away
+        // from its .map origin.
+        int vm = (int)editor_view_mode.value;
+        if (vm < 0) vm = 0;
+        if (vm >= (int)(sizeof(view_items) / sizeof(view_items[0])))
+            vm = (int)(sizeof(view_items) / sizeof(view_items[0])) - 1;
+        IG_SetNextItemWidth(90);
+        if (IG_Combo("view", &vm, view_items,
+                     (int)(sizeof(view_items) / sizeof(view_items[0]))))
+        {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "editor_view_mode %d\n", vm);
             Cbuf_AddText(buf);
         }
     }

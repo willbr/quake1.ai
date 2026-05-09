@@ -448,10 +448,8 @@ static int model_local_bbox(model_t *m, vec3_t out_mins, vec3_t out_maxs)
     return 1;
 }
 
-int Editor_EntityAnchor(const edit_entity_t *e, vec3_t out)
+static int try_live_anchor(const edit_entity_t *e, vec3_t out)
 {
-    if (!e) return 0;
-    if (Entity_GetOrigin(e, out)) return 1;
     if (e->live_ent && !e->live_ent->free)
     {
         const float *amn = e->live_ent->v.absmin;
@@ -464,6 +462,20 @@ int Editor_EntityAnchor(const edit_entity_t *e, vec3_t out)
             return 1;
         }
     }
+    return 0;
+}
+
+int Editor_EntityAnchor(const edit_entity_t *e, vec3_t out)
+{
+    extern cvar_t editor_view_mode;
+    int view_live = (int)editor_view_mode.value == 0;
+    if (!e) return 0;
+    // In live mode, the engine-known position wins so the gizmo + bbox
+    // track an AI-moved monster. Map mode keeps the original priority
+    // (origin key first) so editing pins the gizmo to the .map source.
+    if (view_live && try_live_anchor(e, out)) return 1;
+    if (Entity_GetOrigin(e, out)) return 1;
+    if (try_live_anchor(e, out)) return 1;
     if (e->live_static)
     {
         VectorCopy(e->live_static->origin, out);
@@ -475,6 +487,8 @@ int Editor_EntityAnchor(const edit_entity_t *e, vec3_t out)
 static void point_entity_bbox(const edit_entity_t *e,
                               vec3_t out_mins, vec3_t out_maxs)
 {
+    extern cvar_t editor_view_mode;
+    int view_live = (int)editor_view_mode.value == 0;
     static const vec3_t default_min = BBDEF_MIN;
     static const vec3_t default_max = BBDEF_MAX;
     const float *mn = default_min, *mx = default_max;
@@ -482,7 +496,11 @@ static void point_entity_bbox(const edit_entity_t *e,
     vec3_t o, am, ax;
     int i;
 
-    if (e->live_ent && !e->live_ent->free)
+    // Live mode: use the live edict's absmin/absmax so the bbox tracks
+    // AI-moved monsters and brush entities (func_door etc) in their
+    // current state. Map mode falls through to the .map origin path so
+    // the bbox stays anchored at the source position.
+    if (view_live && e->live_ent && !e->live_ent->free)
     {
         const float *amn = e->live_ent->v.absmin;
         const float *amx = e->live_ent->v.absmax;
@@ -506,7 +524,19 @@ static void point_entity_bbox(const edit_entity_t *e,
         return;
     }
 
-    Entity_GetOrigin(e, o);
+    // .map origin path (used in map mode, or when no live edict). For BSP-
+    // loaded brush entities (no .map origin key) fall back to the live
+    // edict's bbox so map mode doesn't snap them to world origin.
+    if (!Entity_GetOrigin(e, o) && e->live_ent && !e->live_ent->free)
+    {
+        const float *amn = e->live_ent->v.absmin;
+        const float *amx = e->live_ent->v.absmax;
+        if (amx[0] > amn[0] || amx[1] > amn[1] || amx[2] > amn[2])
+        {
+            for (i = 0; i < 3; i++) { out_mins[i] = amn[i]; out_maxs[i] = amx[i]; }
+            return;
+        }
+    }
     if (e->classname_idx >= 0)
         ci = find_class(e->kv[e->classname_idx].value);
 
@@ -662,6 +692,8 @@ void Editor_PushPreviewEntities(void)
     int n_pushed = 0;
     extern int       cl_numvisedicts;
     extern entity_t *cl_visedicts[];
+    extern cvar_t    editor_view_mode;
+    int view_map = (int)editor_view_mode.value == 1;
 
     if (!Editor_IsOpen()) return;
     if (!cl.worldmodel) return;
@@ -679,24 +711,43 @@ void Editor_PushPreviewEntities(void)
         if (e->classname_idx < 0) continue;
         if (Editor_EntityHidden(i)) continue;
 
-        // Engine already renders these — pushing another copy would double
-        // the model in the framebuffer. live_static is rendered via the
-        // efrag chain (R_StoreEfrags during BSP walk).
-        //
-        // For live_ent we have to be careful: info_player_* / info_*
-        // metadata entities keep an alive edict (their spawn function is a
-        // no-op) but with v.model = NULL — so the engine *doesn't* render
-        // anything for them. Use cl_entities[N].model as the authoritative
-        // "engine will render this" check, since that's what
-        // CL_RelinkEntities uses to decide whether to push into
-        // cl_visedicts. Only skip when the engine is going to draw
-        // something itself.
+        // The engine renders the edict at its current (possibly AI-moved)
+        // position; we render the preview at the .map origin. View modes:
+        //   live: show what's running. Skip preview when an edict already
+        //         exists so we don't double-draw at two different places.
+        //   map:  show what the .map says. Scrub the engine's visedict for
+        //         this entity and push our preview at the .map origin.
+        // For live_ent we use cl_entities[N].model as the authoritative
+        // "engine will render this" check — info_player_* metadata edicts
+        // are alive but have v.model=NULL, and we still want to preview
+        // those.
         if (e->live_ent && !e->live_ent->free)
         {
             int en = NUM_FOR_EDICT(e->live_ent);
             if (en > 0 && en < cl.num_entities && cl_entities[en].model)
-                continue;
+            {
+                if (view_map)
+                {
+                    int k;
+                    for (k = 0; k < cl_numvisedicts; k++)
+                    {
+                        if (cl_visedicts[k] == &cl_entities[en])
+                        {
+                            cl_visedicts[k] = cl_visedicts[--cl_numvisedicts];
+                            break;
+                        }
+                    }
+                    // fall through: push preview at .map origin
+                }
+                else
+                {
+                    continue;
+                }
+            }
         }
+        // SV_MakeStatic'd ents (torches) don't move, so .map origin == live
+        // origin == efrag origin. Skip in both modes — no double-render risk
+        // and we'd have to walk the efrag chain to scrub them anyway.
         if (e->live_static) continue;
 
         cls = e->kv[e->classname_idx].value;

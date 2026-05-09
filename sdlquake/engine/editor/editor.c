@@ -74,6 +74,13 @@ cvar_t      editor_grid_snap     = { "editor_grid_snap", "1" };
 cvar_t      editor_grid_size     = { "editor_grid_size", "16" };
 cvar_t      editor_grid_absolute = { "editor_grid_absolute", "1" };
 
+// View mode: 0 = "live" (show what's running — engine renders edicts at
+// AI-moved positions, bbox follows live, gizmo anchors on live). 1 = "map"
+// (show what the .map says — preview entities at .map origin, live edicts
+// scrubbed from cl_visedicts so they don't double-render, bbox + gizmo at
+// .map origin). Default live so the editor opens looking like the game.
+cvar_t      editor_view_mode     = { "editor_view_mode", "0" };
+
 static int     s_lookmode      = 0;
 static int     s_camera_inited = 0;
 static vec3_t  s_cam_origin;
@@ -551,6 +558,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_grid_snap);
     Cvar_RegisterVariable(&editor_grid_size);
     Cvar_RegisterVariable(&editor_grid_absolute);
+    Cvar_RegisterVariable(&editor_view_mode);
 
     {
         extern void Editor_RegisterCvars(void);
