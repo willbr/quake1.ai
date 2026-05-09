@@ -90,6 +90,11 @@ cvar_t      editor_view_mode     = { "editor_view_mode", "0" };
 cvar_t      editor_show_angles   = { "editor_show_angles", "0" };
 cvar_t      editor_show_links    = { "editor_show_links",  "1" };
 
+// Face mode: 0 = clicks select brushes (default), 1 = clicks set the active
+// face on the singly-selected brush. Toggled via toolbar Faces button.
+// Active-face state lives in edit_scene; this cvar is just the UI flag.
+cvar_t      editor_face_mode     = { "editor_face_mode",   "0" };
+
 // Default texture for newly-spawned cube brushes. The toolbar texture
 // picker writes here; Editor_Cmd_AddCube_f reads it. Falls through to
 // Scene_AddCubeBrush's "wbrick1_5" hardcoded fallback if blanked out
@@ -643,6 +648,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_view_mode);
     Cvar_RegisterVariable(&editor_show_angles);
     Cvar_RegisterVariable(&editor_show_links);
+    Cvar_RegisterVariable(&editor_face_mode);
     Cvar_RegisterVariable(&editor_brush_tex);
     Cvar_RegisterVariable(&editor_brush_hollow_thickness);
 
@@ -896,12 +902,24 @@ int Editor_ProcessEvent(void *evp)
         // Try the gizmo first; if it doesn't grab an axis, treat as a pick.
         if (Editor_GizmoMouseDown(vx, vy)) return 1;
         {
-            int e_idx, b_idx;
+            extern cvar_t editor_face_mode;
+            int e_idx, b_idx, plane_idx;
             SDL_Keymod mod = SDL_GetModState();
             int shift = (mod & SDL_KMOD_SHIFT) != 0;
-            if (Editor_PickAt(vx, vy, &e_idx, &b_idx))
+            int face_mode = editor_face_mode.value != 0.0f;
+            if (Editor_PickAt(vx, vy, &e_idx, &b_idx, &plane_idx))
             {
-                if (shift)
+                if (face_mode && b_idx >= 0 && plane_idx >= 0)
+                {
+                    // Face mode replaces selection with the picked brush
+                    // and pins active_face to the clicked face.
+                    // Shift is intentionally ignored — multi-face select
+                    // is out of scope.
+                    Scene_SelectionClear();
+                    Scene_SelectionAdd(e_idx, b_idx);
+                    Scene_SetActiveFace(e_idx, b_idx, plane_idx);
+                }
+                else if (shift)
                 {
                     Scene_SelectionToggle(e_idx, b_idx);
                 }

@@ -1102,6 +1102,8 @@ void Editor_RenderScene(void)
         int wire_all = (style == EDIT_STYLE_WIRE
                      || style == EDIT_STYLE_FLAT_WIRE
                      || style == EDIT_STYLE_TEX_WIRE);
+        int af_e, af_b, af_p;
+        int has_active_face = Scene_GetActiveFace(&af_e, &af_b, &af_p);
         for (i = 0; i < edit_scene.numentities; i++)
         {
             edit_entity_t *e = &edit_scene.entities[i];
@@ -1126,6 +1128,27 @@ void Editor_RenderScene(void)
                     draw_brush(b,
                                is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH,
                                is_sel);
+                }
+                // Active-face highlight: walk the face whose plane_idx
+                // matches and draw its edges in white over everything,
+                // depth-bypassed. Plane-index keying survives Brush_Compile
+                // reorderings — same trick Brush_TranslateFace uses.
+                if (has_active_face && i == af_e && j == af_b)
+                {
+                    int kk;
+                    for (kk = 0; kk < b->numfaces; kk++)
+                    {
+                        const edit_face_t *f = &b->faces[kk];
+                        int v;
+                        if (f->plane_idx != af_p) continue;
+                        for (v = 0; v < f->numverts; v++)
+                        {
+                            int next = (v + 1) % f->numverts;
+                            Editor_DrawLine3DOver(f->verts[v], f->verts[next],
+                                                  EDIT_COLOR_AXIS_HOT);
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -1484,12 +1507,13 @@ static int edict_is_already_bound(const edict_t *ed)
     return 0;
 }
 
-int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
+int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush,
+                  int *out_plane)
 {
     vec3_t origin, dir;
     float best_t = 1e30f;
     float world_t;
-    int best_ent = -1, best_brush = -1;
+    int best_ent = -1, best_brush = -1, best_plane = -1;
     int i, j, k;
 
     reap_dead_transients();
@@ -1518,6 +1542,7 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
                     best_t = t;
                     best_ent = i;
                     best_brush = -1;
+                    best_plane = -1;
                 }
             }
             continue;
@@ -1541,6 +1566,7 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
                         best_t = t;
                         best_ent = i;
                         best_brush = j;
+                        best_plane = f->plane_idx;
                     }
                 }
             }
@@ -1585,11 +1611,13 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
             best_t = t;
             best_ent = idx;
             best_brush = -1;
+            best_plane = -1;
         }
     }
 
     if (best_ent < 0) return 0;
     if (out_ent)   *out_ent   = best_ent;
     if (out_brush) *out_brush = best_brush;
+    if (out_plane) *out_plane = best_plane;
     return 1;
 }

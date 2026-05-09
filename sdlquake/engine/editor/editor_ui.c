@@ -219,6 +219,21 @@ static void draw_toolbar(void)
     }
     IG_SameLine(0, -1);
     {
+        // Face mode: clicks set the active face on the singly-selected
+        // brush instead of replacing the brush selection. Active face
+        // gates the inspector's alignment widgets and gets a white
+        // outline overlay in the wireframe pass.
+        extern cvar_t editor_face_mode;
+        int on = editor_face_mode.value != 0.0f;
+        if (IG_Checkbox("faces", &on))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_face_mode %d\n", on ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
         // Snap toggle. Cvar is float; treat any non-zero as on.
         int snap = editor_grid_snap.value != 0.0f;
         if (IG_Checkbox("snap", &snap))
