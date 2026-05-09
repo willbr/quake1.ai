@@ -217,6 +217,10 @@ void  Entity_TranslateOrigin(edit_entity_t *e, const vec3_t delta);
 // Upsert a kv pair (replace by key if present, else append). Refreshes the
 // classname_idx / origin_idx caches when those keys change.
 void  Entity_SetKV          (edit_entity_t *e, const char *key, const char *value);
+// Remove a kv pair by key, shifting later entries down. Refreshes the
+// classname_idx / origin_idx caches. No-op if the key is absent. Returns
+// 1 on removal, 0 if absent.
+int   Entity_RemoveKV       (edit_entity_t *e, const char *key);
 
 // Selection helpers. The list-based API treats the *primary* (last-added)
 // brush as the focal one — that's what GetSelected{Brush,Entity} return,

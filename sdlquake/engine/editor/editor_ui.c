@@ -1389,23 +1389,47 @@ static void draw_inspector(void)
     // and reading "classname" should never require scanning a long list.
     // spawnflags gets its own dedicated checkbox section below — skip it
     // in the generic kv loop.
+    //
+    // Each non-classname row gets an [x] button to remove it; classname
+    // is locked because the engine spawn dispatch needs it to function.
+    // Removing during iteration breaks the index, so the loop stops on
+    // the first removal — UI redraws the next frame against the shrunk
+    // array. After the rows, a footer row with [+] + key input appends
+    // a new kv (with empty value, ready for the row's text edit). All
+    // mutations push their own History_Push so undo round-trips.
     {
         int sf_idx = kv_lookup(e, "spawnflags");
-        int order[3] = { e->classname_idx, e->origin_idx, -1 };
+        int order[2] = { e->classname_idx, e->origin_idx };
         int j;
-        for (j = 0; j < 2; j++)
+        int removed_any = 0;
+        for (j = 0; j < 2 && !removed_any; j++)
         {
             int idx = order[j];
+            int is_classname;
             if (idx < 0 || idx >= e->numkv) continue;
+            is_classname = (idx == e->classname_idx);
             IG_PushID_Int(idx);
             snprintf(buf, sizeof(buf), "%s##key", e->kv[idx].key);
             IG_SetNextItemWidth(180);
             if (IG_InputText(buf, e->kv[idx].value, EDIT_VAL_LEN,
                              IG_ITF_EnterReturnsTrue))
                 inspector_sync_live(e, e->kv[idx].key, e->kv[idx].value);
+            if (!is_classname)
+            {
+                IG_SameLine(0, -1);
+                if (IG_SmallButton("x##rm"))
+                {
+                    char keycopy[EDIT_KEY_LEN];
+                    Q_strncpy(keycopy, e->kv[idx].key, EDIT_KEY_LEN - 1);
+                    keycopy[EDIT_KEY_LEN - 1] = '\0';
+                    History_Push("remove kv");
+                    Entity_RemoveKV(e, keycopy);
+                    removed_any = 1;
+                }
+            }
             IG_PopID();
         }
-        for (i = 0; i < e->numkv; i++)
+        for (i = 0; i < e->numkv && !removed_any; i++)
         {
             if (i == e->classname_idx) continue;
             if (i == e->origin_idx)    continue;
@@ -1416,7 +1440,38 @@ static void draw_inspector(void)
             if (IG_InputText(buf, e->kv[i].value, EDIT_VAL_LEN,
                              IG_ITF_EnterReturnsTrue))
                 inspector_sync_live(e, e->kv[i].key, e->kv[i].value);
+            IG_SameLine(0, -1);
+            if (IG_SmallButton("x##rm"))
+            {
+                char keycopy[EDIT_KEY_LEN];
+                Q_strncpy(keycopy, e->kv[i].key, EDIT_KEY_LEN - 1);
+                keycopy[EDIT_KEY_LEN - 1] = '\0';
+                History_Push("remove kv");
+                Entity_RemoveKV(e, keycopy);
+                removed_any = 1;
+            }
             IG_PopID();
+        }
+
+        // Footer: add a new kv. Trims whitespace, rejects collisions
+        // (Entity_SetKV upserts, so a duplicate would silently re-target
+        // the existing row instead of appending — surprising UX).
+        {
+            static char s_new_key[EDIT_KEY_LEN] = "";
+            int submit;
+            IG_SetNextItemWidth(140);
+            submit = IG_InputText("##newkey", s_new_key, sizeof(s_new_key),
+                                  IG_ITF_EnterReturnsTrue);
+            IG_SameLine(0, -1);
+            if (IG_SmallButton("+ add kv") || submit)
+            {
+                if (s_new_key[0] && kv_lookup(e, s_new_key) < 0)
+                {
+                    History_Push("add kv");
+                    Entity_SetKV(e, s_new_key, "");
+                }
+                s_new_key[0] = '\0';
+            }
         }
     }
     IG_Separator();

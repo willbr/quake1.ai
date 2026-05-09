@@ -677,6 +677,22 @@ void Entity_SetKV(edit_entity_t *e, const char *key, const char *value)
     e->kv[idx].value[EDIT_VAL_LEN - 1] = '\0';
 }
 
+int Entity_RemoveKV(edit_entity_t *e, const char *key)
+{
+    int idx, j;
+    if (!e || !key || !key[0]) return 0;
+    idx = kv_find(e, key);
+    if (idx < 0) return 0;
+    for (j = idx + 1; j < e->numkv; j++)
+        e->kv[j - 1] = e->kv[j];
+    e->numkv--;
+    // Rebuild classname/origin caches — both the index of the removed key
+    // matters (hit) and the indices after the removal point shift down.
+    e->classname_idx = kv_find(e, "classname");
+    e->origin_idx    = kv_find(e, "origin");
+    return 1;
+}
+
 int Scene_AddPointEntity(const char *classname, const vec3_t origin)
 {
     edit_entity_t e;
