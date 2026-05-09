@@ -1370,6 +1370,41 @@ int Editor_EntityInView(int e_idx)
     return 1;
 }
 
+// Detach e->live_ent when the underlying server slot has been ED_Free'd
+// and reused for a different classname. Common path: the player picks up
+// an item the .map authored (item_health, item_shells, …); ED_Free 0.5s
+// later the slot is reallocated for a runtime-spawned projectile (spike /
+// missile / grenade). Without this, picking against `live_ent->v.absmin/
+// absmax` would let the user click rockets and nails as if they were the
+// long-gone item. After detach, point_entity_bbox falls back to the .map
+// origin path — that's what the user authored, so it's the correct anchor.
+static void detach_stale_live_ent(edit_entity_t *e)
+{
+    const char *cls;
+    if (!e->live_ent) return;
+    if (e->live_ent->free) { e->live_ent = NULL; return; }
+    if (e->classname_idx < 0) return;
+    if (!e->live_ent->v.classname) return;
+    cls = e->kv[e->classname_idx].value;
+    if (strcmp(e->live_ent->v.classname, cls) != 0)
+        e->live_ent = NULL;
+}
+
+// Dead-monster filter for picking. Once a monster_* dies its corpse stays
+// at SOLID_NOT (vanilla death anims) or gets ThrowHead'd to a head model
+// that's also SOLID_NOT — either way, `solid == SOLID_NOT` on a monster_*
+// is a clean "this is a corpse" signal. Caller has already detached stale
+// live_ents so this only fires on the real surviving edict.
+static int entity_is_dead_corpse(const edit_entity_t *e)
+{
+    const char *cls;
+    if (!e->live_ent || e->live_ent->free) return 0;
+    if (e->classname_idx < 0) return 0;
+    cls = e->kv[e->classname_idx].value;
+    if (strncmp(cls, "monster_", 8) != 0) return 0;
+    return e->live_ent->v.solid == SOLID_NOT;
+}
+
 int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
 {
     vec3_t origin, dir;
@@ -1385,6 +1420,8 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
     {
         edit_entity_t *e = &edit_scene.entities[i];
         if (Editor_EntityHidden(i)) continue;        // category-filtered out
+        detach_stale_live_ent(e);                    // rocket/spike took our slot?
+        if (entity_is_dead_corpse(e)) continue;      // dead monster — uninteresting
         if (Entity_IsPoint(e))
         {
             vec3_t pmin, pmax;
