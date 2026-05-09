@@ -240,7 +240,9 @@ int Editor_EntityCategory(const edit_entity_t *e)
     if (!strncmp(cls, "trigger_", 8))                return EDIT_CAT_TRIGGER;
     if (!strncmp(cls, "info_player_", 12))           return EDIT_CAT_SPAWN;
     if (!strcmp (cls, "info_teleport_destination")) return EDIT_CAT_SPAWN;
-    if (!strcmp (cls, "info_intermission"))          return EDIT_CAT_SPAWN;
+    // info_intermission is the post-level camera — metadata, not a
+    // gameplay spawn point. Group with the rest of the info_* metadata
+    // so the "info" filter checkbox actually hides it.
     if (!strncmp(cls, "info_",    5))                return EDIT_CAT_INFO;
     if (!strncmp(cls, "light",    5))                return EDIT_CAT_LIGHT;
     if (!strncmp(cls, "monster_", 8))                return EDIT_CAT_MONSTER;
