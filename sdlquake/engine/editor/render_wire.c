@@ -285,6 +285,121 @@ static void point_entity_bbox(const edit_entity_t *e,
     }
 }
 
+// -----------------------------------------------------------------------------
+// Point entity model preview
+// -----------------------------------------------------------------------------
+//
+// Spawned monsters/items normally only appear after `map <name>` runs the
+// QuakeC spawn function. While editing we want to *see* what the user
+// placed, so we render the alias model directly through the engine's
+// software pipeline using a transient currententity. Loaded on demand via
+// Mod_ForName — anything not in s_model_table or that fails to load falls
+// back to the plain wire AABB.
+
+static const struct {
+    const char *classname;
+    const char *modelpath;
+} s_model_table[] = {
+    {"info_player_start",       "progs/player.mdl"},
+    {"info_player_deathmatch",  "progs/player.mdl"},
+    {"info_teleport_destination","progs/player.mdl"},
+    {"monster_army",            "progs/soldier.mdl"},
+    {"monster_dog",             "progs/dog.mdl"},
+    {"monster_ogre",            "progs/ogre.mdl"},
+    {"monster_demon1",          "progs/demon.mdl"},
+    {"monster_shambler",        "progs/shambler.mdl"},
+    {"monster_knight",          "progs/knight.mdl"},
+    {"monster_wizard",          "progs/wizard.mdl"},
+    {"monster_zombie",          "progs/zombie.mdl"},
+    {"monster_enforcer",        "progs/enforcer.mdl"},
+    {"monster_hell_knight",     "progs/hknight.mdl"},
+    {"monster_fish",            "progs/fish.mdl"},
+    {"monster_boss",            "progs/boss.mdl"},
+    {"weapon_supershotgun",     "progs/g_shot.mdl"},
+    {"weapon_nailgun",          "progs/g_nail.mdl"},
+    {"weapon_supernailgun",     "progs/g_nail2.mdl"},
+    {"weapon_grenadelauncher",  "progs/g_rock.mdl"},
+    {"weapon_rocketlauncher",   "progs/g_rock2.mdl"},
+    {"weapon_lightning",        "progs/g_light.mdl"},
+    {"item_armor1",             "progs/armor.mdl"},
+    {"item_armor2",             "progs/armor.mdl"},
+    {"item_armorInv",           "progs/armor.mdl"},
+    {"item_artifact_super_damage",      "progs/quaddama.mdl"},
+    {"item_artifact_invisibility",      "progs/invisibl.mdl"},
+    {"item_artifact_invulnerability",   "progs/invulner.mdl"},
+    {"item_artifact_envirosuit",        "progs/suit.mdl"},
+    {"item_torch_small_walltorch",      "progs/flame.mdl"},
+    // .bsp ammo boxes (item_health/shells/spikes/rockets/cells) are brush
+    // models, not alias — they fall back to the wire AABB for now.
+};
+
+static const char *classname_to_model(const char *classname)
+{
+    int i;
+    if (!classname) return NULL;
+    for (i = 0; i < (int)(sizeof(s_model_table) / sizeof(s_model_table[0])); i++)
+        if (!strcmp(s_model_table[i].classname, classname))
+            return s_model_table[i].modelpath;
+    return NULL;
+}
+
+// Read the entity's "angle" key into out_angles[YAW]. Quake .map convention:
+// -1 = up, -2 = down, otherwise yaw degrees. We treat the up/down sentinels
+// as a flat yaw=0 for preview (player-model arrow points along +X).
+static void parse_entity_angles(const edit_entity_t *e, vec3_t out_angles)
+{
+    int k;
+    out_angles[0] = out_angles[1] = out_angles[2] = 0;
+    for (k = 0; k < e->numkv; k++)
+    {
+        if (!strcmp(e->kv[k].key, "angle"))
+        {
+            float a = (float)atof(e->kv[k].value);
+            if (a >= 0) out_angles[YAW] = a;
+            return;
+        }
+    }
+}
+
+// Render a single alias model at the entity's origin. Mirrors the software
+// renderer's case mod_alias path in R_DrawEntitiesOnList.
+static void draw_point_entity_model(const edit_entity_t *e, const char *modelpath)
+{
+    static entity_t fake_ent;       // reused across the per-frame loop
+    model_t *m;
+    alight_t lighting;
+    float    lightvec[3] = { -1, 0, 0 };
+    int      j;
+
+    m = Mod_ForName((char *)modelpath, false);
+    if (!m || m->type != mod_alias) return;
+
+    memset(&fake_ent, 0, sizeof(fake_ent));
+    Entity_GetOrigin(e, fake_ent.origin);
+    parse_entity_angles(e, fake_ent.angles);
+    fake_ent.model    = m;
+    fake_ent.frame    = 0;
+    fake_ent.skinnum  = 0;
+    fake_ent.colormap = vid.colormap;
+    fake_ent.trivial_accept = 0;
+
+    currententity = &fake_ent;
+    VectorCopy(fake_ent.origin, r_entorigin);
+    VectorSubtract(r_origin, r_entorigin, modelorg);
+
+    if (!R_AliasCheckBBox()) return;
+
+    j = R_LightPoint(fake_ent.origin);
+    lighting.ambientlight = j;
+    lighting.shadelight   = j;
+    lighting.plightvec    = lightvec;
+    if (lighting.ambientlight > 128) lighting.ambientlight = 128;
+    if (lighting.ambientlight + lighting.shadelight > 192)
+        lighting.shadelight = 192 - lighting.ambientlight;
+
+    R_AliasDrawModel(&lighting);
+}
+
 // Union bbox of every selected brush + point entity. Returns 1 if at least
 // one valid item contributed.
 static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
@@ -389,15 +504,37 @@ void Editor_RenderScene(void)
         }
     }
 
-    // Pass 3: point entities (always wire AABB, depth-bypassed so they read
-    // as overlays even inside brushes).
+    // Pass 3a: point entity models. When we have a model for the classname
+    // we render it through the alias path so the user sees the actual
+    // monster / weapon / item shape they placed; otherwise we'll fall
+    // through to the wire-AABB pass below.
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
+        const char *cls, *mpath;
+        if (!Entity_IsPoint(e)) continue;
+        if (e->classname_idx < 0) continue;
+        cls = e->kv[e->classname_idx].value;
+        mpath = classname_to_model(cls);
+        if (!mpath) continue;
+        draw_point_entity_model(e, mpath);
+    }
+
+    // Pass 3b: wire AABB for point entities. Selected items always draw
+    // (so the user has a visible selection marker even on top of the
+    // model); unselected items only draw when no model rendered, since
+    // the box would otherwise duplicate the model's silhouette.
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        const char *cls = NULL;
         vec3_t pmin, pmax;
-        int is_sel;
+        int is_sel, has_model;
         if (!Entity_IsPoint(e)) continue;
         is_sel = Scene_SelectionContains(i, -1);
+        if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
+        has_model = classname_to_model(cls) != NULL;
+        if (has_model && !is_sel) continue;
         point_entity_bbox(e, pmin, pmax);
         draw_aabb_over(pmin, pmax,
                        is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH);
