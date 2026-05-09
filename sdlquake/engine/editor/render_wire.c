@@ -1568,6 +1568,15 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush)
             amx = ed->v.absmax;
             if (amx[0] <= amn[0] || amx[1] <= amn[1] || amx[2] <= amn[2])
                 continue;
+            // Skip edicts whose bbox contains the ray origin. In FPS mode
+            // the ray starts at the player's eye, which sits inside the
+            // player edict's bbox — without this, every click lands on
+            // the player. Generalises to "you can't aim at something
+            // you're standing in" for any future free-fly case too.
+            if (origin[0] >= amn[0] && origin[0] <= amx[0]
+             && origin[1] >= amn[1] && origin[1] <= amx[1]
+             && origin[2] >= amn[2] && origin[2] <= amx[2])
+                continue;
             if (!ray_vs_aabb(origin, dir, amn, amx, &t)) continue;
             if (t > world_t) continue;       // wall in the way
             if (t >= best_t) continue;
