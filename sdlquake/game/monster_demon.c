@@ -154,6 +154,7 @@ static void Demon_Melee(float side) {
     float dx, dy, dz, dist;
     ai_face();
     eng->SV_WalkMove(e, e->v.ideal_yaw, 12);
+    if (!e->v.enemy || e->v.enemy->free) return;     // QC enemy=world default doesn't apply in native C port
     dx = e->v.enemy->v.origin[0] - e->v.origin[0];
     dy = e->v.enemy->v.origin[1] - e->v.origin[1];
     dz = e->v.enemy->v.origin[2] - e->v.origin[2];

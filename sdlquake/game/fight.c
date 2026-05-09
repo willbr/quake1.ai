@@ -59,15 +59,22 @@ static void knight_attack(void) {
 
 // ---------------------------------------------------------------------------
 // ai_face -- turn self to face enemy
+// In QC, self.enemy defaults to world (edict 0) so reading
+// self.enemy.origin returns (0,0,0). Our native-C port has it as a real
+// pointer that's NULL when unset — guard so we don't deref. Just bail
+// (keep current ideal_yaw) when no enemy; SV_ChangeYaw still spins us
+// toward whatever yaw we were already heading.
 // ---------------------------------------------------------------------------
 void ai_face(void) {
     edict_t *self = g->self;
-    vec3_t diff = {
-        self->v.enemy->v.origin[0] - self->v.origin[0],
-        self->v.enemy->v.origin[1] - self->v.origin[1],
-        self->v.enemy->v.origin[2] - self->v.origin[2]
-    };
-    self->v.ideal_yaw = eng->VectorToYaw(diff);
+    if (self->v.enemy && !self->v.enemy->free) {
+        vec3_t diff = {
+            self->v.enemy->v.origin[0] - self->v.origin[0],
+            self->v.enemy->v.origin[1] - self->v.origin[1],
+            self->v.enemy->v.origin[2] - self->v.origin[2]
+        };
+        self->v.ideal_yaw = eng->VectorToYaw(diff);
+    }
     eng->SV_ChangeYaw(self);
 }
 
