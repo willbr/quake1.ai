@@ -1153,7 +1153,9 @@ void Editor_RenderScene(void)
     }
 
     // Combined selection bbox (only when more than one item selected).
-    if (multi)
+    // Editor-only — when the user closes the editor, the selection still
+    // exists internally but should be invisible in the running game.
+    if (multi && Editor_IsOpen())
     {
         vec3_t bmin, bmax;
         if (selection_bbox(bmin, bmax))
