@@ -356,9 +356,15 @@ static int parse_scene_text(char *src)
             // model field (triggers). Skip the classname strcmp here —
             // tolerant in case of future spawn-time renames; the brush
             // bbox is the authoritative key.
+            //
+            // SV_LinkEdict inflates absmin/absmax by ±1 unit per axis
+            // (world.c:441) — bumps the matched-edict d2 to 6 even when
+            // it's the right one. Tolerance is set generously enough to
+            // accommodate that, but well below a typical inter-trigger
+            // separation (≥32u per axis → d2 ≥ 1024).
             if (!best && by_model && have_expected_bbox)
             {
-                float bb_best = 1.0f * 1.0f;     // 1u squared per-axis tolerance
+                float bb_best = 64.0f;
                 for (j = 1; j < sv.num_edicts; j++)
                 {
                     edict_t *ed = EDICT_NUM(j);
