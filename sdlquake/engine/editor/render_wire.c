@@ -303,6 +303,8 @@ typedef struct {
 
 static const edit_class_info_t s_class_info[] = {
     {"info_player_start",       "progs/player.mdl",  BB1_MIN,  BB1_MAX},
+    {"info_player_start2",      "progs/player.mdl",  BB1_MIN,  BB1_MAX},
+    {"info_player_coop",        "progs/player.mdl",  BB1_MIN,  BB1_MAX},
     {"info_player_deathmatch",  "progs/player.mdl",  BB1_MIN,  BB1_MAX},
     {"info_teleport_destination","progs/player.mdl", BB1_MIN,  BB1_MAX},
     {"monster_army",            "progs/soldier.mdl", BBM1_MIN, BBM1_MAX},
