@@ -308,6 +308,140 @@ static void draw_brush_list(void)
 }
 
 // -----------------------------------------------------------------------------
+// spawnflags tables — class-specific bits, plus the universal skill/DM bits.
+// -----------------------------------------------------------------------------
+
+typedef struct { unsigned bit; const char *label; } spawnflag_def_t;
+
+typedef struct {
+    const char *classname;       // exact match (NULL → use prefix)
+    const char *prefix;          // prefix match (NULL → use classname)
+    const spawnflag_def_t *flags;
+    int n;
+} class_flag_table_t;
+
+static const spawnflag_def_t s_universal_flags[] = {
+    {  256, "Not on Easy" },
+    {  512, "Not on Normal" },
+    { 1024, "Not on Hard" },
+    { 2048, "Not in Deathmatch" },
+};
+
+static const spawnflag_def_t s_light_flags[]   = { { 1, "Start off" } };
+static const spawnflag_def_t s_door_flags[]    = {
+    { 1,  "Start open" }, { 4,  "Don't link" }, { 8,  "Gold key" },
+    { 16, "Silver key" }, { 32, "Toggle" },
+};
+static const spawnflag_def_t s_plat_flags[]    = { { 1, "Low trigger" } };
+static const spawnflag_def_t s_trigger_flags[] = { { 1, "No touch" } };
+static const spawnflag_def_t s_health_flags[]  = {
+    { 1, "Rotten (15)" }, { 2, "Mega (100)" },
+};
+static const spawnflag_def_t s_changelevel_flags[] = { { 1, "Silent" } };
+
+static const class_flag_table_t s_class_flag_tables[] = {
+    { NULL,                  "light",      s_light_flags,        1 },
+    { "func_door",           NULL,         s_door_flags,         5 },
+    { "func_door_secret",    NULL,         s_door_flags,         5 },
+    { "func_plat",           NULL,         s_plat_flags,         1 },
+    { "trigger_multiple",    NULL,         s_trigger_flags,      1 },
+    { "trigger_once",        NULL,         s_trigger_flags,      1 },
+    { "trigger_changelevel", NULL,         s_changelevel_flags,  1 },
+    { "item_health",         NULL,         s_health_flags,       2 },
+};
+
+static const class_flag_table_t *find_class_flags(const char *classname)
+{
+    int i;
+    if (!classname) return NULL;
+    for (i = 0; i < (int)(sizeof(s_class_flag_tables)
+                          / sizeof(s_class_flag_tables[0])); i++)
+    {
+        const class_flag_table_t *t = &s_class_flag_tables[i];
+        if (t->classname && !strcmp(t->classname, classname)) return t;
+        if (t->prefix && !strncmp(t->prefix, classname, strlen(t->prefix)))
+            return t;
+    }
+    return NULL;
+}
+
+static int kv_lookup(const edit_entity_t *e, const char *key)
+{
+    int i;
+    for (i = 0; i < e->numkv; i++)
+        if (!strcmp(e->kv[i].key, key)) return i;
+    return -1;
+}
+
+// Render the spawnflags section: class-specific checkboxes (if known),
+// universal skill/DM checkboxes, and a raw integer fallback. Mutates the
+// "spawnflags" kv (creating it on first toggle) and pushes the new value to
+// e->live_ent->v.spawnflags so the live entity sees the change too.
+static void draw_spawnflags_section(edit_entity_t *e)
+{
+    char buf[32];
+    char label[80];
+    int  changed = 0, on, j;
+    int  current;
+    const char *cls = e->classname_idx >= 0
+                      ? e->kv[e->classname_idx].value : NULL;
+    const class_flag_table_t *cf = find_class_flags(cls);
+    int  sf_idx = kv_lookup(e, "spawnflags");
+
+    current = sf_idx >= 0 ? atoi(e->kv[sf_idx].value) : 0;
+
+    IG_TextUnformatted("spawnflags");
+
+    // Class-specific bits first (more interesting per-entity).
+    if (cf)
+    {
+        for (j = 0; j < cf->n; j++)
+        {
+            on = (current & cf->flags[j].bit) != 0;
+            snprintf(label, sizeof(label), "%s##cf%d", cf->flags[j].label, j);
+            if (IG_Checkbox(label, &on))
+            {
+                if (on) current |=  cf->flags[j].bit;
+                else    current &= ~cf->flags[j].bit;
+                changed = 1;
+            }
+        }
+    }
+
+    // Universal skill / DM filter bits — apply to every entity.
+    for (j = 0; j < (int)(sizeof(s_universal_flags) / sizeof(s_universal_flags[0])); j++)
+    {
+        on = (current & s_universal_flags[j].bit) != 0;
+        snprintf(label, sizeof(label), "%s##uf%d",
+                 s_universal_flags[j].label, j);
+        if (IG_Checkbox(label, &on))
+        {
+            if (on) current |=  s_universal_flags[j].bit;
+            else    current &= ~s_universal_flags[j].bit;
+            changed = 1;
+        }
+    }
+
+    // Raw integer — handles bits the table doesn't know about, and lets
+    // power users type a value directly.
+    snprintf(buf, sizeof(buf), "%d", current);
+    IG_SetNextItemWidth(120);
+    if (IG_InputText("raw##sfraw", buf, sizeof(buf), IG_ITF_EnterReturnsTrue))
+    {
+        current = atoi(buf);
+        changed = 1;
+    }
+
+    if (changed)
+    {
+        snprintf(buf, sizeof(buf), "%d", current);
+        Entity_SetKV(e, "spawnflags", buf);
+        if (e->live_ent && !e->live_ent->free)
+            e->live_ent->v.spawnflags = (float)current;
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Inspector
 // -----------------------------------------------------------------------------
 
@@ -344,7 +478,10 @@ static void draw_inspector(void)
     // array order. Most parsers happen to put classname first already, but
     // for entities populated from worldmodel->entities the order can vary,
     // and reading "classname" should never require scanning a long list.
+    // spawnflags gets its own dedicated checkbox section below — skip it
+    // in the generic kv loop.
     {
+        int sf_idx = kv_lookup(e, "spawnflags");
         int order[3] = { e->classname_idx, e->origin_idx, -1 };
         int j;
         for (j = 0; j < 2; j++)
@@ -362,6 +499,7 @@ static void draw_inspector(void)
         {
             if (i == e->classname_idx) continue;
             if (i == e->origin_idx)    continue;
+            if (i == sf_idx)           continue;
             IG_PushID_Int(i);
             snprintf(buf, sizeof(buf), "%s##key", e->kv[i].key);
             IG_SetNextItemWidth(180);
@@ -370,6 +508,8 @@ static void draw_inspector(void)
             IG_PopID();
         }
     }
+    IG_Separator();
+    draw_spawnflags_section(e);
     IG_Separator();
 
     if (b)
