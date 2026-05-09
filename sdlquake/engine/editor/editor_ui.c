@@ -359,6 +359,27 @@ int Editor_EntityHidden(int e_idx)
     if (cat > 0 && cat < EDIT_CAT_COUNT && s_hide_cat[cat]) return 1;
     if (s_visible_only && !Editor_EntityInView(e_idx)) return 1;
     if (entity_hidden_by_skill(e)) return 1;
+
+    // Live mode: hide entities the engine isn't visibly rendering. Once
+    // realised as a live edict the engine's model decision is the truth —
+    // info_player_*, info_intermission, info_null and similar metadata
+    // edicts have v.model=NULL and the engine draws nothing for them, so
+    // bbox + arrows + picking should also draw nothing. SV_MakeStatic'd
+    // ents (live_static) keep their efrag chain so they stay visible.
+    // Pending entities (no live_ent yet) and BSP-loaded brush entities
+    // both pass through — the former is the user's authoring intent, the
+    // latter has v.model="*N" which sets cl_entities[N].model.
+    {
+        extern cvar_t editor_view_mode;
+        int view_live = (int)editor_view_mode.value == 0;
+        if (view_live && e->live_ent && !e->live_ent->free)
+        {
+            int en = NUM_FOR_EDICT(e->live_ent);
+            int engine_renders =
+                (en > 0 && en < cl.num_entities && cl_entities[en].model);
+            if (!engine_renders) return 1;
+        }
+    }
     return 0;
 }
 
