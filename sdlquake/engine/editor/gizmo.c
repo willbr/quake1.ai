@@ -9,6 +9,7 @@
 #include "quakedef.h"
 #include "edit_scene.h"
 #include "edit_history.h"
+#include "editor.h"             // Editor_IsOpen
 #include "editor_internal.h"
 
 #include <math.h>
@@ -227,6 +228,11 @@ void Editor_GizmoDraw(void)
     };
     int i;
     int multi = Scene_NumSelected() > 1;
+
+    // The whole gizmo is an editing affordance — hide it during play even
+    // if a selection persists from the last editor session. Editor_RenderScene
+    // still calls us unconditionally so brush wireframes can stay visible.
+    if (!Editor_IsOpen()) return;
 
     // Anchor on the selection centroid for multi-select; use the primary
     // item's centroid (brush or point entity origin) for single. Face
