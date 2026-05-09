@@ -18,6 +18,7 @@
 #include "edit_history.h"
 #include "editor.h"
 #include "editor_internal.h"
+#include "hotreload.h"          // g_game_api
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -289,6 +290,101 @@ static void Editor_Cmd_Status_f(void)
 }
 
 // -----------------------------------------------------------------------------
+// Spawn pending point entities (closing the editor → live edicts)
+// -----------------------------------------------------------------------------
+//
+// When the user adds a point entity in the editor (Add entity / editor_entity_add)
+// it lives in edit_scene with spawned=0. The editor renders its model preview,
+// but the engine has no edict for it — so the player can't touch it. On close
+// we walk those pending entities and run the same flow ED_LoadFromFile uses
+// at map load: ED_Alloc, ED_ParseEdict, then game.dll's entity_spawn dispatch
+// which fires the classname's spawn function (sets model/size/touch/etc).
+//
+// Brushes added via Add cube don't need this — they overlay through
+// Editor_RenderScene and collide via the editor's brute-force trace path,
+// neither of which involves a server edict.
+
+// Synthesize the ED_ParseEdict-consumable text for one entity's kv list and
+// hand the resulting edict to game.dll's spawn dispatch. Returns 1 on
+// successful spawn, 0 if skipped or failed.
+static int spawn_one_pending(edit_entity_t *e)
+{
+    edict_t *ent;
+    char     buf[2048];
+    int      len = 0;
+    int      i;
+    char    *parsed;
+    const char *classname;
+
+    if (e->classname_idx < 0) return 0;
+    classname = e->kv[e->classname_idx].value;
+
+    // info_player_start / info_player_deathmatch / info_intermission /
+    // info_teleport_destination etc are level metadata, not touchable
+    // entities — game_entity_spawn ignores them anyway, but skipping
+    // here avoids burning an edict slot for nothing.
+    if (!strncmp(classname, "info_", 5)) return 0;
+
+    // Emit "key" "value" lines followed by a closing brace; ED_ParseEdict
+    // expects to start *inside* a brace and consume until '}'.
+    for (i = 0; i < e->numkv; i++)
+    {
+        int wrote = snprintf(buf + len, sizeof(buf) - len,
+                             "\"%s\" \"%s\"\n",
+                             e->kv[i].key, e->kv[i].value);
+        if (wrote <= 0 || (size_t)(len + wrote) >= sizeof(buf) - 4) break;
+        len += wrote;
+    }
+    snprintf(buf + len, sizeof(buf) - len, "}\n");
+
+    ent = ED_Alloc();
+    parsed = ED_ParseEdict(buf, ent);
+    if (!parsed)
+    {
+        ED_Free(ent);
+        Con_Printf("editor: spawn failed (parse) for '%s'\n", classname);
+        return 0;
+    }
+
+    if (!g_game_api || !g_game_api->entity_spawn)
+    {
+        ED_Free(ent);
+        return 0;
+    }
+
+    // Many spawn functions read pr_global_struct->self while running.
+    pr_global_struct->self = EDICT_TO_PROG(ent);
+    g_game_api->entity_spawn(ent, ent->v.classname);
+
+    // The spawn function usually calls SV_SetOrigin / SV_SetSize which link
+    // automatically; relink defensively for the rare cases that don't.
+    SV_LinkEdict(ent, false);
+    return 1;
+}
+
+static void Editor_FlushPendingEntities(void)
+{
+    int i, n_spawned = 0;
+    if (!g_game_api) return;
+    if (!sv.active)  return;        // no live server to spawn into
+
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        if (!Entity_IsPoint(e)) continue;
+        if (e->spawned) continue;
+        if (spawn_one_pending(e)) n_spawned++;
+        // Mark spawned even on skip so we don't try every frame — the
+        // skip reasons (info_*, missing classname) won't change without
+        // a kv edit, which the user can re-trigger by re-adding.
+        e->spawned = 1;
+    }
+    if (n_spawned > 0)
+        Con_Printf("editor: spawned %d pending entit%s into the world\n",
+                   n_spawned, n_spawned == 1 ? "y" : "ies");
+}
+
+// -----------------------------------------------------------------------------
 // Lifecycle
 // -----------------------------------------------------------------------------
 
@@ -341,14 +437,22 @@ void Editor_Toggle(void)
 {
     if (!s_inited) return;
 
-    // Closing the editor: auto-save the .map first if a file is loaded.
-    // No-ops cleanly when we never loaded one (filename empty).
-    if (s_open && edit_scene.filename[0])
+    // Closing the editor: spawn any newly-placed point entities into the
+    // live server so the player can actually touch them, then auto-save
+    // the .map. Order matters — flushing first means the save reflects
+    // post-spawn kv defaults (e.g. spawn functions sometimes back-fill
+    // spawnflags), keeping the file authoritative.
+    if (s_open)
     {
-        if (Scene_Save(edit_scene.filename))
-            Con_Printf("editor: auto-saved %s\n", edit_scene.filename);
-        else
-            Con_Printf("editor: auto-save failed for %s\n", edit_scene.filename);
+        Editor_FlushPendingEntities();
+        if (edit_scene.filename[0])
+        {
+            if (Scene_Save(edit_scene.filename))
+                Con_Printf("editor: auto-saved %s\n", edit_scene.filename);
+            else
+                Con_Printf("editor: auto-save failed for %s\n",
+                           edit_scene.filename);
+        }
     }
 
     s_open = !s_open;

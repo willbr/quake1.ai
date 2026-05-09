@@ -270,6 +270,12 @@ static int parse_scene_text(char *src)
             edit_entity_t *e = &edit_scene.entities[i];
             for (j = 0; j < e->numbrushes; j++)
                 Brush_Compile(&e->brushes[j]);
+            // Anything in a freshly-parsed scene was either spawned by the
+            // engine's load-from-file flow (because the .bsp/.map text we
+            // just parsed matches what the server already knows about) or
+            // is brush-only and never had a server edict. Either way, the
+            // editor shouldn't attempt to spawn it again on close.
+            e->spawned = 1;
         }
     }
     return ok;

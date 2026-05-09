@@ -70,6 +70,12 @@ typedef struct edit_entity_s {
     // every kv mutation.
     int         classname_idx;
     int         origin_idx;
+
+    // 0 = added by the editor and not yet realised as a server edict.
+    // 1 = either parsed from the .map at load time (so already spawned by
+    //     the engine's normal load-from-file flow) or already flushed by
+    //     Editor_FlushPendingEntities. Not persisted to disk.
+    int         spawned;
 } edit_entity_t;
 
 // One entry in the selection list. (entity, brush) is the global address;
