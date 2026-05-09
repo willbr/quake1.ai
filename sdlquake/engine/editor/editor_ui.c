@@ -270,6 +270,9 @@ static void draw_brush_list(void)
         int hide_monster = s_hide_cat[EDIT_CAT_MONSTER];
         int hide_func    = s_hide_cat[EDIT_CAT_FUNC];
         int hide_sound   = s_hide_cat[EDIT_CAT_SOUND];
+        int hide_path    = s_hide_cat[EDIT_CAT_PATH];
+        int hide_misc    = s_hide_cat[EDIT_CAT_MISC];
+        int hide_info    = s_hide_cat[EDIT_CAT_INFO];
         IG_TextUnformatted("Hide:");
         if (IG_Checkbox("triggers", &hide_trig))    s_hide_cat[EDIT_CAT_TRIGGER] = hide_trig;
         IG_SameLine(0, -1);
@@ -281,6 +284,11 @@ static void draw_brush_list(void)
         IG_SameLine(0, -1);
         if (IG_Checkbox("funcs",    &hide_func))    s_hide_cat[EDIT_CAT_FUNC]    = hide_func;
         if (IG_Checkbox("sounds",   &hide_sound))   s_hide_cat[EDIT_CAT_SOUND]   = hide_sound;
+        IG_SameLine(0, -1);
+        if (IG_Checkbox("paths",    &hide_path))    s_hide_cat[EDIT_CAT_PATH]    = hide_path;
+        if (IG_Checkbox("misc",     &hide_misc))    s_hide_cat[EDIT_CAT_MISC]    = hide_misc;
+        IG_SameLine(0, -1);
+        if (IG_Checkbox("info",     &hide_info))    s_hide_cat[EDIT_CAT_INFO]    = hide_info;
     }
     IG_Separator();
 

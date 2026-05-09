@@ -32,11 +32,14 @@ struct edit_plane_s;
 #define EDIT_COLOR_MONSTER      232     // dark orange       (183, 51, 15) — monster_*
 #define EDIT_COLOR_FUNC         246     // pale cyan         (215,255,255) — func_*
 #define EDIT_COLOR_SOUND         47     // lavender          (139,139,203) — ambient_*
+#define EDIT_COLOR_PATH         235     // bright orange     (219,127, 59) — path_*
+#define EDIT_COLOR_MISC         252     // pale cream        (255,243,147) — misc_*
+#define EDIT_COLOR_INFO          13     // light grey        (203,203,203) — info_null/notnull/command
 
 // Category index for filtering / colour-coding. Order is stable; UI
 // checkboxes index into a parallel filter array.
 enum {
-    EDIT_CAT_OTHER = 0,     // worldspawn, info_null/notnull, misc, etc.
+    EDIT_CAT_OTHER = 0,     // worldspawn etc. (anything not below)
     EDIT_CAT_TRIGGER,       // trigger_*
     EDIT_CAT_LIGHT,         // light, light_*
     EDIT_CAT_SPAWN,         // info_player_*, info_teleport_destination, info_intermission
@@ -44,6 +47,9 @@ enum {
     EDIT_CAT_MONSTER,       // monster_*
     EDIT_CAT_FUNC,          // func_* (doors, plats, buttons, walls, ...)
     EDIT_CAT_SOUND,         // ambient_*
+    EDIT_CAT_PATH,          // path_corner, path_*
+    EDIT_CAT_MISC,          // misc_*
+    EDIT_CAT_INFO,          // info_null, info_notnull, info_command, etc.
     EDIT_CAT_COUNT
 };
 

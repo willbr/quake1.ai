@@ -241,6 +241,7 @@ int Editor_EntityCategory(const edit_entity_t *e)
     if (!strncmp(cls, "info_player_", 12))           return EDIT_CAT_SPAWN;
     if (!strcmp (cls, "info_teleport_destination")) return EDIT_CAT_SPAWN;
     if (!strcmp (cls, "info_intermission"))          return EDIT_CAT_SPAWN;
+    if (!strncmp(cls, "info_",    5))                return EDIT_CAT_INFO;
     if (!strncmp(cls, "light",    5))                return EDIT_CAT_LIGHT;
     if (!strncmp(cls, "monster_", 8))                return EDIT_CAT_MONSTER;
     if (!strncmp(cls, "item_",    5))                return EDIT_CAT_ITEM;
@@ -248,6 +249,8 @@ int Editor_EntityCategory(const edit_entity_t *e)
     if (!strncmp(cls, "ammo_",    5))                return EDIT_CAT_ITEM;
     if (!strncmp(cls, "func_",    5))                return EDIT_CAT_FUNC;
     if (!strncmp(cls, "ambient_", 8))                return EDIT_CAT_SOUND;
+    if (!strncmp(cls, "path_",    5))                return EDIT_CAT_PATH;
+    if (!strncmp(cls, "misc_",    5))                return EDIT_CAT_MISC;
     return EDIT_CAT_OTHER;
 }
 
@@ -263,6 +266,9 @@ static byte category_color(const edit_entity_t *e)
         case EDIT_CAT_MONSTER: return EDIT_COLOR_MONSTER;
         case EDIT_CAT_FUNC:    return EDIT_COLOR_FUNC;
         case EDIT_CAT_SOUND:   return EDIT_COLOR_SOUND;
+        case EDIT_CAT_PATH:    return EDIT_COLOR_PATH;
+        case EDIT_CAT_MISC:    return EDIT_COLOR_MISC;
+        case EDIT_CAT_INFO:    return EDIT_COLOR_INFO;
         default:               return EDIT_COLOR_DEFAULT;
     }
 }
