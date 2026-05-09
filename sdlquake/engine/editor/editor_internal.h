@@ -113,6 +113,11 @@ int  Editor_EntityCategory(const struct edit_entity_s *e);
 // entities.
 int  Editor_EntityHidden  (int e_idx);
 
+// editor_ui.c — sync per-session UI state from cvars on each editor open.
+// Currently: difficulty preview filter ← `skill` / `deathmatch` cvars so
+// the dropdown matches what the running game would actually spawn.
+void Editor_UI_OnOpen     (void);
+
 // render_wire.c — 1 if the entity is in front of the camera, projects into
 // the viewport, and isn't occluded by the world BSP. Used by the "visible
 // only" filter.

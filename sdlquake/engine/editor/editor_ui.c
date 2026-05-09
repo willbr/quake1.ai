@@ -237,11 +237,19 @@ static void draw_toolbar(void)
 // -----------------------------------------------------------------------------
 
 // Per-category hide flag, indexed by EDIT_CAT_*. Persists across panel
-// re-opens within a session. Default is everything visible. The
-// "OTHER" slot covers worldspawn / misc_* / etc — we don't expose a
-// checkbox for it (hiding worldspawn would render the level invisible),
-// but the array entry exists so EDIT_CAT_OTHER indexing is uniform.
-static int s_hide_cat[EDIT_CAT_COUNT] = { 0 };
+// re-opens within a session. The "OTHER" slot covers worldspawn /
+// misc_* / etc — we don't expose a checkbox for it (hiding worldspawn
+// would render the level invisible), but the array entry exists so
+// EDIT_CAT_OTHER indexing is uniform.
+//
+// Default hides triggers, lights, and info_* metadata — these are
+// invisible in the running game and clutter the editor view by
+// default; the user can re-enable them from the panel checkboxes.
+static int s_hide_cat[EDIT_CAT_COUNT] = {
+    [EDIT_CAT_TRIGGER] = 1,
+    [EDIT_CAT_LIGHT]   = 1,
+    [EDIT_CAT_INFO]    = 1,
+};
 
 // "Visible only" toggle — when on, anything outside the camera frustum
 // or occluded by world geometry is hidden, regardless of category. Useful
@@ -254,6 +262,22 @@ static int s_visible_only = 0;
 // NOT_EASY/NOT_NORMAL/NOT_HARD/NOT_DEATHMATCH spawnflag bits so the user
 // can preview which entities will actually spawn at each difficulty.
 static int s_skill_filter = -1;
+
+// Called from Editor_Toggle when the editor opens. Resets s_skill_filter
+// to match the game's current `skill` (and `deathmatch`) cvars so the
+// preview dropdown lines up with what would actually spawn if the user
+// hit Restart map. The user can override after the sync — the override
+// stays until the next time the editor opens.
+void Editor_UI_OnOpen(void)
+{
+    extern cvar_t skill, deathmatch;
+    int s = (int)skill.value;
+    if (deathmatch.value != 0.0f) { s_skill_filter = 3; return; }
+    if (s < 0) s = 0;
+    if (s > 2) s = 2;       // collapse nightmare onto hard (vanilla
+                            // shares the NOT_HARD spawnflag bit)
+    s_skill_filter = s;
+}
 
 static int entity_hidden_by_skill(const edit_entity_t *e)
 {

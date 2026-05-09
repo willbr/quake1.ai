@@ -586,9 +586,13 @@ void Editor_Toggle(void)
     // Opening the editor: refresh edit_scene against the live server.
     // Server-populated scenes get rebuilt against new sv.edicts when the
     // map changed; user-loaded scenes drop their live_ent pointers so a
-    // post-map-change drag can't move a random edict.
+    // post-map-change drag can't move a random edict. Then sync the UI's
+    // per-session filter state from cvars (difficulty preview ← skill).
     if (!s_open)
+    {
         editor_check_map_change();
+        Editor_UI_OnOpen();
+    }
 
     // Closing the editor: spawn any newly-placed point entities into the
     // live server so the player can actually touch them, then auto-save
