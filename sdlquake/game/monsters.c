@@ -6,6 +6,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "sim/sim.h"
 #include <string.h>
 
 extern engine_api_t   *eng;
@@ -52,6 +53,7 @@ void monster_death_use(void) {
 // Walk monsters
 // ---------------------------------------------------------------------------
 static void walkmonster_start_go(edict_t *self) {
+    Sim_AI_RegisterMonster(self);
     g->self = self;
     self->v.origin[2] += 1;  // nudge off floor
     eng->SV_DropToFloor(self);
@@ -108,6 +110,7 @@ void walkmonster_start(edict_t *self) {
 // Fly monsters
 // ---------------------------------------------------------------------------
 static void flymonster_start_go(edict_t *self) {
+    Sim_AI_RegisterMonster(self);
     g->self = self;
     self->v.takedamage = DAMAGE_AIM;
     self->v.ideal_yaw  = self->v.angles[1];
@@ -154,6 +157,7 @@ void flymonster_start(edict_t *self) {
 // Swim monsters
 // ---------------------------------------------------------------------------
 static void swimmonster_start_go(edict_t *self) {
+    Sim_AI_RegisterMonster(self);
     g->self = self;
     if (g->deathmatch) {
         eng->ED_Free(self);
