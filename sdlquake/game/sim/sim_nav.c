@@ -331,7 +331,11 @@ void Sim_Nav_LevelInit(const char *mapname) {
         eng->Con_Print("sim_nav: extract failed\n");
         free_mesh(s_mesh); s_mesh = 0; return;
     }
-    build_edges(s_mesh);
+    if (!build_edges(s_mesh)) {
+        eng->Con_Print("sim_nav: edge build failed\n");
+        free_mesh(s_mesh); s_mesh = 0;
+        return;
+    }
     build_adjacency(s_mesh);
 
     // Make cache directory and save (best-effort, Windows-compatible).
