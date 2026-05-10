@@ -29,6 +29,12 @@ void spawn_path_corner(edict_t *e);
 // misc.c
 void spawn_info_null(edict_t *e);
 void spawn_info_notnull(edict_t *e);
+
+static void spawn_info_patrol_node(edict_t *e) {
+    e->v.solid    = SOLID_NOT;
+    e->v.movetype = MOVETYPE_NONE;
+    Sim_Patrol_RegisterNode(e);
+}
 void spawn_light(edict_t *e);
 void spawn_light_fluoro(edict_t *e);
 void spawn_light_fluorospark(edict_t *e);
@@ -145,6 +151,7 @@ static const spawn_entry_t s_spawns[] = {
     // misc.c
     { "info_null",                    spawn_info_null                       },
     { "info_notnull",                 spawn_info_notnull                    },
+    { "info_patrol_node",             spawn_info_patrol_node                },
     { "light",                        spawn_light                           },
     { "light_fluoro",                 spawn_light_fluoro                    },
     { "light_fluorospark",            spawn_light_fluorospark               },

@@ -85,6 +85,8 @@ ai_brain_t *Sim_AI_IterNext(ai_brain_t *prev);
 void Sim_Patrol_RegisterNode(edict_t *e);   // called from spawn dispatch
 void Sim_Patrol_Resolve(void);              // links targets at level start
 edict_t *Sim_Patrol_FindByTargetname(const char *name);
+void Sim_Patrol_RegisterArenaNode(int route, int idx, edict_t *e);
+edict_t *Sim_Patrol_FindArenaNode(int route, int idx);
 
 // ---------------------------------------------------------------------------
 // Navmesh

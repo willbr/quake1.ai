@@ -10,6 +10,9 @@ extern game_globals_t *g;
 
 static ai_brain_t s_brains[SIM_MAX_BRAINS];
 
+// Forward declaration — defined at the bottom of this file.
+static void Sim_Patrol_LevelInit_(void);
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -19,6 +22,7 @@ void Sim_AI_Init(void) {
 
 void Sim_AI_LevelInit(void) {
     memset(s_brains, 0, sizeof(s_brains));
+    Sim_Patrol_LevelInit_();
 }
 
 // ---------------------------------------------------------------------------
@@ -254,8 +258,56 @@ void Sim_AI_Frame(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Patrol routes (stubs until Task 13)
+// Patrol routes
 // ---------------------------------------------------------------------------
-void Sim_Patrol_RegisterNode(edict_t *e) { (void)e; }
-void Sim_Patrol_Resolve(void) {}
-edict_t *Sim_Patrol_FindByTargetname(const char *n) { (void)n; return 0; }
+#define SIM_MAX_PATROL_NODES 256
+
+// Side-table for arena-spawned patrol nodes (not map-entity nodes).
+// Keyed by (route, idx) rather than targetname, since arena nodes can't
+// set string_t targetname via the engine API.
+static struct { int route, idx; edict_t *e; } s_arena_nodes[SIM_MAX_PATROL_NODES];
+static int s_arena_node_count;
+
+static edict_t *s_patrol_nodes[SIM_MAX_PATROL_NODES];
+static int      s_patrol_count;
+
+static void Sim_Patrol_LevelInit_(void) {
+    s_patrol_count = 0;
+    s_arena_node_count = 0;
+    for (int i = 0; i < SIM_MAX_PATROL_NODES; i++) {
+        s_patrol_nodes[i] = 0;
+        s_arena_nodes[i].e = 0;
+    }
+}
+
+void Sim_Patrol_RegisterNode(edict_t *e) {
+    if (s_patrol_count >= SIM_MAX_PATROL_NODES) return;
+    s_patrol_nodes[s_patrol_count++] = e;
+}
+
+void Sim_Patrol_RegisterArenaNode(int route, int idx, edict_t *e) {
+    if (s_arena_node_count >= SIM_MAX_PATROL_NODES) return;
+    s_arena_nodes[s_arena_node_count].route = route;
+    s_arena_nodes[s_arena_node_count].idx   = idx;
+    s_arena_nodes[s_arena_node_count].e     = e;
+    s_arena_node_count++;
+}
+
+void Sim_Patrol_Resolve(void) {
+    // No pre-linking needed for v1. Nodes are found at runtime.
+}
+
+edict_t *Sim_Patrol_FindByTargetname(const char *name) {
+    // For map-entity nodes: defer to engine's ED_Find.
+    // This handles real info_patrol_node entities placed in maps.
+    if (!name || !*name) return 0;
+    return eng->ED_Find(g->world, "targetname", name);
+}
+
+edict_t *Sim_Patrol_FindArenaNode(int route, int idx) {
+    for (int i = 0; i < s_arena_node_count; i++) {
+        if (s_arena_nodes[i].route == route && s_arena_nodes[i].idx == idx)
+            return s_arena_nodes[i].e;
+    }
+    return 0;
+}
