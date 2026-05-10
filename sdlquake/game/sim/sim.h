@@ -66,6 +66,11 @@ typedef struct {
     float        sense_sight_range;  // base 1024
     float        sense_hearing_mult; // base 1.0
     float        next_tick_time;
+    // Navmesh path being walked (SEARCHING)
+    vec3_t      path_pts[32];
+    int         path_len;
+    int         path_idx;
+    float       path_replan_time;
 } ai_brain_t;
 
 void        Sim_AI_Init(void);

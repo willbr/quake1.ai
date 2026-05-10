@@ -190,7 +190,13 @@ static void sense_tick(ai_brain_t *b, edict_t *e) {
         break;
     }
 
-    if (b->state != prev) b->state_entered_time = g->time;
+    if (b->state != prev) {
+        b->state_entered_time = g->time;
+        if (b->state == AI_SEARCHING) {
+            b->path_len = 0;
+            b->path_idx = 0;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,10 +234,35 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         return;  // suppress vanilla AI walk this tick
     }
     case AI_SUSPICIOUS:
-    case AI_SEARCHING:
         face_point(e, b->last_known_pos);
         eng->SV_WalkMove(e, e->v.angles[1], 8.0f);
         break;
+    case AI_SEARCHING: {
+        // Replan if no path or every 2 seconds.
+        if (b->path_len == 0 || g->time > b->path_replan_time) {
+            b->path_len = Sim_Nav_PathTo(e->v.origin, b->last_known_pos,
+                                         b->path_pts, 32);
+            b->path_idx = 0;
+            b->path_replan_time = g->time + 2.0f;
+            if (b->path_len == 0) {
+                // Fallback: stand-and-sweep at last_known_pos.
+                face_point(e, b->last_known_pos);
+                eng->SV_WalkMove(e, e->v.angles[1], 8.0f);
+                break;
+            }
+        }
+        if (b->path_idx >= b->path_len) {
+            // Reached the destination — sweep until state times out.
+            face_point(e, b->last_known_pos);
+            break;
+        }
+        const float *next = b->path_pts[b->path_idx];
+        float dx = next[0] - e->v.origin[0];
+        float dy = next[1] - e->v.origin[1];
+        if (dx*dx + dy*dy < 32*32) { b->path_idx++; break; }
+        face_point(e, (vec3_t){ next[0], next[1], next[2] });
+        eng->SV_WalkMove(e, e->v.angles[1], 12.0f);
+    } break;
     case AI_COMBAT:
         // Fall through to vanilla Quake combat AI.
         break;
