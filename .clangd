@@ -1,0 +1,18 @@
+CompileFlags:
+  Add:
+    # Project include paths (mirrors build.zig addIncludePath calls)
+    - -Isdlquake/vendor/SDL3-3.4.8/include
+    - -Isdlquake/vendor/imgui-1.92.8
+    - -Isdlquake/platform
+    - -Isdlquake/mcp
+    - -Isdlquake/engine
+    - -Isdlquake/engine/editor
+    - -Isdlquake/game
+    - -Isdlquake/engine_src
+    # Active build defines
+    - -DNATIVE_GAME=1
+    - -D_WIN32
+    - -DSDLQUAKE
+  # engine_src uses gnu89; platform/editor/mcp use modern C.
+  # gnu17 is a superset so clangd navigation works across all files.
+  Compiler: clang

@@ -1168,24 +1168,30 @@ void Editor_RenderScene(void)
             for (j = 0; j < e->numbrushes; j++)
             {
                 edit_brush_t *b = &e->brushes[j];
-                int is_sel = Scene_SelectionContains(i, j);
+                int is_sel      = Scene_SelectionContains(i, j);
+                int is_brush_ent = (i > 0);  /* non-worldspawn entity */
                 if (!b->valid) continue;
                 if (!brush_visible(b)) continue;
-                if (!wire_all && !is_sel) continue;
+                // Worldspawn brushes only need the wireframe in wire-all
+                // mode or when selected — the BSP renderer already draws
+                // them.  Non-worldspawn brush entities (func_door, etc.)
+                // always get an outline so they're never invisible even
+                // when the fill pass is skipped (bsp_is_ours).
+                if (!wire_all && !is_sel && !is_brush_ent) continue;
                 // Multi-select hides the per-brush yellow outline — we draw
                 // a single union bbox below instead so the group reads as
                 // one thing. In single-select the per-brush outline still
                 // wins for clarity (and ignores depth so it's always seen).
                 if (multi && is_sel)
                 {
-                    if (wire_all)
-                        draw_brush(b, EDIT_COLOR_BRUSH, 0);
+                    if (wire_all || is_brush_ent)
+                        draw_brush(b, is_brush_ent ? category_color(e) : EDIT_COLOR_BRUSH, 0);
                 }
                 else
                 {
-                    draw_brush(b,
-                               is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_BRUSH,
-                               is_sel);
+                    byte bc = is_sel      ? EDIT_COLOR_SELECTED :
+                              is_brush_ent ? category_color(e)  : EDIT_COLOR_BRUSH;
+                    draw_brush(b, bc, is_sel);
                 }
                 // Active-face highlight: walk the face whose plane_idx
                 // matches and draw its edges in white over everything,

@@ -1,10 +1,18 @@
-// mcp_server.c -- Model Context Protocol (MCP 2024-11-05) stdio JSON-RPC 2.0 server
+// mcp_server.c -- Model Context Protocol (MCP 2024-11-05) JSON-RPC 2.0 server
 //
-// Architecture:
-//   Background thread reads stdin line-by-line and pushes raw lines onto a mutex-
-//   protected circular queue.  The main thread calls MCP_Frame() once per game
-//   frame; it drains the queue, parses each request, and writes a response to
-//   stdout.  All Quake state access therefore happens on the main thread.
+// Two transport modes, selected at init time:
+//
+//   stdio (--mcp):
+//     Background thread reads stdin; main thread writes to stdout.
+//     Claude Code must be the parent process (spawns quake.exe via .mcp.json).
+//
+//   HTTP/SSE (--mcp-http PORT):
+//     Background thread accepts TCP connections on PORT:
+//       GET  /sse      -> SSE stream (server→client events)
+//       POST /message  -> client→server requests, queued like stdin lines
+//     Main thread writes responses as "data: {json}\n\n" SSE frames.
+//     Claude Code connects to the already-running game; no spawn required.
+//     .mcp.json uses { "type": "sse", "url": "http://localhost:PORT/sse" }.
 //
 // Tools (Phase 2 MVP + Phase 7 editor self-drive):
 //   get_player_state  -- position, health, ammo, map name
@@ -17,6 +25,21 @@
 //   editor_entity_add -- append a point entity at explicit origin
 //   editor_set_kv     -- upsert a key/value pair on a specific entity
 //   editor_select     -- programmatic selection (no cursor needed)
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SOCKET mcp_raw_sock_t;
+#define MCP_SOCK_INVALID  INVALID_SOCKET
+#define mcp_sock_close(s) closesocket(s)
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+typedef int mcp_raw_sock_t;
+#define MCP_SOCK_INVALID  (-1)
+#define mcp_sock_close(s) close(s)
+#endif
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -76,7 +99,16 @@ static int mcp_dequeue(mcp_slot_t *out)
 }
 
 // ---------------------------------------------------------------------------
-// Background stdin reader thread
+// HTTP/SSE transport state
+// ---------------------------------------------------------------------------
+
+static int              mcp_http_port   = 0;
+static mcp_raw_sock_t   mcp_listen_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
+static mcp_raw_sock_t   mcp_sse_sock    = (mcp_raw_sock_t)MCP_SOCK_INVALID;
+static SDL_Mutex       *mcp_sse_mutex   = NULL;
+
+// ---------------------------------------------------------------------------
+// Background stdin reader thread (stdio mode)
 // ---------------------------------------------------------------------------
 
 static int SDLCALL mcp_reader_thread(void *userdata)
@@ -90,6 +122,121 @@ static int SDLCALL mcp_reader_thread(void *userdata)
             line[--len] = '\0';
         if (len > 0)
             mcp_enqueue(line);
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Background HTTP accept thread (HTTP/SSE mode)
+// ---------------------------------------------------------------------------
+
+// Read bytes from sock until "\r\n\r\n" header terminator or buffer full.
+static int http_recv_headers(mcp_raw_sock_t sock, char *buf, int bufsz)
+{
+    int total = 0;
+    while (total < bufsz - 1)
+    {
+        char c;
+        int r = recv((mcp_raw_sock_t)sock, &c, 1, 0);
+        if (r <= 0) break;
+        buf[total++] = c;
+        if (total >= 4 &&
+            buf[total-4] == '\r' && buf[total-3] == '\n' &&
+            buf[total-2] == '\r' && buf[total-1] == '\n')
+            break;
+    }
+    buf[total] = '\0';
+    return total;
+}
+
+static int SDLCALL mcp_http_thread(void *userdata)
+{
+    (void)userdata;
+
+    while (1)
+    {
+        struct sockaddr_in addr;
+        int alen = sizeof(addr);
+        mcp_raw_sock_t conn = accept(mcp_listen_sock,
+                                     (struct sockaddr *)&addr, &alen);
+        if (conn == (mcp_raw_sock_t)MCP_SOCK_INVALID) break;
+
+        char hdr[4096];
+        http_recv_headers(conn, hdr, sizeof(hdr));
+
+        if (strncmp(hdr, "GET /sse", 8) == 0)
+        {
+            // SSE stream: send headers + endpoint event, keep socket open.
+            char response[512];
+            int rlen = snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/event-stream\r\n"
+                "Cache-Control: no-cache\r\n"
+                "Connection: keep-alive\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "\r\n"
+                "event: endpoint\n"
+                "data: http://localhost:%d/message\n"
+                "\n",
+                mcp_http_port);
+            send(conn, response, rlen, 0);
+
+            // Replace any existing SSE client.
+            SDL_LockMutex(mcp_sse_mutex);
+            if (mcp_sse_sock != (mcp_raw_sock_t)MCP_SOCK_INVALID)
+                mcp_sock_close(mcp_sse_sock);
+            mcp_sse_sock = conn;
+            SDL_UnlockMutex(mcp_sse_mutex);
+            // conn stays open — don't close here.
+        }
+        else if (strncmp(hdr, "OPTIONS ", 8) == 0)
+        {
+            const char *preflight =
+                "HTTP/1.1 204 No Content\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+                "Access-Control-Allow-Headers: Content-Type\r\n"
+                "Content-Length: 0\r\n"
+                "\r\n";
+            send(conn, preflight, (int)strlen(preflight), 0);
+            mcp_sock_close(conn);
+        }
+        else if (strncmp(hdr, "POST /message", 13) == 0)
+        {
+            // Find Content-Length.
+            int clen = 0;
+            const char *cl = strstr(hdr, "Content-Length: ");
+            if (!cl) cl = strstr(hdr, "content-length: ");
+            if (cl) clen = atoi(cl + 16);
+
+            if (clen > 0 && clen < MCP_LINE_MAX - 1)
+            {
+                char body[MCP_LINE_MAX];
+                int got = 0;
+                while (got < clen)
+                {
+                    int r = recv(conn, body + got, clen - got, 0);
+                    if (r <= 0) break;
+                    got += r;
+                }
+                body[got] = '\0';
+                mcp_enqueue(body);
+            }
+            const char *ok =
+                "HTTP/1.1 202 Accepted\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: 0\r\n"
+                "\r\n";
+            send(conn, ok, (int)strlen(ok), 0);
+            mcp_sock_close(conn);
+        }
+        else
+        {
+            const char *notfound =
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+            send(conn, notfound, (int)strlen(notfound), 0);
+            mcp_sock_close(conn);
+        }
     }
     return 0;
 }
@@ -220,33 +367,65 @@ static char *json_escape_append(char *dst, const char *dend, const char *src)
 }
 
 // ---------------------------------------------------------------------------
-// Response helpers — all output goes to stdout, all writes on main thread
+// Response helpers — route to stdout (stdio) or SSE socket (HTTP), main thread
 // ---------------------------------------------------------------------------
+
+static void mcp_write_line(const char *line)
+{
+    if (mcp_http_port > 0)
+    {
+        SDL_LockMutex(mcp_sse_mutex);
+        mcp_raw_sock_t s = mcp_sse_sock;
+        SDL_UnlockMutex(mcp_sse_mutex);
+        if (s == (mcp_raw_sock_t)MCP_SOCK_INVALID) return;
+        char frame[MCP_LINE_MAX + 16];
+        int flen = snprintf(frame, sizeof(frame), "data: %s\n\n", line);
+        if (send(s, frame, flen, 0) < 0)
+        {
+            SDL_LockMutex(mcp_sse_mutex);
+            if (mcp_sse_sock == s)
+            {
+                mcp_sock_close(mcp_sse_sock);
+                mcp_sse_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
+            }
+            SDL_UnlockMutex(mcp_sse_mutex);
+        }
+    }
+    else
+    {
+        fprintf(stdout, "%s\n", line);
+        fflush(stdout);
+    }
+}
 
 static void mcp_send(const char *id_json, const char *result_json)
 {
-    fprintf(stdout, "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}\n",
-            id_json, result_json);
-    fflush(stdout);
+    char buf[MCP_LINE_MAX];
+    snprintf(buf, sizeof(buf),
+             "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}",
+             id_json, result_json);
+    mcp_write_line(buf);
 }
 
 static void mcp_error(const char *id_json, int code, const char *msg)
 {
-    fprintf(stdout,
-            "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\"}}\n",
-            id_json, code, msg);
-    fflush(stdout);
+    char buf[MCP_LINE_MAX];
+    snprintf(buf, sizeof(buf),
+             "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\"}}",
+             id_json, code, msg);
+    mcp_write_line(buf);
 }
 
 // Wrap an already-built text payload in the MCP content envelope.
 // text_escaped must already have " and \ escaped.
 static void mcp_text_result(const char *id_json, const char *text_escaped)
 {
-    fprintf(stdout,
-            "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":"
-            "{\"content\":[{\"type\":\"text\",\"text\":\"%s\"}]}}\n",
-            id_json, text_escaped);
-    fflush(stdout);
+    char buf[MCP_LINE_MAX * 2];
+    snprintf(buf, sizeof(buf),
+             "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":"
+             "{\"content\":[{\"type\":\"text\",\"text\":\"%s\"}]}}",
+             id_json, text_escaped);
+    mcp_write_line(buf);
 }
 
 // ---------------------------------------------------------------------------
@@ -731,11 +910,50 @@ static void mcp_dispatch(const char *line)
 // Public API
 // ---------------------------------------------------------------------------
 
-void MCP_Init(void)
+// port == 0 → stdio transport; port > 0 → HTTP/SSE transport
+void MCP_Init(int port)
 {
-    mcp_active = 1;
-    mcp_mutex  = SDL_CreateMutex();
-    mcp_thread = SDL_CreateThread(mcp_reader_thread, "mcp_reader", NULL);
+    mcp_active    = 1;
+    mcp_http_port = port;
+    mcp_mutex     = SDL_CreateMutex();
+
+    if (port > 0)
+    {
+        mcp_sse_mutex = SDL_CreateMutex();
+
+#ifdef _WIN32
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
+        mcp_listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (mcp_listen_sock != (mcp_raw_sock_t)MCP_SOCK_INVALID)
+        {
+            int reuse = 1;
+            setsockopt(mcp_listen_sock, SOL_SOCKET, SO_REUSEADDR,
+                       (const char *)&reuse, sizeof(reuse));
+            struct sockaddr_in sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.sin_family      = AF_INET;
+            sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            sa.sin_port        = htons((unsigned short)port);
+            if (bind(mcp_listen_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0
+                || listen(mcp_listen_sock, 8) < 0)
+            {
+                mcp_sock_close(mcp_listen_sock);
+                mcp_listen_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
+                Con_Printf("mcp: failed to bind port %d\n", port);
+            }
+            else
+            {
+                mcp_thread = SDL_CreateThread(mcp_http_thread, "mcp_http", NULL);
+                Con_Printf("mcp: HTTP/SSE server on http://localhost:%d/sse\n", port);
+            }
+        }
+    }
+    else
+    {
+        mcp_thread = SDL_CreateThread(mcp_reader_thread, "mcp_reader", NULL);
+    }
 }
 
 void MCP_Frame(void)
@@ -747,7 +965,17 @@ void MCP_Frame(void)
 
 void MCP_Shutdown(void)
 {
-    // Reader thread is blocked on fgets; it exits naturally when stdin closes.
-    if (mcp_mutex) { SDL_DestroyMutex(mcp_mutex); mcp_mutex = NULL; }
+    if (mcp_listen_sock != (mcp_raw_sock_t)MCP_SOCK_INVALID)
+    {
+        mcp_sock_close(mcp_listen_sock);
+        mcp_listen_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
+    }
+    if (mcp_sse_sock != (mcp_raw_sock_t)MCP_SOCK_INVALID)
+    {
+        mcp_sock_close(mcp_sse_sock);
+        mcp_sse_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
+    }
+    if (mcp_sse_mutex) { SDL_DestroyMutex(mcp_sse_mutex); mcp_sse_mutex = NULL; }
+    if (mcp_mutex)     { SDL_DestroyMutex(mcp_mutex);     mcp_mutex     = NULL; }
     mcp_active = 0;
 }

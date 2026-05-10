@@ -1,11 +1,11 @@
-* render bbox needs a direction arrow
-* render patrol path
+* refactor into libries I can reuse
 * review native c code vs old quakec
 * review what can be extracted in to libraries
 * command history for the console
     * up and down
     * CTRL+R for search
     * usualy readline hotkeys
+* procgen textures
 
 # Ideas
 
@@ -29,6 +29,7 @@
 
 ## Debug rendering
 
+* flame graph for render timings
 * flat-shaded mode (no texturing, solid face colours)
 * no-lighting / fullbright mode
 * wireframe overlay (edges only, or edges over solid)
@@ -54,6 +55,9 @@
 
 ## Engine & platform
 
+* use SDL_net
+* remove malloc, use areans
+* intern all strings so i dont need to use strcmp
 * replace stdlib & null terminated strings
 * replace build.zig with build.c
 * uncapped framerate with fixed physics
@@ -75,15 +79,28 @@
 
 ## Editor & live workflow
 
+* remove on disk files, .h1 .h2 .pts, hull files and leak point files
 * live `.map` editing
 * live entity editing
+* selction mode brush, face, edge vertext, group
 * brush boolean ops — subtract, intersect, hollow
 * live texture painting (paint lightmap or diffuse onto a face, hot-reload)
 * undo / redo stack with branch points
-* diff view — highlight what changed since last compile
-* screenshot regression testing (golden frames per map)
 * light baking on a worker thread, progressive refinement
 * prefab library, drag-and-drop entity templates
+* edge to stairs gizmo
+* room tool, and corridoors
+* lattice modifer
+* gizmo rect, that lets you move on two axis at once
+* sqlite file format for maps that includes undo data
+* value .map 220 version support
+* bsp -> .map
+* new map format
+    * sqlite base
+    * raw map data
+    * textures
+    * lua code?
+    * cached bsp?
 
 ## Game logic / scripting
 
@@ -92,10 +109,7 @@
 
 ## AI / LLM-native gameplay
 
-* LLM-driven monster taunts that react to *how* you fight (camping, rocket-jumping, low health)
-* talk-to-monsters mode — Undertale mercy route, Claude voices each shambler
 * AI dungeon master that rewrites encounters mid-level based on player skill
-* voice-controlled console (whisper → Claude → cvar / cmd)
 * Claude proposes balance patches from your last session's telemetry, you accept / reject
 * AI-generated flavor text for items, signs, and corpses
 * procedural side-quests injected mid-playthrough ("find the rune before the next slipgate")
@@ -295,3 +309,9 @@
 
 * docs on file formats
 * docs on the code
+
+## Cutscene Editor
+
+* camera movements
+* record stub dialog and sounds
+

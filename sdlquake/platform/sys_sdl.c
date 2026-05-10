@@ -195,6 +195,7 @@ static void print_usage(void)
         "\n"
         "Platform options:\n"
         "  --mcp                Run MCP server on stdio (logs go to stderr)\n"
+        "  --mcp-http <port>    Run MCP server over HTTP/SSE on localhost:PORT\n"
         "  --hot-reload         Poll game.dll for changes and reload at runtime\n"
         "  --list-cvars         Print all registered cvars and their values, then exit\n"
         "  -dedicated           Run as dedicated server (no video/audio)\n"
@@ -281,8 +282,14 @@ int main(int argc, char **argv)
     if (list_cvars)
         sys_headless = true;
 
-    if (COM_CheckParm("--mcp") && !list_cvars)
-        MCP_Init();
+    if (!list_cvars)
+    {
+        int mcp_http_idx = COM_CheckParm("--mcp-http");
+        if (mcp_http_idx && mcp_http_idx + 1 < com_argc)
+            MCP_Init(atoi(com_argv[mcp_http_idx + 1]));
+        else if (COM_CheckParm("--mcp"))
+            MCP_Init(0);
+    }
 
     parms.memsize = MINIMUM_MEMORY;
     {
