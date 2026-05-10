@@ -127,6 +127,17 @@ static float sense_intensity(ai_brain_t *b, edict_t *e, const stimulus_t *s) {
 }
 
 static void sense_tick(ai_brain_t *b, edict_t *e) {
+    if (eng->Cvar_VariableValue("notarget") > 0.5f) {
+        b->alert_level  = 0;
+        b->target_edict = -1;
+        if (b->state != AI_IDLE) {
+            b->state              = AI_IDLE;
+            b->state_entered_time = g->time;
+            b->path_len           = 0;
+        }
+        return;
+    }
+
     stimulus_t recents[16];
     float since = b->next_tick_time - 1.0f;     // 1s lookback overlap
     int n = Stim_QueryNear(e->v.origin,
