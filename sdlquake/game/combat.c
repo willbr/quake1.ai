@@ -3,6 +3,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "sim/sim.h"
 #include <math.h>
 #include <string.h>
 
@@ -57,6 +58,23 @@ static void Killed(edict_t *targ, edict_t *attacker)
 {
     edict_t *oself = g->self;
     g->self = targ;
+
+    // Emit death stims for the AI sense filter.
+    {
+        stimulus_t s = {0};
+        s.origin[0] = targ->v.origin[0];
+        s.origin[1] = targ->v.origin[1];
+        s.origin[2] = targ->v.origin[2];
+        s.source_edict = eng->ED_GetNum(targ);
+
+        s.kind = STIM_CORPSE;
+        s.intensity = 1.0f;
+        Stim_Emit(&s);
+
+        s.kind = STIM_SOUND;
+        s.intensity = 0.5f;
+        Stim_Emit(&s);
+    }
 
     if (g->self->v.health < -99.0f)
         g->self->v.health = -99.0f;
