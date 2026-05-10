@@ -268,4 +268,12 @@ typedef int (*Scene_BrushIter_fn)(edit_entity_t *e, int e_idx,
                                   edit_brush_t *b, int b_idx, void *user);
 void  Scene_ForEachBrush(Scene_BrushIter_fn cb, void *user);
 
+// Serialize the scene to a compact JSON description (open-state, mapname,
+// selection, entities with kv pairs, brushes with AABBs). Used by the MCP
+// `editor_get_scene` tool so an external agent can introspect the scene.
+// Writes up to outsz-1 bytes (always NUL-terminated). Returns bytes written
+// excluding terminator. Truncates with a "...":true marker if the output
+// doesn't fit.
+int   Scene_SerializeJSON  (char *out, int outsz);
+
 #endif // EDIT_SCENE_H

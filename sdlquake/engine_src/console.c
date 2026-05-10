@@ -647,3 +647,60 @@ void Con_NotifyBox (char *text)
 	realtime = 0;				// put the cursor back to invisible
 }
 
+/*
+=================
+Con_GetLastLines
+
+Copies the last `n` console lines into `out` (NUL-terminated, lines joined by
+'\n'), trimming trailing spaces. Used by the MCP `console_tail` tool so an
+external agent can read engine diagnostics after issuing a console command.
+
+Returns bytes written (excluding terminator). Caps at outsz-1 bytes.
+=================
+*/
+int Con_GetLastLines (int n, char *out, int outsz)
+{
+	int		want, start, line, col, last;
+	int		written = 0;
+	char	*p, *end;
+
+	if (!out || outsz <= 0) return 0;
+	if (n <= 0 || !con_text || con_linewidth <= 0 || con_totallines <= 0)
+	{ out[0] = '\0'; return 0; }
+
+	/* Clamp: can't read more than the ring holds. con_current itself is
+	 * the line getting next-printed-into, so it's the latest content. */
+	want = n;
+	if (want > con_totallines) want = con_totallines;
+	start = con_current - want + 1;
+	if (start < 0) start = 0;
+
+	p   = out;
+	end = out + outsz - 1;        /* leave room for trailing NUL */
+
+	for (line = start; line <= con_current && p < end; line++)
+	{
+		const char *src = con_text + (line % con_totallines) * con_linewidth;
+
+		/* Find last non-space char so we don't trail dozens of pad spaces.
+		 * Engine sets high bit for color; mask before comparing. */
+		last = -1;
+		for (col = 0; col < con_linewidth; col++)
+		{
+			char c = (char)((unsigned char)src[col] & 0x7f);
+			if (c != ' ') last = col;
+		}
+
+		for (col = 0; col <= last && p < end; col++)
+		{
+			char c = (char)((unsigned char)src[col] & 0x7f);
+			if (c < ' ' || c > '~') c = ' ';   /* drop weirdness */
+			*p++ = c;
+		}
+		if (p < end) *p++ = '\n';
+	}
+	*p = '\0';
+	written = (int)(p - out);
+	return written;
+}
+

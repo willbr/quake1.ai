@@ -6,10 +6,17 @@
 //   frame; it drains the queue, parses each request, and writes a response to
 //   stdout.  All Quake state access therefore happens on the main thread.
 //
-// Tools (Phase 2 MVP):
+// Tools (Phase 2 MVP + Phase 7 editor self-drive):
 //   get_player_state  -- position, health, ammo, map name
 //   list_entities     -- all live edicts (classname + origin)
 //   set_cvar          -- set a named cvar to a string value
+//   console_exec      -- queue any engine console command (Cbuf_AddText)
+//   console_tail      -- last N lines from the engine console scrollback
+//   editor_get_scene  -- structured JSON of the current edit_scene
+//   editor_brush_add  -- append a 6-plane AABB brush at explicit mins/maxs
+//   editor_entity_add -- append a point entity at explicit origin
+//   editor_set_kv     -- upsert a key/value pair on a specific entity
+//   editor_select     -- programmatic selection (no cursor needed)
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -18,6 +25,9 @@
 
 #include "quakedef.h"
 #include "mcp_server.h"
+#include "edit_scene.h"        /* editor scene API for Phase 7 self-drive tools */
+#include "editor.h"            /* Editor_IsOpen */
+#include "edit_history.h"      /* History_Push */
 
 int mcp_active = 0;
 
@@ -149,6 +159,47 @@ static void json_extract_id(const char *json, char *id_buf, int id_bufsz)
         strncpy(id_buf, start, len);
         id_buf[len] = '\0';
     }
+}
+
+// Extract numeric value for "key":NNN (integer). Returns 1 on success.
+// `arg_obj` should point at the start of the JSON object that contains the key.
+static int json_int(const char *json, const char *key, int *out)
+{
+    char search[128];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+    const char *p = strstr(json, search);
+    if (!p) return 0;
+    p += strlen(search);
+    while (*p == ' ') p++;
+    char *endp = NULL;
+    long v = strtol(p, &endp, 10);
+    if (endp == p) return 0;
+    *out = (int)v;
+    return 1;
+}
+
+// Extract a 3-element JSON number array for "key":[x,y,z] -> out[0..2].
+// Returns 1 on success. Permissive: skips whitespace, accepts ints/floats.
+static int json_vec3(const char *json, const char *key, float out[3])
+{
+    char search[128];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+    const char *p = strstr(json, search);
+    if (!p) return 0;
+    p += strlen(search);
+    while (*p == ' ') p++;
+    if (*p != '[') return 0;
+    p++;
+    int i;
+    for (i = 0; i < 3; i++)
+    {
+        while (*p == ' ' || *p == ',') p++;
+        char *endp = NULL;
+        out[i] = strtof(p, &endp);
+        if (endp == p) return 0;
+        p = endp;
+    }
+    return 1;
 }
 
 // Append src to dst (bounded), escaping " and \ for embedding in a JSON string.
@@ -307,6 +358,186 @@ static void tool_list_entities(const char *id_json)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: console_exec — Cbuf_AddText escape hatch
+// ---------------------------------------------------------------------------
+
+static void tool_console_exec(const char *id_json, const char *command)
+{
+    char buf[1024];
+    if (!command || !command[0])
+    {
+        mcp_error(id_json, -32602, "missing command parameter");
+        return;
+    }
+    /* Cbuf_AddText takes a non-const char* and expects a trailing newline.
+     * Build a local copy so the queued command runs cleanly even if the
+     * caller forgot to terminate. */
+    snprintf(buf, sizeof(buf), "%s\n", command);
+    Cbuf_AddText(buf);
+    mcp_text_result(id_json, "ok");
+}
+
+// ---------------------------------------------------------------------------
+// Tool: console_tail — last N lines from the engine console scrollback
+// ---------------------------------------------------------------------------
+
+extern int Con_GetLastLines(int n, char *out, int outsz);
+
+static void tool_console_tail(const char *id_json, int lines)
+{
+    static char raw[8192];
+    static char escaped[16384];
+    int          n = (lines > 0) ? lines : 50;
+    if (n > 200) n = 200;
+    Con_GetLastLines(n, raw, sizeof(raw));
+    char *d   = escaped;
+    char *end = escaped + sizeof(escaped) - 1;
+    /* Replace newlines with \n in the JSON-escaped output. */
+    const char *s = raw;
+    while (*s && d < end - 2)
+    {
+        if (*s == '\n')         { *d++ = '\\'; *d++ = 'n'; s++; }
+        else if (*s == '"')     { *d++ = '\\'; *d++ = '"'; s++; }
+        else if (*s == '\\')    { *d++ = '\\'; *d++ = '\\'; s++; }
+        else                    { *d++ = *s++; }
+    }
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
+// Tool: editor_get_scene — JSON dump of the current edit_scene
+// ---------------------------------------------------------------------------
+
+static void tool_editor_get_scene(const char *id_json)
+{
+    static char raw[16384];
+    static char escaped[32768];
+    Scene_SerializeJSON(raw, sizeof(raw));
+    /* mcp_text_result wraps the payload in {content:[{text:...}]} and the
+     * payload itself is JSON. Escape it for transport. */
+    char *d   = escaped;
+    char *end = escaped + sizeof(escaped) - 1;
+    const char *s = raw;
+    while (*s && d < end - 2)
+    {
+        if (*s == '"')      { *d++ = '\\'; *d++ = '"'; s++; }
+        else if (*s == '\\'){ *d++ = '\\'; *d++ = '\\'; s++; }
+        else                { *d++ = *s++; }
+    }
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
+// Tool: editor_brush_add — append a 6-plane AABB brush at explicit coords
+// ---------------------------------------------------------------------------
+
+static void tool_editor_brush_add(const char *id_json, const char *args)
+{
+    float mins[3] = {0,0,0};
+    float maxs[3] = {0,0,0};
+    char  texname[64] = {0};
+    char  result[128];
+    if (!Editor_IsOpen()) { mcp_error(id_json, -32602, "editor not open"); return; }
+    if (!json_vec3(args, "mins", mins) || !json_vec3(args, "maxs", maxs))
+    {
+        mcp_error(id_json, -32602, "missing mins/maxs vec3");
+        return;
+    }
+    json_str(args, "texture", texname, sizeof(texname));   /* optional */
+    History_Push("mcp brush add");
+    if (!Scene_AddCubeBrush(mins, maxs, texname[0] ? texname : NULL))
+    {
+        mcp_error(id_json, -32602, "Scene_AddCubeBrush failed");
+        return;
+    }
+    /* The newly-added brush is the last one in worldspawn (entity 0). */
+    {
+        int b_idx = (edit_scene.numentities > 0)
+                    ? (edit_scene.entities[0].numbrushes - 1) : -1;
+        snprintf(result, sizeof(result),
+                 "{\\\"ent\\\":0,\\\"brush\\\":%d}", b_idx);
+        mcp_text_result(id_json, result);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tool: editor_entity_add — append a point entity at explicit origin
+// ---------------------------------------------------------------------------
+
+static void tool_editor_entity_add(const char *id_json, const char *args)
+{
+    char  classname[64] = {0};
+    float origin[3] = {0,0,0};
+    char  result[128];
+    if (!Editor_IsOpen()) { mcp_error(id_json, -32602, "editor not open"); return; }
+    if (!json_str(args, "classname", classname, sizeof(classname)) ||
+        !classname[0])
+    {
+        mcp_error(id_json, -32602, "missing classname");
+        return;
+    }
+    json_vec3(args, "origin", origin);          /* optional, defaults to 0 */
+    History_Push("mcp entity add");
+    if (!Scene_AddPointEntity(classname, origin))
+    {
+        mcp_error(id_json, -32602, "Scene_AddPointEntity failed");
+        return;
+    }
+    snprintf(result, sizeof(result),
+             "{\\\"ent\\\":%d}", edit_scene.numentities - 1);
+    mcp_text_result(id_json, result);
+}
+
+// ---------------------------------------------------------------------------
+// Tool: editor_set_kv — upsert key/value on a specific entity
+// ---------------------------------------------------------------------------
+
+static void tool_editor_set_kv(const char *id_json, const char *args)
+{
+    int  ent = -1;
+    char key[64]    = {0};
+    char value[256] = {0};
+    if (!Editor_IsOpen()) { mcp_error(id_json, -32602, "editor not open"); return; }
+    if (!json_int(args, "ent", &ent)
+        || ent < 0 || ent >= edit_scene.numentities)
+    {
+        mcp_error(id_json, -32602, "bad ent index");
+        return;
+    }
+    if (!json_str(args, "key", key, sizeof(key)) || !key[0])
+    {
+        mcp_error(id_json, -32602, "missing key");
+        return;
+    }
+    json_str(args, "value", value, sizeof(value));   /* allow empty */
+    History_Push("mcp set kv");
+    Entity_SetKV(&edit_scene.entities[ent], key, value);
+    mcp_text_result(id_json, "ok");
+}
+
+// ---------------------------------------------------------------------------
+// Tool: editor_select — programmatic selection (no cursor needed)
+// ---------------------------------------------------------------------------
+
+static void tool_editor_select(const char *id_json, const char *args)
+{
+    int ent = -1, brush = -1;
+    if (!Editor_IsOpen()) { mcp_error(id_json, -32602, "editor not open"); return; }
+    if (!json_int(args, "ent", &ent)
+        || ent < 0 || ent >= edit_scene.numentities)
+    {
+        mcp_error(id_json, -32602, "bad ent index");
+        return;
+    }
+    json_int(args, "brush", &brush);    /* -1 = whole entity (point ent) */
+    Scene_SelectionClear();
+    Scene_SelectionAdd(ent, brush);
+    mcp_text_result(id_json, "ok");
+}
+
+// ---------------------------------------------------------------------------
 // Tool: set_cvar
 // ---------------------------------------------------------------------------
 
@@ -339,7 +570,52 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
          "\"properties\":{" \
            "\"name\":{\"type\":\"string\",\"description\":\"Cvar name\"}," \
            "\"value\":{\"type\":\"string\",\"description\":\"New value\"}}," \
-         "\"required\":[\"name\",\"value\"]}}" \
+         "\"required\":[\"name\",\"value\"]}}," \
+      "{\"name\":\"console_exec\"," \
+       "\"description\":\"Queue any engine console command (Cbuf_AddText). Supports all built-in editor commands such as editor, editor_new, editor_save, editor_compile, editor_undo, plus engine commands like map, disconnect, set\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"command\":{\"type\":\"string\",\"description\":\"Console command line\"}}," \
+         "\"required\":[\"command\"]}}," \
+      "{\"name\":\"console_tail\"," \
+       "\"description\":\"Return the last N lines from the engine console scrollback (defaults to 50, max 200)\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"lines\":{\"type\":\"integer\",\"description\":\"Number of lines, 1..200\"}}," \
+         "\"required\":[]}}," \
+      "{\"name\":\"editor_get_scene\"," \
+       "\"description\":\"Return a JSON description of the in-memory editor scene (open state, mapname, selection, entities with kv pairs, brushes with AABBs)\"," \
+       "\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"required\":[]}}," \
+      "{\"name\":\"editor_brush_add\"," \
+       "\"description\":\"Append a 6-plane AABB brush to worldspawn at explicit mins/maxs. Editor must be open. Returns the new brush index\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"mins\":{\"type\":\"array\",\"items\":{\"type\":\"number\"},\"minItems\":3,\"maxItems\":3}," \
+           "\"maxs\":{\"type\":\"array\",\"items\":{\"type\":\"number\"},\"minItems\":3,\"maxItems\":3}," \
+           "\"texture\":{\"type\":\"string\",\"description\":\"Texture name (optional, default wbrick1_5)\"}}," \
+         "\"required\":[\"mins\",\"maxs\"]}}," \
+      "{\"name\":\"editor_entity_add\"," \
+       "\"description\":\"Append a point entity at an explicit origin. Editor must be open. Returns the new entity index\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"classname\":{\"type\":\"string\"}," \
+           "\"origin\":{\"type\":\"array\",\"items\":{\"type\":\"number\"},\"minItems\":3,\"maxItems\":3}}," \
+         "\"required\":[\"classname\"]}}," \
+      "{\"name\":\"editor_set_kv\"," \
+       "\"description\":\"Set or upsert a key/value pair on a specific entity. Editor must be open\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"ent\":{\"type\":\"integer\",\"description\":\"Entity index from editor_get_scene\"}," \
+           "\"key\":{\"type\":\"string\"}," \
+           "\"value\":{\"type\":\"string\"}}," \
+         "\"required\":[\"ent\",\"key\",\"value\"]}}," \
+      "{\"name\":\"editor_select\"," \
+       "\"description\":\"Programmatically set the editor selection (replaces the existing selection). Editor must be open. Use brush=-1 to select a point entity as a whole\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"ent\":{\"type\":\"integer\"}," \
+           "\"brush\":{\"type\":\"integer\",\"description\":\"Brush index, or -1 for point entity\"}}," \
+         "\"required\":[\"ent\"]}}" \
     "]}"
 
 // ---------------------------------------------------------------------------
@@ -401,6 +677,44 @@ static void mcp_dispatch(const char *line)
                 mcp_error(id_json, -32602, "missing name parameter");
             else
                 tool_set_cvar(id_json, cvar_name, cvar_value);
+        }
+        else if (strcmp(tool_name, "console_exec") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            char cmd[1024] = {0};
+            if (args) json_str(args, "command", cmd, sizeof(cmd));
+            tool_console_exec(id_json, cmd);
+        }
+        else if (strcmp(tool_name, "console_tail") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            int n = 50;
+            if (args) json_int(args, "lines", &n);
+            tool_console_tail(id_json, n);
+        }
+        else if (strcmp(tool_name, "editor_get_scene") == 0)
+        {
+            tool_editor_get_scene(id_json);
+        }
+        else if (strcmp(tool_name, "editor_brush_add") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_editor_brush_add(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "editor_entity_add") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_editor_entity_add(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "editor_set_kv") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_editor_set_kv(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "editor_select") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_editor_select(id_json, args ? args : "");
         }
         else
         {

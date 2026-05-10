@@ -5,6 +5,7 @@
 #include "editor_internal.h"
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -1121,4 +1122,148 @@ void Scene_UngroupSelected(void)
 
     Con_Printf("editor: ungrouped %d brushes back into worldspawn\n", n_moved);
     // Selection is left empty since indices are now stale — user can re-pick.
+}
+
+// -----------------------------------------------------------------------------
+// JSON serialization (read-only) — Scene_SerializeJSON
+//
+// Compact representation of the scene for the MCP `editor_get_scene` tool.
+// Two design rules:
+//   * Bounded buffer, never grows. If we hit the cap, emit "truncated":true
+//     and stop appending — better than dropping a tail mid-array and producing
+//     invalid JSON.
+//   * Per-entity full kv list, per-brush AABB only (faces / planes are too
+//     verbose for round-trip; addable later if a tool needs them).
+// -----------------------------------------------------------------------------
+
+extern int Editor_IsOpen(void);
+
+/* Compact append helpers. All return number of bytes written (clamped so
+ * we never overflow). Set *trunc on truncation. */
+static int j_append (char **p, char *end, const char *s, int *trunc)
+{
+    int written = 0;
+    while (*s && *p < end - 1) { **p = *s++; (*p)++; written++; }
+    if (*s) *trunc = 1;
+    return written;
+}
+
+static int j_appendf(char **p, char *end, int *trunc, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+    if (*p >= end - 1) { *trunc = 1; return 0; }
+    va_start(ap, fmt);
+    n = vsnprintf(*p, (size_t)(end - *p), fmt, ap);
+    va_end(ap);
+    if (n < 0) { *trunc = 1; return 0; }
+    if (n >= end - *p) { *p = end - 1; *trunc = 1; return (int)(end - *p); }
+    *p += n;
+    return n;
+}
+
+static void j_escape_string(char **p, char *end, const char *s, int *trunc)
+{
+    while (*s && *p < end - 2)
+    {
+        unsigned char c = (unsigned char)*s++;
+        if (c == '"' || c == '\\')
+        {
+            if (*p >= end - 3) { *trunc = 1; break; }
+            *(*p)++ = '\\';
+            *(*p)++ = (char)c;
+        }
+        else if (c < 0x20)
+        {
+            /* skip control chars; rare in user input */
+            continue;
+        }
+        else
+        {
+            *(*p)++ = (char)c;
+        }
+    }
+    if (*s) *trunc = 1;
+}
+
+int Scene_SerializeJSON(char *out, int outsz)
+{
+    char *p   = out;
+    char *end = out + outsz;
+    int   trunc = 0;
+    int   i, k, b;
+
+    if (!out || outsz <= 2) { if (out && outsz) out[0] = '\0'; return 0; }
+
+    j_appendf(&p, end, &trunc,
+        "{\"open\":%s,\"mapname\":\"",
+        Editor_IsOpen() ? "true" : "false");
+    j_escape_string(&p, end, edit_scene.mapname, &trunc);
+    j_append(&p, end, "\",\"selection\":[", &trunc);
+    for (i = 0; i < edit_scene.num_selected; i++)
+    {
+        j_appendf(&p, end, &trunc, "%s{\"ent\":%d,\"brush\":%d}",
+                  i == 0 ? "" : ",",
+                  edit_scene.selection[i].entity,
+                  edit_scene.selection[i].brush);
+    }
+    j_append(&p, end, "],\"entities\":[", &trunc);
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        const char *cls = (e->classname_idx >= 0)
+                            ? e->kv[e->classname_idx].value : "";
+        j_appendf(&p, end, &trunc,
+                  "%s{\"idx\":%d,\"classname\":\"",
+                  i == 0 ? "" : ",", i);
+        j_escape_string(&p, end, cls, &trunc);
+        j_append(&p, end, "\",\"num_brushes\":", &trunc);
+        j_appendf(&p, end, &trunc, "%d", e->numbrushes);
+        if (e->origin_idx >= 0)
+        {
+            j_append(&p, end, ",\"origin\":\"", &trunc);
+            j_escape_string(&p, end, e->kv[e->origin_idx].value, &trunc);
+            j_append(&p, end, "\"", &trunc);
+        }
+        j_append(&p, end, ",\"kv\":[", &trunc);
+        for (k = 0; k < e->numkv; k++)
+        {
+            if (k) j_append(&p, end, ",", &trunc);
+            j_append(&p, end, "[\"", &trunc);
+            j_escape_string(&p, end, e->kv[k].key, &trunc);
+            j_append(&p, end, "\",\"", &trunc);
+            j_escape_string(&p, end, e->kv[k].value, &trunc);
+            j_append(&p, end, "\"]", &trunc);
+        }
+        j_append(&p, end, "]}", &trunc);
+    }
+    j_append(&p, end, "],\"brushes\":[", &trunc);
+    {
+        int first = 1;
+        for (i = 0; i < edit_scene.numentities; i++)
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            for (b = 0; b < e->numbrushes; b++)
+            {
+                edit_brush_t *br = &e->brushes[b];
+                j_appendf(&p, end, &trunc,
+                    "%s{\"ent\":%d,\"idx\":%d,"
+                    "\"mins\":[%.0f,%.0f,%.0f],"
+                    "\"maxs\":[%.0f,%.0f,%.0f],"
+                    "\"num_faces\":%d}",
+                    first ? "" : ",", i, b,
+                    br->mins[0], br->mins[1], br->mins[2],
+                    br->maxs[0], br->maxs[1], br->maxs[2],
+                    br->numfaces);
+                first = 0;
+            }
+        }
+    }
+    j_append(&p, end, "]", &trunc);
+    if (trunc)
+        j_append(&p, end, ",\"truncated\":true", &trunc);
+    j_append(&p, end, "}", &trunc);
+    if (p >= end) p = end - 1;
+    *p = '\0';
+    return (int)(p - out);
 }
