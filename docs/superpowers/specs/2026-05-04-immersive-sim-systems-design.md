@@ -1,7 +1,7 @@
 # Immersive-Sim Systems for Quake — Design
 
 **Date:** 2026-05-04
-**Status:** Proposed
+**Status:** M1/M2/M2.5 complete (2026-05-10); M3+ planned
 **Phase:** 8 (follows planned Phases 6 and 7 in CLAUDE.md)
 
 ## Goal
@@ -332,19 +332,19 @@ The spec is single-player-first but explicitly preserves MP viability:
 
 Each milestone is a working, playable state.
 
-### M1 — Stimulus bus + sense filter, no new content
+### M1 ✅ Done — Stimulus bus + sense filter, no new content
 
 `sim_stimulus.c`, ring buffer, API. Wire existing Quake events into the bus: gunshots emit `STIM_SOUND`, monster deaths emit `STIM_CORPSE`. Add the AI side-table and sense filter, but FSM still defaults to vanilla behavior — sense filter just *logs* what it would react to (imgui overlay shows alert level per monster).
 
 **Verify:** firing a shotgun in a hallway shows alert spikes on nearby monsters in the imgui overlay.
 
-### M2 — AI FSM live (with stand-and-sweep search fallback)
+### M2 ✅ Done — AI FSM live (with stand-and-sweep search fallback)
 
 Plug in IDLE/SUSPICIOUS/SEARCHING/COMBAT transitions. Add `info_patrol_node` entity. Procedural arenas: a small generator that spawns a 1024³ box room with 4 patrol nodes and 2-3 grunts. SEARCHING uses the stand-and-sweep fallback (no navmesh yet).
 
 **Verify:** in the arena, a grunt patrols, hears a shot, investigates the spot, gives up after 20s.
 
-### M2.5 — Navmesh bake & A*
+### M2.5 ✅ Done — Navmesh bake & A*
 
 `sim_nav.c`. Bake on first map load, cache to disk, A* powers SEARCHING.
 
