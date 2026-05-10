@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <direct.h>
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -228,13 +229,66 @@ static void build_adjacency(sim_navmesh_t *m) {
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle stubs (bake, A* wired in Tasks 18-19)
+// Mesh helpers: free, save, load, file_size
+// ---------------------------------------------------------------------------
+static void free_mesh(sim_navmesh_t *m) {
+    if (!m) return;
+    free(m->points);
+    free(m->edges);
+    free(m->adj_offsets);
+    free(m->adj);
+    free(m);
+}
+
+static int save_mesh(const char *path, const sim_navmesh_t *m) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return 0;
+    int magic = 0x4E41564D;     // 'NAVM'
+    int ver   = 1;
+    fwrite(&magic, 4, 1, f);
+    fwrite(&ver,   4, 1, f);
+    fwrite(&m->point_count, 4, 1, f);
+    fwrite(&m->edge_count,  4, 1, f);
+    fwrite(m->points, sizeof(nav_point_t), m->point_count, f);
+    fwrite(m->edges,  sizeof(nav_edge_t),  m->edge_count, f);
+    fclose(f);
+    return 1;
+}
+
+static sim_navmesh_t *load_mesh(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    int magic, ver, np, ne;
+    fread(&magic, 4, 1, f); fread(&ver, 4, 1, f);
+    fread(&np, 4, 1, f);    fread(&ne, 4, 1, f);
+    if (magic != 0x4E41564D || ver != 1) { fclose(f); return 0; }
+    sim_navmesh_t *m = calloc(1, sizeof(*m));
+    if (!m) { fclose(f); return 0; }
+    m->point_count = np;
+    m->edge_count  = ne;
+    m->points = malloc(sizeof(nav_point_t) * np);
+    m->edges  = malloc(sizeof(nav_edge_t)  * ne);
+    if (!m->points || !m->edges) { fclose(f); free_mesh(m); return 0; }
+    fread(m->points, sizeof(nav_point_t), np, f);
+    fread(m->edges,  sizeof(nav_edge_t),  ne, f);
+    fclose(f);
+    build_adjacency(m);
+    return m;
+}
+
+static long file_size(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fclose(f);
+    return sz;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
 // ---------------------------------------------------------------------------
 void Sim_Nav_Init(void) {
-    (void)extract_walkable_points;
-    (void)alloc_probe;
-    (void)build_edges;
-    (void)build_adjacency;
     s_mesh = 0;
     s_ready = 0;
 }
@@ -243,8 +297,53 @@ int            Sim_Nav_IsReady(void) { return s_ready; }
 sim_navmesh_t *Sim_Nav_Get(void)     { return s_mesh; }
 
 void Sim_Nav_LevelInit(const char *mapname) {
-    (void)mapname;
-    // Full bake wired in Task 18.
+    if (s_mesh) { free_mesh(s_mesh); s_mesh = 0; }
+    s_ready = 0;
+    if (!mapname || !*mapname) return;
+
+    char bsp_path[256];
+    char nav_path[256];
+    snprintf(bsp_path, sizeof(bsp_path), "id1/maps/%s.bsp", mapname);
+    long bsp_sz = file_size(bsp_path);
+    if (bsp_sz < 0) {
+        eng->Con_Print("sim_nav: bsp not found\n");
+        return;
+    }
+    snprintf(nav_path, sizeof(nav_path),
+             "id1/cache/navmesh/%s-%ld.nav", mapname, bsp_sz);
+
+    // Try cache.
+    s_mesh = load_mesh(nav_path);
+    if (s_mesh) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "sim_nav: loaded %d pts %d edges from cache\n",
+                 s_mesh->point_count, s_mesh->edge_count);
+        eng->Con_Print(buf);
+        s_ready = 1;
+        return;
+    }
+
+    // Bake from scratch.
+    eng->Con_Print("sim_nav: baking...\n");
+    s_mesh = calloc(1, sizeof(*s_mesh));
+    if (!s_mesh) return;
+    if (!extract_walkable_points(bsp_path, &s_mesh->points, &s_mesh->point_count)) {
+        eng->Con_Print("sim_nav: extract failed\n");
+        free_mesh(s_mesh); s_mesh = 0; return;
+    }
+    build_edges(s_mesh);
+    build_adjacency(s_mesh);
+
+    // Make cache directory and save (best-effort, Windows-compatible).
+    _mkdir("id1\\cache");
+    _mkdir("id1\\cache\\navmesh");
+    save_mesh(nav_path, s_mesh);
+
+    char buf[160];
+    snprintf(buf, sizeof(buf), "sim_nav: baked %d pts %d edges\n",
+             s_mesh->point_count, s_mesh->edge_count);
+    eng->Con_Print(buf);
+    s_ready = 1;
 }
 
 int Sim_Nav_PathTo(const vec3_t a, const vec3_t b, vec3_t *o, int n) {
