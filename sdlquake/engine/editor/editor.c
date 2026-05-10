@@ -149,6 +149,14 @@ static void scaffold_build_test_room(const char *mapname)
     Scene_AddCubeBrush(r_mins, r_maxs, "wbrick1_5");
     Scene_HollowBrush(0 /*worldspawn*/, 0, 16);
 
+    /* qbsp's WriteMiptex needs worldspawn to declare a "wad" key or
+     * it warns "no wadfile specified" and ships the .bsp with zero
+     * textures embedded. cl.worldmodel->textures then comes back
+     * empty and the next editor_compile's WAD synthesis has nothing
+     * to dump. Set it explicitly so the loop closes. */
+    if (edit_scene.numentities > 0)
+        Entity_SetKV(&edit_scene.entities[0], "wad", "gfx/base.wad");
+
     /* Door brush — added to worldspawn, then wrapped into a func_door. */
     Scene_AddCubeBrush(door_mins, door_maxs, "wbrick1_5");
     Scene_WrapBrushesIntoEntity("func_door");
