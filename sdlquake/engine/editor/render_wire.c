@@ -171,10 +171,50 @@ static void draw_line3d(const vec3_t a_world, const vec3_t b_world,
     {
         float iz0 = 1.0f / va[2];
         float iz1 = 1.0f / vb[2];
+        float diz;
+        int   i2;
+        float t0, t1, p2, q2, r2;
+        float ps[4], qs[4];
+        float W, H;
         sx0 = xcenter + xscale * va[0] * iz0;
         sy0 = ycenter - yscale * va[1] * iz0;
         sx1 = xcenter + xscale * vb[0] * iz1;
         sy1 = ycenter - yscale * vb[1] * iz1;
+
+        // Liang-Barsky 2-D screen clip. Near-plane clipping can leave a
+        // vertex with va[2] == NEAR_CLIP (0.01), giving iz == 100 and a
+        // screen X/Y millions of pixels off-screen. draw_line8's trivial
+        // reject only catches the case where *both* endpoints are on the
+        // same side; one on-screen + one at ±2M causes ~2M Bresenham
+        // iterations (drawing nothing). Clip to screen rect first.
+        W = (float)vid.width  - 1.0f;
+        H = (float)vid.height - 1.0f;
+        diz = iz1 - iz0;
+        {
+            float dx = sx1 - sx0, dy = sy1 - sy0;
+            ps[0] = -dx; qs[0] = sx0;
+            ps[1] =  dx; qs[1] = W - sx0;
+            ps[2] = -dy; qs[2] = sy0;
+            ps[3] =  dy; qs[3] = H - sy0;
+        }
+        t0 = 0.0f; t1 = 1.0f;
+        for (i2 = 0; i2 < 4; i2++) {
+            p2 = ps[i2]; q2 = qs[i2];
+            if (p2 == 0.0f) { if (q2 < 0.0f) return; continue; }
+            r2 = q2 / p2;
+            if (p2 < 0.0f) { if (r2 > t1) return; if (r2 > t0) t0 = r2; }
+            else            { if (r2 < t0) return; if (r2 < t1) t1 = r2; }
+        }
+        if (t0 > t1) return;
+        /* Apply in terms of the *original* dx/dy so t0 and t1 are both
+         * relative to the same baseline — adjust t1 (far end) before t0
+         * (near end) so the t0 delta still uses the original span. */
+        {
+            float odx = sx1 - sx0, ody = sy1 - sy0;
+            if (t1 < 1.0f) { sx1 = sx0 + t1*odx; sy1 = sy0 + t1*ody; iz1 = iz0 + t1*diz; }
+            if (t0 > 0.0f) { sx0 += t0*odx;       sy0 += t0*ody;       iz0 += t0*diz;     }
+        }
+
         draw_line8((int)(sx0 + 0.5f), (int)(sy0 + 0.5f), iz0,
                    (int)(sx1 + 0.5f), (int)(sy1 + 0.5f), iz1, color, ztest);
     }
@@ -1072,6 +1112,7 @@ void Editor_RenderScene(void)
     int style = (int)editor_render_style.value;
     int multi = Scene_NumSelected() > 1;
 
+    if (!Editor_IsOpen()) return;
     if (edit_scene.numentities == 0) return;
 
     // If the engine's loaded worldmodel came from a recent editor_compile
