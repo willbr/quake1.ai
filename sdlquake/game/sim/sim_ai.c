@@ -139,6 +139,54 @@ static void sense_tick(ai_brain_t *b, edict_t *e) {
     b->alert_level *= 0.95f;
     if (b->alert_level < 0)    b->alert_level = 0;
     if (b->alert_level > 1.0f) b->alert_level = 1.0f;
+
+    // Track strongest sight stim this tick for FSM bookkeeping.
+    int    saw_player_full = 0;
+    vec3_t player_pos = {0, 0, 0};
+
+    for (int i = 0; i < n; i++) {
+        if (recents[i].source_edict == b->edict_num) continue;
+        if (recents[i].kind != STIM_SIGHT_ENTITY) continue;
+        if (recents[i].source_edict != 1) continue;   // edict 1 = player in single-player
+        float eff = sense_intensity(b, e, &recents[i]);
+        if (eff > 0.7f) {
+            saw_player_full = 1;
+            player_pos[0] = recents[i].origin[0];
+            player_pos[1] = recents[i].origin[1];
+            player_pos[2] = recents[i].origin[2];
+        }
+    }
+
+    if (saw_player_full) {
+        b->last_known_pos[0] = player_pos[0];
+        b->last_known_pos[1] = player_pos[1];
+        b->last_known_pos[2] = player_pos[2];
+        b->target_edict = 1;
+    }
+
+    // FSM transitions
+    float since_state = g->time - b->state_entered_time;
+    ai_state_t prev = b->state;
+
+    switch (b->state) {
+    case AI_IDLE:
+        if (b->alert_level > 0.25f) b->state = AI_SUSPICIOUS;
+        break;
+    case AI_SUSPICIOUS:
+        if (saw_player_full || b->alert_level > 0.6f) b->state = AI_SEARCHING;
+        else if (n == 0 && since_state > 8.0f && b->alert_level < 0.05f) b->state = AI_IDLE;
+        break;
+    case AI_SEARCHING:
+        if (saw_player_full && los_clear(e->v.origin, b->last_known_pos))
+            b->state = AI_COMBAT;
+        else if (n == 0 && since_state > 20.0f) b->state = AI_IDLE;
+        break;
+    case AI_COMBAT:
+        if (!saw_player_full && since_state > 3.0f) b->state = AI_SEARCHING;
+        break;
+    }
+
+    if (b->state != prev) b->state_entered_time = g->time;
 }
 
 // ---------------------------------------------------------------------------

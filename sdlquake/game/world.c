@@ -3,6 +3,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "sim/sim.h"
 #include <string.h>
 
 extern engine_api_t   *eng;
@@ -59,6 +60,24 @@ void StartFrame(void)
 {
     g->teamplay  = eng->Cvar_VariableValue("teamplay");
     g->framecount++;
+
+    // Emit a sight stimulus from the player every frame so AI can see them.
+    if (g->world && g->time > 0) {
+        edict_t *player = 0;
+        for (edict_t *cur = eng->ED_Next(g->world); cur; cur = eng->ED_Next(cur)) {
+            if (eng->ED_GetNum(cur) == 1) { player = cur; break; }
+        }
+        if (player && player->v.health > 0) {
+            stimulus_t s = {0};
+            s.kind = STIM_SIGHT_ENTITY;
+            s.origin[0] = player->v.origin[0];
+            s.origin[1] = player->v.origin[1];
+            s.origin[2] = player->v.origin[2];
+            s.intensity = 1.0f;
+            s.source_edict = 1;
+            Stim_Emit(&s);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
