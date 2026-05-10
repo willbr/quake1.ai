@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 6
+#define GAME_API_VERSION 7
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -145,6 +145,9 @@ typedef struct engine_api_s {
     void  (*ImguiAI_Push)(int edict_num, int state, float alert_level,
                           const float last_known_pos[3], int target_edict);
     int   (*ImguiAI_Active)(void);   // returns 1 if the panel is visible
+    void  (*ImguiNav_Set)(const void *pts_xy, int np,
+                          const void *edges_ushort_pairs, int ne);
+    void  (*ImguiNav_SetPath)(const void *path_xy_floats, int n);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

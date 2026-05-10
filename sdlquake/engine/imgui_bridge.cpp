@@ -164,6 +164,28 @@ void IG_TableHeadersRow(void)                             { ImGui::TableHeadersR
 void IG_TableNextRow(void)                                { ImGui::TableNextRow(); }
 int  IG_TableSetColumnIndex(int col)  { return ImGui::TableSetColumnIndex(col) ? 1 : 0; }
 
+// Canvas drawing (backed by ImDrawList)
+static ImVec2 s_canvas_origin;
+
+void IG_BeginCanvas(const char *id, float w, float h)
+{
+    s_canvas_origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(id, ImVec2(w, h));
+}
+
+void IG_CanvasLine(float x0, float y0, float x1, float y1, unsigned int col)
+{
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    dl->AddLine(ImVec2(s_canvas_origin.x + x0, s_canvas_origin.y + y0),
+                ImVec2(s_canvas_origin.x + x1, s_canvas_origin.y + y1),
+                (ImU32)col, 1.0f);
+}
+
+void IG_EndCanvas(void)
+{
+    // Space already reserved by InvisibleButton; nothing to do.
+}
+
 // SDL3 input backend
 int  IG_ImplSDL3_InitForSDLRenderer(SDL_Window *w, SDL_Renderer *r)
     { return ImGui_ImplSDL3_InitForSDLRenderer(w, r) ? 1 : 0; }

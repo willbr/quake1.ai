@@ -743,6 +743,25 @@ static int imgui_ai_active_shim(void) {
 }
 
 // ---------------------------------------------------------------------------
+// imgui Nav panel shims
+// ---------------------------------------------------------------------------
+static void imgui_nav_set_shim(const void *pts_xy, int np,
+                               const void *edges_ushort_pairs, int ne) {
+    ImguiSupport_Nav_Set((const imgui_nav_point_t *)pts_xy, np,
+                         (const imgui_nav_edge_t  *)edges_ushort_pairs, ne);
+}
+
+static void imgui_nav_setpath_shim(const void *path_xy_floats, int n) {
+    imgui_nav_active_t p;
+    memset(&p, 0, sizeof(p));
+    p.has_path = (n > 0);
+    p.path_len = (n > 32) ? 32 : n;
+    if (p.path_len > 0)
+        memcpy(p.path_xy, path_xy_floats, sizeof(float) * 2 * p.path_len);
+    ImguiSupport_Nav_SetPath(&p);
+}
+
+// ---------------------------------------------------------------------------
 // Full engine_funcs table
 // ---------------------------------------------------------------------------
 
@@ -816,6 +835,8 @@ static engine_api_t engine_funcs = {
     ImguiSupport_AI_Clear,
     imgui_ai_push_shim,
     imgui_ai_active_shim,
+    imgui_nav_set_shim,
+    imgui_nav_setpath_shim,
 };
 
 // ---------------------------------------------------------------------------

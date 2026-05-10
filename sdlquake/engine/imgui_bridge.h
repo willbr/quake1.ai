@@ -154,6 +154,11 @@ void  IG_TableHeadersRow(void);
 void  IG_TableNextRow(void);
 int   IG_TableSetColumnIndex(int col);
 
+// Canvas drawing (backed by ImDrawList)
+void  IG_BeginCanvas(const char *id, float w, float h);
+void  IG_CanvasLine(float x0, float y0, float x1, float y1, unsigned int col);
+void  IG_EndCanvas(void);
+
 // SDL3 input backend
 int   IG_ImplSDL3_InitForSDLRenderer(SDL_Window *w, SDL_Renderer *r);
 void  IG_ImplSDL3_Shutdown(void);

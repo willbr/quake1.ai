@@ -369,3 +369,35 @@ const imgui_ai_row_t *ImguiSupport_AI_Row(int i) {
     if (i < 0 || i >= s_ai_count) return 0;
     return &s_ai_rows[i];
 }
+
+/* ---------------------------------------------------------------------------
+ * Nav minimap shared state
+ * --------------------------------------------------------------------------- */
+static imgui_nav_point_t  s_nav_pts[IMGUI_NAV_MAX_POINTS];
+static imgui_nav_edge_t   s_nav_eds[IMGUI_NAV_MAX_EDGES];
+static int                s_nav_np, s_nav_ne;
+static imgui_nav_active_t s_nav_path;
+
+void ImguiSupport_Nav_Set(const imgui_nav_point_t *pts, int np,
+                          const imgui_nav_edge_t *eds, int ne) {
+    if (np > IMGUI_NAV_MAX_POINTS) np = IMGUI_NAV_MAX_POINTS;
+    if (ne > IMGUI_NAV_MAX_EDGES)  ne = IMGUI_NAV_MAX_EDGES;
+    memcpy(s_nav_pts, pts, sizeof(imgui_nav_point_t) * np);
+    memcpy(s_nav_eds, eds, sizeof(imgui_nav_edge_t)  * ne);
+    s_nav_np = np;
+    s_nav_ne = ne;
+}
+
+void ImguiSupport_Nav_SetPath(const imgui_nav_active_t *p) {
+    s_nav_path = *p;
+}
+
+int ImguiSupport_Nav_Count(int *out_np, int *out_ne) {
+    if (out_np) *out_np = s_nav_np;
+    if (out_ne) *out_ne = s_nav_ne;
+    return s_nav_np > 0;
+}
+
+const imgui_nav_point_t  *ImguiSupport_Nav_Points(void) { return s_nav_pts; }
+const imgui_nav_edge_t   *ImguiSupport_Nav_Edges(void)  { return s_nav_eds; }
+const imgui_nav_active_t *ImguiSupport_Nav_Path(void)   { return &s_nav_path; }

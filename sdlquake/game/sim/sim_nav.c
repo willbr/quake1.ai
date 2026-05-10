@@ -319,6 +319,34 @@ void Sim_Nav_LevelInit(const char *mapname) {
         snprintf(buf, sizeof(buf), "sim_nav: loaded %d pts %d edges from cache\n",
                  s_mesh->point_count, s_mesh->edge_count);
         eng->Con_Print(buf);
+        {
+            // Push to imgui as 2D xy-only.
+            int np = s_mesh->point_count;
+            if (np > 4096) np = 4096;
+            float *xy = malloc(sizeof(float) * 2 * np);
+            if (xy) {
+                for (int i = 0; i < np; i++) {
+                    xy[2*i+0] = s_mesh->points[i].pos[0];
+                    xy[2*i+1] = s_mesh->points[i].pos[1];
+                }
+                int ne = 0;
+                unsigned short *eds = malloc(sizeof(unsigned short) * 2 * s_mesh->edge_count);
+                if (eds) {
+                    for (int i = 0; i < s_mesh->edge_count; i++) {
+                        int a = s_mesh->edges[i].from;
+                        int b = s_mesh->edges[i].to;
+                        if (a < 65536 && b < 65536) {
+                            eds[2*ne+0] = (unsigned short)a;
+                            eds[2*ne+1] = (unsigned short)b;
+                            ne++;
+                        }
+                    }
+                    eng->ImguiNav_Set(xy, np, eds, ne);
+                    free(eds);
+                }
+                free(xy);
+            }
+        }
         s_ready = 1;
         return;
     }
@@ -343,6 +371,33 @@ void Sim_Nav_LevelInit(const char *mapname) {
     _mkdir("id1\\cache\\navmesh");
     save_mesh(nav_path, s_mesh);
 
+    {
+        int np = s_mesh->point_count;
+        if (np > 4096) np = 4096;
+        float *xy = malloc(sizeof(float) * 2 * np);
+        if (xy) {
+            for (int i = 0; i < np; i++) {
+                xy[2*i+0] = s_mesh->points[i].pos[0];
+                xy[2*i+1] = s_mesh->points[i].pos[1];
+            }
+            int ne = 0;
+            unsigned short *eds = malloc(sizeof(unsigned short) * 2 * s_mesh->edge_count);
+            if (eds) {
+                for (int i = 0; i < s_mesh->edge_count; i++) {
+                    int a = s_mesh->edges[i].from;
+                    int b = s_mesh->edges[i].to;
+                    if (a < 65536 && b < 65536) {
+                        eds[2*ne+0] = (unsigned short)a;
+                        eds[2*ne+1] = (unsigned short)b;
+                        ne++;
+                    }
+                }
+                eng->ImguiNav_Set(xy, np, eds, ne);
+                free(eds);
+            }
+            free(xy);
+        }
+    }
     char buf[160];
     snprintf(buf, sizeof(buf), "sim_nav: baked %d pts %d edges\n",
              s_mesh->point_count, s_mesh->edge_count);

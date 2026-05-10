@@ -85,6 +85,48 @@ static void draw_ai(void)
         }
         IG_EndTable();
     }
+
+    // Navmesh minimap
+    int np, ne;
+    ImguiSupport_Nav_Count(&np, &ne);
+    snprintf(buf, sizeof(buf), "nav: %d pts %d edges", np, ne);
+    IG_TextUnformatted(buf);
+
+    if (np > 0) {
+        const imgui_nav_point_t *pts = ImguiSupport_Nav_Points();
+        float min_x = pts[0].x, max_x = pts[0].x;
+        float min_y = pts[0].y, max_y = pts[0].y;
+        for (int i = 1; i < np; i++) {
+            if (pts[i].x < min_x) min_x = pts[i].x;
+            if (pts[i].x > max_x) max_x = pts[i].x;
+            if (pts[i].y < min_y) min_y = pts[i].y;
+            if (pts[i].y > max_y) max_y = pts[i].y;
+        }
+        float W = max_x - min_x, H = max_y - min_y;
+        if (W < 1) W = 1;
+        if (H < 1) H = 1;
+
+        IG_BeginCanvas("##nav", 256, 256);
+        const imgui_nav_edge_t *eds = ImguiSupport_Nav_Edges();
+        for (int i = 0; i < ne; i++) {
+            float ax = (pts[eds[i].a].x - min_x) / W * 256.0f;
+            float ay = (pts[eds[i].a].y - min_y) / H * 256.0f;
+            float bx = (pts[eds[i].b].x - min_x) / W * 256.0f;
+            float by = (pts[eds[i].b].y - min_y) / H * 256.0f;
+            IG_CanvasLine(ax, ay, bx, by, 0xFF888888);
+        }
+        const imgui_nav_active_t *p = ImguiSupport_Nav_Path();
+        if (p->has_path) {
+            for (int i = 0; i + 1 < p->path_len; i++) {
+                float ax = (p->path_xy[2*i+0]   - min_x) / W * 256.0f;
+                float ay = (p->path_xy[2*i+1]   - min_y) / H * 256.0f;
+                float bx = (p->path_xy[2*(i+1)+0] - min_x) / W * 256.0f;
+                float by = (p->path_xy[2*(i+1)+1] - min_y) / H * 256.0f;
+                IG_CanvasLine(ax, ay, bx, by, 0xFF00FF00);
+            }
+        }
+        IG_EndCanvas();
+    }
     IG_End();
 }
 

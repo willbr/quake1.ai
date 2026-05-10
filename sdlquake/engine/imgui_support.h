@@ -47,6 +47,25 @@ void   ImguiSupport_AI_Push(const imgui_ai_row_t *row);
 int    ImguiSupport_AI_Count(void);
 const  imgui_ai_row_t *ImguiSupport_AI_Row(int i);
 
+// Nav minimap shared state (written by game DLL each frame, read by imgui layer).
+#define IMGUI_NAV_MAX_POINTS  4096
+#define IMGUI_NAV_MAX_EDGES   16384
+typedef struct { float x, y; }              imgui_nav_point_t;
+typedef struct { unsigned short a, b; }     imgui_nav_edge_t;
+typedef struct {
+    int   has_path;
+    int   path_len;
+    float path_xy[64];   // up to 32 (x,y) pairs
+} imgui_nav_active_t;
+
+void ImguiSupport_Nav_Set(const imgui_nav_point_t *pts, int np,
+                          const imgui_nav_edge_t *eds, int ne);
+void ImguiSupport_Nav_SetPath(const imgui_nav_active_t *p);
+int  ImguiSupport_Nav_Count(int *out_np, int *out_ne);
+const imgui_nav_point_t  *ImguiSupport_Nav_Points(void);
+const imgui_nav_edge_t   *ImguiSupport_Nav_Edges(void);
+const imgui_nav_active_t *ImguiSupport_Nav_Path(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -304,6 +304,28 @@ void Sim_AI_Frame(void) {
                               b->last_known_pos, b->target_edict);
         }
     }
+
+    // Push the path of the first SEARCHING brain for the nav minimap.
+    if (eng->ImguiNav_SetPath) {
+        int pushed = 0;
+        for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
+            if (b->state == AI_SEARCHING && b->path_len > 0) {
+                float xy[64];
+                int n = b->path_len > 32 ? 32 : b->path_len;
+                for (int i = 0; i < n; i++) {
+                    xy[2*i+0] = b->path_pts[i][0];
+                    xy[2*i+1] = b->path_pts[i][1];
+                }
+                eng->ImguiNav_SetPath(xy, n);
+                pushed = 1;
+                break;
+            }
+        }
+        if (!pushed) {
+            float xy[2] = {0, 0};
+            eng->ImguiNav_SetPath(xy, 0);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
