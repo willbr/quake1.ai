@@ -4,7 +4,10 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "sim/sim.h"
 #include <string.h>
+
+extern game_globals_t *g;
 
 typedef struct { const char *classname; void (*fn)(edict_t *); } spawn_entry_t;
 
@@ -241,6 +244,12 @@ static const spawn_entry_t s_spawns[] = {
 
 void game_entity_spawn(edict_t *e, const char *classname)
 {
+    static const char *s_last_mapname = (const char *)1;  // sentinel: non-NULL invalid ptr
+    if (g->mapname != s_last_mapname) {
+        s_last_mapname = g->mapname;
+        Sim_LevelInit(g->mapname ? g->mapname : "");
+    }
+
     int n = (int)(sizeof(s_spawns)/sizeof(s_spawns[0]));
     for (int i = 0; i < n; i++) {
         if (!s_spawns[i].classname) break;
