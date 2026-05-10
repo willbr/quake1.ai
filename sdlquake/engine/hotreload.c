@@ -22,6 +22,7 @@
 #include "hotreload.h"
 #include "sv_bridge.h"
 #include "imgui_support.h"
+#include "debug_lines.h"
 
 #if NATIVE_GAME
 // Bring in the full edict_t / entvars_s definitions so offsetof works.
@@ -800,6 +801,10 @@ static void *engine_load_file(const char *path, int *out_size) {
     return buf;
 }
 
+static void engine_debug_line(float *start, float *end, int color) {
+    DebugLines_Add(start, end, color);
+}
+
 // ---------------------------------------------------------------------------
 // imgui Nav panel shims
 // ---------------------------------------------------------------------------
@@ -897,6 +902,7 @@ static engine_api_t engine_funcs = {
     imgui_nav_setpath_shim,
     engine_cvar_register,
     engine_load_file,
+    engine_debug_line,
 };
 
 // ---------------------------------------------------------------------------

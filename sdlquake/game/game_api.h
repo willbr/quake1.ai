@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 9
+#define GAME_API_VERSION 10
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -155,6 +155,10 @@ typedef struct engine_api_s {
     // VFS file loader — searches PAK files; caller frees the buffer with free().
     // Returns NULL if the file is not found. out_size receives the file length.
     void *(*LoadFile)(const char *path, int *out_size);
+
+    // Debug line overlay — drawn into vid.buffer this frame only.
+    // color is a Quake palette index (0-255). Call every frame to keep visible.
+    void  (*SV_DebugLine)(vec3_t start, vec3_t end, int color);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

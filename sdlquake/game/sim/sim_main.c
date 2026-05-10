@@ -39,5 +39,6 @@ void Sim_Frame(void) {
     }
 
     Sim_AI_Frame();
+    Sim_Nav_Frame();
     Sim_Arena_Poll();
 }

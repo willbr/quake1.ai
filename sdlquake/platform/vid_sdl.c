@@ -8,6 +8,7 @@
 #include "r_bbox.h"
 #include "r_paths.h"
 #include "vid_palette.h"
+#include "debug_lines.h"
 
 // ---------------------------------------------------------------------------
 // Globals that Win32 platform files normally define
@@ -215,6 +216,7 @@ void VID_Update(vrect_t *rects)
 
     RPaths_Draw();
     RBBox_Draw();
+    DebugLines_Draw();
 
     void *pixels;
     int pitch;
