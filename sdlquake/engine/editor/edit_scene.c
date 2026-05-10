@@ -940,8 +940,6 @@ int Scene_WrapBrushesIntoEntity(const char *classname)
     int     i, n, n_moved = 0;
     int     new_ent_idx;
     int     have_brush = 0;
-    vec3_t  cmin = { 0, 0, 0 }, cmax = { 0, 0, 0 };
-    vec3_t  origin;
     edit_entity_t wrap_e;
     edit_selref_t *snap;
 
@@ -952,50 +950,34 @@ int Scene_WrapBrushesIntoEntity(const char *classname)
         return 0;
     }
 
-    // Pre-compute origin over the selected brushes' bboxes BEFORE any
-    // moves so the math is stable. Skip selection entries that aren't
-    // actually brushes (b == -1, point entity).
+    // Verify selection contains at least one valid brush.
     for (i = 0; i < edit_scene.num_selected; i++)
     {
         edit_selref_t s = edit_scene.selection[i];
         edit_brush_t *b;
-        int k;
         if (s.entity < 0 || s.entity >= edit_scene.numentities) continue;
         if (s.brush  < 0) continue;
         if (s.brush  >= edit_scene.entities[s.entity].numbrushes) continue;
         b = &edit_scene.entities[s.entity].brushes[s.brush];
         if (!b->valid) continue;
-        for (k = 0; k < 3; k++)
-        {
-            float mid = (b->mins[k] + b->maxs[k]) * 0.5f;
-            if (!have_brush)
-            {
-                cmin[k] = cmax[k] = mid;
-            }
-            else
-            {
-                if (mid < cmin[k]) cmin[k] = mid;
-                if (mid > cmax[k]) cmax[k] = mid;
-            }
-        }
         have_brush = 1;
+        break;
     }
     if (!have_brush)
     {
         Con_Printf("editor: wrap: no brushes in selection\n");
         return 0;
     }
-    for (i = 0; i < 3; i++)
-        origin[i] = (cmin[i] + cmax[i]) * 0.5f;
 
-    // Build the wrapper entity (kv: classname + origin).
+    /* Brush entities must have origin "0 0 0": qbsp compiles brush geometry
+     * at absolute world coords without subtracting the entity origin, so any
+     * non-zero origin would cause the engine to double-offset at spawn. */
     memset(&wrap_e, 0, sizeof(wrap_e));
     wrap_e.kv = (edit_kv_t *)calloc(2, sizeof(edit_kv_t));
     Q_strncpy(wrap_e.kv[0].key,   "classname", EDIT_KEY_LEN - 1);
     Q_strncpy(wrap_e.kv[0].value, classname,   EDIT_VAL_LEN - 1);
     Q_strncpy(wrap_e.kv[1].key,   "origin",    EDIT_KEY_LEN - 1);
-    snprintf  (wrap_e.kv[1].value, EDIT_VAL_LEN, "%g %g %g",
-               origin[0], origin[1], origin[2]);
+    Q_strncpy(wrap_e.kv[1].value, "0 0 0",     EDIT_VAL_LEN - 1);
     wrap_e.numkv         = 2;
     wrap_e.classname_idx = 0;
     wrap_e.origin_idx    = 1;
