@@ -37,10 +37,11 @@ static void draw_perf(void)
 }
 
 static const char *ai_state_name(int s) {
+    // Values must match ai_state_t in sim.h: IDLE=0, SUSPICIOUS=1, SEARCHING=2, COMBAT=3
     switch (s) {
         case 0: return "idle";
-        case 1: return "suspect";
-        case 2: return "search";
+        case 1: return "suspicious";
+        case 2: return "searching";
         case 3: return "combat";
         default: return "?";
     }

@@ -737,7 +737,10 @@ static void imgui_ai_push_shim(int edict_num, int state, float alert_level,
 }
 
 extern int imgui_ai_panel_open;  // defined in imgui_layer.c
-static int imgui_ai_active_shim(void) { return imgui_ai_panel_open; }
+extern int ImguiLayer_IsOpen(void);  // defined in imgui_layer.c
+static int imgui_ai_active_shim(void) {
+    return imgui_ai_panel_open && ImguiLayer_IsOpen();
+}
 
 // ---------------------------------------------------------------------------
 // Full engine_funcs table
