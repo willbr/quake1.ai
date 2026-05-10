@@ -1,6 +1,7 @@
 // sim_nav.c -- BSP walkable-surface extraction, navmesh bake, A* pathfinding.
 
 #include "sim.h"
+#include "../game_defs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -154,10 +155,77 @@ static int extract_walkable_points(const char *bsp_path,
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle stubs (edge-build, bake, A* wired in Tasks 17-19)
+// Step 2: allocate a probe entity for walkmove testing.
+// ---------------------------------------------------------------------------
+
+// Need an entity to probe with. Allocate once, reuse, free at end.
+static edict_t *alloc_probe(void) {
+    edict_t *e = eng->ED_Alloc();
+    e->v.movetype = MOVETYPE_STEP;
+    e->v.solid    = SOLID_SLIDEBOX;
+    eng->SV_SetSize(e, (vec3_t){-16, -16, -24}, (vec3_t){16, 16, 32});
+    return e;
+}
+
+static int build_edges(sim_navmesh_t *m) {
+    int   cap = 4096, n = 0;
+    nav_edge_t *e = malloc(sizeof(nav_edge_t) * cap);
+
+    edict_t *probe = alloc_probe();
+
+    for (int i = 0; i < m->point_count; i++) {
+        eng->SV_SetOrigin(probe, m->points[i].pos);
+        if (!eng->SV_DropToFloor(probe)) continue;
+
+        for (int j = 0; j < m->point_count; j++) {
+            if (i == j) continue;
+            float dx = m->points[i].pos[0] - m->points[j].pos[0];
+            float dy = m->points[i].pos[1] - m->points[j].pos[1];
+            float dz = m->points[i].pos[2] - m->points[j].pos[2];
+            float d  = (float)sqrt(dx*dx + dy*dy + dz*dz);
+            if (d > 96.0f) continue;
+            // Probe walkmove from i to j.
+            eng->SV_SetOrigin(probe, m->points[i].pos);
+            float yaw = (float)(atan2(-dy, -dx) * 180.0 / 3.14159265358979);
+            int ok = eng->SV_WalkMove(probe, yaw, d);
+            if (!ok) continue;
+
+            if (n == cap) { cap *= 2; e = realloc(e, sizeof(nav_edge_t) * cap); }
+            e[n].from   = i;
+            e[n].to     = j;
+            e[n].weight = d;
+            n++;
+        }
+    }
+
+    eng->ED_Free(probe);
+    m->edges      = e;
+    m->edge_count = n;
+    return 1;
+}
+
+static void build_adjacency(sim_navmesh_t *m) {
+    m->adj_offsets = calloc(m->point_count + 1, sizeof(int));
+    for (int i = 0; i < m->edge_count; i++) m->adj_offsets[m->edges[i].from + 1]++;
+    for (int i = 1; i <= m->point_count; i++) m->adj_offsets[i] += m->adj_offsets[i-1];
+
+    int *cursor = calloc(m->point_count, sizeof(int));
+    m->adj = malloc(sizeof(int) * m->edge_count);
+    for (int i = 0; i < m->edge_count; i++) {
+        int from = m->edges[i].from;
+        m->adj[m->adj_offsets[from] + cursor[from]++] = i;
+    }
+    free(cursor);
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle stubs (bake, A* wired in Tasks 18-19)
 // ---------------------------------------------------------------------------
 void Sim_Nav_Init(void) {
     (void)extract_walkable_points;
+    (void)alloc_probe;
+    (void)build_edges;
+    (void)build_adjacency;
     s_mesh = 0;
     s_ready = 0;
 }
