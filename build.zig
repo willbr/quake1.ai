@@ -268,6 +268,12 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/monster_shambler.c",
             "sdlquake/game/monster_boss.c",
             "sdlquake/game/monster_oldone.c",
+            // Immersive-sim systems (M1 + M2 + M2.5)
+            "sdlquake/game/sim/sim_main.c",
+            "sdlquake/game/sim/sim_stimulus.c",
+            "sdlquake/game/sim/sim_ai.c",
+            "sdlquake/game/sim/sim_nav.c",
+            "sdlquake/game/sim/sim_arena.c",
         },
         .flags = &.{
             "-std=c11",
