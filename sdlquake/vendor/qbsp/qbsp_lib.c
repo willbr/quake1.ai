@@ -4,11 +4,12 @@
  * Replaces the old `int main(argc, argv)` in qbsp.c. Sets the longjmp
  * recovery target Error() uses, calls into qbsp's existing ProcessFile()
  * pipeline, and harvests the .bsp bytes that bspfile.c's WriteBSPFile
- * (M1.4) writes to a memory buffer instead of disk.
+ * appends to qbsp_membuf instead of writing to disk.
  *
- * Until M1.4 lands, WriteBSPFile still writes to disk; this function
- * reads the resulting file back into a malloc'd buffer at the end. That
- * disk hop will go away when WriteBSPFile is buffer-aware.
+ * Membuf API (qbsp_membuf_*) lives here because it owns its buffer
+ * outside the tracked allocator — qbsp_reset_state must not wipe it.
+ * bspfile.c's WriteBSPFile/AddLump check qbsp_membuf_active and call
+ * the helpers below in place of fopen/ftell/fwrite/fclose.
  */
 
 #include "cmdlib.h"
@@ -83,6 +84,67 @@ static void qbsp_free_all_tracked(void)
         h = next;
     }
     qbsp_alloc_head.next = qbsp_alloc_head.prev = &qbsp_alloc_head;
+}
+
+/* -------------------------------------------------------------------------
+ * Membuf — in-memory destination for WriteBSPFile.
+ *
+ * bspfile.c reads qbsp_membuf_active to decide whether AddLump/WriteBSPFile
+ * route their bytes here (set during qbsp_compile_to_memory) or to a real
+ * FILE * (the standalone qbsp tool's path, untouched).
+ *
+ * The buffer uses real libc malloc/realloc/free — NOT the tracked
+ * allocator above — because (a) the buffer's lifetime extends beyond
+ * qbsp_reset_state (caller frees after the engine has loaded it), and
+ * (b) qbsp_free_all_tracked would yank it out from under the caller.
+ */
+int    qbsp_membuf_active = 0;
+byte  *qbsp_membuf         = NULL;
+int    qbsp_membuf_size    = 0;
+static int qbsp_membuf_cap = 0;
+
+void qbsp_membuf_reset(void)
+{
+    if (qbsp_membuf) free(qbsp_membuf);
+    qbsp_membuf      = NULL;
+    qbsp_membuf_size = 0;
+    qbsp_membuf_cap  = 0;
+}
+
+void qbsp_membuf_append(const void *src, int len)
+{
+    int need = qbsp_membuf_size + len;
+    if (need > qbsp_membuf_cap)
+    {
+        int cap = qbsp_membuf_cap ? qbsp_membuf_cap : (1 << 20);
+        while (cap < need) cap *= 2;
+        qbsp_membuf = (byte *)realloc(qbsp_membuf, (size_t)cap);
+        if (!qbsp_membuf) Con_Printf("qbsp_membuf: out of memory\n");
+        qbsp_membuf_cap = cap;
+    }
+    memcpy(qbsp_membuf + qbsp_membuf_size, src, (size_t)len);
+    qbsp_membuf_size += len;
+}
+
+void qbsp_membuf_patch(int pos, const void *src, int len)
+{
+    /* Caller (WriteBSPFile epilogue) overwrites the placeholder header
+     * at offset 0 once all lump offsets are known. The bytes were
+     * already reserved by an earlier append, so no growth is needed. */
+    memcpy(qbsp_membuf + pos, src, (size_t)len);
+}
+
+int qbsp_membuf_pos(void) { return qbsp_membuf_size; }
+
+byte *qbsp_membuf_take(int *out_size)
+{
+    /* Transfer ownership; subsequent compiles get a fresh buffer. */
+    byte *p = qbsp_membuf;
+    if (out_size) *out_size = qbsp_membuf_size;
+    qbsp_membuf      = NULL;
+    qbsp_membuf_size = 0;
+    qbsp_membuf_cap  = 0;
+    return p;
 }
 
 /* Globals qbsp.c declares; we touch them from here so the namespace
@@ -256,34 +318,6 @@ static void apply_options(const qbsp_options_t *opts)
     }
 }
 
-/*
- * Read the freshly-written .bsp from disk into a malloc'd buffer. M1.4
- * replaces WriteBSPFile to skip the disk hop entirely; until then this
- * is the bridge.
- */
-static int slurp_bsp(const char *path, void **out_bytes, int *out_size)
-{
-    FILE *f = fopen(path, "rb");
-    long  size;
-    void *buf;
-    if (!f) {
-        Con_Printf("qbsp: failed to read back %s\n", path);
-        return 1;
-    }
-    fseek(f, 0, SEEK_END);
-    size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    buf = malloc((size_t)size);
-    if (!buf) { fclose(f); return 1; }
-    if ((long)fread(buf, 1, (size_t)size, f) != size) {
-        fclose(f); free(buf); return 1;
-    }
-    fclose(f);
-    *out_bytes = buf;
-    *out_size  = (int)size;
-    return 0;
-}
-
 int qbsp_compile_to_memory(const char *map_path,
                            void **out_bsp, int *out_size,
                            const qbsp_options_t *opts)
@@ -292,6 +326,7 @@ int qbsp_compile_to_memory(const char *map_path,
     char    destname[1024];
     jmp_buf err_buf;
     int     dot_idx;
+    int     bsp_size = 0;
 
     if (out_bsp)  *out_bsp = NULL;
     if (out_size) *out_size = 0;
@@ -301,14 +336,12 @@ int qbsp_compile_to_memory(const char *map_path,
     reset_options_defaults();
     apply_options(opts);
 
-    /* destname is used by ProcessFile for portfile/pointfile/hullfile
-     * stems; it strips the extension and adds .bsp itself. We write the
-     * .bsp to a sibling of the .map (same dir, .bsp extension) and slurp
-     * it back into RAM at the end. M1.4 will eliminate this disk hop. */
+    /* destname is still passed to ProcessFile because qbsp uses it as
+     * the stem for the auxiliary files it does write to disk —
+     * .h1/.h2 hull files and the .pts leak file. WriteBSPFile itself
+     * ignores the filename when membuf is active. */
     snprintf(sourcename, sizeof(sourcename), "%s", map_path);
     snprintf(destname,   sizeof(destname),   "%s", map_path);
-    /* StripExtension/DefaultExtension are qbsp helpers but we want to
-     * be defensive about the path string here. Find last '.' and chop. */
     {
         int i;
         for (i = (int)strlen(destname) - 1, dot_idx = -1; i >= 0; i--) {
@@ -319,19 +352,35 @@ int qbsp_compile_to_memory(const char *map_path,
         strncat(destname, ".bsp", sizeof(destname) - strlen(destname) - 1);
     }
 
+    /* Hijack WriteBSPFile to append into qbsp_membuf instead of writing
+     * to disk. Reset the buffer up-front in case a previous compile
+     * left one allocated (qbsp_membuf_take normally clears it, but a
+     * crash mid-pipeline could leak). */
+    qbsp_membuf_active = 1;
+    qbsp_membuf_reset();
+
     /* Set the longjmp target before any qbsp call. Error() in cmdlib.c
      * checks qbsp_err_jmp and longjmps here on any abort. */
     qbsp_err_jmp    = &err_buf;
     qbsp_err_msg[0] = '\0';
     if (setjmp(err_buf) != 0) {
         Con_Printf("qbsp: %s\n", qbsp_err_msg);
-        qbsp_err_jmp = NULL;
+        qbsp_err_jmp       = NULL;
+        qbsp_membuf_active = 0;
+        qbsp_membuf_reset();
         return 1;
     }
 
     ProcessFile(sourcename, destname);
-    qbsp_err_jmp = NULL;
+    qbsp_err_jmp       = NULL;
+    qbsp_membuf_active = 0;
 
-    if (slurp_bsp(destname, out_bsp, out_size) != 0) return 1;
+    /* Transfer ownership of the buffer to the caller (engine VFS). */
+    *out_bsp  = qbsp_membuf_take(&bsp_size);
+    *out_size = bsp_size;
+    if (!*out_bsp || bsp_size <= 0) {
+        Con_Printf("qbsp: WriteBSPFile produced no output\n");
+        return 1;
+    }
     return 0;
 }

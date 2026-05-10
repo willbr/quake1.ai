@@ -3,6 +3,14 @@
 #include "mathlib.h"
 #include "bspfile.h"
 
+/* Memory-write hook: when active, WriteBSPFile/AddLump bypass the FILE *
+ * path and append into qbsp_membuf instead. Implemented in qbsp_lib.c. */
+extern int  qbsp_membuf_active;
+extern void qbsp_membuf_reset (void);
+extern void qbsp_membuf_append(const void *src, int len);
+extern void qbsp_membuf_patch (int pos, const void *src, int len);
+extern int  qbsp_membuf_pos   (void);
+
 //=============================================================================
 
 int			nummodels;
@@ -283,12 +291,23 @@ dheader_t	outheader;
 void AddLump (int lumpnum, void *data, int len)
 {
 	lump_t *lump;
+	int		aligned;
 
 	lump = &header->lumps[lumpnum];
-	
-	lump->fileofs = LittleLong( ftell(wadfile) );
-	lump->filelen = LittleLong(len);
-	SafeWrite (wadfile, data, (len+3)&~3);
+	aligned = (len + 3) & ~3;
+
+	if (qbsp_membuf_active)
+	{
+		lump->fileofs = LittleLong (qbsp_membuf_pos ());
+		lump->filelen = LittleLong (len);
+		qbsp_membuf_append (data, aligned);
+	}
+	else
+	{
+		lump->fileofs = LittleLong (ftell (wadfile));
+		lump->filelen = LittleLong (len);
+		SafeWrite (wadfile, data, aligned);
+	}
 }
 
 /*
@@ -299,16 +318,27 @@ Swaps the bsp file in place, so it should not be referenced again
 =============
 */
 void	WriteBSPFile (char *filename)
-{		
+{
 	header = &outheader;
 	memset (header, 0, sizeof(dheader_t));
-	
+
 	SwapBSPFile (true);
 
 	header->version = LittleLong (BSPVERSION);
-	
-	wadfile = SafeOpenWrite (filename);
-	SafeWrite (wadfile, header, sizeof(dheader_t));	// overwritten later
+
+	/* Prologue: reserve dheader_t at offset 0. AddLump will fill in the
+	 * lump table as it appends; the final memcpy/fseek+SafeWrite below
+	 * patches the header in place once all offsets are known. */
+	if (qbsp_membuf_active)
+	{
+		qbsp_membuf_reset ();
+		qbsp_membuf_append (header, sizeof(dheader_t));
+	}
+	else
+	{
+		wadfile = SafeOpenWrite (filename);
+		SafeWrite (wadfile, header, sizeof(dheader_t));	// overwritten later
+	}
 
 	AddLump (LUMP_PLANES, dplanes, numplanes*sizeof(dplane_t));
 	AddLump (LUMP_LEAFS, dleafs, numleafs*sizeof(dleaf_t));
@@ -326,10 +356,17 @@ void	WriteBSPFile (char *filename)
 	AddLump (LUMP_VISIBILITY, dvisdata, visdatasize);
 	AddLump (LUMP_ENTITIES, dentdata, entdatasize);
 	AddLump (LUMP_TEXTURES, dtexdata, texdatasize);
-	
-	fseek (wadfile, 0, SEEK_SET);
-	SafeWrite (wadfile, header, sizeof(dheader_t));
-	fclose (wadfile);	
+
+	if (qbsp_membuf_active)
+	{
+		qbsp_membuf_patch (0, header, sizeof(dheader_t));
+	}
+	else
+	{
+		fseek (wadfile, 0, SEEK_SET);
+		SafeWrite (wadfile, header, sizeof(dheader_t));
+		fclose (wadfile);
+	}
 }
 
 //============================================================================
