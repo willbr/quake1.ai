@@ -11,6 +11,19 @@
 #include <time.h>
 #include <stdarg.h>
 
+/* Tracked allocator — qbsp's malloc/free go through qbsp_malloc/qbsp_free
+ * which keep a doubly-linked list of all live allocations. qbsp_reset_state
+ * (called at the top of each qbsp_compile_to_memory) walks the list and
+ * frees stragglers, so qbsp's many file-scope buffers + linked structures
+ * (winding_t, face_t, surface_t, portal_t, mface_t, ...) don't leak across
+ * compiles. Free during a single compile still works (qbsp_free unlinks),
+ * so peak memory stays bounded. Defined here so every qbsp .c file picks
+ * up the redirect after stdlib.h has already declared the real symbols. */
+extern void *qbsp_malloc(size_t size);
+extern void  qbsp_free  (void *p);
+#define malloc(s)  qbsp_malloc(s)
+#define free(p)    qbsp_free(p)
+
 /* Output redirect — qbsp's printf calls land in the engine console.
  * fprintf is intentionally NOT redirected: every fprintf call site in
  * qbsp writes to a real FILE * (hull files, portal files, leak files)
