@@ -334,7 +334,7 @@ enum {
     EDIT_STYLE_COUNT
 };
 
-cvar_t editor_render_style = { "editor_render_style", "0" };
+cvar_t editor_render_style = { "editor_render_style", "3" };
 
 void Editor_RegisterCvars(void)
 {
@@ -1111,8 +1111,11 @@ void Editor_RenderScene(void)
     int i, j;
     int style = (int)editor_render_style.value;
     int multi = Scene_NumSelected() > 1;
+    int editor_open = Editor_IsOpen();
+    extern cvar_t editor_view_mode;
+    int view_map = (int)editor_view_mode.value == 1;
 
-    if (!Editor_IsOpen()) return;
+    if (!editor_open && !view_map) return;
     if (edit_scene.numentities == 0) return;
 
     // If the engine's loaded worldmodel came from a recent editor_compile
@@ -1182,16 +1185,17 @@ void Editor_RenderScene(void)
                 // a single union bbox below instead so the group reads as
                 // one thing. In single-select the per-brush outline still
                 // wins for clarity (and ignores depth so it's always seen).
-                if (multi && is_sel)
+                if (multi && is_sel && editor_open)
                 {
                     if (wire_all || is_brush_ent)
                         draw_brush(b, is_brush_ent ? category_color(e) : EDIT_COLOR_BRUSH, 0);
                 }
                 else
                 {
-                    byte bc = is_sel      ? EDIT_COLOR_SELECTED :
+                    int show_sel = is_sel && editor_open;
+                    byte bc = show_sel    ? EDIT_COLOR_SELECTED :
                               is_brush_ent ? category_color(e)  : EDIT_COLOR_BRUSH;
-                    draw_brush(b, bc, is_sel);
+                    draw_brush(b, bc, show_sel);
                 }
                 // Active-face highlight: walk the face whose plane_idx
                 // matches and draw its edges in white over everything,

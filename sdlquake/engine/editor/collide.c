@@ -138,6 +138,13 @@ void EditorCollide_ClipMove(const vec3_t start, const vec3_t mins,
     float  best_t    = trace->fraction;
     int    i, j;
 
+    {
+        extern int Editor_IsOpen(void);
+        extern cvar_t editor_view_mode;
+        int view_map = (int)editor_view_mode.value == 1;
+        if (!Editor_IsOpen() && !view_map) return;
+    }
+
     if (edit_scene.numentities == 0) return;
 
     for (i = 0; i < edit_scene.numentities; i++)
