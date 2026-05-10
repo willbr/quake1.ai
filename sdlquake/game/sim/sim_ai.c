@@ -206,9 +206,27 @@ static void face_point(edict_t *e, const vec3_t target) {
 
 static void behavior_tick(ai_brain_t *b, edict_t *e) {
     switch (b->state) {
-    case AI_IDLE:
-        // Fall through to vanilla Quake AI (handled elsewhere).
-        break;
+    case AI_IDLE: {
+        if (b->patrol_route_id < 0) break;
+        // Look up current arena-patrol node (route, idx).
+        edict_t *node = Sim_Patrol_FindArenaNode(b->patrol_route_id, b->patrol_node_idx);
+        if (!node) break;
+        float dx = node->v.origin[0] - e->v.origin[0];
+        float dy = node->v.origin[1] - e->v.origin[1];
+        float dz = node->v.origin[2] - e->v.origin[2];
+        float d2 = dx*dx + dy*dy + dz*dz;
+        if (d2 < 32*32) {
+            // Arrived at node — advance to next.
+            b->patrol_node_idx++;
+            // Wrap if next node not found.
+            if (!Sim_Patrol_FindArenaNode(b->patrol_route_id, b->patrol_node_idx))
+                b->patrol_node_idx = 0;
+            break;
+        }
+        face_point(e, node->v.origin);
+        eng->SV_WalkMove(e, e->v.angles[1], 12.0f);
+        return;  // suppress vanilla AI walk this tick
+    }
     case AI_SUSPICIOUS:
     case AI_SEARCHING:
         face_point(e, b->last_known_pos);

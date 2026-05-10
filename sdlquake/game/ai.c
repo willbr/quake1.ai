@@ -289,7 +289,8 @@ void ai_painforward(float dist) { eng->SV_WalkMove(g->self, g->self->v.ideal_yaw
 void ai_walk(float dist) {
     {
         ai_brain_t *b = Sim_AI_GetBrain(g->self);
-        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING))
+        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
+                  (b->state == AI_IDLE && b->patrol_route_id >= 0)))
             return;
     }
     g->movedist = dist;
@@ -301,7 +302,8 @@ void ai_stand(edict_t *self) {
     g->self = self;
     {
         ai_brain_t *b = Sim_AI_GetBrain(self);
-        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING))
+        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
+                  (b->state == AI_IDLE && b->patrol_route_id >= 0)))
             return;
     }
     if (FindTarget()) return;
@@ -414,7 +416,8 @@ static void ai_run_slide(void) {
 void ai_run(float dist) {
     {
         ai_brain_t *b = Sim_AI_GetBrain(g->self);
-        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING))
+        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
+                  (b->state == AI_IDLE && b->patrol_route_id >= 0)))
             return;
     }
     edict_t *self = g->self;
