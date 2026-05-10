@@ -3,6 +3,7 @@
 
 #include "quakedef.h"
 #include "edit_texcache.h"
+#include "editor_internal.h"
 #include "imgui_bridge.h"
 
 #include <SDL3/SDL.h>
@@ -66,18 +67,26 @@ static cache_entry_t *find_entry(const char *name)
     return NULL;
 }
 
-// Find the worldmodel texture by basename (case-insensitive). Mirrors the
-// existing find_world_texture in render_tex.c but kept private here so
-// edit_texcache can stand alone.
+// Find a texture by name: worldmodel first, then the editor texture pool.
 static texture_t *find_world_tex(const char *name)
 {
     int i;
-    if (!cl.worldmodel || !cl.worldmodel->textures) return NULL;
-    for (i = 0; i < cl.worldmodel->numtextures; i++)
+    if (cl.worldmodel && cl.worldmodel->textures)
     {
-        texture_t *t = cl.worldmodel->textures[i];
-        if (!t || !t->name[0]) continue;
-        if (!Q_strcasecmp(t->name, name)) return t;
+        for (i = 0; i < cl.worldmodel->numtextures; i++)
+        {
+            texture_t *t = cl.worldmodel->textures[i];
+            if (t && !Q_strcasecmp(t->name, name)) return t;
+        }
+    }
+    {
+        int pool_count;
+        texture_t **pool = Editor_TexPool_Get(&pool_count);
+        for (i = 0; i < pool_count; i++)
+        {
+            texture_t *t = pool[i];
+            if (t && !Q_strcasecmp(t->name, name)) return t;
+        }
     }
     return NULL;
 }
@@ -150,7 +159,6 @@ IG_TextureID Editor_GetTextureThumbnail(const char *name)
 
     if (!name || !name[0]) return NULL;
     check_world();
-    if (!cl.worldmodel) return NULL;
 
     e = find_entry(name);
     if (e && e->tex) return (IG_TextureID)e->tex;

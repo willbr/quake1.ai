@@ -149,6 +149,25 @@ static void scaffold_build_test_room(const char *mapname)
     Scene_AddCubeBrush(r_mins, r_maxs, "wbrick1_5");
     Scene_HollowBrush(0 /*worldspawn*/, 0, 16);
 
+    /* Brush 0 = floor slab, brush 1 = ceiling slab (see Scene_HollowBrush
+     * ordering: floor=z:mins..mins+thick, ceiling=z:maxs-thick..maxs). */
+    {
+        edit_entity_t *ws = &edit_scene.entities[0];
+        int p;
+        if (ws->numbrushes >= 2)
+        {
+            for (p = 0; p < ws->brushes[0].numplanes; p++)
+                Q_strncpy(ws->brushes[0].planes[p].texname, "floor0_1",
+                          EDIT_TEX_NAME_LEN - 1);
+            Brush_Compile(&ws->brushes[0]);
+
+            for (p = 0; p < ws->brushes[1].numplanes; p++)
+                Q_strncpy(ws->brushes[1].planes[p].texname, "sky1",
+                          EDIT_TEX_NAME_LEN - 1);
+            Brush_Compile(&ws->brushes[1]);
+        }
+    }
+
     /* qbsp's WriteMiptex needs worldspawn to declare a "wad" key or
      * it warns "no wadfile specified" and ships the .bsp with zero
      * textures embedded. cl.worldmodel->textures then comes back
@@ -191,6 +210,7 @@ static void Editor_Cmd_New_f(void)
     cls.demonum = -1;
     CL_Disconnect_f();
 
+    Editor_TexPool_Init();
     History_Clear();
     Scene_Clear();
     scaffold_build_test_room(name);
@@ -316,6 +336,128 @@ static void Editor_Cmd_Undo_f(void)
     if (!History_Undo()) Con_Printf("editor: nothing to undo\n");
 }
 
+// -----------------------------------------------------------------------------
+// Texture pool — persistent collection of texture_t loaded from game BSPs,
+// so the texture browser and WAD synthesis have the full Quake palette even
+// when the current worldmodel only has a handful of textures compiled in.
+// -----------------------------------------------------------------------------
+
+static texture_t **s_texpool       = NULL;
+static int         s_texpool_count = 0;
+static int         s_texpool_cap   = 0;
+static int         s_texpool_inited = 0;
+
+static int texpool_has(const char *name)
+{
+    int i;
+    for (i = 0; i < s_texpool_count; i++)
+        if (s_texpool[i] && !Q_strcasecmp(s_texpool[i]->name, name)) return 1;
+    return 0;
+}
+
+static void texpool_add(texture_t *t)
+{
+    if (s_texpool_count >= s_texpool_cap)
+    {
+        int new_cap = s_texpool_cap ? s_texpool_cap * 2 : 256;
+        s_texpool = (texture_t **)realloc(s_texpool,
+                                          new_cap * sizeof(texture_t *));
+        s_texpool_cap = new_cap;
+    }
+    s_texpool[s_texpool_count++] = t;
+}
+
+static void texpool_load_bsp(const char *path)
+{
+    int h, len, i;
+    byte *data;
+    dheader_t *hdr;
+    dmiptexlump_t *ml;
+    int texofs, texlen;
+
+    len = COM_OpenFile((char *)path, &h);
+    if (h == -1 || len < (int)sizeof(dheader_t)) return;
+
+    data = (byte *)malloc((size_t)len);
+    if (!data) { COM_CloseFile(h); return; }
+    Sys_FileRead(h, data, len);
+    COM_CloseFile(h);
+
+    hdr = (dheader_t *)data;
+    if (LittleLong(hdr->version) != BSPVERSION) { free(data); return; }
+
+    texofs = LittleLong(hdr->lumps[LUMP_TEXTURES].fileofs);
+    texlen = LittleLong(hdr->lumps[LUMP_TEXTURES].filelen);
+    if (texofs + texlen > len || texlen < (int)sizeof(int)) { free(data); return; }
+
+    ml = (dmiptexlump_t *)(data + texofs);
+    ml->nummiptex = LittleLong(ml->nummiptex);
+
+    for (i = 0; i < ml->nummiptex; i++)
+    {
+        int ofs = LittleLong(ml->dataofs[i]);
+        miptex_t *mt;
+        texture_t *tx;
+        int pixels, j;
+
+        if (ofs < 0 || ofs + (int)sizeof(miptex_t) > texlen) continue;
+        mt = (miptex_t *)((byte *)ml + ofs);
+        if (!mt->name[0]) continue;
+        if (texpool_has(mt->name)) continue;
+
+        mt->width  = LittleLong(mt->width);
+        mt->height = LittleLong(mt->height);
+        for (j = 0; j < MIPLEVELS; j++)
+            mt->offsets[j] = LittleLong(mt->offsets[j]);
+
+        if ((mt->width & 15) || (mt->height & 15)
+         || mt->width == 0 || mt->height == 0) continue;
+
+        pixels = (int)(mt->width * mt->height / 64 * 85);
+        tx = (texture_t *)malloc(sizeof(texture_t) + (size_t)pixels);
+        if (!tx) continue;
+        memset(tx, 0, sizeof(texture_t));
+        memcpy(tx->name, mt->name, sizeof(tx->name));
+        tx->width  = mt->width;
+        tx->height = mt->height;
+        for (j = 0; j < MIPLEVELS; j++)
+            tx->offsets[j] = mt->offsets[j]
+                           + (unsigned)(sizeof(texture_t) - sizeof(miptex_t));
+        memcpy(tx + 1, mt + 1, (size_t)pixels);
+        texpool_add(tx);
+    }
+    free(data);
+}
+
+void Editor_TexPool_Init(void)
+{
+    static const char *maps[] = {
+        "maps/start.bsp",
+        "maps/e1m1.bsp", "maps/e1m2.bsp", "maps/e1m3.bsp", "maps/e1m4.bsp",
+        "maps/e1m5.bsp", "maps/e1m6.bsp", "maps/e1m7.bsp",
+        "maps/e2m1.bsp", "maps/e2m2.bsp", "maps/e2m3.bsp", "maps/e2m4.bsp",
+        "maps/e2m5.bsp", "maps/e2m6.bsp", "maps/e2m7.bsp",
+        "maps/e3m1.bsp", "maps/e3m2.bsp", "maps/e3m3.bsp", "maps/e3m4.bsp",
+        "maps/e3m5.bsp", "maps/e3m6.bsp", "maps/e3m7.bsp",
+        "maps/e4m1.bsp", "maps/e4m2.bsp", "maps/e4m3.bsp", "maps/e4m4.bsp",
+        "maps/e4m5.bsp", "maps/e4m6.bsp", "maps/e4m7.bsp",
+        NULL
+    };
+    int i;
+    if (s_texpool_inited) return;
+    s_texpool_inited = 1;
+    for (i = 0; maps[i]; i++)
+        texpool_load_bsp(maps[i]);
+    Con_Printf("editor: texture pool: %d textures from game BSPs\n",
+               s_texpool_count);
+}
+
+texture_t **Editor_TexPool_Get(int *out_count)
+{
+    if (out_count) *out_count = s_texpool_count;
+    return s_texpool;
+}
+
 // qbsp's WriteMiptex needs <gamedir>/<wad> on disk to look up texture
 // sizes for surface UV math + to embed pixel data into the .bsp. id
 // never shipped gfx/base.wad in the runtime PAK — that file is the
@@ -345,92 +487,125 @@ typedef struct wad2_lumpinfo_s {
 
 static int write_wad2_from_worldmodel(const char *out_path)
 {
+    FILE      *f;
+    int        i, n_lumps = 0, body_size = 0;
+    int        header_size = 12;
+    int       *lump_size = NULL;
+    int       *lump_pos  = NULL;
+    texture_t **all_tex  = NULL;
+    int        all_count = 0, all_cap = 0;
 
-    FILE *f;
-    int   i, n_lumps = 0, body_size = 0;
-    int   header_size = 12;
-    int   *lump_size  = NULL;     /* per-texture body size (header + mips) */
-    int   *lump_pos   = NULL;     /* per-texture filepos */
-
-    if (!cl.worldmodel || !cl.worldmodel->textures
-     || cl.worldmodel->numtextures <= 0)
+    /* Build a unified, deduplicated texture list: worldmodel first, then
+     * any pool textures not already present. This lets qbsp resolve any
+     * texture the user picks from the browser, even if it hasn't been
+     * compiled into the current worldmodel yet. */
+    if (cl.worldmodel && cl.worldmodel->textures)
     {
-        Con_Printf("editor_compile: no worldmodel textures to dump\n");
+        for (i = 0; i < cl.worldmodel->numtextures; i++)
+        {
+            texture_t *t = cl.worldmodel->textures[i];
+            if (!t || !t->name[0]) continue;
+            if (all_count >= all_cap)
+            {
+                all_cap = all_cap ? all_cap * 2 : 64;
+                all_tex = (texture_t **)realloc(all_tex,
+                              (size_t)all_cap * sizeof(texture_t *));
+            }
+            all_tex[all_count++] = t;
+        }
+    }
+    {
+        int pool_count;
+        texture_t **pool = Editor_TexPool_Get(&pool_count);
+        for (i = 0; i < pool_count; i++)
+        {
+            texture_t *t = pool[i];
+            int j, found = 0;
+            if (!t || !t->name[0]) continue;
+            for (j = 0; j < all_count; j++)
+                if (!Q_strcasecmp(all_tex[j]->name, t->name)) { found = 1; break; }
+            if (!found)
+            {
+                if (all_count >= all_cap)
+                {
+                    all_cap = all_cap ? all_cap * 2 : 64;
+                    all_tex = (texture_t **)realloc(all_tex,
+                                  (size_t)all_cap * sizeof(texture_t *));
+                }
+                all_tex[all_count++] = t;
+            }
+        }
+    }
+
+    if (all_count == 0)
+    {
+        Con_Printf("editor_compile: no textures — run editor_new first\n");
+        if (all_tex) free(all_tex);
         return 1;
     }
 
-    /* First pass: size the buffer + count valid lumps. */
+    /* First pass: compute per-lump sizes and file positions. */
+    lump_size = (int *)calloc((size_t)all_count, sizeof(int));
+    lump_pos  = (int *)calloc((size_t)all_count, sizeof(int));
+    for (i = 0; i < all_count; i++)
     {
-        int nt = cl.worldmodel->numtextures;
-        lump_size = (int *)calloc(nt, sizeof(int));
-        lump_pos  = (int *)calloc(nt, sizeof(int));
-        for (i = 0; i < nt; i++)
-        {
-            texture_t *t = cl.worldmodel->textures[i];
-            int sz;
-            if (!t || !t->name[0]) continue;
-            sz = 40                                            /* miptex header */
-               + (int)(t->width * t->height)                   /* mip 0 */
-               + (int)((t->width >> 1) * (t->height >> 1))     /* mip 1 */
-               + (int)((t->width >> 2) * (t->height >> 2))     /* mip 2 */
-               + (int)((t->width >> 3) * (t->height >> 3));    /* mip 3 */
-            lump_size[i] = sz;
-            lump_pos [i] = header_size + body_size;
-            body_size   += sz;
-            n_lumps++;
-        }
+        texture_t *t = all_tex[i];
+        int sz = 40
+               + (int)(t->width * t->height)
+               + (int)((t->width >> 1) * (t->height >> 1))
+               + (int)((t->width >> 2) * (t->height >> 2))
+               + (int)((t->width >> 3) * (t->height >> 3));
+        lump_size[i] = sz;
+        lump_pos [i] = header_size + body_size;
+        body_size   += sz;
+        n_lumps++;
     }
 
     f = fopen(out_path, "wb");
     if (!f)
     {
         Con_Printf("editor_compile: can't open %s for write\n", out_path);
-        free(lump_size); free(lump_pos);
+        free(all_tex); free(lump_size); free(lump_pos);
         return 1;
     }
 
-    /* Header. */
+    /* WAD2 header. */
     {
         char hdr[12];
         int  infotableofs = header_size + body_size;
         memcpy(hdr, "WAD2", 4);
-        memcpy(hdr + 4, &n_lumps, 4);
+        memcpy(hdr + 4, &n_lumps,       4);
         memcpy(hdr + 8, &infotableofs, 4);
         fwrite(hdr, 1, 12, f);
     }
 
-    /* Body — one miptex per texture in worldmodel order. */
-    for (i = 0; i < cl.worldmodel->numtextures; i++)
+    /* Body — one miptex per texture. */
+    for (i = 0; i < all_count; i++)
     {
-        texture_t *t = cl.worldmodel->textures[i];
+        texture_t *t = all_tex[i];
         unsigned   off[4];
         int        k;
-        if (!t || !t->name[0]) continue;
-        /* Miptex offsets are relative to the start of the miptex
-         * (NOT relative to texture_t). Our miptex is 40 bytes
-         * before the mip-0 pixel data. */
         off[0] = 40;
         off[1] = off[0] + t->width * t->height;
         off[2] = off[1] + (t->width >> 1) * (t->height >> 1);
         off[3] = off[2] + (t->width >> 2) * (t->height >> 2);
-        fwrite(t->name, 1, 16, f);
-        fwrite(&t->width,  1, 4, f);
-        fwrite(&t->height, 1, 4, f);
-        fwrite(off, 1, 16, f);
+        fwrite(t->name,    1, 16, f);
+        fwrite(&t->width,  1,  4, f);
+        fwrite(&t->height, 1,  4, f);
+        fwrite(off,        1, 16, f);
         for (k = 0; k < 4; k++)
         {
-            const byte *src = (const byte *)t + t->offsets[k];
-            int  npix = (int)((t->width >> k) * (t->height >> k));
+            const byte *src  = (const byte *)t + t->offsets[k];
+            int         npix = (int)((t->width >> k) * (t->height >> k));
             fwrite(src, 1, (size_t)npix, f);
         }
     }
 
     /* Directory. */
-    for (i = 0; i < cl.worldmodel->numtextures; i++)
+    for (i = 0; i < all_count; i++)
     {
-        texture_t *t = cl.worldmodel->textures[i];
+        texture_t      *t  = all_tex[i];
         wad2_lumpinfo_t li;
-        if (!t || !t->name[0]) continue;
         memset(&li, 0, sizeof(li));
         li.filepos     = lump_pos [i];
         li.disksize    = lump_size[i];
@@ -442,6 +617,7 @@ static int write_wad2_from_worldmodel(const char *out_path)
     }
 
     fclose(f);
+    free(all_tex);
     free(lump_size);
     free(lump_pos);
     Con_Printf("editor_compile: wrote %s (%d textures, %d bytes)\n",

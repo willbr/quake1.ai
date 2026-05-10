@@ -66,30 +66,54 @@ static int strstri_simple(const char *hay, const char *needle)
 // ptr-array realloc per map load.
 static const char *const *world_tex_list(int *out_count)
 {
-    static const char **names    = NULL;
-    static int          cap      = 0;
-    static int          count    = 0;
-    static void        *cached   = (void *)(intptr_t)-1;
+    static const char **names         = NULL;
+    static int          cap           = 0;
+    static int          count         = 0;
+    static void        *cached_world  = (void *)(intptr_t)-1;
+    static int          cached_pool   = -1;
+    int pool_count;
+    texture_t **pool = Editor_TexPool_Get(&pool_count);
 
-    if ((void *)cl.worldmodel != cached)
+    if ((void *)cl.worldmodel != cached_world || pool_count != cached_pool)
     {
-        cached = (void *)cl.worldmodel;
-        count  = 0;
-        if (cl.worldmodel && cl.worldmodel->textures
-         && cl.worldmodel->numtextures > 0)
+        int i;
+        cached_world = (void *)cl.worldmodel;
+        cached_pool  = pool_count;
+        count = 0;
+
+        /* Worldmodel textures first. */
+        if (cl.worldmodel && cl.worldmodel->textures)
         {
-            int i;
-            if (cl.worldmodel->numtextures > cap)
-            {
-                cap = cl.worldmodel->numtextures;
-                names = (const char **)realloc(names,
-                    sizeof(*names) * (size_t)cap);
-            }
             for (i = 0; i < cl.worldmodel->numtextures; i++)
             {
                 texture_t *t = cl.worldmodel->textures[i];
-                if (t && t->name[0]) names[count++] = t->name;
+                if (!t || !t->name[0]) continue;
+                if (count >= cap)
+                {
+                    cap = cap ? cap * 2 : 128;
+                    names = (const char **)realloc(names,
+                                (size_t)cap * sizeof(*names));
+                }
+                names[count++] = t->name;
             }
+        }
+
+        /* Pool textures not already in the list. */
+        for (i = 0; i < pool_count; i++)
+        {
+            texture_t *t = pool[i];
+            int j, found = 0;
+            if (!t || !t->name[0]) continue;
+            for (j = 0; j < count; j++)
+                if (!Q_strcasecmp(names[j], t->name)) { found = 1; break; }
+            if (found) continue;
+            if (count >= cap)
+            {
+                cap = cap ? cap * 2 : 128;
+                names = (const char **)realloc(names,
+                            (size_t)cap * sizeof(*names));
+            }
+            names[count++] = t->name;
         }
     }
     *out_count = count;

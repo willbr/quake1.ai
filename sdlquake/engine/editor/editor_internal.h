@@ -117,6 +117,12 @@ int  Editor_GizmoIsActive   (void);
 // the brush has no faces.
 void Editor_BrushCentroid   (const struct edit_brush_s *b, vec3_t out);
 
+// editor.c — persistent texture pool loaded from all game BSPs. Available
+// after the first editor_new (or Editor_TexPool_Init call). Returns a stable
+// pointer valid until engine shutdown.
+void        Editor_TexPool_Init(void);
+texture_t         **Editor_TexPool_Get(int *out_count);
+
 // editor.c — center the free-fly camera on the (e_idx, b_idx) item and back
 // off enough to frame it. Uses brush[b_idx] when b_idx >= 0, else the
 // entity's origin. Keeps the current view angles, so direction is preserved.
