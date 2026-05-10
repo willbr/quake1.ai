@@ -176,8 +176,12 @@ static void scaffold_build_test_room(const char *mapname)
     if (edit_scene.numentities > 0)
         Entity_SetKV(&edit_scene.entities[0], "wad", "gfx/base.wad");
 
-    /* Door brush — added to worldspawn, then wrapped into a func_door. */
+    /* Door brush — added to worldspawn, then wrapped into a func_door.
+     * Scene_AddCubeBrush clears the selection on exit, so we must
+     * re-select the new brush before calling WrapBrushesIntoEntity,
+     * which requires a non-empty selection. */
     Scene_AddCubeBrush(door_mins, door_maxs, "wbrick1_5");
+    Scene_SelectionAdd(0, edit_scene.entities[0].numbrushes - 1);
     Scene_WrapBrushesIntoEntity("func_door");
     door_ent_idx = edit_scene.numentities - 1;
     Editor_ApplyClassnameDefaults(&edit_scene.entities[door_ent_idx],
@@ -185,6 +189,14 @@ static void scaffold_build_test_room(const char *mapname)
     /* angle -1 = "moves up", more obviously a working door than the
      * default east slide. */
     Entity_SetKV(&edit_scene.entities[door_ent_idx], "angle", "-1");
+    /* qbsp does NOT subtract entity origin from brush vertex coordinates,
+     * so a non-zero origin (set by WrapBrushesIntoEntity to the brush
+     * centroid) would double-offset the door: geometry is compiled at
+     * absolute world coords, then the engine shifts by origin again at
+     * spawn → door lands outside the room.  Brush entities require
+     * origin "0 0 0" so pos1/pos2 are correct and the model renders
+     * at its compiled absolute position. */
+    Entity_SetKV(&edit_scene.entities[door_ent_idx], "origin", "0 0 0");
 
     /* Player spawn inside the room, above the floor at eye height. */
     Scene_AddPointEntity("info_player_start", spawn);

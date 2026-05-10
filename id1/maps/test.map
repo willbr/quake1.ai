@@ -52,7 +52,7 @@
 }
 {
 "classname" "func_door"
-"origin" "32 96 48"
+"origin" "0 0 0"
 "angle" "-1"
 {
 ( 48 112 96 ) ( 48 112 0 ) ( 48 80 0 ) wbrick1_5 0 0 0 1 1
