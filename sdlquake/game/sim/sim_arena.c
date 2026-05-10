@@ -28,13 +28,14 @@ void Sim_Arena_Spawn(void) {
         player->v.origin[2]
     };
 
-    // 4 patrol nodes in a 256-unit square around the player.
-    // Use a probe entity to drop each candidate to the floor and skip
-    // positions in water/slime/lava or that don't land on solid ground.
+    // Try candidates at decreasing radii until we have at least 2 dry nodes.
+    // Maps like start.bsp have water very close to the spawn point, so we
+    // shrink from 128 → 64 → 32 before giving up.
     static const float offsets[4][2] = {
-        { 128,  128 }, { -128,  128 },
-        {-128, -128 }, {  128, -128 },
+        { 1,  1 }, { -1,  1 }, { -1, -1 }, {  1, -1 },
     };
+    static const float radii[] = { 128.0f, 64.0f, 32.0f };
+    static const int   n_radii = 3;
 
     edict_t *probe = eng->ED_Alloc();
     probe->v.movetype = MOVETYPE_STEP;
@@ -42,25 +43,48 @@ void Sim_Arena_Spawn(void) {
     eng->SV_SetSize(probe, (vec3_t){-16,-16,-24}, (vec3_t){16,16,32});
 
     int node_count = 0;
-    for (int i = 0; i < 4; i++) {
-        vec3_t candidate = {
-            base[0] + offsets[i][0],
-            base[1] + offsets[i][1],
-            base[2],
-        };
-        eng->SV_SetOrigin(probe, candidate);
-        if (!eng->SV_DropToFloor(probe)) continue;             // no solid below
-        int contents = eng->SV_PointContents(probe->v.origin);
-        if (contents <= -3) continue;                          // water/slime/lava
+    for (int ri = 0; ri < n_radii && node_count < 2; ri++) {
+        float r = radii[ri];
+        for (int i = 0; i < 4 && node_count < 4; i++) {
+            vec3_t candidate = {
+                base[0] + offsets[i][0] * r,
+                base[1] + offsets[i][1] * r,
+                base[2],
+            };
+            eng->SV_SetOrigin(probe, candidate);
+            if (!eng->SV_DropToFloor(probe)) continue;         // no solid below
+            int contents = eng->SV_PointContents(probe->v.origin);
+            if (contents <= -3) continue;                      // water/slime/lava
 
-        edict_t *node = eng->ED_Alloc();
-        node->v.solid    = SOLID_NOT;
-        node->v.movetype = MOVETYPE_NONE;
-        eng->SV_SetOrigin(node, probe->v.origin);
-        Sim_Patrol_RegisterArenaNode(0, node_count, node);
-        Sim_Patrol_RegisterNode(node);
-        node_count++;
+            edict_t *node = eng->ED_Alloc();
+            node->v.solid    = SOLID_NOT;
+            node->v.movetype = MOVETYPE_NONE;
+            eng->SV_SetOrigin(node, probe->v.origin);
+            Sim_Patrol_RegisterArenaNode(0, node_count, node);
+            Sim_Patrol_RegisterNode(node);
+            node_count++;
+        }
     }
+
+    // Last-resort fallback: place nodes at the player's position.
+    if (node_count < 2) {
+        eng->SV_SetOrigin(probe, base);
+        eng->SV_DropToFloor(probe);
+        int contents = eng->SV_PointContents(probe->v.origin);
+        if (contents > -3) {
+            int need = 2 - node_count;
+            for (int i = 0; i < need; i++) {
+                edict_t *node = eng->ED_Alloc();
+                node->v.solid    = SOLID_NOT;
+                node->v.movetype = MOVETYPE_NONE;
+                eng->SV_SetOrigin(node, probe->v.origin);
+                Sim_Patrol_RegisterArenaNode(0, node_count, node);
+                Sim_Patrol_RegisterNode(node);
+                node_count++;
+            }
+        }
+    }
+
     eng->ED_Free(probe);
 
     if (node_count < 2) {

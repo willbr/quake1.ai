@@ -88,7 +88,7 @@ zig build game                           # rebuild only game.dll (fast hot-reloa
 | 4 | ✅ done | Dear ImGui dev overlay |
 | 5 | ✅ done | QuakeC → C (port progs to hot-reloadable game.dll) |
 | 6 | ✅ done | Port Wolf3D & Doom1 guns into Quake (sprites, sounds, behaviour) |
-| 7 | planned | In-game 3D map editor |
+| 7 | ✅ done | In-game 3D map editor |
 | 8 | planned | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust) |
 
 ### Phase 8 references

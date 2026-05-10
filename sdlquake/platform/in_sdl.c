@@ -140,6 +140,17 @@ void IN_ProcessEvents(void)
                     Editor_Toggle();
                 break;
             }
+            // Esc closes the dev overlay if it's open (and no ImGui widget
+            // has keyboard focus — let ImGui dismiss the widget first).
+            if (ev.key.scancode == SDL_SCANCODE_ESCAPE
+                && ImguiLayer_IsOpen()
+                && !Editor_IsOpen()
+                && !IG_WantCaptureKeyboard())
+            {
+                if (ev.key.type == SDL_EVENT_KEY_DOWN)
+                    ImguiLayer_Toggle();
+                break;
+            }
             // Editor delete: Delete or Backspace removes the current
             // selection. Gated on editor open + ImGui not capturing the
             // keyboard (otherwise the Inspector text fields would lose

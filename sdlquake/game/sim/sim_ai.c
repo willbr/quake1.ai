@@ -2,6 +2,7 @@
 // State for each monster lives in s_brains[edict_num], not in edict_t.
 
 #include "sim.h"
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
 
@@ -296,13 +297,12 @@ void Sim_AI_Frame(void) {
         b->next_tick_time = now + (1.0f / SIM_AI_TICK_HZ);
     }
 
-    // Push to imgui panel.
-    if (eng->ImguiAI_Active && eng->ImguiAI_Active()) {
-        eng->ImguiAI_Clear();
-        for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
-            eng->ImguiAI_Push(b->edict_num, (int)b->state, b->alert_level,
-                              b->last_known_pos, b->target_edict);
-        }
+    // Push to imgui panel — always, so the panel shows current data the
+    // moment F12 is opened without needing to wait for the next tick.
+    eng->ImguiAI_Clear();
+    for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
+        eng->ImguiAI_Push(b->edict_num, (int)b->state, b->alert_level,
+                          b->last_known_pos, b->target_edict);
     }
 
     // Push the path of the first SEARCHING brain for the nav minimap.
