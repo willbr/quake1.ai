@@ -236,8 +236,6 @@ static int FindTarget(void) {
     edict_t *self = g->self;
     edict_t *client;
 
-    if (eng->Cvar_VariableValue("notarget") > 0.5f) return 0;
-
     // Piggyback on a nearby monster's recent sighting (unless ambush flag set).
     if (sight_entity_time >= g->time - 0.1f && !(((int)self->v.spawnflags) & 3)) {
         client = sight_entity;
@@ -425,10 +423,10 @@ void ai_run(float dist) {
     edict_t *self = g->self;
     g->movedist = dist;
 
-    // notarget: release any live player enemy immediately.
+    // notarget: release enemy that has FL_NOTARGET set (toggled by "notarget" command).
     if (self->v.enemy && self->v.enemy != g->world &&
             self->v.enemy->v.health > 0 &&
-            eng->Cvar_VariableValue("notarget") > 0.5f) {
+            ((int)self->v.enemy->v.flags & FL_NOTARGET)) {
         self->v.enemy = g->world;
         if (self->v.movetarget) {
             if (self->v.th_walk) self->v.th_walk(self);

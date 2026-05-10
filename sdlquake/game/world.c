@@ -68,7 +68,7 @@ void StartFrame(void)
             if (eng->ED_GetNum(cur) == 1) { player = cur; break; }
         }
         if (player && player->v.health > 0
-                && eng->Cvar_VariableValue("notarget") < 0.5f) {
+                && !((int)player->v.flags & FL_NOTARGET)) {
             stimulus_t s = {0};
             s.kind = STIM_SIGHT_ENTITY;
             s.origin[0] = player->v.origin[0];

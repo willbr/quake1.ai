@@ -2,6 +2,7 @@
 // State for each monster lives in s_brains[edict_num], not in edict_t.
 
 #include "sim.h"
+#include "../game_defs.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -127,15 +128,22 @@ static float sense_intensity(ai_brain_t *b, edict_t *e, const stimulus_t *s) {
 }
 
 static void sense_tick(ai_brain_t *b, edict_t *e) {
-    if (eng->Cvar_VariableValue("notarget") > 0.5f) {
-        b->alert_level  = 0;
-        b->target_edict = -1;
-        if (b->state != AI_IDLE) {
-            b->state              = AI_IDLE;
-            b->state_entered_time = g->time;
-            b->path_len           = 0;
+    // Check FL_NOTARGET on player edict (set by the "notarget" console command).
+    {
+        edict_t *player = 0;
+        for (edict_t *cur = eng->ED_Next(g->world); cur; cur = eng->ED_Next(cur)) {
+            if (eng->ED_GetNum(cur) == 1) { player = cur; break; }
         }
-        return;
+        if (player && ((int)player->v.flags & FL_NOTARGET)) {
+            b->alert_level  = 0;
+            b->target_edict = -1;
+            if (b->state != AI_IDLE) {
+                b->state              = AI_IDLE;
+                b->state_entered_time = g->time;
+                b->path_len           = 0;
+            }
+            return;
+        }
     }
 
     stimulus_t recents[16];
