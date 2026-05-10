@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 7
+#define GAME_API_VERSION 8
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -148,6 +148,9 @@ typedef struct engine_api_s {
     void  (*ImguiNav_Set)(const void *pts_xy, int np,
                           const void *edges_ushort_pairs, int ne);
     void  (*ImguiNav_SetPath)(const void *path_xy_floats, int n);
+
+    // Cvar registration (must be called during init, before console is used)
+    void  (*Cvar_Register)(const char *name, const char *default_val);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

@@ -38,6 +38,44 @@ typedef struct { float origin[3], angles[3]; int modelindex, frame, colormap, sk
 #define GAME_DLL_SRC  "zig-out/bin/game.dll"
 #define GAME_DLL_LOAD "zig-out/bin/game_loaded.dll"
 
+// ---------------------------------------------------------------------------
+// Game-DLL cvar registration shim.
+// Quake's cvar_t must persist for the engine's lifetime; we own the storage.
+// ---------------------------------------------------------------------------
+#define MAX_GAME_CVARS 32
+
+// Must match engine's cvar_t layout: name, string, archive(int), server(int),
+// value(float), next(ptr). qboolean is int in Quake.
+typedef struct game_reg_cvar_s {
+    char   *name;
+    char   *string;
+    int     archive;
+    int     server;
+    float   value;
+    struct game_reg_cvar_s *next;
+} game_reg_cvar_t;
+
+// Forward-declare the engine function (defined in cvar.c).
+void Cvar_RegisterVariable(game_reg_cvar_t *cvar);
+
+static game_reg_cvar_t s_game_cvars[MAX_GAME_CVARS];
+static char            s_game_cvar_names[MAX_GAME_CVARS][64];
+static char            s_game_cvar_defaults[MAX_GAME_CVARS][64];
+static int             s_game_cvar_count;
+
+static void engine_cvar_register(const char *name, const char *default_val) {
+    if (s_game_cvar_count >= MAX_GAME_CVARS) return;
+    int i = s_game_cvar_count++;
+    strncpy(s_game_cvar_names[i],    name,        63);
+    strncpy(s_game_cvar_defaults[i], default_val, 63);
+    s_game_cvar_names[i][63]    = '\0';
+    s_game_cvar_defaults[i][63] = '\0';
+    memset(&s_game_cvars[i], 0, sizeof(s_game_cvars[i]));
+    s_game_cvars[i].name   = s_game_cvar_names[i];
+    s_game_cvars[i].string = s_game_cvar_defaults[i];
+    Cvar_RegisterVariable(&s_game_cvars[i]);
+}
+
 // Forward-declare the Quake engine functions we wrap for the game DLL.
 void   Con_Printf(char *fmt, ...);
 void   Con_DPrintf(char *fmt, ...);
@@ -837,6 +875,7 @@ static engine_api_t engine_funcs = {
     imgui_ai_active_shim,
     imgui_nav_set_shim,
     imgui_nav_setpath_shim,
+    engine_cvar_register,
 };
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ extern game_globals_t *g;
 extern void game_entity_spawn(edict_t *e, const char *classname);
 
 void Sim_Arena_Init(void) {
-    eng->Cvar_SetValue("sim_arena_go", 0.0f);
+    eng->Cvar_Register("sim_arena_go", "0");
 }
 
 void Sim_Arena_Spawn(void) {
