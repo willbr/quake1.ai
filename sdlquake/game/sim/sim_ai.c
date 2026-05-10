@@ -20,6 +20,7 @@ static void Sim_Patrol_LevelInit_(void);
 // ---------------------------------------------------------------------------
 void Sim_AI_Init(void) {
     memset(s_brains, 0, sizeof(s_brains));
+    eng->Cvar_Register("sim_sense_debug", "0");
 }
 
 void Sim_AI_LevelInit(void) {
@@ -343,6 +344,38 @@ void Sim_AI_Frame(void) {
         if (!pushed) {
             float xy[2] = {0, 0};
             eng->ImguiNav_SetPath(xy, 0);
+        }
+    }
+
+    // Debug: sight-cone visualization (two lines at ±45° of yaw)
+    if (eng->Cvar_VariableValue("sim_sense_debug") > 0.0f) {
+        static const float kPi = 3.14159265f;
+        static const float kHalfFov = 3.14159265f / 4.0f;   // 45°
+        for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
+            edict_t *e = 0;
+            for (edict_t *cur = eng->ED_Next(g->world); cur; cur = eng->ED_Next(cur)) {
+                if (eng->ED_GetNum(cur) == b->edict_num) { e = cur; break; }
+            }
+            if (!e || e->v.health <= 0) continue;
+
+            int color = (b->state == AI_COMBAT || b->state == AI_SEARCHING) ? 79
+                      : (b->state == AI_SUSPICIOUS) ? 251
+                      : 112;
+
+            float yaw = e->v.angles[1] * (kPi / 180.0f);
+            float r   = b->sense_sight_range;
+
+            vec3_t eye = { e->v.origin[0], e->v.origin[1], e->v.origin[2] + 28.0f };
+
+            vec3_t tip1 = { eye[0] + r * (float)cos(yaw + kHalfFov),
+                            eye[1] + r * (float)sin(yaw + kHalfFov),
+                            eye[2] };
+            vec3_t tip2 = { eye[0] + r * (float)cos(yaw - kHalfFov),
+                            eye[1] + r * (float)sin(yaw - kHalfFov),
+                            eye[2] };
+
+            eng->SV_DebugLine(eye, tip1, color);
+            eng->SV_DebugLine(eye, tip2, color);
         }
     }
 }

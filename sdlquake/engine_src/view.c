@@ -982,6 +982,45 @@ else
 		Chase_Update ();
 }
 
+#ifndef GLQUAKE
+// Gap crosshair: 4-pixel arms with 2-pixel gap from center, dark outline.
+// Replaces Draw_Character('+') which was anchored by top-left, not centre.
+static void V_DrawCrosshair (void)
+{
+    extern byte vid_palette_id[];
+    int    cx  = scr_vrect.x + scr_vrect.width/2  + (int)cl_crossx.value;
+    int    cy  = scr_vrect.y + scr_vrect.height/2 + (int)cl_crossy.value;
+    byte  *buf = vid.buffer;
+    int    rw  = vid.rowbytes;
+    int    i;
+
+    if (cx < 4 || cx >= (int)vid.width  - 4 ||
+        cy < 4 || cy >= (int)vid.height - 4)
+        return;
+
+// Write a pixel and reset its palette slot to Quake (0), overriding any
+// Doom-palette tag that the weapon viewmodel sprite may have left behind.
+#define CPIX(ptr, col) do { byte *_p = (ptr); *_p = (col); vid_palette_id[_p - buf] = 0; } while(0)
+
+    // dark outline on the perpendicular side of each arm pixel
+    for (i = 2; i <= 3; i++) {
+        CPIX(&buf[(cy-1)*rw + cx+i], 0);  CPIX(&buf[(cy+1)*rw + cx+i], 0);
+        CPIX(&buf[(cy-1)*rw + cx-i], 0);  CPIX(&buf[(cy+1)*rw + cx-i], 0);
+        CPIX(&buf[(cy+i)*rw + cx-1], 0);  CPIX(&buf[(cy+i)*rw + cx+1], 0);
+        CPIX(&buf[(cy-i)*rw + cx-1], 0);  CPIX(&buf[(cy-i)*rw + cx+1], 0);
+    }
+    // bright white arms (overwrite any coincident outline pixels)
+    for (i = 2; i <= 3; i++) {
+        CPIX(&buf[cy*rw + cx+i], 254);
+        CPIX(&buf[cy*rw + cx-i], 254);
+        CPIX(&buf[(cy+i)*rw + cx], 254);
+        CPIX(&buf[(cy-i)*rw + cx], 254);
+    }
+
+#undef CPIX
+}
+#endif
+
 /*
 ==================
 V_RenderView
@@ -1055,8 +1094,7 @@ void V_RenderView (void)
 
 #ifndef GLQUAKE
 	if (crosshair.value)
-		Draw_Character (scr_vrect.x + scr_vrect.width/2 + cl_crossx.value, 
-			scr_vrect.y + scr_vrect.height/2 + cl_crossy.value, '+');
+		V_DrawCrosshair ();
 #endif
 		
 }
