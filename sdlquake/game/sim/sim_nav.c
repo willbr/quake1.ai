@@ -350,7 +350,102 @@ void Sim_Nav_LevelInit(const char *mapname) {
     s_ready = 1;
 }
 
-int Sim_Nav_PathTo(const vec3_t a, const vec3_t b, vec3_t *o, int n) {
-    (void)a; (void)b; (void)o; (void)n;
-    return 0;
+// ---------------------------------------------------------------------------
+// A* — small open-set, no priority queue. O(N²) for v1; fine for ~1k nodes.
+// ---------------------------------------------------------------------------
+static int nearest_point(const sim_navmesh_t *m, const vec3_t pos) {
+    int   best = -1;
+    float best_d2 = 1e18f;
+    for (int i = 0; i < m->point_count; i++) {
+        float dx = m->points[i].pos[0] - pos[0];
+        float dy = m->points[i].pos[1] - pos[1];
+        float dz = m->points[i].pos[2] - pos[2];
+        float d2 = dx*dx + dy*dy + dz*dz;
+        if (d2 < best_d2) { best_d2 = d2; best = i; }
+    }
+    return best;
+}
+
+static float dist3(const vec3_t a, const vec3_t b) {
+    float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+    return (float)sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out) {
+    if (!s_mesh || !s_ready) return 0;
+    int start = nearest_point(s_mesh, from);
+    int goal  = nearest_point(s_mesh, to);
+    if (start < 0 || goal < 0) return 0;
+    if (start == goal) {
+        if (max_out >= 1) {
+            out[0][0] = s_mesh->points[goal].pos[0];
+            out[0][1] = s_mesh->points[goal].pos[1];
+            out[0][2] = s_mesh->points[goal].pos[2];
+        }
+        return 1;
+    }
+
+    int N = s_mesh->point_count;
+    float *gscore = malloc(sizeof(float) * N);
+    float *fscore = malloc(sizeof(float) * N);
+    int   *came   = malloc(sizeof(int)   * N);
+    char  *open   = calloc(N, 1);
+    char  *closed = calloc(N, 1);
+    if (!gscore || !fscore || !came || !open || !closed) {
+        free(gscore); free(fscore); free(came); free(open); free(closed);
+        return 0;
+    }
+    for (int i = 0; i < N; i++) { gscore[i] = 1e18f; fscore[i] = 1e18f; came[i] = -1; }
+
+    gscore[start] = 0;
+    fscore[start] = dist3(s_mesh->points[start].pos, s_mesh->points[goal].pos);
+    open[start] = 1;
+
+    int found = 0;
+    while (1) {
+        int   cur  = -1;
+        float bf = 1e18f;
+        for (int i = 0; i < N; i++) {
+            if (!open[i]) continue;
+            if (fscore[i] < bf) { bf = fscore[i]; cur = i; }
+        }
+        if (cur < 0) break;
+        if (cur == goal) { found = 1; break; }
+        open[cur]   = 0;
+        closed[cur] = 1;
+
+        int o0 = s_mesh->adj_offsets[cur];
+        int o1 = s_mesh->adj_offsets[cur + 1];
+        for (int k = o0; k < o1; k++) {
+            const nav_edge_t *e = &s_mesh->edges[s_mesh->adj[k]];
+            int nb = e->to;
+            if (closed[nb]) continue;
+            float tentative = gscore[cur] + e->weight;
+            if (tentative < gscore[nb]) {
+                came[nb]   = cur;
+                gscore[nb] = tentative;
+                fscore[nb] = tentative + dist3(s_mesh->points[nb].pos, s_mesh->points[goal].pos);
+                open[nb]   = 1;
+            }
+        }
+    }
+
+    int written = 0;
+    if (found) {
+        // Reconstruct path: walk came[] backwards into a temp buffer, reverse.
+        int  tmp[1024];
+        int  tn = 0;
+        int  c  = goal;
+        while (c != -1 && tn < 1024) { tmp[tn++] = c; c = came[c]; }
+        // Reverse and copy to out.
+        for (int i = tn - 1; i >= 0 && written < max_out; i--) {
+            out[written][0] = s_mesh->points[tmp[i]].pos[0];
+            out[written][1] = s_mesh->points[tmp[i]].pos[1];
+            out[written][2] = s_mesh->points[tmp[i]].pos[2];
+            written++;
+        }
+    }
+
+    free(gscore); free(fscore); free(came); free(open); free(closed);
+    return written;
 }
