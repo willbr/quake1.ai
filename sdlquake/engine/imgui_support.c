@@ -348,3 +348,24 @@ const char *ImguiSupport_CvarDescription(const char *name)
             return s_cvar_descs[i].desc;
     return NULL;
 }
+
+/* ---------------------------------------------------------------------------
+ * AI dev panel shared state
+ * --------------------------------------------------------------------------- */
+
+static imgui_ai_row_t s_ai_rows[IMGUI_AI_MAX_ROWS];
+static int            s_ai_count;
+
+void ImguiSupport_AI_Clear(void) { s_ai_count = 0; }
+
+void ImguiSupport_AI_Push(const imgui_ai_row_t *row) {
+    if (s_ai_count >= IMGUI_AI_MAX_ROWS) return;
+    s_ai_rows[s_ai_count++] = *row;
+}
+
+int ImguiSupport_AI_Count(void) { return s_ai_count; }
+
+const imgui_ai_row_t *ImguiSupport_AI_Row(int i) {
+    if (i < 0 || i >= s_ai_count) return 0;
+    return &s_ai_rows[i];
+}

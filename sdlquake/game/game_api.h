@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 5
+#define GAME_API_VERSION 6
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -139,6 +139,12 @@ typedef struct engine_api_s {
     void  (*SV_Particle)(vec3_t origin, vec3_t dir, float color, float count);
     void  (*SV_MakeStatic)(edict_t *e);
     void  (*SV_SetSpawnParms)(edict_t *client);
+
+    // imgui dev panels (no-op if imgui inactive)
+    void  (*ImguiAI_Clear)(void);
+    void  (*ImguiAI_Push)(int edict_num, int state, float alert_level,
+                          const float last_known_pos[3], int target_edict);
+    int   (*ImguiAI_Active)(void);   // returns 1 if the panel is visible
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

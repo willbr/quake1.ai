@@ -21,6 +21,7 @@
 #include "game_api.h"
 #include "hotreload.h"
 #include "sv_bridge.h"
+#include "imgui_support.h"
 
 #if NATIVE_GAME
 // Bring in the full edict_t / entvars_s definitions so offsetof works.
@@ -718,6 +719,27 @@ static void engine_sv_setspawnparms(edict_t *e)
 }
 
 // ---------------------------------------------------------------------------
+// imgui AI panel shims
+// ---------------------------------------------------------------------------
+
+static void imgui_ai_push_shim(int edict_num, int state, float alert_level,
+                               const float last_known_pos[3], int target_edict)
+{
+    imgui_ai_row_t r;
+    r.edict_num = edict_num;
+    r.state = state;
+    r.alert_level = alert_level;
+    r.last_known_pos[0] = last_known_pos[0];
+    r.last_known_pos[1] = last_known_pos[1];
+    r.last_known_pos[2] = last_known_pos[2];
+    r.target_edict = target_edict;
+    ImguiSupport_AI_Push(&r);
+}
+
+extern int imgui_ai_panel_open;  // defined in imgui_layer.c
+static int imgui_ai_active_shim(void) { return imgui_ai_panel_open; }
+
+// ---------------------------------------------------------------------------
 // Full engine_funcs table
 // ---------------------------------------------------------------------------
 
@@ -787,6 +809,10 @@ static engine_api_t engine_funcs = {
     engine_sv_particle,
     engine_sv_makestatic,
     engine_sv_setspawnparms,
+
+    ImguiSupport_AI_Clear,
+    imgui_ai_push_shim,
+    imgui_ai_active_shim,
 };
 
 // ---------------------------------------------------------------------------

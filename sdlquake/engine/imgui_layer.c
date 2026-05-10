@@ -16,6 +16,8 @@ static SDL_Renderer *s_renderer = NULL;
 static int           s_open     = 0;
 static int           s_inited   = 0;
 
+int imgui_ai_panel_open = 1;
+
 // ---------------------------------------------------------------------------
 // Panels
 // ---------------------------------------------------------------------------
@@ -31,6 +33,57 @@ static void draw_perf(void)
         IG_WF_NoCollapse  | IG_WF_NoSavedSettings);
     snprintf(buf, sizeof(buf), "%.1f fps  %.2f ms", fps, 1000.0f / fps);
     IG_TextUnformatted(buf);
+    IG_End();
+}
+
+static const char *ai_state_name(int s) {
+    switch (s) {
+        case 0: return "idle";
+        case 1: return "suspect";
+        case 2: return "search";
+        case 3: return "combat";
+        default: return "?";
+    }
+}
+
+static void draw_ai(void)
+{
+    if (!imgui_ai_panel_open) return;
+    IG_SetNextWindowSize(420, 280, IG_Cond_Once);
+    IG_SetNextWindowPos(10, 80, IG_Cond_Once);
+    if (!IG_Begin("AI", &imgui_ai_panel_open, IG_WF_None)) { IG_End(); return; }
+
+    int n = ImguiSupport_AI_Count();
+    char buf[160];
+    snprintf(buf, sizeof(buf), "%d brains", n);
+    IG_TextUnformatted(buf);
+
+    if (IG_BeginTable("##ai", 4,
+            IG_TF_Borders | IG_TF_RowBg | IG_TF_ScrollY, 0, -1))
+    {
+        IG_TableSetupColumn("ent",     IG_TCF_WidthFixed, 40);
+        IG_TableSetupColumn("state",   IG_TCF_WidthFixed, 70);
+        IG_TableSetupColumn("alert",   IG_TCF_WidthFixed, 60);
+        IG_TableSetupColumn("target",  IG_TCF_WidthFixed, 60);
+        IG_TableHeadersRow();
+        for (int i = 0; i < n; i++) {
+            const imgui_ai_row_t *r = ImguiSupport_AI_Row(i);
+            if (!r) continue;
+            IG_TableNextRow();
+            IG_TableSetColumnIndex(0);
+            snprintf(buf, sizeof(buf), "%d", r->edict_num);
+            IG_TextUnformatted(buf);
+            IG_TableSetColumnIndex(1);
+            IG_TextUnformatted(ai_state_name(r->state));
+            IG_TableSetColumnIndex(2);
+            snprintf(buf, sizeof(buf), "%.2f", r->alert_level);
+            IG_TextUnformatted(buf);
+            IG_TableSetColumnIndex(3);
+            snprintf(buf, sizeof(buf), "%d", r->target_edict);
+            IG_TextUnformatted(buf);
+        }
+        IG_EndTable();
+    }
     IG_End();
 }
 
@@ -263,6 +316,7 @@ void ImguiLayer_Render(void)
         else
         {
             draw_perf();
+            draw_ai();
             draw_cvars();
             draw_entities();
             draw_console();

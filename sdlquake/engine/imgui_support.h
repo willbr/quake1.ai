@@ -32,6 +32,21 @@ int         ImguiSupport_TabComplete(const char *partial, char *out, int out_siz
 // Returns a human-readable description for a cvar name, or NULL if unknown.
 const char *ImguiSupport_CvarDescription(const char *name);
 
+// AI dev panel shared state (written by game DLL each frame, read by imgui layer).
+#define IMGUI_AI_MAX_ROWS 64
+typedef struct {
+    int          edict_num;
+    int          state;          // ai_state_t value
+    float        alert_level;
+    float        last_known_pos[3];
+    int          target_edict;
+} imgui_ai_row_t;
+
+void   ImguiSupport_AI_Clear(void);
+void   ImguiSupport_AI_Push(const imgui_ai_row_t *row);
+int    ImguiSupport_AI_Count(void);
+const  imgui_ai_row_t *ImguiSupport_AI_Row(int i);
+
 #ifdef __cplusplus
 }
 #endif

@@ -73,9 +73,16 @@ ai_brain_t *Sim_AI_IterNext(ai_brain_t *prev) {
 }
 
 // ---------------------------------------------------------------------------
-// Frame tick (no-op until Task 10 adds sense filter)
+// Frame tick — pushes live brain data to the imgui AI panel.
 // ---------------------------------------------------------------------------
-void Sim_AI_Frame(void) {}
+void Sim_AI_Frame(void) {
+    if (!eng->ImguiAI_Active || !eng->ImguiAI_Active()) return;
+    eng->ImguiAI_Clear();
+    for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
+        eng->ImguiAI_Push(b->edict_num, (int)b->state, b->alert_level,
+                          b->last_known_pos, b->target_edict);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Patrol routes (stubs until Task 13)
