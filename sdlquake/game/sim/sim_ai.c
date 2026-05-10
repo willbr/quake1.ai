@@ -190,6 +190,33 @@ static void sense_tick(ai_brain_t *b, edict_t *e) {
 }
 
 // ---------------------------------------------------------------------------
+// Behavior helpers
+// ---------------------------------------------------------------------------
+static void face_point(edict_t *e, const vec3_t target) {
+    float dx = target[0] - e->v.origin[0];
+    float dy = target[1] - e->v.origin[1];
+    vec3_t v = {dx, dy, 0};
+    e->v.ideal_yaw = eng->VectorToYaw(v);
+    eng->SV_ChangeYaw(e);
+}
+
+static void behavior_tick(ai_brain_t *b, edict_t *e) {
+    switch (b->state) {
+    case AI_IDLE:
+        // Fall through to vanilla Quake AI (handled elsewhere).
+        break;
+    case AI_SUSPICIOUS:
+    case AI_SEARCHING:
+        face_point(e, b->last_known_pos);
+        eng->SV_WalkMove(e, e->v.angles[1], 8.0f);
+        break;
+    case AI_COMBAT:
+        // Fall through to vanilla Quake combat AI.
+        break;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Frame tick — 10 Hz per brain; pushes live data to the imgui AI panel.
 // ---------------------------------------------------------------------------
 void Sim_AI_Frame(void) {
@@ -212,6 +239,7 @@ void Sim_AI_Frame(void) {
         }
 
         sense_tick(b, e);
+        behavior_tick(b, e);
         b->next_tick_time = now + (1.0f / SIM_AI_TICK_HZ);
     }
 

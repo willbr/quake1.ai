@@ -3,6 +3,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "sim/sim.h"
 #include <string.h>
 #include <math.h>
 
@@ -286,6 +287,11 @@ void ai_pain   (float dist) { ai_back(dist); }
 void ai_painforward(float dist) { eng->SV_WalkMove(g->self, g->self->v.ideal_yaw, dist); }
 
 void ai_walk(float dist) {
+    {
+        ai_brain_t *b = Sim_AI_GetBrain(g->self);
+        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING))
+            return;
+    }
     g->movedist = dist;
     if (FindTarget()) return;
     eng->SV_MoveToGoal(g->self, dist);
@@ -293,6 +299,11 @@ void ai_walk(float dist) {
 
 void ai_stand(edict_t *self) {
     g->self = self;
+    {
+        ai_brain_t *b = Sim_AI_GetBrain(self);
+        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING))
+            return;
+    }
     if (FindTarget()) return;
     if (g->time > self->v.pausetime) {
         if (self->v.th_walk) self->v.th_walk(self);
@@ -401,6 +412,11 @@ static void ai_run_slide(void) {
 // ai_run -- main AI run loop; called each frame from th_run frame callbacks
 // ---------------------------------------------------------------------------
 void ai_run(float dist) {
+    {
+        ai_brain_t *b = Sim_AI_GetBrain(g->self);
+        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING))
+            return;
+    }
     edict_t *self = g->self;
     g->movedist = dist;
 
