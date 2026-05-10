@@ -172,6 +172,7 @@ static int build_edges(sim_navmesh_t *m) {
     nav_edge_t *e = malloc(sizeof(nav_edge_t) * cap);
 
     edict_t *probe = alloc_probe();
+    if (!e) { eng->ED_Free(probe); return 0; }
 
     for (int i = 0; i < m->point_count; i++) {
         eng->SV_SetOrigin(probe, m->points[i].pos);
@@ -190,7 +191,12 @@ static int build_edges(sim_navmesh_t *m) {
             int ok = eng->SV_WalkMove(probe, yaw, d);
             if (!ok) continue;
 
-            if (n == cap) { cap *= 2; e = realloc(e, sizeof(nav_edge_t) * cap); }
+            if (n == cap) {
+                cap *= 2;
+                nav_edge_t *tmp = realloc(e, sizeof(nav_edge_t) * cap);
+                if (!tmp) { free(e); eng->ED_Free(probe); return 0; }
+                e = tmp;
+            }
             e[n].from   = i;
             e[n].to     = j;
             e[n].weight = d;
@@ -206,11 +212,14 @@ static int build_edges(sim_navmesh_t *m) {
 
 static void build_adjacency(sim_navmesh_t *m) {
     m->adj_offsets = calloc(m->point_count + 1, sizeof(int));
+    if (!m->adj_offsets) return;
     for (int i = 0; i < m->edge_count; i++) m->adj_offsets[m->edges[i].from + 1]++;
     for (int i = 1; i <= m->point_count; i++) m->adj_offsets[i] += m->adj_offsets[i-1];
 
     int *cursor = calloc(m->point_count, sizeof(int));
+    if (!cursor) { free(m->adj_offsets); m->adj_offsets = NULL; return; }
     m->adj = malloc(sizeof(int) * m->edge_count);
+    if (!m->adj) { free(m->adj_offsets); m->adj_offsets = NULL; free(cursor); return; }
     for (int i = 0; i < m->edge_count; i++) {
         int from = m->edges[i].from;
         m->adj[m->adj_offsets[from] + cursor[from]++] = i;
