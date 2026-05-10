@@ -4,11 +4,23 @@
 #include "game_types.h"
 #include "game_defs.h"
 #include "weapons_phase6.h"
+#include "sim/sim.h"
 #include <string.h>
 #include <math.h>
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
+
+static void emit_weapon_sound(edict_t *shooter, float intensity) {
+    stimulus_t s = {0};
+    s.kind          = STIM_SOUND;
+    s.origin[0]     = shooter->v.origin[0];
+    s.origin[1]     = shooter->v.origin[1];
+    s.origin[2]     = shooter->v.origin[2];
+    s.intensity     = intensity;
+    s.source_edict  = eng->ED_GetNum(shooter);
+    Stim_Emit(&s);
+}
 
 // ---------------------------------------------------------------------------
 // External dependencies
@@ -94,6 +106,7 @@ static float crandom(void) {
 // ---------------------------------------------------------------------------
 void W_FireAxe(void) {
     edict_t *self = g->self;
+    emit_weapon_sound(self, 0.15f);
     vec3_t source, org;
     source[0] = self->v.origin[0];
     source[1] = self->v.origin[1];
@@ -285,6 +298,7 @@ static void FireBullets(float shotcount, vec3_t dir, vec3_t spread) {
 
 static void W_FireShotgun(void) {
     edict_t *self = g->self;
+    emit_weapon_sound(self, 0.7f);
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/guncock.wav", 1, ATTN_NORM);
     self->v.punchangle[0] = -2;
     self->v.currentammo = self->v.ammo_shells = self->v.ammo_shells - 1;
@@ -296,6 +310,7 @@ static void W_FireShotgun(void) {
 
 static void W_FireSuperShotgun(void) {
     edict_t *self = g->self;
+    emit_weapon_sound(self, 0.85f);
     if (self->v.currentammo == 1) { W_FireShotgun(); return; }
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/shotgn2.wav", 1, ATTN_NORM);
     self->v.punchangle[0] = -4;
@@ -363,6 +378,7 @@ static void T_MissileTouch(edict_t *self, edict_t *other) {
 
 static void W_FireRocket(void) {
     edict_t *self = g->self;
+    emit_weapon_sound(self, 0.9f);
     self->v.currentammo = self->v.ammo_rockets = self->v.ammo_rockets - 1;
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/sgun1.wav", 1, ATTN_NORM);
     self->v.punchangle[0] = -2;
@@ -439,6 +455,7 @@ static void LightningDamage(vec3_t p1, vec3_t p2, edict_t *from, float damage) {
 
 void W_FireLightning(void) {
     edict_t *self = g->self;
+    emit_weapon_sound(self, 0.6f);
     if (self->v.ammo_cells < 1) {
         self->v.weapon = W_BestWeapon();
         W_SetCurrentAmmo();
@@ -502,6 +519,7 @@ static void GrenadeTouch(edict_t *self, edict_t *other) {
 
 static void W_FireGrenade(void) {
     edict_t *self = g->self;
+    emit_weapon_sound(self, 0.8f);
     self->v.currentammo = self->v.ammo_rockets = self->v.ammo_rockets - 1;
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/grenade.wav", 1, ATTN_NORM);
     self->v.punchangle[0] = -2;
@@ -624,6 +642,7 @@ static void W_FireSuperSpikes(void) {
 
 void W_FireSpikes(float ox) {
     edict_t *self = g->self;
+    emit_weapon_sound(self, 0.55f);
     eng->MakeVectors(self->v.v_angle);
     if (self->v.ammo_nails >= 2 && self->v.weapon == IT_SUPER_NAILGUN) {
         W_FireSuperSpikes();
