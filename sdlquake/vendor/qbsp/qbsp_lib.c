@@ -159,7 +159,18 @@ static void qbsp_reset_state(void)
     numleafs = numplanes = numvertexes = numnodes = numtexinfo = 0;
     numfaces = numclipnodes = numedges = nummarksurfaces = numsurfedges = 0;
 
-    /* map.c */
+    /* map.c — zero counters AND the arrays themselves. mapbrushes[]
+     * and entities[] have linked-list pointers (b->faces, b->next,
+     * e->epairs, e->brushes); the freelist walk above already released
+     * the nodes those pointed at, but the array slots still hold
+     * dangling pointers. ParseBrush's duplicate-plane check walks
+     * b->faces; ParseEntity sets b->next from mapent->brushes; both
+     * must start NULL or the walk dereferences freed memory.
+     * map.h is already in scope via bsp5.h, so the typed arrays are
+     * usable here directly. */
+    memset(mapbrushes, 0, sizeof(mapbrushes));
+    memset(entities,   0, sizeof(entities));
+    memset(miptex,     0, sizeof(miptex));
     nummapbrushes = num_entities = nummiptex = 0;
     unget = scriptline = 0;
     script_p = NULL;
