@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "quake1-ai": {
+      "type": "stdio",
+      "command": "${QUAKE1_AI_BIN:-C:\\Users\\wjbr\\src\\quake1.ai\\zig-out\\bin\\quake.exe}",
+      "args": ["--mcp", "+map", "e1m1"],
+      "env": {}
+    }
+  }
+}
