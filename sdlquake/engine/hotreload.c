@@ -781,6 +781,26 @@ static int imgui_ai_active_shim(void) {
 }
 
 // ---------------------------------------------------------------------------
+// VFS file loader — reads through Quake's PAK-aware filesystem.
+// ---------------------------------------------------------------------------
+extern int  COM_OpenFile(char *filename, int *hndl);
+extern void COM_CloseFile(int h);
+extern int  Sys_FileRead(int handle, void *dest, int count);
+
+static void *engine_load_file(const char *path, int *out_size) {
+    int h = -1;
+    int len = COM_OpenFile((char *)path, &h);
+    if (len < 0) return NULL;
+    void *buf = malloc(len + 1);
+    if (!buf) { COM_CloseFile(h); return NULL; }
+    Sys_FileRead(h, buf, len);
+    COM_CloseFile(h);
+    ((char *)buf)[len] = '\0';
+    if (out_size) *out_size = len;
+    return buf;
+}
+
+// ---------------------------------------------------------------------------
 // imgui Nav panel shims
 // ---------------------------------------------------------------------------
 static void imgui_nav_set_shim(const void *pts_xy, int np,
@@ -876,6 +896,7 @@ static engine_api_t engine_funcs = {
     imgui_nav_set_shim,
     imgui_nav_setpath_shim,
     engine_cvar_register,
+    engine_load_file,
 };
 
 // ---------------------------------------------------------------------------

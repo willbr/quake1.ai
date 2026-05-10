@@ -68,34 +68,13 @@ static sim_navmesh_t *s_mesh;
 static int            s_ready;
 
 // ---------------------------------------------------------------------------
-// File I/O helper
+// Step 1: extract walkable face centroids from an in-memory BSP buffer.
 // ---------------------------------------------------------------------------
-static int read_file(const char *path, void **out_data, int *out_size) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    void *buf = malloc((size_t)sz);
-    if (!buf) { fclose(f); return 0; }
-    fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    *out_data = buf;
-    *out_size = (int)sz;
-    return 1;
-}
-
-// ---------------------------------------------------------------------------
-// Step 1: read the BSP, extract walkable face centroids.
-// ---------------------------------------------------------------------------
-static int extract_walkable_points(const char *bsp_path,
+static int extract_walkable_points(void *raw, int raw_size,
                                    nav_point_t **out_points,
                                    int *out_count)
 {
-    void *raw = 0;
-    int   size = 0;
-    if (!read_file(bsp_path, &raw, &size)) return 0;
-
+    (void)raw_size;
     bsp_header_t *h = (bsp_header_t *)raw;
     if (h->version != BSPVERSION) { free(raw); return 0; }
 
@@ -112,7 +91,7 @@ static int extract_walkable_points(const char *bsp_path,
 
     int cap = 1024, n = 0;
     nav_point_t *pts = (nav_point_t *)malloc(sizeof(nav_point_t) * cap);
-    if (!pts) { free(raw); return 0; }
+    if (!pts) { return 0; }
 
     for (int fi = 0; fi < nfaces; fi++) {
         const bsp_face_t  *f = &faces[fi];
@@ -149,7 +128,6 @@ static int extract_walkable_points(const char *bsp_path,
         n++;
     }
 
-    free(raw);
     *out_points = pts;
     *out_count  = n;
     return 1;
@@ -229,7 +207,7 @@ static void build_adjacency(sim_navmesh_t *m) {
 }
 
 // ---------------------------------------------------------------------------
-// Mesh helpers: free, save, load, file_size
+// Mesh helpers: free, save, load
 // ---------------------------------------------------------------------------
 static void free_mesh(sim_navmesh_t *m) {
     if (!m) return;
@@ -276,15 +254,6 @@ static sim_navmesh_t *load_mesh(const char *path) {
     return m;
 }
 
-static long file_size(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return -1;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fclose(f);
-    return sz;
-}
-
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -301,16 +270,18 @@ void Sim_Nav_LevelInit(const char *mapname) {
     s_ready = 0;
     if (!mapname || !*mapname) return;
 
-    char bsp_path[256];
+    char bsp_vfs_path[256];
     char nav_path[256];
-    snprintf(bsp_path, sizeof(bsp_path), "id1/maps/%s.bsp", mapname);
-    long bsp_sz = file_size(bsp_path);
-    if (bsp_sz < 0) {
+    snprintf(bsp_vfs_path, sizeof(bsp_vfs_path), "maps/%s.bsp", mapname);
+
+    int bsp_sz = 0;
+    void *bsp_raw = eng->LoadFile(bsp_vfs_path, &bsp_sz);
+    if (!bsp_raw) {
         eng->Con_Print("sim_nav: bsp not found\n");
         return;
     }
     snprintf(nav_path, sizeof(nav_path),
-             "id1/cache/navmesh/%s-%ld.nav", mapname, bsp_sz);
+             "id1/cache/navmesh/%s-%d.nav", mapname, bsp_sz);
 
     // Try cache.
     s_mesh = load_mesh(nav_path);
@@ -348,21 +319,22 @@ void Sim_Nav_LevelInit(const char *mapname) {
             }
         }
         s_ready = 1;
+        free(bsp_raw);
         return;
     }
 
     // Bake from scratch.
     eng->Con_Print("sim_nav: baking...\n");
     s_mesh = calloc(1, sizeof(*s_mesh));
-    if (!s_mesh) return;
-    if (!extract_walkable_points(bsp_path, &s_mesh->points, &s_mesh->point_count)) {
+    if (!s_mesh) { free(bsp_raw); return; }
+    if (!extract_walkable_points(bsp_raw, bsp_sz, &s_mesh->points, &s_mesh->point_count)) {
         eng->Con_Print("sim_nav: extract failed\n");
-        free_mesh(s_mesh); s_mesh = 0; return;
+        free_mesh(s_mesh); s_mesh = 0; free(bsp_raw); return;
     }
+    free(bsp_raw);
     if (!build_edges(s_mesh)) {
         eng->Con_Print("sim_nav: edge build failed\n");
-        free_mesh(s_mesh); s_mesh = 0;
-        return;
+        free_mesh(s_mesh); s_mesh = 0; return;
     }
     build_adjacency(s_mesh);
 

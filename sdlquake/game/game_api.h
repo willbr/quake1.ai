@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 8
+#define GAME_API_VERSION 9
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -151,6 +151,10 @@ typedef struct engine_api_s {
 
     // Cvar registration (must be called during init, before console is used)
     void  (*Cvar_Register)(const char *name, const char *default_val);
+
+    // VFS file loader — searches PAK files; caller frees the buffer with free().
+    // Returns NULL if the file is not found. out_size receives the file length.
+    void *(*LoadFile)(const char *path, int *out_size);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

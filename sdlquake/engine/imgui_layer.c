@@ -50,7 +50,7 @@ static const char *ai_state_name(int s) {
 static void draw_ai(void)
 {
     if (!imgui_ai_panel_open) return;
-    IG_SetNextWindowSize(420, 280, IG_Cond_Once);
+    IG_SetNextWindowSize(420, 600, IG_Cond_Once);
     IG_SetNextWindowPos(10, 80, IG_Cond_Once);
     if (!IG_Begin("AI", &imgui_ai_panel_open, IG_WF_None)) { IG_End(); return; }
 
@@ -60,7 +60,7 @@ static void draw_ai(void)
     IG_TextUnformatted(buf);
 
     if (IG_BeginTable("##ai", 4,
-            IG_TF_Borders | IG_TF_RowBg | IG_TF_ScrollY, 0, -1))
+            IG_TF_Borders | IG_TF_RowBg | IG_TF_ScrollY, 0, 120))
     {
         IG_TableSetupColumn("ent",     IG_TCF_WidthFixed, 40);
         IG_TableSetupColumn("state",   IG_TCF_WidthFixed, 70);
