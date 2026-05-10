@@ -3,6 +3,7 @@
 
 #include "sim.h"
 #include <string.h>
+#include <math.h>
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -73,14 +74,106 @@ ai_brain_t *Sim_AI_IterNext(ai_brain_t *prev) {
 }
 
 // ---------------------------------------------------------------------------
-// Frame tick — pushes live brain data to the imgui AI panel.
+// Sense filter
+// ---------------------------------------------------------------------------
+static float falloff(float distance, float ref_radius) {
+    float f = 1.0f - (distance / (2.0f * ref_radius));
+    if (f < 0) f = 0;
+    if (f > 1) f = 1;
+    return f;
+}
+
+static int los_clear(const vec3_t a, const vec3_t b) {
+    eng->SV_Traceline(a, b, /*nomonsters=*/1, /*skip=*/0);
+    return g->trace_fraction == 1.0f;
+}
+
+static float sense_intensity(ai_brain_t *b, edict_t *e, const stimulus_t *s) {
+    float d = 0;
+    {
+        float dx = s->origin[0] - e->v.origin[0];
+        float dy = s->origin[1] - e->v.origin[1];
+        float dz = s->origin[2] - e->v.origin[2];
+        d = (float)sqrt(dx*dx + dy*dy + dz*dz);
+    }
+    float ref = 0;
+    float los = 1.0f;
+    switch (s->kind) {
+        case STIM_SOUND:
+            ref = 1024.0f * b->sense_hearing_mult; break;
+        case STIM_SIGHT_ENTITY:
+            ref = b->sense_sight_range;
+            los = los_clear(e->v.origin, s->origin) ? 1.0f : 0.0f;
+            break;
+        case STIM_CORPSE:
+            ref = 512.0f;
+            los = los_clear(e->v.origin, s->origin) ? 1.0f : 0.0f;
+            break;
+        case STIM_PROP_BROKEN:
+            ref = 768.0f; break;
+        case STIM_LIGHT_CHANGE:
+            ref = 384.0f; break;
+        case STIM_SMOKE:
+            ref = b->sense_sight_range; break;
+        default:
+            return 0.0f;
+    }
+    return s->intensity * falloff(d, ref) * los;
+}
+
+static void sense_tick(ai_brain_t *b, edict_t *e) {
+    stimulus_t recents[16];
+    float since = b->next_tick_time - 1.0f;     // 1s lookback overlap
+    int n = Stim_QueryNear(e->v.origin,
+                           b->sense_sight_range * 2.0f,
+                           since, recents, 16);
+
+    for (int i = 0; i < n; i++) {
+        // Don't react to your own emissions.
+        if (recents[i].source_edict == b->edict_num) continue;
+        float eff = sense_intensity(b, e, &recents[i]);
+        b->alert_level += eff * 0.5f;
+    }
+
+    // Decay
+    b->alert_level *= 0.95f;
+    if (b->alert_level < 0)    b->alert_level = 0;
+    if (b->alert_level > 1.0f) b->alert_level = 1.0f;
+}
+
+// ---------------------------------------------------------------------------
+// Frame tick — 10 Hz per brain; pushes live data to the imgui AI panel.
 // ---------------------------------------------------------------------------
 void Sim_AI_Frame(void) {
-    if (!eng->ImguiAI_Active || !eng->ImguiAI_Active()) return;
-    eng->ImguiAI_Clear();
+    float now = g->time;
+
     for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
-        eng->ImguiAI_Push(b->edict_num, (int)b->state, b->alert_level,
-                          b->last_known_pos, b->target_edict);
+        if (now < b->next_tick_time) continue;
+
+        // Find the edict for this brain by walking entity list.
+        // O(N^2) is acceptable for M1 with typical monster counts.
+        edict_t *e = 0;
+        for (edict_t *cur = eng->ED_Next(g->world); cur; cur = eng->ED_Next(cur)) {
+            if (eng->ED_GetNum(cur) == b->edict_num) { e = cur; break; }
+        }
+        if (!e) { b->in_use = 0; continue; }
+        if (e->v.health <= 0) {
+            b->state = AI_IDLE;
+            b->alert_level = 0;
+            continue;
+        }
+
+        sense_tick(b, e);
+        b->next_tick_time = now + (1.0f / SIM_AI_TICK_HZ);
+    }
+
+    // Push to imgui panel.
+    if (eng->ImguiAI_Active && eng->ImguiAI_Active()) {
+        eng->ImguiAI_Clear();
+        for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
+            eng->ImguiAI_Push(b->edict_num, (int)b->state, b->alert_level,
+                              b->last_known_pos, b->target_edict);
+        }
     }
 }
 
