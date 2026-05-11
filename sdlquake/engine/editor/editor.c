@@ -75,6 +75,9 @@ cvar_t      editor_camera = { "editor_camera", "0" };
 cvar_t      editor_grid_snap     = { "editor_grid_snap", "1" };
 cvar_t      editor_grid_size     = { "editor_grid_size", "16" };
 cvar_t      editor_grid_absolute = { "editor_grid_absolute", "1" };
+cvar_t      editor_rotate_snap          = { "editor_rotate_snap",          "1"  };
+cvar_t      editor_rotate_snap_size     = { "editor_rotate_snap_size",     "45" };
+cvar_t      editor_rotate_snap_absolute = { "editor_rotate_snap_absolute", "1"  };
 
 // View mode: 0 = "live" (show what's running — engine renders edicts at
 // AI-moved positions, bbox follows live, gizmo anchors on live). 1 = "map"
@@ -1274,6 +1277,9 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_grid_snap);
     Cvar_RegisterVariable(&editor_grid_size);
     Cvar_RegisterVariable(&editor_grid_absolute);
+    Cvar_RegisterVariable(&editor_rotate_snap);
+    Cvar_RegisterVariable(&editor_rotate_snap_size);
+    Cvar_RegisterVariable(&editor_rotate_snap_absolute);
     Cvar_RegisterVariable(&editor_view_mode);
     Cvar_RegisterVariable(&editor_show_angles);
     Cvar_RegisterVariable(&editor_show_links);
