@@ -139,6 +139,9 @@ static void draw_toolbar(void)
     extern cvar_t editor_grid_snap;
     extern cvar_t editor_grid_size;
     extern cvar_t editor_grid_absolute;
+    extern cvar_t editor_rotate_snap;
+    extern cvar_t editor_rotate_snap_size;
+    extern cvar_t editor_rotate_snap_absolute;
     extern cvar_t editor_view_mode;
     static const char *style_items[] = {
         "wireframe", "flat", "flat+wire", "textured", "textured+wire"
@@ -154,6 +157,9 @@ static void draw_toolbar(void)
         "45 (jump)", "56 (player)", "64", "128 (room)"
     };
     enum { GRID_N = (int)(sizeof(grid_values) / sizeof(grid_values[0])) };
+    static const float rotate_snap_values[] = { 5, 10, 15, 22.5f, 30, 45, 90 };
+    static const char *rotate_snap_items[]  = { "5", "10", "15", "22.5", "30", "45", "90" };
+    enum { RSNAP_N = (int)(sizeof(rotate_snap_values) / sizeof(rotate_snap_values[0])) };
 
     float disp_w = 1280, disp_h = 720;
     IG_GetDisplaySize(&disp_w, &disp_h);
@@ -302,6 +308,40 @@ static void draw_toolbar(void)
         {
             char buf[64];
             snprintf(buf, sizeof(buf), "editor_grid_size %g\n", grid_values[sel]);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        int rsnap = editor_rotate_snap.value != 0.0f;
+        if (IG_Checkbox("rsnap", &rsnap))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_rotate_snap %d\n", rsnap ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        int rabs = editor_rotate_snap_absolute.value != 0.0f;
+        if (IG_Checkbox("abs##rot", &rabs))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_rotate_snap_absolute %d\n", rabs ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        int sel = 5, k;
+        float cur = editor_rotate_snap_size.value;
+        for (k = 0; k < RSNAP_N; k++)
+            if (rotate_snap_values[k] == cur) { sel = k; break; }
+        IG_SetNextItemWidth(60);
+        if (IG_Combo("rangle", &sel, rotate_snap_items, RSNAP_N))
+        {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "editor_rotate_snap_size %g\n", rotate_snap_values[sel]);
             Cbuf_AddText(buf);
         }
     }
