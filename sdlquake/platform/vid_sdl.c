@@ -74,9 +74,14 @@ static int vid_menu_cursor = 0; // index into vid_scale_factors; set in VID_Init
 
 #define VID_WIDTH  320
 #define VID_HEIGHT 200
+#define VID_RENDER_MAX_W (VID_WIDTH  * 4)  /* 1280 */
+#define VID_RENDER_MAX_H (VID_HEIGHT * 4)  /* 800  */
 
-static byte vid_buffer[VID_WIDTH * VID_HEIGHT];
-byte vid_palette_id[VID_WIDTH * VID_HEIGHT];   // declared in vid_palette.h
+static int vid_render_w = VID_WIDTH;
+static int vid_render_h = VID_HEIGHT;
+
+static byte vid_buffer[VID_RENDER_MAX_W * VID_RENDER_MAX_H];
+byte vid_palette_id[VID_RENDER_MAX_W * VID_RENDER_MAX_H];  /* declared in vid_palette.h */
 
 // ---------------------------------------------------------------------------
 // Palette helpers
@@ -125,6 +130,49 @@ void VID_SetPalette(unsigned char *palette)   { build_palette(palette); }
 void VID_ShiftPalette(unsigned char *palette) { build_palette(palette); }
 
 // ---------------------------------------------------------------------------
+// Live resolution switch
+// ---------------------------------------------------------------------------
+
+static void VID_ApplyScale(int scale)
+{
+    extern short *d_pzbuffer;
+    extern int    D_SurfaceCacheForRes(int w, int h);
+    extern void   D_InitCaches(void *buffer, int size);
+
+    int new_w = VID_WIDTH  * scale;
+    int new_h = VID_HEIGHT * scale;
+
+    if (sdl_texture) { SDL_DestroyTexture(sdl_texture); sdl_texture = NULL; }
+    sdl_texture = SDL_CreateTexture(sdl_renderer,
+        SDL_PIXELFORMAT_ARGB8888,
+        SDL_TEXTUREACCESS_STREAMING,
+        new_w, new_h);
+    if (!sdl_texture)
+        Sys_Error("SDL_CreateTexture failed: %s", SDL_GetError());
+
+    SDL_SetRenderLogicalPresentation(sdl_renderer, new_w, new_h,
+        SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+    SDL_SetWindowSize(sdl_window, new_w, new_h);
+
+    vid_render_w = new_w;
+    vid_render_h = new_h;
+
+    vid.width         = new_w;
+    vid.height        = new_h;
+    vid.rowbytes      = new_w;
+    vid.conwidth      = new_w;
+    vid.conheight     = new_h;
+    vid.conrowbytes   = new_w;
+    vid.maxwarpwidth  = new_w;
+    vid.maxwarpheight = new_h;
+    vid.recalc_refdef = 1;
+
+    int zbuf_bytes  = new_w * new_h * sizeof(short);
+    int cache_bytes = D_SurfaceCacheForRes(new_w, new_h);
+    D_InitCaches((byte *)d_pzbuffer + zbuf_bytes, cache_bytes);
+}
+
+// ---------------------------------------------------------------------------
 // Video Options menu
 // ---------------------------------------------------------------------------
 
@@ -169,7 +217,7 @@ static void VID_MenuKey(int key)
             int new_scale = vid_scale_factors[vid_menu_cursor];
             vid_scale_active = new_scale;
             Cvar_SetValue("vid_scale", (float)new_scale);
-            SDL_SetWindowSize(sdl_window, VID_WIDTH * new_scale, VID_HEIGHT * new_scale);
+            VID_ApplyScale(new_scale);
             S_LocalSound("misc/menu2.wav");
         }
         break;
@@ -213,9 +261,11 @@ void VID_Init(unsigned char *palette)
             }
         }
         vid_scale_active = scale;
+        vid_render_w     = VID_WIDTH  * scale;
+        vid_render_h     = VID_HEIGHT * scale;
 
         sdl_window = SDL_CreateWindow("quake1.ai",
-            VID_WIDTH * scale, VID_HEIGHT * scale,
+            vid_render_w, vid_render_h,
             SDL_WINDOW_RESIZABLE);
         if (!sdl_window)
             Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
@@ -224,39 +274,37 @@ void VID_Init(unsigned char *palette)
         if (!sdl_renderer)
             Sys_Error("SDL_CreateRenderer failed: %s", SDL_GetError());
 
-        // Scale texture to window, keeping pixel art crisp
         SDL_SetRenderLogicalPresentation(sdl_renderer,
-            VID_WIDTH, VID_HEIGHT,
+            vid_render_w, vid_render_h,
             SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
         SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
 
-        // Streaming texture: we upload the expanded 32-bit framebuffer every frame
         sdl_texture = SDL_CreateTexture(sdl_renderer,
             SDL_PIXELFORMAT_ARGB8888,
             SDL_TEXTUREACCESS_STREAMING,
-            VID_WIDTH, VID_HEIGHT);
+            vid_render_w, vid_render_h);
         if (!sdl_texture)
             Sys_Error("SDL_CreateTexture failed: %s", SDL_GetError());
     }
 
     // Fill in viddef
     memset(&vid, 0, sizeof(vid));
-    vid.width      = VID_WIDTH;
-    vid.height     = VID_HEIGHT;
-    vid.rowbytes   = VID_WIDTH;
-    // Match original formula from vid_win.c: pixel aspect for 4:3 CRT at this res
-    // (200/320)*(320/240) = 0.8333 for 320x200, keeps weapon/HUD layout correct
+    vid.width      = vid_render_w;
+    vid.height     = vid_render_h;
+    vid.rowbytes   = vid_render_w;
+    // Pixel aspect for 4:3 CRT at 320x200 — scale-independent since w and h
+    // scale by the same factor, preserving the ratio.
     vid.aspect     = ((float)VID_HEIGHT / (float)VID_WIDTH) * (320.0f / 240.0f);
     vid.numpages   = 1;
     vid.colormap   = host_colormap;
     vid.fullbright = 256 - LittleLong(*((int *)vid.colormap + 2048));
     vid.buffer     = vid_buffer;
-    vid.conbuffer  = vid_buffer; // same framebuffer — Draw_Character writes here
-    vid.conwidth   = VID_WIDTH;
-    vid.conheight  = VID_HEIGHT;
-    vid.conrowbytes = VID_WIDTH;
-    vid.maxwarpwidth  = VID_WIDTH;
-    vid.maxwarpheight = VID_HEIGHT;
+    vid.conbuffer  = vid_buffer;
+    vid.conwidth   = vid_render_w;
+    vid.conheight  = vid_render_h;
+    vid.conrowbytes = vid_render_w;
+    vid.maxwarpwidth  = vid_render_w;
+    vid.maxwarpheight = vid_render_h;
     vid.recalc_refdef = 1;
 
     build_palette(palette);
@@ -276,10 +324,13 @@ void VID_Init(unsigned char *palette)
         extern void   D_InitCaches(void *buffer, int size);
         extern void  *Hunk_HighAllocName(int size, char *name);
 
-        int zbuf_bytes  = VID_WIDTH * VID_HEIGHT * sizeof(short);
-        int cache_bytes = D_SurfaceCacheForRes(VID_WIDTH, VID_HEIGHT);
+        // Pre-allocate for max resolution so VID_ApplyScale never needs hunk realloc.
+        int zbuf_bytes_max  = VID_RENDER_MAX_W * VID_RENDER_MAX_H * sizeof(short);
+        int cache_bytes_max = D_SurfaceCacheForRes(VID_RENDER_MAX_W, VID_RENDER_MAX_H);
+        d_pzbuffer = (short *)Hunk_HighAllocName(zbuf_bytes_max + cache_bytes_max, "video");
 
-        d_pzbuffer = (short *)Hunk_HighAllocName(zbuf_bytes + cache_bytes, "video");
+        int zbuf_bytes  = vid_render_w * vid_render_h * sizeof(short);
+        int cache_bytes = D_SurfaceCacheForRes(vid_render_w, vid_render_h);
         D_InitCaches((byte *)d_pzbuffer + zbuf_bytes, cache_bytes);
     }
 
@@ -316,14 +367,12 @@ void VID_Update(vrect_t *rects)
         // Slot 0 (Quake) mirrors d_8to24table[]; slot 1 (Doom) filled on demand.
         unsigned (*lut)[256] = vid_lut;
 
-        for (int y = 0; y < VID_HEIGHT; y++)
+        for (int y = 0; y < vid_render_h; y++)
         {
             unsigned *dst     = (unsigned *)((byte *)pixels + y * pitch);
-            byte     *src     = vid.buffer       + y * vid.rowbytes;
-            // vid_palette_id is sized VID_WIDTH * VID_HEIGHT by construction;
-            // stride is always VID_WIDTH, independent of any vid.rowbytes padding.
-            byte     *pal_src = vid_palette_id   + y * VID_WIDTH;
-            for (int x = 0; x < VID_WIDTH; x++)
+            byte     *src     = vid.buffer     + y * vid.rowbytes;
+            byte     *pal_src = vid_palette_id + y * vid_render_w;
+            for (int x = 0; x < vid_render_w; x++)
                 dst[x] = lut[pal_src[x]][src[x]];
         }
 
@@ -340,7 +389,7 @@ void VID_Update(vrect_t *rects)
     // renderer pipeline. Must run AFTER the expand step (above) which
     // reads the tags this frame's renderer wrote — clearing earlier
     // would wipe those tags before expand sees them.
-    memset(vid_palette_id, 0, sizeof(vid_palette_id));
+    memset(vid_palette_id, 0, vid_render_w * vid_render_h);
 
     // Force the sbar to redraw on the next SCR_UpdateScreen. Stock Quake
     // uses sb_updates / vid.numpages to skip Sbar_Draw once each VRAM page
