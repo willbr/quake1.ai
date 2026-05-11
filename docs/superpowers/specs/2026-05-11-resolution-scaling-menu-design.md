@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add a Video Options menu to the SDL3 platform layer that lets the player choose window scale (1x, 2x, 3x) and persist the choice across restarts.
+Add a Video Options menu to the SDL3 platform layer that lets the player choose window scale (1x, 2x, 3x, 4x) and persist the choice across restarts.
 
 ## Scope
 
@@ -15,7 +15,7 @@ cvar_t vid_scale = {"vid_scale", "0", true};
 ```
 
 - `0` = auto-detect (largest integer scale that fits the usable desktop area). Stays `0` in config so the next launch also auto-detects.
-- `1` / `2` / `3` = explicit scale; saved to `config.cfg`.
+- `1` / `2` / `3` / `4` = explicit scale; saved to `config.cfg`.
 
 ## Startup
 
@@ -26,10 +26,11 @@ cvar_t vid_scale = {"vid_scale", "0", true};
 `VID_MenuDraw` draws the classic Quake-style video menu:
 
 - Header: `gfx/p_option.lmp` title pic (same as Options page)
-- Three items at fixed y positions:
+- Four items at fixed y positions:
   - `1x  320x200`
   - `2x  640x400`
   - `3x  960x600`
+  - `4x  1280x800`
 - The item matching the active window scale has the animated cursor character beside it.
 
 `VID_MenuKey` handles:
@@ -47,10 +48,10 @@ vid_menukeyfn  = VID_MenuKey;
 
 ## State
 
-A file-static `int vid_menu_cursor` (0/1/2) tracks the highlighted item. Initialised from `(int)vid_scale.value - 1`, clamped to `[0, 2]`. When `vid_scale` is `0` (auto), cursor defaults to `vid_scale_active - 1` where `vid_scale_active` is a file-static int set during `VID_Init` to the scale that was actually applied.
+A file-static `int vid_menu_cursor` (0/1/2/3) tracks the highlighted item. Initialised from `(int)vid_scale.value - 1`, clamped to `[0, 3]`. When `vid_scale` is `0` (auto), cursor defaults to `vid_scale_active - 1` where `vid_scale_active` is a file-static int set during `VID_Init` to the scale that was actually applied.
 
 ## Out of scope
 
 - Fullscreen toggle
-- Scales beyond 3x
+- Scales beyond 4x
 - ImGui alternative UI
