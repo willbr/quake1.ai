@@ -10,6 +10,13 @@
 #include "vid_palette.h"
 #include "debug_lines.h"
 
+// Menu helpers from menu.c (no shared header)
+extern void M_Print(int cx, int cy, char *str);
+extern void M_PrintWhite(int cx, int cy, char *str);
+extern void M_DrawPic(int x, int y, qpic_t *pic);
+extern void M_DrawCharacter(int cx, int line, int num);
+extern void M_Menu_Options_f(void);
+
 // ---------------------------------------------------------------------------
 // Globals that Win32 platform files normally define
 // ---------------------------------------------------------------------------
@@ -54,6 +61,16 @@ static SDL_Texture  *sdl_texture  = NULL;
 
 static int vid_scale_active = 3;               // scale actually applied; set in VID_Init
 static cvar_t vid_scale = {"vid_scale", "0", true}; // 0=auto, 1-4=explicit; archived
+
+#define VID_NUM_SCALES 4
+static const int    vid_scale_factors[VID_NUM_SCALES] = {1, 2, 3, 4};
+static const char  *vid_scale_labels[VID_NUM_SCALES]  = {
+    "1x  320x200",
+    "2x  640x400",
+    "3x  960x600",
+    "4x  1280x800"
+};
+static int vid_menu_cursor = 0; // index into vid_scale_factors; set in VID_Init
 
 #define VID_WIDTH  320
 #define VID_HEIGHT 200
@@ -106,6 +123,61 @@ static void vid_load_aux_palette(int slot, const char *qpath)
 
 void VID_SetPalette(unsigned char *palette)   { build_palette(palette); }
 void VID_ShiftPalette(unsigned char *palette) { build_palette(palette); }
+
+// ---------------------------------------------------------------------------
+// Video Options menu
+// ---------------------------------------------------------------------------
+
+static void VID_MenuDraw(void)
+{
+    qpic_t *p = Draw_CachePic("gfx/vidmodes.lmp");
+    M_DrawPic((320 - p->width) / 2, 4, p);
+
+    int base_y = 40;
+    for (int i = 0; i < VID_NUM_SCALES; i++)
+    {
+        if (vid_scale_factors[i] == vid_scale_active)
+            M_PrintWhite(64, base_y + i * 16, (char *)vid_scale_labels[i]);
+        else
+            M_Print(64, base_y + i * 16, (char *)vid_scale_labels[i]);
+        if (vid_menu_cursor == i)
+            M_DrawCharacter(56, base_y + i * 16, 12 + ((int)(realtime * 4) & 1));
+    }
+}
+
+static void VID_MenuKey(int key)
+{
+    switch (key)
+    {
+    case K_ESCAPE:
+        M_Menu_Options_f();
+        break;
+
+    case K_UPARROW:
+        S_LocalSound("misc/menu1.wav");
+        vid_menu_cursor = (vid_menu_cursor - 1 + VID_NUM_SCALES) % VID_NUM_SCALES;
+        break;
+
+    case K_DOWNARROW:
+        S_LocalSound("misc/menu1.wav");
+        vid_menu_cursor = (vid_menu_cursor + 1) % VID_NUM_SCALES;
+        break;
+
+    case K_ENTER:
+    case K_SPACE:
+        {
+            int new_scale = vid_scale_factors[vid_menu_cursor];
+            vid_scale_active = new_scale;
+            Cvar_SetValue("vid_scale", (float)new_scale);
+            SDL_SetWindowSize(sdl_window, VID_WIDTH * new_scale, VID_HEIGHT * new_scale);
+            S_LocalSound("misc/menu2.wav");
+        }
+        break;
+
+    default:
+        break;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Init / shutdown
@@ -210,6 +282,10 @@ void VID_Init(unsigned char *palette)
         d_pzbuffer = (short *)Hunk_HighAllocName(zbuf_bytes + cache_bytes, "video");
         D_InitCaches((byte *)d_pzbuffer + zbuf_bytes, cache_bytes);
     }
+
+    vid_menu_cursor = vid_scale_active - 1;
+    vid_menudrawfn  = VID_MenuDraw;
+    vid_menukeyfn   = VID_MenuKey;
 }
 
 void VID_Shutdown(void)
