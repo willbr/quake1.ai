@@ -163,10 +163,14 @@ static void VID_ApplyScale(int scale)
     vid.conwidth      = new_w;
     vid.conheight     = new_h;
     vid.conrowbytes   = new_w;
-    vid.maxwarpwidth  = new_w;
-    vid.maxwarpheight = new_h;
+    vid.maxwarpwidth  = WARP_WIDTH;
+    vid.maxwarpheight = WARP_HEIGHT;
     vid.recalc_refdef = 1;
 
+    {
+        extern void D_FlushCaches(void);
+        D_FlushCaches();
+    }
     int zbuf_bytes  = new_w * new_h * sizeof(short);
     int cache_bytes = D_SurfaceCacheForRes(new_w, new_h);
     D_InitCaches((byte *)d_pzbuffer + zbuf_bytes, cache_bytes);
@@ -303,8 +307,8 @@ void VID_Init(unsigned char *palette)
     vid.conwidth   = vid_render_w;
     vid.conheight  = vid_render_h;
     vid.conrowbytes = vid_render_w;
-    vid.maxwarpwidth  = vid_render_w;
-    vid.maxwarpheight = vid_render_h;
+    vid.maxwarpwidth  = WARP_WIDTH;
+    vid.maxwarpheight = WARP_HEIGHT;
     vid.recalc_refdef = 1;
 
     build_palette(palette);
