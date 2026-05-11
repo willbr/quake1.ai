@@ -52,6 +52,9 @@ static SDL_Window   *sdl_window   = NULL;
 static SDL_Renderer *sdl_renderer = NULL;
 static SDL_Texture  *sdl_texture  = NULL;
 
+static int vid_scale_active = 3;               // scale actually applied; set in VID_Init
+static cvar_t vid_scale = {"vid_scale", "0", true}; // 0=auto, 1-4=explicit; archived
+
 #define VID_WIDTH  320
 #define VID_HEIGHT 200
 
@@ -112,11 +115,20 @@ extern qboolean sys_headless;
 
 void VID_Init(unsigned char *palette)
 {
+    Cvar_RegisterVariable(&vid_scale);
+
     if (!sys_headless)
     {
-        // Pick the largest integer scale that fits the usable desktop area
-        int scale = 3; // fallback
+        // Determine window scale: explicit cvar or auto-detect
+        int scale;
+        int req = (int)vid_scale.value;
+        if (req >= 1 && req <= 4)
         {
+            scale = req;
+        }
+        else
+        {
+            scale = 3; // fallback
             SDL_DisplayID display = SDL_GetPrimaryDisplay();
             SDL_Rect usable;
             if (SDL_GetDisplayUsableBounds(display, &usable))
@@ -125,8 +137,10 @@ void VID_Init(unsigned char *palette)
                 int sy = usable.h / VID_HEIGHT;
                 scale = sx < sy ? sx : sy;
                 if (scale < 1) scale = 1;
+                if (scale > 4) scale = 4;
             }
         }
+        vid_scale_active = scale;
 
         sdl_window = SDL_CreateWindow("quake1.ai",
             VID_WIDTH * scale, VID_HEIGHT * scale,
