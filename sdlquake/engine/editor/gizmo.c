@@ -36,10 +36,16 @@ static vec3_t   s_drag_dir;             // axis basis vec (translate) / face nor
 static float    s_drag_start_dist;      // plane.dist at drag start (face-resize only — for absolute snap)
 static vec3_t   s_rotate_pivot;         // selection centroid captured at rotate-drag start
 static float    s_rotate_prev_angle;    // last frame's mouse angle in radians, for incremental step rotation
+static float    s_rotate_total_raw;     // accumulated raw angle since drag-start (radians)
+static float    s_rotate_total_applied; // total snapped angle already applied (radians)
+static float    s_rotate_start_angle;   // primary entity's angle on drag axis at drag-start (absolute snap)
 
 extern cvar_t   editor_grid_snap;
 extern cvar_t   editor_grid_size;
 extern cvar_t   editor_grid_absolute;
+extern cvar_t   editor_rotate_snap;
+extern cvar_t   editor_rotate_snap_size;
+extern cvar_t   editor_rotate_snap_absolute;
 
 static float snap_to_grid(float v)
 {
@@ -708,6 +714,29 @@ int Editor_GizmoMouseDown(float sx, float sy)
         if (!rotate_mouse_angle(best_ring_axis, s_rotate_pivot, r_org, r_dir,
                                 &s_rotate_prev_angle))
             s_rotate_prev_angle = 0;
+        s_rotate_total_raw     = 0.0f;
+        s_rotate_total_applied = 0.0f;
+        s_rotate_start_angle   = 0.0f;
+        {
+            edit_entity_t *pe = Scene_GetSelectedEntity();
+            if (pe)
+            {
+                int k, ai = -1, angle_idx = -1;
+                float pitch = 0, yaw = 0, roll = 0;
+                for (k = 0; k < pe->numkv; k++)
+                {
+                    if      (!strcmp(pe->kv[k].key, "angles")) { ai        = k; break; }
+                    else if (!strcmp(pe->kv[k].key, "angle"))    angle_idx = k;
+                }
+                if (ai >= 0)
+                    sscanf(pe->kv[ai].value, "%f %f %f", &pitch, &yaw, &roll);
+                else if (angle_idx >= 0)
+                    yaw = (float)atof(pe->kv[angle_idx].value);
+                if      (best_ring_axis == 2) s_rotate_start_angle = yaw   * (3.14159265f / 180.0f);
+                else if (best_ring_axis == 0) s_rotate_start_angle = pitch * (3.14159265f / 180.0f);
+                else                          s_rotate_start_angle = roll  * (3.14159265f / 180.0f);
+            }
+        }
         return 1;
     }
     if (best_axis < 0) return 0;
@@ -763,8 +792,28 @@ void Editor_GizmoMouseMove(float sx, float sy)
         if (!rotate_mouse_angle(s_drag_rotate_axis, s_rotate_pivot,
                                 r_org, r_dir, &a_now))
             return;
-        step = wrap_delta(a_now - s_rotate_prev_angle);
-        s_rotate_prev_angle = a_now;
+        {
+            float raw_delta = wrap_delta(a_now - s_rotate_prev_angle);
+            s_rotate_prev_angle  = a_now;
+            s_rotate_total_raw  += raw_delta;
+            if (editor_rotate_snap.value != 0.0f)
+            {
+                float snap_rad = editor_rotate_snap_size.value * (3.14159265f / 180.0f);
+                float snapped_total;
+                if (snap_rad <= 0.0f) snap_rad = 3.14159265f / 4.0f;
+                if (editor_rotate_snap_absolute.value != 0.0f)
+                    snapped_total = floorf((s_rotate_start_angle + s_rotate_total_raw) / snap_rad + 0.5f) * snap_rad
+                                    - s_rotate_start_angle;
+                else
+                    snapped_total = floorf(s_rotate_total_raw / snap_rad + 0.5f) * snap_rad;
+                step = snapped_total - s_rotate_total_applied;
+                s_rotate_total_applied = snapped_total;
+            }
+            else
+            {
+                step = raw_delta;
+            }
+        }
         if (step == 0.0f) return;
 
         n_sel = Scene_NumSelected();
