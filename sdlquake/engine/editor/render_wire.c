@@ -562,10 +562,35 @@ static void point_entity_bbox(const edit_entity_t *e,
         if (m && model_local_bbox(m, am, ax))
         {
             const float *org = e->live_ent->v.origin;
-            for (i = 0; i < 3; i++)
+            const float *ang = e->live_ent->v.angles;
+            if (ang[0] != 0.0f || ang[1] != 0.0f || ang[2] != 0.0f)
             {
-                out_mins[i] = org[i] + am[i];
-                out_maxs[i] = org[i] + ax[i];
+                vec3_t fwd, right, up;
+                int c;
+                AngleVectors((float *)ang, fwd, right, up);
+                out_mins[0] = out_mins[1] = out_mins[2] =  1e30f;
+                out_maxs[0] = out_maxs[1] = out_maxs[2] = -1e30f;
+                for (c = 0; c < 8; c++)
+                {
+                    float lx = (c & 1) ? ax[0] : am[0];
+                    float ly = (c & 2) ? ax[1] : am[1];
+                    float lz = (c & 4) ? ax[2] : am[2];
+                    int k;
+                    for (k = 0; k < 3; k++)
+                    {
+                        float w = org[k] + fwd[k]*lx - right[k]*ly + up[k]*lz;
+                        if (w < out_mins[k]) out_mins[k] = w;
+                        if (w > out_maxs[k]) out_maxs[k] = w;
+                    }
+                }
+            }
+            else
+            {
+                for (i = 0; i < 3; i++)
+                {
+                    out_mins[i] = org[i] + am[i];
+                    out_maxs[i] = org[i] + ax[i];
+                }
             }
             return;
         }
@@ -1598,7 +1623,23 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush,
         {
             vec3_t pmin, pmax;
             float t;
+            int k;
             point_entity_bbox(e, pmin, pmax);
+            // Ensure a minimum pick volume so thin/oriented entities
+            // (e.g. rockets flying toward the camera) remain clickable
+            // even though the visual box correctly collapses to a small
+            // cross-section. The display box is unchanged — only the
+            // slab test here gets the padded volume.
+            {
+                vec3_t anchor;
+                static const float PICK_MIN = 10.0f;
+                if (Editor_EntityAnchor(e, anchor))
+                    for (k = 0; k < 3; k++)
+                    {
+                        if (pmin[k] > anchor[k] - PICK_MIN) pmin[k] = anchor[k] - PICK_MIN;
+                        if (pmax[k] < anchor[k] + PICK_MIN) pmax[k] = anchor[k] + PICK_MIN;
+                    }
+            }
             if (ray_vs_aabb(origin, dir, pmin, pmax, &t))
             {
                 // Reject hits behind a wall — picking should match
