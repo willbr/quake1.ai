@@ -29,7 +29,7 @@
 
 extern SDL_Window *VID_GetWindow(void);
 
-// Convert a window-coord SDL mouse event into 320x200 vid-space coords.
+// Convert a window-coord SDL mouse event into vid-space coords.
 static void window_to_vid(float wx, float wy, float *vx, float *vy)
 {
     SDL_Window *w = VID_GetWindow();
@@ -37,14 +37,15 @@ static void window_to_vid(float wx, float wy, float *vx, float *vy)
     if (w) SDL_GetWindowSize(w, &ww, &wh);
     if (ww <= 0 || wh <= 0) { *vx = wx; *vy = wy; return; }
 
-    // SDL3 logical presentation is INTEGER_SCALE (vid_sdl.c). We mirror its
-    // letterbox arithmetic: the 320x200 logical area is centred and integer-
-    // scaled to fit the window; everything outside maps to negative or
-    // out-of-range vid coords.
+    // SDL3 logical presentation is LETTERBOX (vid_sdl.c) — fractional scale
+    // = min(ww/vw, wh/vh), no integer rounding, no minimum clamp. The render
+    // is centred in the window with bars on whichever axis doesn't fill.
+    // INTEGER_SCALE math here gave the wrong vid coords whenever the window
+    // didn't match the render at a whole multiple, and the picker landed on
+    // a different handle than the one the user clicked.
     float scale_x = (float)ww / (float)vid.width;
     float scale_y = (float)wh / (float)vid.height;
-    float scale   = scale_x < scale_y ? floorf(scale_x) : floorf(scale_y);
-    if (scale < 1.0f) scale = 1.0f;
+    float scale   = scale_x < scale_y ? scale_x : scale_y;
     float ox = (ww - vid.width  * scale) * 0.5f;
     float oy = (wh - vid.height * scale) * 0.5f;
     *vx = (wx - ox) / scale;
