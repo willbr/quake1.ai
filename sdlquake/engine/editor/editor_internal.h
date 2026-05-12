@@ -154,6 +154,15 @@ void Editor_ApplyClassnameDefaults(struct edit_entity_s *e, const char *cls);
 // inside R_RenderView_ between CL_RelinkEntities and R_EdgeDrawing.
 void Editor_PushPreviewEntities(void);
 
+// render_wire.c — eagerly materialise transient edit_entity_t entries
+// for every alive runtime edict in sv.edicts (those not already bound
+// to a .map-authored entry). Reaps stale transients first. No-op
+// outside live view or when sv is inactive. Called once per editor
+// frame from Editor_PreRender so the Brushes panel can list runtime
+// ents (rockets, gibs, drops) with classnames without requiring the
+// user to first click them in the 3D viewport.
+void Editor_MaterialiseLiveTransients(void);
+
 // render_wire.c — classify a classname into one of EDIT_CAT_*. Used for
 // bbox color and filter checkboxes.
 int  Editor_EntityCategory(const struct edit_entity_s *e);

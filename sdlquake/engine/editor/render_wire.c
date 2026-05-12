@@ -1600,6 +1600,43 @@ static int edict_is_already_bound(const edict_t *ed)
     return 0;
 }
 
+// Walk sv.edicts and ensure every alive runtime edict has a transient
+// edit_entity_t wrapping it. Drops dead transients first. Mirrors the
+// edict-skip rules of Editor_PickAt's runtime-edict pass (degenerate
+// bbox → skip; already-bound → skip).
+void Editor_MaterialiseLiveTransients(void)
+{
+    extern cvar_t editor_view_mode;
+    int n;
+    int i;
+    int view_live = (int)editor_view_mode.value == 0;
+
+    if (!view_live) return;
+    if (!sv.active) return;
+
+    // Refresh stale live_ent links on .map-authored entries before
+    // edict_is_already_bound consults them. Without this, a freed slot
+    // reused by an unrelated runtime ent would block transient creation.
+    for (i = 0; i < edit_scene.numentities; i++)
+        detach_stale_live_ent(&edit_scene.entities[i]);
+
+    reap_dead_transients();
+
+    for (n = 1; n < sv.num_edicts; n++)
+    {
+        edict_t *ed = EDICT_NUM(n);
+        const float *amn, *amx;
+        if (ed->free) continue;
+        if (edict_is_already_bound(ed)) continue;
+        amn = ed->v.absmin;
+        amx = ed->v.absmax;
+        // Degenerate bbox = temp ent or fresh edict, not selectable.
+        if (amx[0] <= amn[0] && amx[1] <= amn[1] && amx[2] <= amn[2])
+            continue;
+        find_or_create_transient(ed);
+    }
+}
+
 int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush,
                   int *out_plane)
 {
