@@ -336,13 +336,9 @@ void VID_Init(unsigned char *palette)
         if (!sdl_window)
             Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
 
-        // Restore last-known window position, if one was saved.
-        {
-            int wx = (int)vid_window_x.value;
-            int wy = (int)vid_window_y.value;
-            if (wx >= 0 && wy >= 0)
-                SDL_SetWindowPosition(sdl_window, wx, wy);
-        }
+        // Window position can't be restored here — config.cfg hasn't been
+        // exec'd yet, so vid_window_x/y still hold their registration
+        // defaults. VID_Update applies them after the first frame.
 
         sdl_renderer = SDL_CreateRenderer(sdl_window, NULL);
         if (!sdl_renderer)
@@ -428,6 +424,19 @@ void VID_Shutdown(void)
 void VID_Update(vrect_t *rects)
 {
     if (!sdl_texture) return;
+
+    // Apply saved window position once, after config.cfg has had a chance to
+    // run (which happens on the first Cbuf_Execute, before the first frame
+    // reaches us here).
+    static qboolean restored_pos = false;
+    if (!restored_pos)
+    {
+        restored_pos = true;
+        int wx = (int)vid_window_x.value;
+        int wy = (int)vid_window_y.value;
+        if (wx >= 0 && wy >= 0)
+            SDL_SetWindowPosition(sdl_window, wx, wy);
+    }
 
     RPaths_Draw();
     RBBox_Draw();
