@@ -1631,7 +1631,7 @@ void Editor_MaterialiseLiveTransients(void)
         amn = ed->v.absmin;
         amx = ed->v.absmax;
         // Degenerate bbox = temp ent or fresh edict, not selectable.
-        if (amx[0] <= amn[0] && amx[1] <= amn[1] && amx[2] <= amn[2])
+        if (amx[0] <= amn[0] || amx[1] <= amn[1] || amx[2] <= amn[2])
             continue;
         find_or_create_transient(ed);
     }
