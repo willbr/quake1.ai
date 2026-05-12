@@ -1,17 +1,31 @@
 # Editor Live View — Phase 1 Design Spec
 
 **Date:** 2026-05-12
-**Status:** Approved
+**Status:** Approved (revised after discovering existing `transient` infrastructure)
 
 ---
 
 ## Overview
 
-Split the editor's "Brushes" panel data source by `editor_view_mode`. In **live** view, the panel iterates the running engine's edict list (`sv.edicts`) and shows one row per alive edict with its classname. In **map** view, the panel keeps its current behaviour (iterates `edit_scene.entities[]`).
+Split the editor's "Brushes" panel data source by `editor_view_mode`. In **live** view, every alive engine edict appears in the panel — both `.map`-authored ents (already represented by an `edit_entity_t` with `live_ent` set) and runtime-spawned ents (rockets, gibs, dropped backpacks). In **map** view, the panel shows only `.map`-authored ents and hides any transients.
 
-This is the first of two phases. Phase 1 makes live edicts **visible and selectable in the list panel** with a bbox highlight on the selected edict. Phase 2 (separate spec, not part of this design) extends 3D-viewport picking, gizmo drag, and KV editing to live edicts.
+This is Phase 1 of two. Phase 1 makes live edicts **visible and selectable**; Phase 2 (separate spec) extends 3D-viewport picking, gizmo drag, and KV editing to live edicts — though much of that already works via the existing `find_or_create_transient` rails.
 
-Phase 1 also fixes the reported bug that runtime-spawned ents (projectiles, gibs, drops) have no visible classname — reading `v.classname` via `PR_GetString` for every live row sidesteps the .map-data path that's currently the only source.
+This revision (May 12) leverages the codebase's existing transient infrastructure (`render_wire.c:1512-1601`) instead of adding a parallel selection model. The previous draft proposed `Scene_LiveSelection*` APIs; those are removed.
+
+---
+
+## Existing infrastructure we're building on
+
+In `sdlquake/engine/editor/render_wire.c` the picker already maintains transient edit_entities for runtime edicts:
+
+- `find_or_create_transient(edict_t *ed)` — looks up the existing transient for `ed` (`live_ent == ed && transient`), or appends a new one with `classname` and `origin` populated from `ed->v`.
+- `reap_dead_transients()` — walks `edit_scene.entities[]`, removes transients whose `live_ent` is null or freed (unless they're currently selected).
+- `edict_is_already_bound(ed)` — returns true if any `edit_entity_t` (transient or `.map`-authored) has `live_ent == ed`. Used to skip edicts that already have a handle.
+
+`edit_entity_t::transient` (in `edit_scene.h:92`) marks these synthesised entries. `map_io.c:529` already excludes them from `.map` save.
+
+The picker currently calls `find_or_create_transient` **lazily** — only when the user clicks an unbound runtime edict in the 3D viewport. Phase 1 adds an **eager** sweep at the start of each frame in live view so every alive runtime edict has an `edit_entity_t` and shows in the brushes panel.
 
 ---
 
@@ -19,119 +33,117 @@ Phase 1 also fixes the reported bug that runtime-spawned ents (projectiles, gibs
 
 **In scope (Phase 1):**
 
-- New live-selection state, parallel to the existing .map selection.
-- "Brushes" panel branches on view mode: live mode iterates `sv.edicts`, displays `[edict#] classname`.
-- Clicking a live row selects that edict (single or shift-multi).
-- Render: selected live edict's absmin/absmax bbox draws with the existing selection highlight colour.
-- View-mode toggle clears the inactive selection list.
+- New helper `Editor_MaterialiseLiveTransients(void)`: walks `sv.edicts[1..num_edicts-1]`, skips free edicts and already-bound ones, calls `find_or_create_transient` for each runtime ent. Called once per editor frame in live view.
+- `draw_brush_list` filters its iteration by view mode (see "Brushes panel filtering" below).
+- `reap_dead_transients()` is also called from the eager sweep so dead transients clear out even without 3D picking activity.
+- View-mode toggle clears any selection that's about to become invisible (selected dead `.map` ent in live, selected transient in map).
 
 **Out of scope (Phase 2):**
 
-- 3D-viewport picking on live edicts (`Editor_PickAt` extension).
-- Gizmo translate/rotate of live edicts.
+- 3D-viewport picking on live edicts already works for unbound runtime ents (line 1685 of render_wire.c). Phase 2 will extend it to `.map`-bound live edicts at the live position.
+- Gizmo translate/rotate on transients — partially works (gizmo reads `live_ent->v.origin`), but Phase 2 audits the path end-to-end.
 - KV side-panel editing of live edicts.
-- Anchor / arrow / link-arrow render passes for live edicts.
+- Anchor / arrow / link-arrow render passes for transients.
 
-The map-view code path is untouched.
+The map-view rendering and selection paths are untouched.
 
 ---
 
-## View-mode semantics (clarified)
+## View-mode semantics
 
-| View mode | Brushes panel iterates | What's selectable |
+| View mode | Brushes panel shows | Hidden in panel |
 |---|---|---|
-| `editor_view_mode 0` (live) | `sv.edicts[1..num_edicts-1]`, non-free | Live edicts only |
-| `editor_view_mode 1` (map) | `edit_scene.entities[]` | .map ents only |
+| `editor_view_mode 0` (live) | Entries with engine presence: `live_ent && !live_ent->free`, OR `live_static != NULL` | Pure-map ents with no engine presence (e.g. an authored monster that was killed and freed) |
+| `editor_view_mode 1` (map) | Authored entries: `transient == 0` | Transient entries (runtime-spawned ents) |
 
-Worldspawn (edict 0) is excluded from the live list — it's the BSP world, not a per-entity selectable thing.
+Worldspawn (edict 0) is always shown in map view (it owns the world brushes) and skipped by the eager sweep in live view (it's the world, not a per-entity selectable thing).
 
 ---
 
-## Selection model
+## Brushes panel filtering
 
-Add a separate live-selection list alongside the existing `(e_idx, b_idx)` tuple list. The two are mutually exclusive — only one is active per view mode.
-
-New API in `edit_scene.h` / scene.c:
+The new visibility predicate, added near the top of `draw_brush_list` in `editor_ui.c`:
 
 ```c
-void Scene_LiveSelectionClear(void);
-void Scene_LiveSelectionAdd(int edict_num);
-void Scene_LiveSelectionToggle(int edict_num);
-int  Scene_LiveSelectionContains(int edict_num);
-int  Scene_NumLiveSelected(void);
-int  Scene_GetLiveSelected(int i);     // returns edict_num, or -1 if i out of range
+static int brush_list_visible(int i)
+{
+    extern cvar_t editor_view_mode;
+    int view_live = (int)editor_view_mode.value == 0;
+    edit_entity_t *e = &edit_scene.entities[i];
+
+    if (Editor_EntityHidden(i)) return 0;  // existing category filter
+
+    if (view_live) {
+        // Live view: must have engine presence.
+        if (e->live_ent && !e->live_ent->free) return 1;
+        if (e->live_static) return 1;
+        return 0;
+    }
+    // Map view: hide transients (they're not authored data).
+    if (e->transient) return 0;
+    return 1;
+}
 ```
 
-Storage: a flat `int[]` of edict numbers, grown like the existing selection arrays. Capacity matches the existing selection's growth pattern.
+Existing `Editor_EntityHidden` category filters (triggers, lights, monsters, …) still apply in both views. The "visible only" toggle works as before — orthogonal to view-mode filtering.
 
-**View-mode-toggle behaviour** (in `editor.c` cvar-set hook for `editor_view_mode`, or wherever the mode flip is observed): when the mode changes, clear the now-inactive selection list. This prevents a stale .map selection from driving the gizmo while the user is browsing live edicts (and vice versa).
-
-The existing gizmo, `Editor_PickAt`, and `Editor_EntityAnchor` are not changed in Phase 1 — they continue to read .map selection. In live view, the gizmo simply doesn't appear (because .map selection is empty after the toggle clear, and Phase 2 will add a separate live-gizmo path).
+The header count line is updated to reflect the filter: `"%d live edicts, %d brushes"` in live, `"%d entities, %d brushes"` in map (existing text).
 
 ---
 
-## Brushes panel — live branch
+## Eager materialisation
 
-Pseudocode for the new live branch in `draw_brush_list`:
+New function in `render_wire.c` (or wherever the transient helpers live), called from the editor's per-frame entry point in live view:
 
 ```c
-if (view_live) {
-    int shown = 0;
-    for (int en = 1; en < sv.num_edicts; en++) {
-        edict_t *ed = EDICT_NUM(en);
+void Editor_MaterialiseLiveTransients(void)
+{
+    extern cvar_t editor_view_mode;
+    if ((int)editor_view_mode.value != 0) return;     // live view only
+    if (!sv.active) return;
+
+    reap_dead_transients();                            // drop stale entries first
+
+    int n;
+    for (n = 1; n < sv.num_edicts; n++) {
+        edict_t *ed = EDICT_NUM(n);
         if (ed->free) continue;
-        const char *cls = PR_GetString(ed->v.classname);
-        if (!cls || !cls[0]) cls = "(no classname)";
-
-        int sel = Scene_LiveSelectionContains(en);
-        char buf[128];
-        snprintf(buf, sizeof(buf), "[%d] %s##le%d", en, cls, en);
-
-        IG_PushID_Int(en);
-        if (IG_Selectable(buf, sel, 0)) {
-            SDL_Keymod mod = SDL_GetModState();
-            int shift = (mod & SDL_KMOD_SHIFT) != 0;
-            if (shift)            Scene_LiveSelectionToggle(en);
-            else                  { Scene_LiveSelectionClear(); Scene_LiveSelectionAdd(en); }
-        }
-        IG_PopID();
-        shown++;
+        if (edict_is_already_bound(ed)) continue;      // .map ent or existing transient
+        // Skip degenerate-bbox edicts (temp ents, fresh edicts). The picker
+        // applies the same rule (line 1704). No bbox -> not selectable.
+        const float *amn = ed->v.absmin;
+        const float *amx = ed->v.absmax;
+        if (amx[0] <= amn[0] && amx[1] <= amn[1] && amx[2] <= amn[2]) continue;
+        find_or_create_transient(ed);
     }
-    {
-        char hdr[64];
-        snprintf(hdr, sizeof(hdr), "%d live edicts", shown);
-        IG_TextUnformatted(hdr);    // (rendered before the list, in practice)
-    }
-    return;
 }
-// else: existing map-view code path, unchanged
 ```
 
-The existing category-filter checkboxes (`Hide:` triggers/lights/spawns/…), skill preview dropdown, and "visible only" toggle are **hidden** in live view — they're .map-authoring affordances and don't apply to runtime state. The live branch is intentionally minimal: list + select. Phase 2 can reintroduce filters keyed on live classnames if useful.
+Call site: at the start of the editor's per-frame work, before `draw_brush_list`. The natural home is wherever `Editor_PreRender` or `Editor_DrawUI` orchestrate the per-frame setup — exact spot pinned down during plan writing.
 
-Worldspawn (edict 0) is skipped. Free edicts are skipped. No sort — natural edict-number order matches typical Quake debugging muscle memory ("`edicts` console command" sorting).
+Cost: O(num_edicts) per frame in live view, mostly the `edict_is_already_bound` linear walk. For typical Quake maps with a few hundred edicts this is negligible compared to the renderer; can optimise if a profiler later flags it.
 
 ---
 
-## Render integration
+## Live presence on .map-authored ents
 
-One addition to the render pass in `render_wire.c`: after the existing selection-highlight pass, if `view_live` and `Scene_NumLiveSelected() > 0`, draw a bbox at each selected live edict's `v.absmin` / `v.absmax` using `EDIT_COLOR_SELECTED` (the existing selection-highlight colour).
+A `.map`-authored entity has `live_ent` set after the spawn flush (`map_io.c`). If the engine then `ED_Free`s that edict (a monster gets killed), the slot may later be reused for an unrelated runtime ent (a rocket). `detach_stale_live_ent` (already in `render_wire.c:1512`) handles the reuse case: if classnames mismatch, it clears `live_ent` on the authored entry. After that:
 
-```c
-if (view_live && Scene_NumLiveSelected() > 0) {
-    for (int i = 0; i < Scene_NumLiveSelected(); i++) {
-        int en = Scene_GetLiveSelected(i);
-        edict_t *ed = EDICT_NUM(en);
-        if (ed->free) continue;                  // edict freed since selection
-        const float *mn = ed->v.absmin;
-        const float *mx = ed->v.absmax;
-        if (mx[0] <= mn[0] && mx[1] <= mn[1] && mx[2] <= mn[2]) continue;
-        editor_draw_bbox(mn, mx, EDIT_COLOR_SELECTED);
-    }
-}
-```
+- The authored entry has `live_ent == NULL` → not visible in live view (no engine presence). Correct.
+- The rocket gets its own transient on the next eager sweep. Correct.
 
-If the user selects an edict and the engine then frees it (monster killed, projectile gone), the highlight silently disappears next frame — no special prune step needed; the `ed->free` check handles it. The selection list itself can hold the stale edict number; it gets cleared by the next view-mode toggle or new selection.
+`detach_stale_live_ent` currently runs inside `Editor_PickAt`. Phase 1 moves the call into the eager sweep too, so live-view filtering sees an accurate `live_ent` even without picking activity. (Detail to land in the plan.)
+
+---
+
+## Selection on view-mode toggle
+
+When `editor_view_mode` changes, the current selection may contain entries that are now hidden. Clearing all selection is the simplest behaviour and matches the user's mental model (the two worlds are distinct):
+
+- Wherever the view-mode cvar is observed for the flip (editor.c's `Editor_PreRender` checks `editor_view_mode.value` each frame already), compare against a static `s_last_view_mode`; if it changed, call `Scene_SelectionClear()`.
+- Also call `Scene_ClearActiveFace()`.
+
+No new API needed.
 
 ---
 
@@ -139,34 +151,20 @@ If the user selects an edict and the engine then frees it (monster killed, proje
 
 | File | Change |
 |---|---|
-| `sdlquake/engine/editor/edit_scene.h` | Declare `Scene_LiveSelection*` API |
-| `sdlquake/engine/editor/edit_scene.c` (or wherever Scene_SelectionAdd lives) | Implement live-selection list + accessors |
-| `sdlquake/engine/editor/editor_ui.c` | Branch `draw_brush_list` on view mode; new live branch |
-| `sdlquake/engine/editor/render_wire.c` | Add live-selection bbox highlight pass |
-| `sdlquake/engine/editor/editor.c` | Clear inactive selection list on `editor_view_mode` change |
+| `sdlquake/engine/editor/render_wire.c` | New `Editor_MaterialiseLiveTransients`; expose internal helpers as needed; move `detach_stale_live_ent` call out of `Editor_PickAt`'s exclusive path. |
+| `sdlquake/engine/editor/editor_internal.h` (or `editor.h`) | Declare `Editor_MaterialiseLiveTransients`. |
+| `sdlquake/engine/editor/editor_ui.c` | `draw_brush_list` uses `brush_list_visible`; header count text updated for live view. |
+| `sdlquake/engine/editor/editor.c` | Per-frame view-mode-change detector clears selection. Call `Editor_MaterialiseLiveTransients` once per frame. |
 
-No `engine_api_t` ABI changes — `sv.edicts`, `PR_GetString`, and `EDICT_NUM` are already accessible to editor code through the engine_src headers.
+No `engine_api_t` ABI changes. No new public APIs in `edit_scene.h`.
 
 ---
 
 ## Bug: runtime ents missing classname
 
-The current `draw_brush_list` (line 606+ in `editor_ui.c`) iterates `edit_scene.entities[]`. Runtime-spawned edicts (projectiles, gibs, dropped items) have no `edit_entity_t`, so they never appear in the panel and never display a classname.
+Before Phase 1: runtime ents only show in the brushes list after being picked in the 3D viewport (which creates a transient with classname populated). Pure rendering or list display does not trigger transient creation, so runtime ents are missing from the panel entirely.
 
-Phase 1 resolves this by iterating `sv.edicts` directly in live view and pulling `v.classname` via `PR_GetString`. No separate code change is needed — it falls out of the architecture.
-
----
-
-## Open questions resolved during brainstorming
-
-- **Q: Should "live" filter to runtime-spawned ents only, or all alive edicts?**
-  A: All currently alive edicts. Includes .map-spawned monsters that have moved and runtime-spawned ents.
-
-- **Q: In live view, what should you be able to do?**
-  A: Phase 1: select and inspect. Phase 2: translate, rotate, edit KVs.
-
-- **Q: One spec or split into phases?**
-  A: Split. This spec is Phase 1. Phase 2 (picker + gizmo + render-of-edits) is a separate spec.
+After Phase 1: eager materialisation creates transients for all alive runtime edicts each frame. `find_or_create_transient` calls `Entity_SetKV("classname", ed->v.classname ? ed->v.classname : "(runtime)")` so every transient has a non-empty classname when the panel iterates `edit_scene.entities[]`.
 
 ---
 
@@ -174,9 +172,26 @@ Phase 1 resolves this by iterating `sv.edicts` directly in live view and pulling
 
 No test suite. Verification via running the editor:
 
-- Load e1m1, open editor, switch to live view → list shows all e1m1 edicts with classnames.
-- Fire a rocket → new row appears with `[N] missile` (or whatever the QC classname is).
-- Click a row → bbox highlight draws around the live edict's position.
-- Shoot the rocket into a wall → row disappears, highlight disappears.
-- Switch to map view → list reverts to .map authored ents; live highlight goes away; live selection was cleared by the toggle.
-- Switch back to live → list re-iterates sv.edicts; .map selection was cleared by the toggle; live selection starts empty.
+- Load `e1m1`, open editor, switch to live view → brushes panel shows worldspawn + every alive monster/item with classnames.
+- Switch to map view → panel shows the same `.map`-authored set, no transients.
+- In live view, fire a rocket → a row appears for the missile (whatever the QC classname is) with no `.map` selection ambiguity.
+- Shoot the rocket into a wall → row disappears next frame (reap).
+- Kill an authored monster → its row disappears from the live panel (engine presence lost) but is still in the map panel.
+- Toggle view mode while something is selected → selection clears.
+- Verify no perf regression in live view at typical map sizes (e1m1 ≈ ~250 edicts).
+
+---
+
+## Open questions resolved during brainstorming
+
+- **Q: What's the live source — runtime-spawned only, or all alive edicts?**
+  A: All currently alive edicts.
+
+- **Q: In live view, what can you do?**
+  A: Phase 1: see and select. Phase 2: gizmo + KV edit.
+
+- **Q: One spec or split?**
+  A: Split. This is Phase 1.
+
+- **Q: Add a parallel live-selection model, or reuse existing transient infrastructure?**
+  A: Reuse transients. The picker already wraps runtime edicts in `edit_entity_t`; eager materialisation in live view makes them universally visible without duplicating selection state.
