@@ -50,7 +50,7 @@ static const char *ai_state_name(int s) {
 static void draw_ai(void)
 {
     if (!imgui_ai_panel_open) return;
-    IG_SetNextWindowSize(420, 600, IG_Cond_Once);
+    IG_SetNextWindowSize(420, 420, IG_Cond_Once);
     IG_SetNextWindowPos(10, 80, IG_Cond_Once);
     if (!IG_Begin("AI", &imgui_ai_panel_open, IG_WF_None)) { IG_End(); return; }
 
@@ -136,8 +136,8 @@ static void draw_cvars(void)
     char value_buf[128];
     char id_buf[144];
 
-    IG_SetNextWindowSize(700, 480, IG_Cond_Once);
-    IG_SetNextWindowPos(200, 10, IG_Cond_Once);
+    IG_SetNextWindowSize(500, 490, IG_Cond_Once);
+    IG_SetNextWindowPos(440, 10, IG_Cond_Once);
     if (!IG_Begin("Cvars", NULL, IG_WF_None)) { IG_End(); return; }
 
     IG_SetNextItemWidth(200);
@@ -200,8 +200,8 @@ static void draw_console(void)
     static char input_buf[256];
     static int  reclaim_focus = 0;
 
-    IG_SetNextWindowSize(600, 300, IG_Cond_Once);
-    IG_SetNextWindowPos(10, 500, IG_Cond_Once);
+    IG_SetNextWindowSize(1260, 280, IG_Cond_Once);
+    IG_SetNextWindowPos(10, 510, IG_Cond_Once);
     if (!IG_Begin("Console", NULL, IG_WF_None)) { IG_End(); return; }
 
     /* Checkbox pinned above the scroll region. */
@@ -252,8 +252,8 @@ static void draw_entities(void)
     char buf[64];
     int n = ImguiSupport_GetNumEdicts();
 
-    IG_SetNextWindowSize(480, 280, IG_Cond_Once);
-    IG_SetNextWindowPos(10, 200, IG_Cond_Once);
+    IG_SetNextWindowSize(310, 490, IG_Cond_Once);
+    IG_SetNextWindowPos(950, 10, IG_Cond_Once);
     if (!IG_Begin("Entities", NULL, IG_WF_None)) { IG_End(); return; }
 
     snprintf(buf, sizeof(buf), "%d edicts", n);
