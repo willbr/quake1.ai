@@ -59,10 +59,14 @@ static SDL_Window   *sdl_window   = NULL;
 static SDL_Renderer *sdl_renderer = NULL;
 static SDL_Texture  *sdl_texture  = NULL;
 
-static int vid_scale_active = 3;               // scale actually applied; set in VID_Init
+static int vid_scale_active = 3;               // render scale actually applied
 static cvar_t vid_scale = {"vid_scale", "0", true}; // 0=auto, 1-4=explicit; archived
 
+static int vid_window_scale_active = 3;        // window-size scale actually applied
+static cvar_t vid_window_scale = {"vid_window_scale", "0", true};
+
 #define VID_NUM_SCALES 4
+#define VID_MENU_ITEMS (VID_NUM_SCALES * 2)
 static const int    vid_scale_factors[VID_NUM_SCALES] = {1, 2, 3, 4};
 static const char  *vid_scale_labels[VID_NUM_SCALES]  = {
     "1x  320x200",
@@ -70,7 +74,8 @@ static const char  *vid_scale_labels[VID_NUM_SCALES]  = {
     "3x  960x600",
     "4x  1280x800"
 };
-static int vid_menu_cursor = 0; // index into vid_scale_factors; set in VID_Init
+// 0-3: render-resolution rows, 4-7: window-size rows.
+static int vid_menu_cursor = 0;
 
 #define VID_WIDTH  320
 #define VID_HEIGHT 200
@@ -152,7 +157,6 @@ static void VID_ApplyScale(int scale)
 
     SDL_SetRenderLogicalPresentation(sdl_renderer, new_w, new_h,
         SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
-    SDL_SetWindowSize(sdl_window, new_w, new_h);
 
     vid_render_w = new_w;
     vid_render_h = new_h;
@@ -176,6 +180,11 @@ static void VID_ApplyScale(int scale)
     D_InitCaches((byte *)d_pzbuffer + zbuf_bytes, cache_bytes);
 }
 
+static void VID_ApplyWindowScale(int scale)
+{
+    SDL_SetWindowSize(sdl_window, VID_WIDTH * scale, VID_HEIGHT * scale);
+}
+
 // ---------------------------------------------------------------------------
 // Video Options menu
 // ---------------------------------------------------------------------------
@@ -185,15 +194,28 @@ static void VID_MenuDraw(void)
     qpic_t *p = Draw_CachePic("gfx/vidmodes.lmp");
     M_DrawPic((320 - p->width) / 2, 4, p);
 
-    int base_y = 40;
+    M_Print(64, 40, "Render Resolution");
+    int render_y = 56;
     for (int i = 0; i < VID_NUM_SCALES; i++)
     {
         if (vid_scale_factors[i] == vid_scale_active)
-            M_PrintWhite(64, base_y + i * 16, (char *)vid_scale_labels[i]);
+            M_PrintWhite(80, render_y + i * 8, (char *)vid_scale_labels[i]);
         else
-            M_Print(64, base_y + i * 16, (char *)vid_scale_labels[i]);
+            M_Print(80, render_y + i * 8, (char *)vid_scale_labels[i]);
         if (vid_menu_cursor == i)
-            M_DrawCharacter(56, base_y + i * 16, 12 + ((int)(realtime * 4) & 1));
+            M_DrawCharacter(72, render_y + i * 8, 12 + ((int)(realtime * 4) & 1));
+    }
+
+    M_Print(64, 100, "Window Size");
+    int window_y = 116;
+    for (int i = 0; i < VID_NUM_SCALES; i++)
+    {
+        if (vid_scale_factors[i] == vid_window_scale_active)
+            M_PrintWhite(80, window_y + i * 8, (char *)vid_scale_labels[i]);
+        else
+            M_Print(80, window_y + i * 8, (char *)vid_scale_labels[i]);
+        if (vid_menu_cursor == VID_NUM_SCALES + i)
+            M_DrawCharacter(72, window_y + i * 8, 12 + ((int)(realtime * 4) & 1));
     }
 }
 
@@ -207,23 +229,31 @@ static void VID_MenuKey(int key)
 
     case K_UPARROW:
         S_LocalSound("misc/menu1.wav");
-        vid_menu_cursor = (vid_menu_cursor - 1 + VID_NUM_SCALES) % VID_NUM_SCALES;
+        vid_menu_cursor = (vid_menu_cursor - 1 + VID_MENU_ITEMS) % VID_MENU_ITEMS;
         break;
 
     case K_DOWNARROW:
         S_LocalSound("misc/menu1.wav");
-        vid_menu_cursor = (vid_menu_cursor + 1) % VID_NUM_SCALES;
+        vid_menu_cursor = (vid_menu_cursor + 1) % VID_MENU_ITEMS;
         break;
 
     case K_ENTER:
     case K_SPACE:
+        if (vid_menu_cursor < VID_NUM_SCALES)
         {
             int new_scale = vid_scale_factors[vid_menu_cursor];
             vid_scale_active = new_scale;
             Cvar_SetValue("vid_scale", (float)new_scale);
             VID_ApplyScale(new_scale);
-            S_LocalSound("misc/menu2.wav");
         }
+        else
+        {
+            int new_scale = vid_scale_factors[vid_menu_cursor - VID_NUM_SCALES];
+            vid_window_scale_active = new_scale;
+            Cvar_SetValue("vid_window_scale", (float)new_scale);
+            VID_ApplyWindowScale(new_scale);
+        }
+        S_LocalSound("misc/menu2.wav");
         break;
 
     default:
@@ -240,36 +270,39 @@ extern qboolean sys_headless;
 void VID_Init(unsigned char *palette)
 {
     Cvar_RegisterVariable(&vid_scale);
+    Cvar_RegisterVariable(&vid_window_scale);
 
     if (!sys_headless)
     {
-        // Determine window scale: explicit cvar or auto-detect
-        int scale;
-        int req = (int)vid_scale.value;
-        if (req >= 1 && req <= 4)
+        // Auto-detect the largest integer scale that fits the desktop; used
+        // as fallback for both render and window when their cvars are unset.
+        int auto_scale = 3;
         {
-            scale = req;
-        }
-        else
-        {
-            scale = 3; // fallback
             SDL_DisplayID display = SDL_GetPrimaryDisplay();
             SDL_Rect usable;
             if (SDL_GetDisplayUsableBounds(display, &usable))
             {
                 int sx = usable.w / VID_WIDTH;
                 int sy = usable.h / VID_HEIGHT;
-                scale = sx < sy ? sx : sy;
-                if (scale < 1) scale = 1;
-                if (scale > 4) scale = 4;
+                auto_scale = sx < sy ? sx : sy;
+                if (auto_scale < 1) auto_scale = 1;
+                if (auto_scale > 4) auto_scale = 4;
             }
         }
-        vid_scale_active = scale;
-        vid_render_w     = VID_WIDTH  * scale;
-        vid_render_h     = VID_HEIGHT * scale;
+
+        int render_req = (int)vid_scale.value;
+        int render_scale = (render_req >= 1 && render_req <= 4) ? render_req : auto_scale;
+
+        int window_req = (int)vid_window_scale.value;
+        int window_scale = (window_req >= 1 && window_req <= 4) ? window_req : auto_scale;
+
+        vid_scale_active        = render_scale;
+        vid_window_scale_active = window_scale;
+        vid_render_w            = VID_WIDTH  * render_scale;
+        vid_render_h            = VID_HEIGHT * render_scale;
 
         sdl_window = SDL_CreateWindow("quake1.ai",
-            vid_render_w, vid_render_h,
+            VID_WIDTH * window_scale, VID_HEIGHT * window_scale,
             SDL_WINDOW_RESIZABLE);
         if (!sdl_window)
             Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
