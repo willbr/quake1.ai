@@ -264,6 +264,18 @@ static void draw_toolbar(void)
     }
     IG_SameLine(0, -1);
     {
+        // Navmesh debug overlay. Drives sim_nav_debug, which the game
+        // DLL registers; lines only appear while the sim is ticking.
+        int on = Cvar_VariableValue("sim_nav_debug") != 0.0f;
+        if (IG_Checkbox("navmesh", &on))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "sim_nav_debug %d\n", on ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
         // Face mode: clicks set the active face on the singly-selected
         // brush instead of replacing the brush selection. Active face
         // gates the inspector's alignment widgets and gets a white
