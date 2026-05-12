@@ -102,6 +102,41 @@ char		m_return_reason [32];
 
 void M_ConfigureNetSubsystem(void);
 
+// Menu drawing uses a 320x200 logical coordinate system that we nearest-
+// neighbor scale up so the menu fills proportionally more of the screen as
+// the render resolution increases. Scale of 1 reproduces the original layout.
+static int M_Scale (void)
+{
+	int s = vid.height / 200;
+	return s < 1 ? 1 : s;
+}
+
+static void M_BlitScaled (int dx, int dy, int sw, int sh, byte *source, qboolean trans)
+{
+	int s = M_Scale();
+	int xoff = (vid.width - 320 * s) / 2;
+	int x0 = dx * s + xoff;
+	int y0 = dy * s;
+	byte *dest = (byte *)vid.buffer + y0 * vid.rowbytes + x0;
+	for (int v = 0; v < sh; v++)
+	{
+		byte *row = dest + v * s * vid.rowbytes;
+		for (int u = 0; u < sw; u++)
+		{
+			byte c = source[v * sw + u];
+			if (trans && c == TRANSPARENT_COLOR)
+				continue;
+			byte *p = row + u * s;
+			for (int yy = 0; yy < s; yy++)
+			{
+				for (int xx = 0; xx < s; xx++)
+					p[xx] = c;
+				p += vid.rowbytes;
+			}
+		}
+	}
+}
+
 /*
 ================
 M_DrawCharacter
@@ -111,7 +146,34 @@ Draws one solid graphics character
 */
 void M_DrawCharacter (int cx, int line, int num)
 {
-	Draw_Character ( cx + ((vid.width - 320)>>1), line, num);
+	extern byte *draw_chars;
+	num &= 255;
+	int row = num >> 4;
+	int col = num & 15;
+	byte *source = draw_chars + (row << 10) + (col << 3);
+	int s = M_Scale();
+	int xoff = (vid.width - 320 * s) / 2;
+	int x0 = cx * s + xoff;
+	int y0 = line * s;
+	byte *dest = (byte *)vid.conbuffer + y0 * vid.conrowbytes + x0;
+	for (int v = 0; v < 8; v++)
+	{
+		byte *row_dst = dest + v * s * vid.conrowbytes;
+		byte *src_row = source + v * 128;
+		for (int u = 0; u < 8; u++)
+		{
+			byte c = src_row[u];
+			if (!c)
+				continue;
+			byte *p = row_dst + u * s;
+			for (int yy = 0; yy < s; yy++)
+			{
+				for (int xx = 0; xx < s; xx++)
+					p[xx] = c;
+				p += vid.conrowbytes;
+			}
+		}
+	}
 }
 
 void M_Print (int cx, int cy, char *str)
@@ -136,12 +198,12 @@ void M_PrintWhite (int cx, int cy, char *str)
 
 void M_DrawTransPic (int x, int y, qpic_t *pic)
 {
-	Draw_TransPic (x + ((vid.width - 320)>>1), y, pic);
+	M_BlitScaled (x, y, pic->width, pic->height, pic->data, true);
 }
 
 void M_DrawPic (int x, int y, qpic_t *pic)
 {
-	Draw_Pic (x + ((vid.width - 320)>>1), y, pic);
+	M_BlitScaled (x, y, pic->width, pic->height, pic->data, false);
 }
 
 byte identityTable[256];
@@ -174,7 +236,30 @@ void M_BuildTranslationTable(int top, int bottom)
 
 void M_DrawTransPicTranslate (int x, int y, qpic_t *pic)
 {
-	Draw_TransPicTranslate (x + ((vid.width - 320)>>1), y, pic, translationTable);
+	int s = M_Scale();
+	int xoff = (vid.width - 320 * s) / 2;
+	int x0 = x * s + xoff;
+	int y0 = y * s;
+	byte *source = pic->data;
+	byte *dest = (byte *)vid.buffer + y0 * vid.rowbytes + x0;
+	for (int v = 0; v < pic->height; v++)
+	{
+		byte *row_dst = dest + v * s * vid.rowbytes;
+		for (int u = 0; u < pic->width; u++)
+		{
+			byte c = source[v * pic->width + u];
+			if (c == TRANSPARENT_COLOR)
+				continue;
+			c = translationTable[c];
+			byte *p = row_dst + u * s;
+			for (int yy = 0; yy < s; yy++)
+			{
+				for (int xx = 0; xx < s; xx++)
+					p[xx] = c;
+				p += vid.rowbytes;
+			}
+		}
+	}
 }
 
 
