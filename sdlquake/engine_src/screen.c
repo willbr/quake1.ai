@@ -49,6 +49,8 @@ qpic_t		*scr_turtle;
 int			scr_fullupdate;
 
 int			clearconsole;
+
+static int Scr_Scale (void);
 int			clearnotify;
 
 viddef_t	vid;				// global video state
@@ -117,10 +119,52 @@ void SCR_EraseCenterString (void)
 	if (scr_center_lines <= 4)
 		y = vid.height*0.35;
 	else
-		y = 48;
+		y = 48 * Scr_Scale();
 
 	scr_copytop = 1;
-	Draw_TileClear (0, y,vid.width, 8*scr_erase_lines);
+	Draw_TileClear (0, y, vid.width, 8 * Scr_Scale() * scr_erase_lines);
+}
+
+// On-screen text overlays (centerprint, notify dialog) use a 320x200 logical
+// font cell that we nearest-neighbor scale up so messages keep their
+// proportional size at every render resolution.
+static int Scr_Scale (void)
+{
+	int s = vid.height / 200;
+	return s < 1 ? 1 : s;
+}
+
+static void Scr_DrawCharScaled (int x, int y, int num, int s)
+{
+	extern byte *draw_chars;
+	num &= 255;
+	if (y + 8*s <= 0 || y >= vid.height)
+		return;
+	int row = num >> 4;
+	int col = num & 15;
+	byte *source = draw_chars + (row << 10) + (col << 3);
+	for (int v = 0; v < 8; v++)
+	{
+		byte *src_row = source + v * 128;
+		for (int yy = 0; yy < s; yy++)
+		{
+			int sy = y + v*s + yy;
+			if (sy < 0)
+				continue;
+			if (sy >= vid.height)
+				return;
+			byte *p = (byte *)vid.conbuffer + sy * vid.conrowbytes + x;
+			for (int u = 0; u < 8; u++)
+			{
+				byte c = src_row[u];
+				if (!c)
+					continue;
+				byte *pp = p + u * s;
+				for (int xx = 0; xx < s; xx++)
+					pp[xx] = c;
+			}
+		}
+	}
 }
 
 void SCR_DrawCenterString (void)
@@ -130,6 +174,7 @@ void SCR_DrawCenterString (void)
 	int		j;
 	int		x, y;
 	int		remaining;
+	int		s = Scr_Scale();
 
 // the finale prints the characters one at a time
 	if (cl.intermission)
@@ -143,23 +188,23 @@ void SCR_DrawCenterString (void)
 	if (scr_center_lines <= 4)
 		y = vid.height*0.35;
 	else
-		y = 48;
+		y = 48 * s;
 
-	do	
+	do
 	{
 	// scan the width of the line
 		for (l=0 ; l<40 ; l++)
 			if (start[l] == '\n' || !start[l])
 				break;
-		x = (vid.width - l*8)/2;
-		for (j=0 ; j<l ; j++, x+=8)
+		x = (vid.width - l*8*s) / 2;
+		for (j=0 ; j<l ; j++, x += 8*s)
 		{
-			Draw_Character (x, y, start[j]);	
+			Scr_DrawCharScaled (x, y, start[j], s);
 			if (!remaining--)
 				return;
 		}
-			
-		y += 8;
+
+		y += 8*s;
 
 		while (*start && *start != '\n')
 			start++;
@@ -724,22 +769,23 @@ void SCR_DrawNotifyString (void)
 	int		l;
 	int		j;
 	int		x, y;
+	int		s = Scr_Scale();
 
 	start = scr_notifystring;
 
 	y = vid.height*0.35;
 
-	do	
+	do
 	{
 	// scan the width of the line
 		for (l=0 ; l<40 ; l++)
 			if (start[l] == '\n' || !start[l])
 				break;
-		x = (vid.width - l*8)/2;
-		for (j=0 ; j<l ; j++, x+=8)
-			Draw_Character (x, y, start[j]);	
-			
-		y += 8;
+		x = (vid.width - l*8*s) / 2;
+		for (j=0 ; j<l ; j++, x += 8*s)
+			Scr_DrawCharScaled (x, y, start[j], s);
+
+		y += 8*s;
 
 		while (*start && *start != '\n')
 			start++;
