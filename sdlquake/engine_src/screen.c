@@ -470,16 +470,20 @@ void SCR_SetUpToDrawConsole (void)
 	else
 		scr_conlines = 0;				// none visible
 	
+	// scr_conspeed is calibrated for the original 200-line screen; scale so
+	// the animation takes the same wall-clock time at any render height.
+	float con_step = scr_conspeed.value * host_frametime * (vid.height / 200.0f);
+
 	if (scr_conlines < scr_con_current)
 	{
-		scr_con_current -= scr_conspeed.value*host_frametime;
+		scr_con_current -= con_step;
 		if (scr_conlines > scr_con_current)
 			scr_con_current = scr_conlines;
 
 	}
 	else if (scr_conlines > scr_con_current)
 	{
-		scr_con_current += scr_conspeed.value*host_frametime;
+		scr_con_current += con_step;
 		if (scr_conlines < scr_con_current)
 			scr_con_current = scr_conlines;
 	}
