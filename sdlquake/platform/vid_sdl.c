@@ -65,6 +65,10 @@ static cvar_t vid_scale = {"vid_scale", "0", true}; // 0=auto, 1-4=explicit; arc
 static int vid_window_scale_active = 3;        // window-size scale actually applied
 static cvar_t vid_window_scale = {"vid_window_scale", "0", true};
 
+// Last-saved window position; -1 = unset, let the OS pick.
+static cvar_t vid_window_x = {"vid_window_x", "-1", true};
+static cvar_t vid_window_y = {"vid_window_y", "-1", true};
+
 #define VID_NUM_SCALES 4
 #define VID_MENU_ITEMS (VID_NUM_SCALES * 2)
 static const int    vid_scale_factors[VID_NUM_SCALES] = {1, 2, 3, 4};
@@ -185,6 +189,14 @@ static void VID_ApplyWindowScale(int scale)
     SDL_SetWindowSize(sdl_window, VID_WIDTH * scale, VID_HEIGHT * scale);
 }
 
+// Called from in_sdl.c on SDL_EVENT_WINDOW_MOVED so the next launch can put
+// the window back where the user left it.
+void VID_OnWindowMoved(int x, int y)
+{
+    if ((int)vid_window_x.value != x) Cvar_SetValue("vid_window_x", (float)x);
+    if ((int)vid_window_y.value != y) Cvar_SetValue("vid_window_y", (float)y);
+}
+
 // ---------------------------------------------------------------------------
 // Video Options menu
 // ---------------------------------------------------------------------------
@@ -271,6 +283,8 @@ void VID_Init(unsigned char *palette)
 {
     Cvar_RegisterVariable(&vid_scale);
     Cvar_RegisterVariable(&vid_window_scale);
+    Cvar_RegisterVariable(&vid_window_x);
+    Cvar_RegisterVariable(&vid_window_y);
 
     if (!sys_headless)
     {
@@ -306,6 +320,14 @@ void VID_Init(unsigned char *palette)
             SDL_WINDOW_RESIZABLE);
         if (!sdl_window)
             Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
+
+        // Restore last-known window position, if one was saved.
+        {
+            int wx = (int)vid_window_x.value;
+            int wy = (int)vid_window_y.value;
+            if (wx >= 0 && wy >= 0)
+                SDL_SetWindowPosition(sdl_window, wx, wy);
+        }
 
         sdl_renderer = SDL_CreateRenderer(sdl_window, NULL);
         if (!sdl_renderer)
