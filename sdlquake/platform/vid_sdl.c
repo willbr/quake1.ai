@@ -294,12 +294,40 @@ static void VID_MenuKey(int key)
 
 extern qboolean sys_headless;
 
+// Pre-load the video cvars we need at window-creation time. The engine
+// doesn't exec config.cfg until after VID_Init returns (via deferred
+// Cbuf_Execute in the first _Host_Frame), so without this the cvars still
+// hold their registration defaults when we call SDL_CreateWindow.
+static void vid_preload_cvars_from_config(void)
+{
+    extern char com_gamedir[MAX_OSPATH];
+    char path[MAX_OSPATH + 16];
+    FILE *f;
+    char line[256];
+
+    snprintf(path, sizeof path, "%s/config.cfg", com_gamedir);
+    f = fopen(path, "r");
+    if (!f) return;
+
+    while (fgets(line, sizeof line, f))
+    {
+        float v;
+        if      (sscanf(line, "vid_window_scale \"%f", &v) == 1) Cvar_SetValue("vid_window_scale", v);
+        else if (sscanf(line, "vid_window_x \"%f", &v) == 1)     Cvar_SetValue("vid_window_x", v);
+        else if (sscanf(line, "vid_window_y \"%f", &v) == 1)     Cvar_SetValue("vid_window_y", v);
+        else if (sscanf(line, "vid_scale \"%f", &v) == 1)        Cvar_SetValue("vid_scale", v);
+    }
+    fclose(f);
+}
+
 void VID_Init(unsigned char *palette)
 {
     Cvar_RegisterVariable(&vid_scale);
     Cvar_RegisterVariable(&vid_window_scale);
     Cvar_RegisterVariable(&vid_window_x);
     Cvar_RegisterVariable(&vid_window_y);
+
+    vid_preload_cvars_from_config();
 
     if (!sys_headless)
     {
@@ -330,15 +358,26 @@ void VID_Init(unsigned char *palette)
         vid_render_w            = VID_WIDTH  * render_scale;
         vid_render_h            = VID_HEIGHT * render_scale;
 
-        sdl_window = SDL_CreateWindow("quake1.ai",
-            VID_WIDTH * window_scale, VID_HEIGHT * window_scale,
-            SDL_WINDOW_RESIZABLE);
-        if (!sdl_window)
-            Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
-
-        // Window position can't be restored here — config.cfg hasn't been
-        // exec'd yet, so vid_window_x/y still hold their registration
-        // defaults. VID_Update applies them after the first frame.
+        {
+            int wx = (int)vid_window_x.value;
+            int wy = (int)vid_window_y.value;
+            int ww = VID_WIDTH  * window_scale;
+            int wh = VID_HEIGHT * window_scale;
+            SDL_PropertiesID props = SDL_CreateProperties();
+            SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "quake1.ai");
+            SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, ww);
+            SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, wh);
+            SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
+            if (wx >= 0 && wy >= 0)
+            {
+                SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, wx);
+                SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, wy);
+            }
+            sdl_window = SDL_CreateWindowWithProperties(props);
+            SDL_DestroyProperties(props);
+            if (!sdl_window)
+                Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
+        }
 
         sdl_renderer = SDL_CreateRenderer(sdl_window, NULL);
         if (!sdl_renderer)
@@ -424,19 +463,6 @@ void VID_Shutdown(void)
 void VID_Update(vrect_t *rects)
 {
     if (!sdl_texture) return;
-
-    // Apply saved window position once, after config.cfg has had a chance to
-    // run (which happens on the first Cbuf_Execute, before the first frame
-    // reaches us here).
-    static qboolean restored_pos = false;
-    if (!restored_pos)
-    {
-        restored_pos = true;
-        int wx = (int)vid_window_x.value;
-        int wy = (int)vid_window_y.value;
-        if (wx >= 0 && wy >= 0)
-            SDL_SetWindowPosition(sdl_window, wx, wy);
-    }
 
     RPaths_Draw();
     RBBox_Draw();
