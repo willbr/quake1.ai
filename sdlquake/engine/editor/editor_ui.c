@@ -132,6 +132,14 @@ static int world_tex_index(const char *name)
     return -1;
 }
 
+// Reflow condition for the three docked panels (toolbar, brushes, inspector).
+// IG_Cond_Always on the first frame and on any frame where the display size
+// just changed, so they snap to the formula-based layout that hugs the window
+// edges. IG_Cond_FirstUseEver otherwise so a manual drag/resize the user did
+// since the last reflow stays where they put it. Refreshed once per frame at
+// the top of Editor_DrawUI.
+static int s_dock_cond = IG_Cond_FirstUseEver;
+
 static void draw_toolbar(void)
 {
     extern cvar_t editor_render_style;
@@ -164,8 +172,8 @@ static void draw_toolbar(void)
     float disp_w = 1280, disp_h = 720;
     IG_GetDisplaySize(&disp_w, &disp_h);
 
-    IG_SetNextWindowPos((float)UI_PAD, (float)UI_PAD, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize(disp_w - 2 * UI_PAD, (float)UI_TOOLBAR_H, IG_Cond_FirstUseEver);
+    IG_SetNextWindowPos((float)UI_PAD, (float)UI_PAD, s_dock_cond);
+    IG_SetNextWindowSize(disp_w - 2 * UI_PAD, (float)UI_TOOLBAR_H, s_dock_cond);
     if (!IG_Begin("Editor", NULL, IG_WF_None)) { IG_End(); return; }
 
     if (IG_Button("Save"))         Cbuf_AddText("editor_save\n");
@@ -570,8 +578,8 @@ static void draw_brush_list(void)
     float y    = (float)(UI_PAD + UI_TOOLBAR_H + UI_PAD);
     float h    = disp_h - y - UI_PAD;
 
-    IG_SetNextWindowPos((float)UI_PAD, y, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize((float)UI_LEFT_W, h, IG_Cond_FirstUseEver);
+    IG_SetNextWindowPos((float)UI_PAD, y, s_dock_cond);
+    IG_SetNextWindowSize((float)UI_LEFT_W, h, s_dock_cond);
     if (!IG_Begin("Brushes", NULL, IG_WF_None)) { IG_End(); return; }
 
     {
@@ -1567,8 +1575,8 @@ static void draw_inspector(void)
     float h = disp_h - y - UI_PAD;
     float x = disp_w - UI_RIGHT_W - UI_PAD;
 
-    IG_SetNextWindowPos(x, y, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize((float)UI_RIGHT_W, h, IG_Cond_FirstUseEver);
+    IG_SetNextWindowPos(x, y, s_dock_cond);
+    IG_SetNextWindowSize((float)UI_RIGHT_W, h, s_dock_cond);
     if (!IG_Begin("Inspector", NULL, IG_WF_None)) { IG_End(); return; }
 
     e = Scene_GetSelectedEntity();
@@ -1810,6 +1818,26 @@ static void draw_inspector(void)
 void Editor_DrawUI(void)
 {
     if (!Editor_IsOpen()) return;
+
+    // Refresh the dock-panel reflow condition for this frame: Always on the
+    // first frame ever and on any frame where the SDL window size changed,
+    // FirstUseEver otherwise so manual drags between resizes stay put.
+    {
+        static float s_last_w = -1, s_last_h = -1;
+        float disp_w = 1280, disp_h = 720;
+        IG_GetDisplaySize(&disp_w, &disp_h);
+        if (disp_w != s_last_w || disp_h != s_last_h)
+        {
+            s_last_w = disp_w;
+            s_last_h = disp_h;
+            s_dock_cond = IG_Cond_Always;
+        }
+        else
+        {
+            s_dock_cond = IG_Cond_FirstUseEver;
+        }
+    }
+
     draw_toolbar();
     draw_brush_list();
     draw_inspector();
