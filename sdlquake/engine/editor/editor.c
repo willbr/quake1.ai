@@ -1445,6 +1445,24 @@ void Editor_PreRender(void)
 
     if (!s_open) return;
 
+    // View-mode change: a selection from the previous mode may now refer
+    // to a hidden entry (a transient that's about to be filtered out, or
+    // a dead .map ent that just lost its live_ent). Drop selection so the
+    // gizmo doesn't anchor on something the user can't see.
+    {
+        static int s_last_view_mode = -1;
+        int vm = (int)editor_view_mode.value;
+        if (s_last_view_mode != vm)
+        {
+            if (s_last_view_mode != -1)        // first frame: don't clear
+            {
+                Scene_SelectionClear();
+                Scene_ClearActiveFace();
+            }
+            s_last_view_mode = vm;
+        }
+    }
+
     // Mid-session map change while the editor is open (e.g. trigger_changelevel
     // tripped, or the user typed `map foo` in the console) — refresh before
     // the gizmo / selection touch any stale state.
