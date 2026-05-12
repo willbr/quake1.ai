@@ -486,27 +486,30 @@ static void Con_DrawCharScaled (int x, int y, int num, int s)
 {
 	extern byte *draw_chars;
 	num &= 255;
+	if (y + 8*s <= 0 || y >= vid.height)
+		return;
 	int row = num >> 4;
 	int col = num & 15;
 	byte *source = draw_chars + (row << 10) + (col << 3);
-	if (y + 8*s <= 0)
-		return;
-	byte *dest = (byte *)vid.conbuffer + y * vid.conrowbytes + x;
 	for (int v = 0; v < 8; v++)
 	{
-		byte *row_dst = dest + v * s * vid.conrowbytes;
 		byte *src_row = source + v * 128;
-		for (int u = 0; u < 8; u++)
+		for (int yy = 0; yy < s; yy++)
 		{
-			byte c = src_row[u];
-			if (!c)
+			int sy = y + v*s + yy;
+			if (sy < 0)
 				continue;
-			byte *p = row_dst + u * s;
-			for (int yy = 0; yy < s; yy++)
+			if (sy >= vid.height)
+				return;
+			byte *p = (byte *)vid.conbuffer + sy * vid.conrowbytes + x;
+			for (int u = 0; u < 8; u++)
 			{
+				byte c = src_row[u];
+				if (!c)
+					continue;
+				byte *pp = p + u * s;
 				for (int xx = 0; xx < s; xx++)
-					p[xx] = c;
-				p += vid.conrowbytes;
+					pp[xx] = c;
 			}
 		}
 	}
