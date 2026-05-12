@@ -167,10 +167,16 @@ void Editor_MaterialiseLiveTransients(void);
 // bbox color and filter checkboxes.
 int  Editor_EntityCategory(const struct edit_entity_s *e);
 
+// editor_ui.c — like Editor_EntityHidden, but applies ONLY the user's
+// category/skill/visible-only filters. The Brushes panel uses this so
+// metadata edicts (info_player_*, info_intermission) show in live view
+// even though they have no visible model.
+int  Editor_EntityHiddenByCategory(int e_idx);
+
 // editor_ui.c — 1 if the user filtered out this entity's category in the
 // Brushes panel checkboxes, or it's outside the camera frustum / behind a
-// wall when "visible only" is on. Render / pick / list paths skip filtered
-// entities.
+// wall when "visible only" is on, or live-view rendering would draw
+// nothing for it. Render / pick paths use this.
 int  Editor_EntityHidden  (int e_idx);
 
 // editor_ui.c — sync per-session UI state from cvars on each editor open.

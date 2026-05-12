@@ -494,7 +494,7 @@ static int entity_hidden_by_skill(const edit_entity_t *e)
     return 0;
 }
 
-int Editor_EntityHidden(int e_idx)
+int Editor_EntityHiddenByCategory(int e_idx)
 {
     int cat;
     edit_entity_t *e;
@@ -504,6 +504,15 @@ int Editor_EntityHidden(int e_idx)
     if (cat > 0 && cat < EDIT_CAT_COUNT && s_hide_cat[cat]) return 1;
     if (s_visible_only && !Editor_EntityInView(e_idx)) return 1;
     if (entity_hidden_by_skill(e)) return 1;
+    return 0;
+}
+
+int Editor_EntityHidden(int e_idx)
+{
+    edit_entity_t *e;
+    if (Editor_EntityHiddenByCategory(e_idx)) return 1;
+    if (e_idx < 0 || e_idx >= edit_scene.numentities) return 0;
+    e = &edit_scene.entities[e_idx];
 
     // Live mode: hide entities the engine isn't visibly rendering. Once
     // realised as a live edict the engine's model decision is the truth —
@@ -528,6 +537,29 @@ int Editor_EntityHidden(int e_idx)
     return 0;
 }
 
+// Combine category-filter visibility with view-mode visibility. The
+// Brushes panel uses this rather than calling Editor_EntityHidden
+// directly, so metadata edicts (info_player_*, info_intermission)
+// still show in live view's list — they're alive engine edicts even
+// though Editor_EntityHidden filters them from render/pick.
+static int brush_list_visible(int e_idx)
+{
+    extern cvar_t editor_view_mode;
+    int view_live = (int)editor_view_mode.value == 0;
+    edit_entity_t *e = &edit_scene.entities[e_idx];
+
+    if (Editor_EntityHiddenByCategory(e_idx)) return 0;
+
+    if (view_live)
+    {
+        if (e->live_ent && !e->live_ent->free) return 1;
+        if (e->live_static) return 1;
+        return 0;
+    }
+    if (e->transient) return 0;
+    return 1;
+}
+
 static void draw_brush_list(void)
 {
     int i, j;
@@ -542,14 +574,22 @@ static void draw_brush_list(void)
     IG_SetNextWindowSize((float)UI_LEFT_W, h, IG_Cond_FirstUseEver);
     if (!IG_Begin("Brushes", NULL, IG_WF_None)) { IG_End(); return; }
 
-    snprintf(buf, sizeof(buf), "%d entities, ? brushes",
-             edit_scene.numentities);
     {
-        int total = 0;
+        extern cvar_t editor_view_mode;
+        int view_live = (int)editor_view_mode.value == 0;
+        int visible_ents = 0, total_brushes = 0;
         for (i = 0; i < edit_scene.numentities; i++)
-            total += edit_scene.entities[i].numbrushes;
-        snprintf(buf, sizeof(buf), "%d entities, %d brushes",
-                 edit_scene.numentities, total);
+        {
+            if (!brush_list_visible(i)) continue;
+            visible_ents++;
+            total_brushes += edit_scene.entities[i].numbrushes;
+        }
+        if (view_live)
+            snprintf(buf, sizeof(buf), "%d live edicts, %d brushes",
+                     visible_ents, total_brushes);
+        else
+            snprintf(buf, sizeof(buf), "%d entities, %d brushes",
+                     visible_ents, total_brushes);
     }
     IG_TextUnformatted(buf);
     IG_Separator();
@@ -607,7 +647,7 @@ static void draw_brush_list(void)
     {
         edit_entity_t *e = &edit_scene.entities[i];
         const char *cls = "(no classname)";
-        if (Editor_EntityHidden(i)) continue;
+        if (!brush_list_visible(i)) continue;
         if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
 
         IG_PushID_Int(i);
