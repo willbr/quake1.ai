@@ -110,31 +110,39 @@ Only called by R_DisplayTime
 */
 void R_LineGraph (int x, int y, int h)
 {
-	int		i;
-	byte	*dest;
-	int		s;
+	int		i, xx, yy;
+	int		cap = (int)r_graphheight.value;
+	int		s = vid.height / 200;
+	if (s < 1) s = 1;
 
-// FIXME: should be disabled on no-buffer adapters, or should be in the driver
-	
 	x += r_refdef.vrect.x;
 	y += r_refdef.vrect.y;
-	
-	dest = vid.buffer + vid.rowbytes*y + x;
-	
-	s = r_graphheight.value;
-	
-	if (h>s)
-		h = s;
-		
-	for (i=0 ; i<h ; i++, dest -= vid.rowbytes*2)
+
+	if (h > cap)
+		h = cap;
+
+	// Each step is a 2*s-tall band: bottom s rows white if below sample,
+	// top s rows always grey. Column is s pixels wide.
+	for (i = 0; i < cap; i++)
 	{
-		dest[0] = 0xff;
-		*(dest-vid.rowbytes) = 0x30;
-	}
-	for ( ; i<s ; i++, dest -= vid.rowbytes*2)
-	{
-		dest[0] = 0x30;
-		*(dest-vid.rowbytes) = 0x30;
+		byte col_lo = (i < h) ? 0xff : 0x30;
+		int row_lo = y - i * 2 * s;
+		int row_hi = row_lo - s;
+		for (yy = 0; yy < s; yy++)
+		{
+			int sy_lo = row_lo - yy;
+			int sy_hi = row_hi - yy;
+			if (sy_lo >= 0)
+			{
+				byte *d = vid.buffer + sy_lo * vid.rowbytes + x;
+				for (xx = 0; xx < s; xx++) d[xx] = col_lo;
+			}
+			if (sy_hi >= 0)
+			{
+				byte *d = vid.buffer + sy_hi * vid.rowbytes + x;
+				for (xx = 0; xx < s; xx++) d[xx] = 0x30;
+			}
+		}
 	}
 }
 
@@ -166,21 +174,25 @@ void R_TimeGraph (void)
 	r_timings[timex] = a;
 	a = timex;
 
-	if (r_refdef.vrect.width <= MAX_TIMINGS)
-		x = r_refdef.vrect.width-1;
-	else
-		x = r_refdef.vrect.width -
-				(r_refdef.vrect.width - MAX_TIMINGS)/2;
+	{
+		int s = vid.height / 200;
+		if (s < 1) s = 1;
+		int span = MAX_TIMINGS * s;
+		if (r_refdef.vrect.width <= span)
+			x = r_refdef.vrect.width - s;
+		else
+			x = r_refdef.vrect.width - (r_refdef.vrect.width - span)/2;
 	do
 	{
-		R_LineGraph (x, r_refdef.vrect.height-2, r_timings[a]);
-		if (x==0)
+		R_LineGraph (x, r_refdef.vrect.height - 2*s, r_timings[a]);
+		if (x < s)
 			break;		// screen too small to hold entire thing
-		x--;
+		x -= s;
 		a--;
 		if (a == -1)
 			a = MAX_TIMINGS-1;
 	} while (a != timex);
+	}
 
 	timex = (timex+1)%MAX_TIMINGS;
 }
