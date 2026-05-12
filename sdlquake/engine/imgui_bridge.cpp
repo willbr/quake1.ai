@@ -18,6 +18,25 @@ void IG_SetIniFilename(const char *p)   { ImGui::GetIO().IniFilename = p; }
 float IG_GetFramerate(void)             { return ImGui::GetIO().Framerate; }
 int   IG_WantCaptureMouse(void)         { return ImGui::GetIO().WantCaptureMouse ? 1 : 0; }
 int   IG_WantCaptureKeyboard(void)      { return ImGui::GetIO().WantCaptureKeyboard ? 1 : 0; }
+
+// Drop any stuck key / mouse state. Called when the layer closes — the
+// previous open period may have forwarded a KEY_DOWN whose KEY_UP couldn't
+// be forwarded (because the close happened in the same frame), leaving
+// ImGui thinking the key is held. Subsequent Shortcut(Esc, Repeat) etc.
+// would then auto-fire on the next time the layer opens, deactivating any
+// just-clicked InputText.
+//
+// We have to clear BOTH the processed state (ClearInputKeys/Mouse) AND the
+// pending event queue (ClearEventsQueue) — the Esc DOWN that triggered the
+// close is sitting in the queue and would otherwise be applied on the next
+// NewFrame after the layer reopens.
+void IG_ClearInputs(void)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.ClearEventsQueue();
+    io.ClearInputKeys();
+    io.ClearInputMouse();
+}
 int   IG_IsMouseDoubleClicked(int button){ return ImGui::IsMouseDoubleClicked((ImGuiMouseButton)button) ? 1 : 0; }
 void  IG_GetDisplaySize(float *w, float *h)
 {

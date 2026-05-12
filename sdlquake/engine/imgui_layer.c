@@ -329,6 +329,16 @@ void ImguiLayer_Toggle(void)
     if (!s_inited) return;
     s_open = !s_open;
     SDL_SetWindowRelativeMouseMode(s_window, !s_open);
+
+    // Closing: drop any key/mouse state ImGui is tracking. We gate event
+    // forwarding on s_open, so a KEY_DOWN that arrived while the layer was
+    // open may have no corresponding KEY_UP forwarded if the layer closes
+    // before the release event lands. Without this, the next time the
+    // layer reopens, ImGui still thinks the key is held — and Shortcut()
+    // checks with Repeat (e.g. is_cancel = Shortcut(Esc, Repeat) inside
+    // InputText) auto-fire and immediately deactivate any freshly-clicked
+    // text widget. Specifically hit when closing the editor with Esc.
+    if (!s_open) IG_ClearInputs();
 }
 
 int ImguiLayer_IsOpen(void)    { return s_open; }

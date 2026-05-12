@@ -77,6 +77,11 @@ void  IG_SetIniFilename(const char *path);   // pass NULL to disable .ini
 float IG_GetFramerate(void);
 int   IG_WantCaptureMouse(void);    // 1 if ImGui currently owns the mouse
 int   IG_WantCaptureKeyboard(void); // 1 if a text widget is focused
+
+// Release all currently-tracked keyboard / mouse state. Used when closing
+// the dev overlay so a KEY_UP that was dropped while the overlay was
+// closing doesn't leave the corresponding key "stuck" inside ImGui's view.
+void IG_ClearInputs(void);
 int   IG_IsMouseDoubleClicked(int button); // 1 if button was just double-clicked
 void  IG_GetDisplaySize(float *w, float *h);
 
