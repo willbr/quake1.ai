@@ -127,11 +127,16 @@ static float point_to_ray(const vec3_t p, const vec3_t r_org, const vec3_t r_dir
 
 // World-length-per-pixel at distance `dist` from camera, so the arrow stays
 // roughly fixed-size on screen. xscale is in pixels-per-radian-ish.
+// Scale the result by vid.height/200 so the gizmo's apparent size in the
+// window stays constant as the render resolution grows — otherwise a 30-
+// framebuffer-pixel arrow shrinks to a quarter of its 1x size at 4x render.
 static float pixel_to_world(float dist)
 {
     extern float xscale;
+    int s = vid.height / 200;
+    if (s < 1) s = 1;
     if (xscale < 1e-3f) return 1.0f;
-    return dist / xscale;
+    return dist * s / xscale;
 }
 
 static void axis_endpoint(const vec3_t centroid, int axis, float arrow_len, vec3_t out)
