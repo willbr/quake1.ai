@@ -165,7 +165,9 @@ void R_TimeGraph (void)
 	
 	r_time2 = Sys_FloatTime ();
 
-	a = (r_time2-r_time1)/0.01;
+	// 1 ms per bar unit — original 0.01 (10 ms) buckets always rounded to 0
+	// on modern hardware where a single render finishes in 1-5 ms.
+	a = (r_time2-r_time1)/0.001;
 //a = fabs(mouse_y * 0.05);
 //a = (int)((r_refdef.vieworg[2] + 1024)/1)%(int)r_graphheight.value;
 //a = fabs(velocity[0])/20;
