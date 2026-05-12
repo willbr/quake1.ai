@@ -64,6 +64,33 @@ static int sdl_scancode_to_quake(SDL_Scancode sc)
     }
 }
 
+// Compute the desired relative-mouse state from current UI state:
+// capture only while the game owns input — release for menu/console/chat,
+// for the dev overlay (unless editor look-mode is active), and on focus loss.
+static qboolean IN_WantRelativeMouse(void)
+{
+    if (!mouse_active)
+        return false;
+    if (key_dest != key_game)
+        return false;
+    if (ImguiLayer_IsOpen() && !Editor_LookmodeActive())
+        return false;
+    return true;
+}
+
+static void IN_SyncMouseMode(void)
+{
+    extern SDL_Window *VID_GetWindow(void);
+    static int last_applied = -1;
+    qboolean want = IN_WantRelativeMouse();
+    if (last_applied == (int)want)
+        return;
+    SDL_Window *win = VID_GetWindow();
+    if (win)
+        SDL_SetWindowRelativeMouseMode(win, want);
+    last_applied = (int)want;
+}
+
 // ---------------------------------------------------------------------------
 // Event processing (called from Sys_SendKeyEvents each frame)
 // ---------------------------------------------------------------------------
@@ -260,30 +287,16 @@ void IN_ProcessEvents(void)
             break;
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
-        {
-            // Restore relative-mouse mode based on what UI is currently up.
-            // If the dev overlay or editor is open with no active look-mode,
-            // we want the cursor visible so the user can click panels /
-            // gizmos. Otherwise (normal play, or editor in look-mode) we
-            // capture the cursor for mouse-look.
-            SDL_Window *win = VID_GetWindow();
-            qboolean want_relative = true;
-            if (ImguiLayer_IsOpen() && !Editor_LookmodeActive())
-                want_relative = false;
-            if (win) SDL_SetWindowRelativeMouseMode(win, want_relative);
             mouse_active = true;
             break;
-        }
         case SDL_EVENT_WINDOW_FOCUS_LOST:
-        {
-            SDL_Window *win = VID_GetWindow();
-            if (win) SDL_SetWindowRelativeMouseMode(win, false);
             mouse_active = false;
             mouse_dx = mouse_dy = 0;
             break;
         }
-        }
     }
+
+    IN_SyncMouseMode();
 }
 
 // ---------------------------------------------------------------------------
