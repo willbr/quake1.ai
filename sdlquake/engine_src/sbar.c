@@ -252,6 +252,54 @@ void Sbar_Init (void)
 
 // drawing routines are relative to the status bar location
 
+// HUD drawing uses a 320x200 logical coordinate system anchored to the bottom
+// of the screen. Nearest-neighbor scale by vid.height/200 so the bar fills
+// proportionally more of the screen at 2x/3x/4x render resolutions.
+int Sbar_Scale (void)
+{
+	int s = vid.height / 200;
+	return s < 1 ? 1 : s;
+}
+
+static int Sbar_XOff (int s)
+{
+	if (cl.gametype == GAME_DEATHMATCH)
+		return 0;
+	return (vid.width - 320 * s) / 2;
+}
+
+static int Sbar_YOff (int s)
+{
+	return vid.height - SBAR_HEIGHT * s;
+}
+
+static void Sbar_BlitScaled (int dx, int dy, int sw, int sh, byte *source, qboolean trans)
+{
+	int s = Sbar_Scale();
+	int x0 = dx * s + Sbar_XOff(s);
+	int y0 = dy * s + Sbar_YOff(s);
+	if (y0 < 0)
+		y0 = 0;
+	byte *dest = (byte *)vid.buffer + y0 * vid.rowbytes + x0;
+	for (int v = 0; v < sh; v++)
+	{
+		byte *row = dest + v * s * vid.rowbytes;
+		for (int u = 0; u < sw; u++)
+		{
+			byte c = source[v * sw + u];
+			if (trans && c == TRANSPARENT_COLOR)
+				continue;
+			byte *p = row + u * s;
+			for (int yy = 0; yy < s; yy++)
+			{
+				for (int xx = 0; xx < s; xx++)
+					p[xx] = c;
+				p += vid.rowbytes;
+			}
+		}
+	}
+}
+
 /*
 =============
 Sbar_DrawPic
@@ -259,10 +307,7 @@ Sbar_DrawPic
 */
 void Sbar_DrawPic (int x, int y, qpic_t *pic)
 {
-	if (cl.gametype == GAME_DEATHMATCH)
-		Draw_Pic (x /* + ((vid.width - 320)>>1)*/, y + (vid.height-SBAR_HEIGHT), pic);
-	else
-		Draw_Pic (x + ((vid.width - 320)>>1), y + (vid.height-SBAR_HEIGHT), pic);
+	Sbar_BlitScaled (x, y, pic->width, pic->height, pic->data, false);
 }
 
 /*
@@ -272,10 +317,7 @@ Sbar_DrawTransPic
 */
 void Sbar_DrawTransPic (int x, int y, qpic_t *pic)
 {
-	if (cl.gametype == GAME_DEATHMATCH)
-		Draw_TransPic (x /*+ ((vid.width - 320)>>1)*/, y + (vid.height-SBAR_HEIGHT), pic);
-	else
-		Draw_TransPic (x + ((vid.width - 320)>>1), y + (vid.height-SBAR_HEIGHT), pic);
+	Sbar_BlitScaled (x, y, pic->width, pic->height, pic->data, true);
 }
 
 /*
@@ -287,10 +329,35 @@ Draws one solid graphics character
 */
 void Sbar_DrawCharacter (int x, int y, int num)
 {
-	if (cl.gametype == GAME_DEATHMATCH)
-		Draw_Character ( x /*+ ((vid.width - 320)>>1) */ + 4 , y + vid.height-SBAR_HEIGHT, num);
-	else
-		Draw_Character ( x + ((vid.width - 320)>>1) + 4 , y + vid.height-SBAR_HEIGHT, num);
+	extern byte *draw_chars;
+	num &= 255;
+	int s = Sbar_Scale();
+	int row = num >> 4;
+	int col = num & 15;
+	byte *source = draw_chars + (row << 10) + (col << 3);
+	int x0 = (x + 4) * s + Sbar_XOff(s);
+	int y0 = y * s + Sbar_YOff(s);
+	if (y0 < 0)
+		y0 = 0;
+	byte *dest = (byte *)vid.conbuffer + y0 * vid.conrowbytes + x0;
+	for (int v = 0; v < 8; v++)
+	{
+		byte *row_dst = dest + v * s * vid.conrowbytes;
+		byte *src_row = source + v * 128;
+		for (int u = 0; u < 8; u++)
+		{
+			byte c = src_row[u];
+			if (!c)
+				continue;
+			byte *p = row_dst + u * s;
+			for (int yy = 0; yy < s; yy++)
+			{
+				for (int xx = 0; xx < s; xx++)
+					p[xx] = c;
+				p += vid.conrowbytes;
+			}
+		}
+	}
 }
 
 /*
@@ -300,10 +367,20 @@ Sbar_DrawString
 */
 void Sbar_DrawString (int x, int y, char *str)
 {
-	if (cl.gametype == GAME_DEATHMATCH)
-		Draw_String (x /*+ ((vid.width - 320)>>1)*/, y+ vid.height-SBAR_HEIGHT, str);
-	else
-		Draw_String (x + ((vid.width - 320)>>1), y+ vid.height-SBAR_HEIGHT, str);
+	while (*str)
+	{
+		Sbar_DrawCharacter (x, y, *str);
+		str++;
+		x += 8;
+	}
+}
+
+// Logical-coordinate fill anchored to the HUD bar (used by deathmatch
+// scoreboard color swatches). x,y,w,h are in 320x200 logical space.
+static void Sbar_Fill (int x, int y, int w, int h, int color)
+{
+	int s = Sbar_Scale();
+	Draw_Fill (x * s + Sbar_XOff(s), y * s + Sbar_YOff(s), w * s, h * s, color);
 }
 
 /*
@@ -521,8 +598,8 @@ void Sbar_DrawScoreboard (void)
 		top = Sbar_ColorForMap (top);
 		bottom = Sbar_ColorForMap (bottom);
 
-		Draw_Fill ( x*8+10 + ((vid.width - 320)>>1), y + vid.height - SBAR_HEIGHT, 28, 4, top);
-		Draw_Fill ( x*8+10 + ((vid.width - 320)>>1), y+4 + vid.height - SBAR_HEIGHT, 28, 4, bottom);
+		Sbar_Fill (x*8+10, y,   28, 4, top);
+		Sbar_Fill (x*8+10, y+4, 28, 4, bottom);
 
 	// draw text
 		for (j=0 ; j<20 ; j++)
@@ -777,12 +854,12 @@ void Sbar_DrawFrags (void)
 // draw the text
 	l = scoreboardlines <= 4 ? scoreboardlines : 4;
 
-	x = 23;
-	if (cl.gametype == GAME_DEATHMATCH)
-		xofs = 0;
-	else
-		xofs = (vid.width - 320)>>1;
-	y = vid.height - SBAR_HEIGHT - 23;
+	{
+		int s = Sbar_Scale();
+		x = 23;
+		xofs = Sbar_XOff(s);
+		y = vid.height - SBAR_HEIGHT*s - 23*s;
+	}
 
 	for (i=0 ; i<l ; i++)
 	{
@@ -797,8 +874,11 @@ void Sbar_DrawFrags (void)
 		top = Sbar_ColorForMap (top);
 		bottom = Sbar_ColorForMap (bottom);
 
-		Draw_Fill (xofs + x*8 + 10, y, 28, 4, top);
-		Draw_Fill (xofs + x*8 + 10, y+4, 28, 3, bottom);
+		{
+			int sc = Sbar_Scale();
+			Draw_Fill (xofs + (x*8 + 10)*sc, y,         28*sc, 4*sc, top);
+			Draw_Fill (xofs + (x*8 + 10)*sc, y + 4*sc,  28*sc, 3*sc, bottom);
+		}
 
 	// draw number
 		f = s->frags;
@@ -848,14 +928,13 @@ void Sbar_DrawFace (void)
 		top = Sbar_ColorForMap (top);
 		bottom = Sbar_ColorForMap (bottom);
 
-		if (cl.gametype == GAME_DEATHMATCH)
-			xofs = 113;
-		else
-			xofs = ((vid.width - 320)>>1) + 113;
-
-		Sbar_DrawPic (112, 0, rsb_teambord);
-		Draw_Fill (xofs, vid.height-SBAR_HEIGHT+3, 22, 9, top);
-		Draw_Fill (xofs, vid.height-SBAR_HEIGHT+12, 22, 9, bottom);
+		{
+			int sc = Sbar_Scale();
+			xofs = (cl.gametype == GAME_DEATHMATCH ? 0 : (vid.width - 320*sc)/2) + 113*sc;
+			Sbar_DrawPic (112, 0, rsb_teambord);
+			Draw_Fill (xofs, vid.height - SBAR_HEIGHT*sc + 3*sc,  22*sc, 9*sc, top);
+			Draw_Fill (xofs, vid.height - SBAR_HEIGHT*sc + 12*sc, 22*sc, 9*sc, bottom);
+		}
 
 		// draw number
 		f = s->frags;

@@ -258,12 +258,16 @@ static void SCR_CalcRefdef (void)
 	else
 		size = scr_viewsize.value;
 
-	if (size >= 120)
-		sb_lines = 0;		// no status bar at all
-	else if (size >= 110)
-		sb_lines = 24;		// no inventory
-	else
-		sb_lines = 24+16+8;
+	{
+		extern int Sbar_Scale (void);
+		int sc = Sbar_Scale();
+		if (size >= 120)
+			sb_lines = 0;		// no status bar at all
+		else if (size >= 110)
+			sb_lines = 24 * sc;	// no inventory
+		else
+			sb_lines = (24+16+8) * sc;
+	}
 
 // these calculations mirror those in R_Init() for r_refdef, but take no
 // account of water warping
