@@ -1450,6 +1450,12 @@ void Editor_PreRender(void)
     // the gizmo / selection touch any stale state.
     editor_check_map_change();
 
+    // Live view: wrap every alive runtime edict in a transient
+    // edit_entity_t so the Brushes panel + selection paths can see it.
+    // No-op in map view. Must run before any pass that iterates
+    // edit_scene.entities[].
+    Editor_MaterialiseLiveTransients();
+
     // Push fake editor preview entities into cl_visedicts so the engine
     // renders alias + brushmodel previews via its normal entity pipeline.
     // Must happen after CL_RelinkEntities reset the list (which is in
