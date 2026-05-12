@@ -110,7 +110,7 @@ Only called by R_DisplayTime
 */
 void R_LineGraph (int x, int y, int h)
 {
-	int		i, xx, yy;
+	int		i, xx;
 	int		cap = (int)r_graphheight.value;
 	int		s = vid.height / 200;
 	if (s < 1) s = 1;
@@ -118,31 +118,19 @@ void R_LineGraph (int x, int y, int h)
 	x += r_refdef.vrect.x;
 	y += r_refdef.vrect.y;
 
-	if (h > cap)
-		h = cap;
+	if (h < 0)   h = 0;
+	if (h > cap) h = cap;
 
-	// Each step is a 2*s-tall band: bottom s rows white if below sample,
-	// top s rows always grey. Column is s pixels wide.
-	for (i = 0; i < cap; i++)
+	// Solid white bar from the baseline up to h*s rows; dark fill above
+	// (so the chart area stays visible at h=0). Column is s pixels wide.
+	for (i = 0; i < cap * s; i++)
 	{
-		byte col_lo = (i < h) ? 0xff : 0x30;
-		int row_lo = y - i * 2 * s;
-		int row_hi = row_lo - s;
-		for (yy = 0; yy < s; yy++)
-		{
-			int sy_lo = row_lo - yy;
-			int sy_hi = row_hi - yy;
-			if (sy_lo >= 0)
-			{
-				byte *d = vid.buffer + sy_lo * vid.rowbytes + x;
-				for (xx = 0; xx < s; xx++) d[xx] = col_lo;
-			}
-			if (sy_hi >= 0)
-			{
-				byte *d = vid.buffer + sy_hi * vid.rowbytes + x;
-				for (xx = 0; xx < s; xx++) d[xx] = 0x30;
-			}
-		}
+		byte col = (i < h * s) ? 0xff : 0x30;
+		int sy = y - i;
+		if (sy < 0)
+			break;
+		byte *d = vid.buffer + sy * vid.rowbytes + x;
+		for (xx = 0; xx < s; xx++) d[xx] = col;
 	}
 }
 
