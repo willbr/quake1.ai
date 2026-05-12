@@ -1524,14 +1524,23 @@ static void detach_stale_live_ent(edit_entity_t *e)
 // Reap transient entries whose underlying live edict went away (rocket
 // detonated, gib settled and freed, …). Without this, every picked-then-
 // gone projectile leaves a permanent ghost at its last classname/origin.
-// Reaped in-place; later passes are still walking edit_scene.numentities
-// so we shift down. Selection refs into the moved range get cleared by
-// Scene_DeleteSelected style logic — but easier: we never reap an entry
-// that's currently selected, the user will lose interest soon enough.
+// Reaped in-place; we build a compaction map and rewrite selection +
+// active-face entity refs through it so a transient disappearing earlier
+// in the array doesn't leave the gizmo pointing at the wrong entry. Skip
+// entries that are currently selected — keeps the user's context across
+// a churn frame so they don't lose a selected rocket mid-edit.
 static void reap_dead_transients(void)
 {
-    int i, w;
-    for (i = 0, w = 0; i < edit_scene.numentities; i++)
+    int i, w, k, dst;
+    int old_count = edit_scene.numentities;
+    int *new_idx;
+
+    if (old_count == 0) return;
+
+    new_idx = (int *)malloc((size_t)old_count * sizeof(int));
+    if (!new_idx) return;       // OOM: skip the reap pass rather than crash
+
+    for (i = 0, w = 0; i < old_count; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
         if (e->transient
@@ -1540,12 +1549,51 @@ static void reap_dead_transients(void)
         {
             // Free per-entity allocations; brushes never set on transients.
             free(e->kv);
+            new_idx[i] = -1;
             continue;
         }
+        new_idx[i] = w;
         if (w != i) edit_scene.entities[w] = *e;
         w++;
     }
     edit_scene.numentities = w;
+
+    // Rewrite selection entity refs through the compaction map. Selected
+    // transients are never reaped (the loop above's Scene_SelectionContains
+    // guard), so existing entries should always map to a valid new index —
+    // but drop anything that doesn't, defensively, so a future change to the
+    // guard rule can't leak a dangling index into the gizmo.
+    for (k = 0, dst = 0; k < edit_scene.num_selected; k++)
+    {
+        int e_old = edit_scene.selection[k].entity;
+        int e_new;
+        if (e_old < 0 || e_old >= old_count) continue;
+        e_new = new_idx[e_old];
+        if (e_new < 0) continue;
+        if (dst != k) edit_scene.selection[dst] = edit_scene.selection[k];
+        edit_scene.selection[dst].entity = e_new;
+        dst++;
+    }
+    edit_scene.num_selected = dst;
+
+    // Active face entity index — clear the trio if its entity got reaped,
+    // shift if it just moved.
+    if (edit_scene.active_face_ent >= 0 && edit_scene.active_face_ent < old_count)
+    {
+        int new_ent = new_idx[edit_scene.active_face_ent];
+        if (new_ent < 0)
+        {
+            edit_scene.active_face_ent   = -1;
+            edit_scene.active_face_brush = -1;
+            edit_scene.active_face_plane = -1;
+        }
+        else
+        {
+            edit_scene.active_face_ent = new_ent;
+        }
+    }
+
+    free(new_idx);
 }
 
 // Look up an existing transient for `ed`; if none, append one. Returns the
