@@ -329,8 +329,11 @@ void IN_Move(usercmd_t *cmd)
     extern void V_StopPitchDrift(void);
     extern cvar_t sensitivity, m_pitch, m_yaw;
 
-    if (!mouse_active)
+    if (!IN_WantRelativeMouse())
+    {
+        mouse_dx = mouse_dy = 0;
         return;
+    }
 
     // Keep nodrift=true every frame so V_DriftPitch never overrides mouse pitch,
     // including the re-trigger that fires after walking forward for v_centermove seconds.
