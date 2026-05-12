@@ -123,9 +123,11 @@ void R_LineGraph (int x, int y, int h)
 
 	// Solid white bar from the baseline up to h*s rows; dark fill above
 	// (so the chart area stays visible at h=0). Column is s pixels wide.
+	// Quake palette: 0xfe = pure white, 0xff = brown (sky sentinel), 0x30
+	// = black. The original used 0xff/0x30 — a brown-on-black blob.
 	for (i = 0; i < cap * s; i++)
 	{
-		byte col = (i < h * s) ? 0xff : 0x30;
+		byte col = (i < h * s) ? 0xfe : 0x30;
 		int sy = y - i;
 		if (sy < 0)
 			break;
