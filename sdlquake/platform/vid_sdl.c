@@ -68,6 +68,9 @@ static cvar_t vid_window_scale = {"vid_window_scale", "0", true};
 // Last-saved window position; -1 = unset, let the OS pick.
 static cvar_t vid_window_x = {"vid_window_x", "-1", true};
 static cvar_t vid_window_y = {"vid_window_y", "-1", true};
+// Last-saved window size; -1 = unset, derive from vid_window_scale.
+static cvar_t vid_window_w = {"vid_window_w", "-1", true};
+static cvar_t vid_window_h = {"vid_window_h", "-1", true};
 
 #define VID_NUM_SCALES 4
 // Cursor positions: 0-3 render scales, 4-7 window scales, 8 = save-position.
@@ -191,16 +194,19 @@ static void VID_ApplyWindowScale(int scale)
     SDL_SetWindowSize(sdl_window, VID_WIDTH * scale, VID_HEIGHT * scale);
 }
 
-// Capture the current SDL window position into the archived cvars so the
-// next launch can restore it. Invoked from the Video Options menu — no
-// autosave, so casual window dragging won't quietly overwrite a saved spot.
-static void VID_SaveWindowPos(void)
+// Capture the current SDL window position AND size into the archived cvars
+// so the next launch can restore it. Invoked from the Video Options menu —
+// no autosave, so casual dragging won't quietly overwrite saved values.
+static void VID_SaveWindow(void)
 {
-    int x = 0, y = 0;
+    int x = 0, y = 0, w = 0, h = 0;
     if (!sdl_window) return;
     SDL_GetWindowPosition(sdl_window, &x, &y);
+    SDL_GetWindowSize(sdl_window, &w, &h);
     Cvar_SetValue("vid_window_x", (float)x);
     Cvar_SetValue("vid_window_y", (float)y);
+    Cvar_SetValue("vid_window_w", (float)w);
+    Cvar_SetValue("vid_window_h", (float)h);
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +243,7 @@ static void VID_MenuDraw(void)
     }
 
     int save_y = 160;
-    M_Print(80, save_y, "Save Window Position");
+    M_Print(80, save_y, "Save Window Pos & Size");
     if (vid_menu_cursor == VID_MENU_SAVE_POS)
         M_DrawCharacter(72, save_y, 12 + ((int)(realtime * 4) & 1));
 }
@@ -278,7 +284,7 @@ static void VID_MenuKey(int key)
         }
         else
         {
-            VID_SaveWindowPos();
+            VID_SaveWindow();
         }
         S_LocalSound("misc/menu2.wav");
         break;
@@ -315,6 +321,8 @@ static void vid_preload_cvars_from_config(void)
         if      (sscanf(line, "vid_window_scale \"%f", &v) == 1) Cvar_SetValue("vid_window_scale", v);
         else if (sscanf(line, "vid_window_x \"%f", &v) == 1)     Cvar_SetValue("vid_window_x", v);
         else if (sscanf(line, "vid_window_y \"%f", &v) == 1)     Cvar_SetValue("vid_window_y", v);
+        else if (sscanf(line, "vid_window_w \"%f", &v) == 1)     Cvar_SetValue("vid_window_w", v);
+        else if (sscanf(line, "vid_window_h \"%f", &v) == 1)     Cvar_SetValue("vid_window_h", v);
         else if (sscanf(line, "vid_scale \"%f", &v) == 1)        Cvar_SetValue("vid_scale", v);
     }
     fclose(f);
@@ -326,6 +334,8 @@ void VID_Init(unsigned char *palette)
     Cvar_RegisterVariable(&vid_window_scale);
     Cvar_RegisterVariable(&vid_window_x);
     Cvar_RegisterVariable(&vid_window_y);
+    Cvar_RegisterVariable(&vid_window_w);
+    Cvar_RegisterVariable(&vid_window_h);
 
     vid_preload_cvars_from_config();
 
@@ -361,8 +371,10 @@ void VID_Init(unsigned char *palette)
         {
             int wx = (int)vid_window_x.value;
             int wy = (int)vid_window_y.value;
-            int ww = VID_WIDTH  * window_scale;
-            int wh = VID_HEIGHT * window_scale;
+            int saved_w = (int)vid_window_w.value;
+            int saved_h = (int)vid_window_h.value;
+            int ww = (saved_w >= 1) ? saved_w : VID_WIDTH  * window_scale;
+            int wh = (saved_h >= 1) ? saved_h : VID_HEIGHT * window_scale;
             SDL_PropertiesID props = SDL_CreateProperties();
             SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "quake1.ai");
             SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, ww);
