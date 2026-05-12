@@ -70,7 +70,9 @@ static cvar_t vid_window_x = {"vid_window_x", "-1", true};
 static cvar_t vid_window_y = {"vid_window_y", "-1", true};
 
 #define VID_NUM_SCALES 4
-#define VID_MENU_ITEMS (VID_NUM_SCALES * 2)
+// Cursor positions: 0-3 render scales, 4-7 window scales, 8 = save-position.
+#define VID_MENU_ITEMS (VID_NUM_SCALES * 2 + 1)
+#define VID_MENU_SAVE_POS (VID_NUM_SCALES * 2)
 static const int    vid_scale_factors[VID_NUM_SCALES] = {1, 2, 3, 4};
 static const char  *vid_scale_labels[VID_NUM_SCALES]  = {
     "1x  320x200",
@@ -189,12 +191,16 @@ static void VID_ApplyWindowScale(int scale)
     SDL_SetWindowSize(sdl_window, VID_WIDTH * scale, VID_HEIGHT * scale);
 }
 
-// Called from in_sdl.c on SDL_EVENT_WINDOW_MOVED so the next launch can put
-// the window back where the user left it.
-void VID_OnWindowMoved(int x, int y)
+// Capture the current SDL window position into the archived cvars so the
+// next launch can restore it. Invoked from the Video Options menu — no
+// autosave, so casual window dragging won't quietly overwrite a saved spot.
+static void VID_SaveWindowPos(void)
 {
-    if ((int)vid_window_x.value != x) Cvar_SetValue("vid_window_x", (float)x);
-    if ((int)vid_window_y.value != y) Cvar_SetValue("vid_window_y", (float)y);
+    int x = 0, y = 0;
+    if (!sdl_window) return;
+    SDL_GetWindowPosition(sdl_window, &x, &y);
+    Cvar_SetValue("vid_window_x", (float)x);
+    Cvar_SetValue("vid_window_y", (float)y);
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +235,11 @@ static void VID_MenuDraw(void)
         if (vid_menu_cursor == VID_NUM_SCALES + i)
             M_DrawCharacter(72, window_y + i * 8, 12 + ((int)(realtime * 4) & 1));
     }
+
+    int save_y = 160;
+    M_Print(80, save_y, "Save Window Position");
+    if (vid_menu_cursor == VID_MENU_SAVE_POS)
+        M_DrawCharacter(72, save_y, 12 + ((int)(realtime * 4) & 1));
 }
 
 static void VID_MenuKey(int key)
@@ -258,12 +269,16 @@ static void VID_MenuKey(int key)
             Cvar_SetValue("vid_scale", (float)new_scale);
             VID_ApplyScale(new_scale);
         }
-        else
+        else if (vid_menu_cursor < VID_MENU_SAVE_POS)
         {
             int new_scale = vid_scale_factors[vid_menu_cursor - VID_NUM_SCALES];
             vid_window_scale_active = new_scale;
             Cvar_SetValue("vid_window_scale", (float)new_scale);
             VID_ApplyWindowScale(new_scale);
+        }
+        else
+        {
+            VID_SaveWindowPos();
         }
         S_LocalSound("misc/menu2.wav");
         break;

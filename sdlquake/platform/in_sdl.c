@@ -293,12 +293,6 @@ void IN_ProcessEvents(void)
             mouse_active = false;
             mouse_dx = mouse_dy = 0;
             break;
-        case SDL_EVENT_WINDOW_MOVED:
-        {
-            extern void VID_OnWindowMoved(int x, int y);
-            VID_OnWindowMoved(ev.window.data1, ev.window.data2);
-            break;
-        }
         }
     }
 
