@@ -29,11 +29,14 @@ extern vec3_t r_origin;
 static int      s_drag_axis = -1;
 static int      s_drag_plane_idx = -1;
 static int      s_drag_rotate_axis = -1;
+static int      s_drag_planar_axis = -1;    // normal axis of 2D drag plane (0/1/2), -1 = inactive
 static float    s_drag_t_start;         // closest-t-on-drag-line at mouse down
 static float    s_drag_applied;         // sum of grid-snapped offsets applied so far
 static vec3_t   s_drag_origin;          // brush centroid (translate) / face centroid (resize) at mouse down
 static vec3_t   s_drag_dir;             // axis basis vec (translate) / face normal (resize)
 static float    s_drag_start_dist;      // plane.dist at drag start (face-resize only — for absolute snap)
+static vec3_t   s_drag_planar_hit;      // hit point on drag plane at mouse down
+static vec3_t   s_drag_planar_applied;  // snapped delta already applied per axis (planar drag)
 static vec3_t   s_rotate_pivot;         // selection centroid captured at rotate-drag start
 static float    s_rotate_prev_angle;    // last frame's mouse angle in radians, for incremental step rotation
 static float    s_rotate_total_raw;     // accumulated raw angle since drag-start (radians)
@@ -338,6 +341,60 @@ static byte face_axis_color(const vec3_t normal)
     return axis_colors[2];
 }
 
+static void apply_translate_delta(const vec3_t delta)
+{
+    int n_sel = Scene_NumSelected();
+    int k, e_idx, b_idx;
+    for (k = 0; k < n_sel; k++)
+    {
+        edit_entity_t *e;
+        if (!Scene_GetSelected(k, &e_idx, &b_idx)) continue;
+        if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
+        e = &edit_scene.entities[e_idx];
+        if (b_idx < 0)
+        {
+            Entity_TranslateOrigin(e, delta);
+            if (e->live_ent && !e->live_ent->free)
+            {
+                vec3_t o;
+                int en;
+                Entity_GetOrigin(e, o);
+                VectorCopy(o, e->live_ent->v.origin);
+                SV_LinkEdict(e->live_ent, false);
+                en = NUM_FOR_EDICT(e->live_ent);
+                if (en > 0 && en < cl.num_entities)
+                {
+                    entity_t *ce = &cl_entities[en];
+                    VectorCopy(o, ce->origin);
+                    VectorCopy(o, ce->msg_origins[0]);
+                    VectorCopy(o, ce->msg_origins[1]);
+                    VectorCopy(e->live_ent->v.angles, ce->angles);
+                    VectorCopy(e->live_ent->v.angles, ce->msg_angles[0]);
+                    VectorCopy(e->live_ent->v.angles, ce->msg_angles[1]);
+                    ce->msgtime   = cl.mtime[0];
+                    ce->forcelink = true;
+                }
+            }
+            else if (e->live_static)
+            {
+                vec3_t o;
+                Entity_GetOrigin(e, o);
+                R_RemoveEfrags(e->live_static);
+                VectorCopy(o, e->live_static->origin);
+                R_AddEfrags(e->live_static);
+            }
+        }
+        else
+        {
+            edit_brush_t *bs;
+            if (b_idx >= e->numbrushes) continue;
+            bs = &e->brushes[b_idx];
+            if (!bs->valid) continue;
+            Brush_Translate(bs, delta);
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Render
 // -----------------------------------------------------------------------------
@@ -559,6 +616,30 @@ void Editor_GizmoDraw(void)
             draw_rotation_ring(centroid, i, ring_r, col);
         }
     }
+
+    // Planar move handles — one square per axis pair, colored by the normal
+    // axis (the constrained direction). Positioned at 35% of arrow_len along
+    // each of the two free axes; side is 24% of arrow_len.
+    {
+        float pd = arrow_len * 0.35f;
+        float ph = arrow_len * 0.12f;
+        int n;
+        for (n = 0; n < 3; n++)
+        {
+            int u = (n + 1) % 3;
+            int v = (n + 2) % 3;
+            byte col = (s_drag_planar_axis == n) ? EDIT_COLOR_AXIS_HOT : axis_colors[n];
+            vec3_t c00, c10, c11, c01;
+            VectorCopy(centroid, c00); c00[u] += pd - ph; c00[v] += pd - ph;
+            VectorCopy(centroid, c10); c10[u] += pd + ph; c10[v] += pd - ph;
+            VectorCopy(centroid, c11); c11[u] += pd + ph; c11[v] += pd + ph;
+            VectorCopy(centroid, c01); c01[u] += pd - ph; c01[v] += pd + ph;
+            Editor_DrawLine3DOver(c00, c10, col);
+            Editor_DrawLine3DOver(c10, c11, col);
+            Editor_DrawLine3DOver(c11, c01, col);
+            Editor_DrawLine3DOver(c01, c00, col);
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -573,8 +654,8 @@ int Editor_GizmoMouseDown(float sx, float sy)
     vec3_t centroid;
     vec3_t r_org, r_dir;
     float dist, arrow_len, ring_r, pick_world;
-    int i, best_axis = -1, best_face = -1, best_ring_axis = -1;
-    float best_d_axis = 1e30f, best_d_face = 1e30f, best_d_ring = 1e30f;
+    int i, best_axis = -1, best_face = -1, best_ring_axis = -1, best_planar = -1;
+    float best_d_axis = 1e30f, best_d_face = 1e30f, best_d_ring = 1e30f, best_d_planar = 1e30f;
     int multi = Scene_NumSelected() > 1;
 
     if (multi)
@@ -663,7 +744,32 @@ int Editor_GizmoMouseDown(float sx, float sy)
         }
     }
 
-    // Pass 3: translate-axis arrows.
+    // Pass 3: planar handles. Intersect the click ray with each axis-aligned
+    // plane through the centroid; accept if the hit falls within the square.
+    {
+        float pd = arrow_len * 0.35f;
+        float ph = arrow_len * 0.12f;
+        for (i = 0; i < 3; i++)
+        {
+            vec3_t hit;
+            int u = (i + 1) % 3;
+            int v = (i + 2) % 3;
+            float du, dv, d;
+            if (!ray_vs_axis_plane(i, centroid, r_org, r_dir, hit)) continue;
+            du = hit[u] - (centroid[u] + pd);
+            dv = hit[v] - (centroid[v] + pd);
+            if (fabsf(du) > ph + pick_world) continue;
+            if (fabsf(dv) > ph + pick_world) continue;
+            d = sqrtf(du*du + dv*dv);
+            if (d < best_d_planar)
+            {
+                best_d_planar = d;
+                best_planar   = i;
+            }
+        }
+    }
+
+    // Pass 4: translate-axis arrows.
     for (i = 0; i < 3; i++)
     {
         vec3_t l_dir = {0,0,0};
@@ -739,6 +845,20 @@ int Editor_GizmoMouseDown(float sx, float sy)
         }
         return 1;
     }
+    if (best_planar >= 0)
+    {
+        History_Push("translate");
+        s_drag_axis        = -1;
+        s_drag_plane_idx   = -1;
+        s_drag_rotate_axis = -1;
+        s_drag_planar_axis = best_planar;
+        VectorCopy(centroid, s_drag_origin);
+        ray_vs_axis_plane(best_planar, centroid, r_org, r_dir, s_drag_planar_hit);
+        s_drag_planar_applied[0] = 0;
+        s_drag_planar_applied[1] = 0;
+        s_drag_planar_applied[2] = 0;
+        return 1;
+    }
     if (best_axis < 0) return 0;
 
     History_Push("translate");
@@ -773,7 +893,7 @@ void Editor_GizmoMouseMove(float sx, float sy)
     vec3_t r_org, r_dir, delta;
     float t_now, raw_offset, snapped_offset, step;
     int i;
-    if (s_drag_axis < 0 && s_drag_plane_idx < 0 && s_drag_rotate_axis < 0)
+    if (s_drag_axis < 0 && s_drag_plane_idx < 0 && s_drag_rotate_axis < 0 && s_drag_planar_axis < 0)
         return;
 
     Editor_ScreenToRay(sx, sy, r_org, r_dir);
@@ -859,13 +979,35 @@ ang_check:
         return;
     }
 
+    if (s_drag_planar_axis >= 0)
+    {
+        vec3_t hit;
+        int u = (s_drag_planar_axis + 1) % 3;
+        int v = (s_drag_planar_axis + 2) % 3;
+        float raw_u, raw_v, snap_u, snap_v, step_u, step_v;
+        if (!ray_vs_axis_plane(s_drag_planar_axis, s_drag_origin, r_org, r_dir, hit))
+            return;
+        raw_u  = hit[u] - s_drag_planar_hit[u];
+        raw_v  = hit[v] - s_drag_planar_hit[v];
+        snap_u = compute_snapped_offset(raw_u, s_drag_origin[u]);
+        snap_v = compute_snapped_offset(raw_v, s_drag_origin[v]);
+        step_u = snap_u - s_drag_planar_applied[u];
+        step_v = snap_v - s_drag_planar_applied[v];
+        if (step_u == 0.0f && step_v == 0.0f) return;
+        for (i = 0; i < 3; i++) delta[i] = 0;
+        delta[u] = step_u;
+        delta[v] = step_v;
+        s_drag_planar_applied[u] = snap_u;
+        s_drag_planar_applied[v] = snap_v;
+        apply_translate_delta(delta);
+        return;
+    }
+
     t_now = closest_t_line_ray(s_drag_origin, s_drag_dir, r_org, r_dir);
     raw_offset = t_now - s_drag_t_start;
 
     if (s_drag_plane_idx >= 0)
     {
-        // Face-resize. Brush-only: drag was started from a face handle and
-        // the gizmo guards face picks behind the primary-is-brush check.
         edit_brush_t *b = Scene_GetSelectedBrush();
         if (!b || !b->valid)
         {
@@ -880,88 +1022,13 @@ ang_check:
     }
     else
     {
-        // Axis translate. Absolute snap pins centroid axis coord to grid.
-        // Every selected ref moves by the same delta — brushes via
-        // Brush_Translate, point entities via Entity_TranslateOrigin.
-        int n_sel, k, e_idx, b_idx;
-        snapped_offset = compute_snapped_offset(raw_offset,
-                                                s_drag_origin[s_drag_axis]);
+        snapped_offset = compute_snapped_offset(raw_offset, s_drag_origin[s_drag_axis]);
         step = snapped_offset - s_drag_applied;
         if (step == 0.0f) return;
         for (i = 0; i < 3; i++) delta[i] = 0;
         delta[s_drag_axis] = step;
         s_drag_applied = snapped_offset;
-
-        n_sel = Scene_NumSelected();
-        for (k = 0; k < n_sel; k++)
-        {
-            edit_entity_t *e;
-            if (!Scene_GetSelected(k, &e_idx, &b_idx)) continue;
-            if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
-            e = &edit_scene.entities[e_idx];
-            if (b_idx < 0)
-            {
-                Entity_TranslateOrigin(e, delta);
-                // Push the new origin into the live edict so the engine
-                // renders it at the dragged position. Sim is paused while
-                // the gizmo is active (free-fly always pauses; fps mode
-                // gates LMB on lookmode-off which means RMB-up = paused),
-                // so we don't fight monster AI here.
-                if (e->live_ent && !e->live_ent->free)
-                {
-                    vec3_t o;
-                    int en;
-                    Entity_GetOrigin(e, o);
-                    VectorCopy(o, e->live_ent->v.origin);
-                    SV_LinkEdict(e->live_ent, false);
-
-                    // sv.edicts is the server's authoritative state; the
-                    // *renderer* uses cl_entities[], filled from network
-                    // entity-update messages. While the editor pauses sim
-                    // those messages don't fire, so without this poke the
-                    // gizmo drag would only show on the editor preview —
-                    // the engine render would lag behind until the editor
-                    // closed and a server frame finally networked the move.
-                    en = NUM_FOR_EDICT(e->live_ent);
-                    if (en > 0 && en < cl.num_entities)
-                    {
-                        entity_t *ce = &cl_entities[en];
-                        VectorCopy(o, ce->origin);
-                        VectorCopy(o, ce->msg_origins[0]);
-                        VectorCopy(o, ce->msg_origins[1]);
-                        VectorCopy(e->live_ent->v.angles, ce->angles);
-                        VectorCopy(e->live_ent->v.angles, ce->msg_angles[0]);
-                        VectorCopy(e->live_ent->v.angles, ce->msg_angles[1]);
-                        ce->msgtime  = cl.mtime[0];     // not stale
-                        ce->forcelink = true;           // re-link efrags
-                    }
-                }
-                // Static-entity path: SV_MakeStatic'd ents (flame torches
-                // etc.) have no live edict — their only runtime presence
-                // is in cl_static_entities[]. Move the origin there and
-                // rebuild the BSP-leaf efrags chain so the renderer
-                // discovers the entity at its new position. Without
-                // R_AddEfrags the flame would still render, but only when
-                // its *old* leaves were visible — nonsensical after even a
-                // small move.
-                else if (e->live_static)
-                {
-                    vec3_t o;
-                    Entity_GetOrigin(e, o);
-                    R_RemoveEfrags(e->live_static);
-                    VectorCopy(o, e->live_static->origin);
-                    R_AddEfrags(e->live_static);
-                }
-            }
-            else
-            {
-                edit_brush_t *bs;
-                if (b_idx >= e->numbrushes) continue;
-                bs = &e->brushes[b_idx];
-                if (!bs->valid) continue;
-                Brush_Translate(bs, delta);
-            }
-        }
+        apply_translate_delta(delta);
     }
 }
 
@@ -970,9 +1037,11 @@ void Editor_GizmoMouseUp(void)
     s_drag_axis        = -1;
     s_drag_plane_idx   = -1;
     s_drag_rotate_axis = -1;
+    s_drag_planar_axis = -1;
 }
 
 int Editor_GizmoIsActive(void)
 {
-    return s_drag_axis >= 0 || s_drag_plane_idx >= 0 || s_drag_rotate_axis >= 0;
+    return s_drag_axis >= 0 || s_drag_plane_idx >= 0 || s_drag_rotate_axis >= 0
+        || s_drag_planar_axis >= 0;
 }

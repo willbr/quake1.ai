@@ -1,3 +1,5 @@
+* gizmo Plane handles: small colored squares on the XY, XZ, and YZ planes for easy planar movement and scaling
+* render the gizmo using imgui?
 * refactor into libries I can reuse
 * review native c code vs old quakec
 * review what can be extracted in to libraries
