@@ -155,7 +155,11 @@ void Con_CheckResize (void)
 	int		i, j, width, oldwidth, oldtotallines, numlines, numchars;
 	char	tbuf[CON_TEXTSIZE];
 
-	width = (vid.width >> 3) - 2;
+	{
+		int cs = vid.height / 200;
+		if (cs < 1) cs = 1;
+		width = ((vid.width / cs) >> 3) - 2;
+	}
 
 	if (width == con_linewidth)
 		return;
@@ -469,6 +473,45 @@ DRAWING
 ==============================================================================
 */
 
+// Console drawing uses a 320x200 logical character grid (8x8 cells, 38 chars
+// per line). Nearest-neighbor scale by vid.height/200 so the text grows
+// proportionally with the render resolution.
+static int Con_Scale (void)
+{
+	int s = vid.height / 200;
+	return s < 1 ? 1 : s;
+}
+
+static void Con_DrawCharScaled (int x, int y, int num, int s)
+{
+	extern byte *draw_chars;
+	num &= 255;
+	int row = num >> 4;
+	int col = num & 15;
+	byte *source = draw_chars + (row << 10) + (col << 3);
+	if (y + 8*s <= 0)
+		return;
+	byte *dest = (byte *)vid.conbuffer + y * vid.conrowbytes + x;
+	for (int v = 0; v < 8; v++)
+	{
+		byte *row_dst = dest + v * s * vid.conrowbytes;
+		byte *src_row = source + v * 128;
+		for (int u = 0; u < 8; u++)
+		{
+			byte c = src_row[u];
+			if (!c)
+				continue;
+			byte *p = row_dst + u * s;
+			for (int yy = 0; yy < s; yy++)
+			{
+				for (int xx = 0; xx < s; xx++)
+					p[xx] = c;
+				p += vid.conrowbytes;
+			}
+		}
+	}
+}
+
 
 /*
 ================
@@ -482,28 +525,29 @@ void Con_DrawInput (void)
 	int		y;
 	int		i;
 	char	*text;
+	int		s = Con_Scale();
 
 	if (key_dest != key_console && !con_forcedup)
 		return;		// don't draw anything
 
 	text = key_lines[edit_line];
-	
+
 // add the cursor frame
 	text[key_linepos] = 10+((int)(realtime*con_cursorspeed)&1);
-	
+
 // fill out remainder with spaces
 	for (i=key_linepos+1 ; i< con_linewidth ; i++)
 		text[i] = ' ';
-		
+
 //	prestep if horizontally scrolling
 	if (key_linepos >= con_linewidth)
 		text += 1 + key_linepos - con_linewidth;
-		
+
 // draw it
-	y = con_vislines-16;
+	y = con_vislines - 16*s;
 
 	for (i=0 ; i<con_linewidth ; i++)
-		Draw_Character ( (i+1)<<3, con_vislines - 16, text[i]);
+		Con_DrawCharScaled ((i+1)*8*s, y, text[i], s);
 
 // remove cursor
 	key_lines[edit_line][key_linepos] = 0;
@@ -523,6 +567,7 @@ void Con_DrawNotify (void)
 	char	*text;
 	int		i;
 	float	time;
+	int		s = Con_Scale();
 	extern char chat_buffer[];
 
 	v = 0;
@@ -537,34 +582,37 @@ void Con_DrawNotify (void)
 		if (time > con_notifytime.value)
 			continue;
 		text = con_text + (i % con_totallines)*con_linewidth;
-		
+
 		clearnotify = 0;
 		scr_copytop = 1;
 
 		for (x = 0 ; x < con_linewidth ; x++)
-			Draw_Character ( (x+1)<<3, v, text[x]);
+			Con_DrawCharScaled ((x+1)*8*s, v, text[x], s);
 
-		v += 8;
+		v += 8*s;
 	}
 
 
 	if (key_dest == key_message)
 	{
+		static char say[] = "say:";
+
 		clearnotify = 0;
 		scr_copytop = 1;
-	
+
+		for (x = 0 ; say[x] ; x++)
+			Con_DrawCharScaled ((x+1)*8*s, v, say[x], s);
+
 		x = 0;
-		
-		Draw_String (8, v, "say:");
-		while(chat_buffer[x])
+		while (chat_buffer[x])
 		{
-			Draw_Character ( (x+5)<<3, v, chat_buffer[x]);
+			Con_DrawCharScaled ((x+5)*8*s, v, chat_buffer[x], s);
 			x++;
 		}
-		Draw_Character ( (x+5)<<3, v, 10+((int)(realtime*con_cursorspeed)&1));
-		v += 8;
+		Con_DrawCharScaled ((x+5)*8*s, v, 10+((int)(realtime*con_cursorspeed)&1), s);
+		v += 8*s;
 	}
-	
+
 	if (v > con_notifylines)
 		con_notifylines = v;
 }
@@ -583,7 +631,8 @@ void Con_DrawConsole (int lines, qboolean drawinput)
 	int				rows;
 	char			*text;
 	int				j;
-	
+	int				s = Con_Scale();
+
 	if (lines <= 0)
 		return;
 
@@ -593,10 +642,10 @@ void Con_DrawConsole (int lines, qboolean drawinput)
 // draw the text
 	con_vislines = lines;
 
-	rows = (lines-16)>>3;		// rows of text to draw
-	y = lines - 16 - (rows<<3);	// may start slightly negative
+	rows = (lines - 16*s) / (8*s);		// rows of text to draw
+	y = lines - 16*s - rows * 8*s;		// may start slightly negative
 
-	for (i= con_current - rows + 1 ; i<=con_current ; i++, y+=8 )
+	for (i= con_current - rows + 1 ; i<=con_current ; i++, y += 8*s)
 	{
 		j = i - con_backscroll;
 		if (j<0)
@@ -604,7 +653,7 @@ void Con_DrawConsole (int lines, qboolean drawinput)
 		text = con_text + (j % con_totallines)*con_linewidth;
 
 		for (x=0 ; x<con_linewidth ; x++)
-			Draw_Character ( (x+1)<<3, y, text[x]);
+			Con_DrawCharScaled ((x+1)*8*s, y, text[x], s);
 	}
 
 // draw the input prompt, user text, and cursor if desired
