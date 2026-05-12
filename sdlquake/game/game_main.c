@@ -58,6 +58,13 @@ static void game_set_change_parms(edict_t *c)      { SetChangeParms(c); }
 void game_entity_spawn(edict_t *e, const char *classname);
 const char *const *game_list_spawn_classes(int *out_count);
 
+// Per-render-frame debug overlay hook. Runs even while the sim is paused
+// (editor open, sv.paused), so debug visualisations stay live.
+static void game_debug_draw_overlays(void)
+{
+    Sim_Nav_Frame();
+}
+
 static game_api_t s_api = {
     GAME_API_VERSION,
     game_init,
@@ -75,6 +82,7 @@ static game_api_t s_api = {
     game_set_new_parms,
     game_set_change_parms,
     game_list_spawn_classes,
+    game_debug_draw_overlays,
 };
 
 #ifdef _WIN32

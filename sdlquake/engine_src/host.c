@@ -33,6 +33,10 @@ extern void Editor_Shutdown    (void);
 extern int  Editor_IsPaused    (void);
 extern int  Editor_AllowGameInput(void);
 
+// Hot-reload DLL handle. host.c already reaches into g_game_api->client_*
+// elsewhere via the transitive game_api.h include from progs.h.
+extern game_api_t *g_game_api;
+
 /*
 
 A server can allways be started, even if the system started out as a client
@@ -718,7 +722,14 @@ void _Host_Frame (float time)
 // update video
 	if (host_speeds.value)
 		time1 = Sys_FloatTime ();
-		
+
+	// Give the game DLL a chance to submit debug overlays (e.g. navmesh
+	// lines via SV_DebugLine). Runs every render frame even when sv.paused
+	// / Editor_IsPaused has frozen SV_Physics, so overlays stay visible
+	// while the editor is open.
+	if (g_game_api && g_game_api->debug_draw_overlays)
+		g_game_api->debug_draw_overlays();
+
 	SCR_UpdateScreen ();
 
 	if (host_speeds.value)

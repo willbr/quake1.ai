@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 10
+#define GAME_API_VERSION 11
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -195,6 +195,13 @@ typedef struct game_api_s {
     // static spawn table; valid for the DLL's lifetime. *out_count receives
     // the entry count (excluding the trailing NULL).
     const char *const *(*list_spawn_classes)(int *out_count);
+
+    // Per-render-frame debug overlay submission. Called from host.c right
+    // before SCR_UpdateScreen, independent of sv.paused / Editor_IsPaused —
+    // so navmesh / AI / stim overlays remain visible while the editor or
+    // pause has frozen the sim. Implementations should re-submit lines via
+    // SV_DebugLine each frame (DebugLines_Add clears after every draw).
+    void  (*debug_draw_overlays)(void);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);

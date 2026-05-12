@@ -39,6 +39,8 @@ void Sim_Frame(void) {
     }
 
     Sim_AI_Frame();
-    Sim_Nav_Frame();
+    // Sim_Nav_Frame is now driven by game_api->debug_draw_overlays so the
+    // navmesh overlay stays visible while the editor / engine has paused
+    // the sim.
     Sim_Arena_Poll();
 }
