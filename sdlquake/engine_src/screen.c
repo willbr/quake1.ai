@@ -38,6 +38,7 @@ cvar_t		scr_centertime = {"scr_centertime","2"};
 cvar_t		scr_showram = {"showram","1"};
 cvar_t		scr_showturtle = {"showturtle","0"};
 cvar_t		scr_showpause = {"showpause","1"};
+cvar_t		scr_showfps = {"showfps", "0", true};
 cvar_t		scr_printspeed = {"scr_printspeed","8"};
 
 qboolean	scr_initialized;		// ready to draw
@@ -375,6 +376,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showram);
 	Cvar_RegisterVariable (&scr_showturtle);
 	Cvar_RegisterVariable (&scr_showpause);
+	Cvar_RegisterVariable (&scr_showfps);
 	Cvar_RegisterVariable (&scr_centertime);
 	Cvar_RegisterVariable (&scr_printspeed);
 
@@ -448,6 +450,48 @@ void SCR_DrawNet (void)
 		return;
 
 	Draw_Pic (scr_vrect.x+64, scr_vrect.y, scr_net);
+}
+
+/*
+==============
+SCR_DrawFPS
+
+Top-right "fps  ms" readout. Averaged over a 0.25s window so the digits
+don't flicker every frame.
+==============
+*/
+void SCR_DrawFPS (void)
+{
+	static double	last_update;
+	static int		frames;
+	static char		buf[32];
+	static int		buf_len;
+	double			now;
+	int				s, x, y, i;
+
+	if (!scr_showfps.value)
+		return;
+
+	now = realtime;
+	frames++;
+	if (now - last_update >= 0.25 || last_update == 0.0)
+	{
+		double dt = now - last_update;
+		if (dt < 1e-6) dt = 1e-6;
+		float fps = (float)(frames / dt);
+		float ms  = 1000.0f / (fps > 0 ? fps : 1.0f);
+		snprintf(buf, sizeof buf, "%4d fps  %5.2f ms", (int)(fps + 0.5f), ms);
+		for (buf_len = 0; buf[buf_len]; buf_len++) {}
+		last_update = now;
+		frames = 0;
+	}
+	if (buf_len == 0) return;
+
+	s = Scr_Scale();
+	x = vid.width - (buf_len + 1) * 8 * s;
+	y = 2 * s;
+	for (i = 0; i < buf_len; i++)
+		Scr_DrawCharScaled(x + i * 8 * s, y, buf[i], s);
 }
 
 /*
@@ -995,6 +1039,7 @@ void SCR_UpdateScreen (void)
 		SCR_DrawNet ();
 		SCR_DrawTurtle ();
 		SCR_DrawPause ();
+		SCR_DrawFPS ();
 		SCR_CheckDrawCenterString ();
 		Sbar_Draw ();
 		SCR_DrawConsole ();
