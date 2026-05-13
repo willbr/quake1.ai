@@ -88,6 +88,25 @@ extern unsigned blocklights_rgb[18*18*3];   // R0,G0,B0, R1,G1,B1, ...
 void R_BuildLightMap_RGB (void);
 void R_AddDynamicLights_RGB (void);
 
+void R_DrawSurfaceBlock8_mip0_rgb (void);
+void R_DrawSurfaceBlock8_mip1_rgb (void);
+void R_DrawSurfaceBlock8_mip2_rgb (void);
+void R_DrawSurfaceBlock8_mip3_rgb (void);
+
+// File-scope globals defined in r_surf.c, consumed by r_surf_rgb.c.
+// `-fcommon` merges these as tentative definitions, but explicit externs
+// make the dependency visible and let the compiler type-check.
+extern unsigned char  *pbasesource;
+extern void           *prowdestbase;
+extern unsigned       *r_lightptr;
+extern unsigned        blocklights[18*18];
+extern int             r_lightwidth;
+extern int             r_numvblocks;
+extern int             sourcetstep;
+extern unsigned char  *r_sourcemax;
+extern int             r_stepback;
+extern int             surfrowbytes;
+
 #define XCENTERING	(1.0 / 2.0)
 #define YCENTERING	(1.0 / 2.0)
 

@@ -50,7 +50,7 @@ pub fn build(b: *std.Build) void {
         "pr_edict.c",
         "r_aclip.c", "r_alias.c", "r_bsp.c", "r_draw.c", "r_edge.c",
         "r_efrag.c", "r_light.c", "r_lut.c", "r_main.c", "r_misc.c", "r_part.c",
-        "r_sky.c", "r_sprite.c", "r_surf.c", "r_vars.c",
+        "r_sky.c", "r_sprite.c", "r_surf.c", "r_surf_rgb.c", "r_vars.c",
         "sbar.c",
         "screen.c",
         "snd_dma.c", "snd_mem.c", "snd_mix.c",
