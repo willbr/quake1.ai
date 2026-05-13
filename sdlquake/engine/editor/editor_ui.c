@@ -504,15 +504,14 @@ static void draw_toolbar(void)
 // would render the level invisible), but the array entry exists so
 // EDIT_CAT_OTHER indexing is uniform.
 //
-// Default hides triggers, ambient sounds, path corners, and info_*
-// metadata -- none of these have a model the engine actually renders,
-// so they just clutter the view; the user can re-enable them from the
-// panel checkboxes. Lights stay visible by default now that the editor
-// has first-class light-entity authoring (Compile + Light, the light
-// inspector panel, viewport gizmos) -- hiding them would defeat the
-// whole flow.
+// Default hides triggers, lights, ambient sounds, path corners, and
+// info_* metadata -- none of these have a model the engine actually
+// renders, so they just clutter the view (start.bsp alone carries 267
+// `light*` entities). The user re-enables them from the panel
+// checkboxes when authoring lights / triggers / etc.
 static int s_hide_cat[EDIT_CAT_COUNT] = {
     [EDIT_CAT_TRIGGER] = 1,
+    [EDIT_CAT_LIGHT]   = 1,
     [EDIT_CAT_SOUND]   = 1,
     [EDIT_CAT_PATH]    = 1,
     [EDIT_CAT_INFO]    = 1,
