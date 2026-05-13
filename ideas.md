@@ -1,12 +1,21 @@
 # Ideas
 
-## Next 4
+## Next
 
-1. **model interpolation** — small change, smooths 10 Hz monster animation, huge perceived-quality win
-2. **decals** (bullet holes, blood) — combat feedback for the Phase 8 immersive-sim work; contained scope
-3. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
-4. **coloured lights** — modernises the renderer's look; pairs with Phase 8 atmospheric scenes
+1. **decals** (bullet holes, blood) — combat feedback for the Phase 8 immersive-sim work; contained scope
+2. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
+3. **coloured lights** — modernises the renderer's look; pairs with Phase 8 atmospheric scenes
 
+* review viz
+* review `func_detail`
+* light options
+    * dirt debug
+    * ambient occlusion
+    * phong shading
+    * shadows
+
+* hide textures
+* 3 clicks to add a cluck, draw the plane then add height
 
 ## Rendering & visuals
 
