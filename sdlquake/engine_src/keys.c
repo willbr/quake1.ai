@@ -300,6 +300,37 @@ when Enter commits a line.
 */
 void Key_Console (int key)
 {
+	/* Ctrl+letter readline hotkeys. Any unmapped Ctrl+letter is swallowed
+	   (consumed, no insert) so it doesn't appear as a literal in the
+	   buffer. This also reserves space for future additions (e.g. Ctrl+R). */
+	if (ctrl_down && key >= 'a' && key <= 'z')
+	{
+		switch (key)
+		{
+		case 'a': LE_BeginningOfLine (&console_le); break;
+		case 'e': LE_EndOfLine       (&console_le); break;
+		case 'b': LE_MoveLeft        (&console_le); break;
+		case 'f': LE_MoveRight       (&console_le); break;
+		case 'p': Key_HistoryPrev    (); break;
+		case 'n': Key_HistoryNext    (); break;
+		case 'k': LE_KillToEnd       (&console_le); break;
+		case 'u': LE_KillToStart     (&console_le); break;
+		case 'w': LE_KillPrevWord    (&console_le); break;
+		case 'l': Cbuf_AddText       ("clear\n"); break;
+		case 'h': LE_DeleteBack      (&console_le); break;
+		case 'd':
+			/* No-op on empty line (don't close console; that's a future
+			   decision if we want bash-like exit behavior). */
+			if (console_le.len > 0)
+				LE_DeleteForward (&console_le);
+			break;
+		default:
+			/* Swallow other Ctrl+letter combos. */
+			break;
+		}
+		return;
+	}
+
 	if (key == K_ENTER)
 	{
 		int prev;
