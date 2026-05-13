@@ -38,7 +38,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    4
+#define NAV_VERSION    5
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -79,8 +79,24 @@ extern game_globals_t *g;
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+// Per-node classification, set during anchor seeding. BFS-expanded nodes
+// stay NAV_NODE_GENERIC. Used by Sim_Nav_Frame to draw colored markers on
+// points of interest in the debug overlay.
+enum {
+    NAV_NODE_GENERIC      = 0,
+    NAV_NODE_PLAYER_SPAWN = 1,   // info_player_start / coop / deathmatch
+    NAV_NODE_EXIT         = 2,   // trigger_changelevel
+    NAV_NODE_ITEM         = 3,   // item_* / weapon_*
+    NAV_NODE_MONSTER      = 4,   // monster_*
+    NAV_NODE_TELEPORT_SRC = 5,   // trigger_teleport
+    NAV_NODE_TELEPORT_DST = 6,   // resolved teleport destination
+    NAV_NODE_DOOR_BUTTON  = 7,   // func_door / func_button
+};
+
 typedef struct {
     vec3_t pos;
+    int    kind;   // NAV_NODE_*
 } nav_point_t;
 
 typedef struct {
@@ -201,6 +217,7 @@ static int add_point(sim_navmesh_t *m, int *cap, grid_t *grd, const vec3_t pos) 
     m->points[idx].pos[0] = pos[0];
     m->points[idx].pos[1] = pos[1];
     m->points[idx].pos[2] = pos[2];
+    m->points[idx].kind   = NAV_NODE_GENERIC;   // anchor-seeded nodes upgrade
     grid_insert(grd, pos, idx);
     return idx;
 }
@@ -295,12 +312,14 @@ typedef enum {
 typedef struct {
     vec3_t        pos;
     anchor_kind_t kind;
+    int           node_kind;    // NAV_NODE_*, propagated to nav_point_t.kind
     edict_t      *entity;       // valid for TELEPORT_SRC / TELEPORT_DST
     int           node_index;   // assigned after seating; -1 if no floor
 } anchor_t;
 
 static int anchors_push(anchor_t **arr, int *cap, int *n,
-                        const vec3_t pos, anchor_kind_t kind, edict_t *ent)
+                        const vec3_t pos, anchor_kind_t kind, int node_kind,
+                        edict_t *ent)
 {
     if (*n >= *cap) {
         int nc = *cap ? *cap * 2 : 64;
@@ -314,6 +333,7 @@ static int anchors_push(anchor_t **arr, int *cap, int *n,
     a->pos[1]     = pos[1];
     a->pos[2]     = pos[2];
     a->kind       = kind;
+    a->node_kind  = node_kind;
     a->entity     = ent;
     a->node_index = -1;
     return 1;
@@ -321,7 +341,8 @@ static int anchors_push(anchor_t **arr, int *cap, int *n,
 
 static void collect_anchors_by_classname(anchor_t **arr, int *cap, int *n,
                                          const char *classname,
-                                         anchor_kind_t kind, int use_bbox_center)
+                                         anchor_kind_t kind, int node_kind,
+                                         int use_bbox_center)
 {
     edict_t *e = eng->ED_Find(g->world, "classname", classname);
     while (e != g->world) {
@@ -332,7 +353,7 @@ static void collect_anchors_by_classname(anchor_t **arr, int *cap, int *n,
             pos[1] = e->v.origin[1];
             pos[2] = e->v.origin[2];
         }
-        anchors_push(arr, cap, n, pos, kind, e);
+        anchors_push(arr, cap, n, pos, kind, node_kind, e);
         e = eng->ED_Find(e, "classname", classname);
     }
 }
@@ -438,17 +459,17 @@ static int bake_floodfill(sim_navmesh_t *m) {
     // currently fires start_frame inside SV_SpawnServer at a point where the
     // map is named but its entities lump has not been parsed yet).
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
-        "info_player_start",       ANCHOR_GENERIC, 0);
+        "info_player_start",       ANCHOR_GENERIC, NAV_NODE_PLAYER_SPAWN, 0);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
-        "info_player_coop",        ANCHOR_GENERIC, 0);
+        "info_player_coop",        ANCHOR_GENERIC, NAV_NODE_PLAYER_SPAWN, 0);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
-        "info_player_deathmatch",  ANCHOR_GENERIC, 0);
+        "info_player_deathmatch",  ANCHOR_GENERIC, NAV_NODE_PLAYER_SPAWN, 0);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
-        "testplayerstart",         ANCHOR_GENERIC, 0);
+        "testplayerstart",         ANCHOR_GENERIC, NAV_NODE_PLAYER_SPAWN, 0);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
-        "trigger_teleport",          ANCHOR_TELEPORT_SRC, 1);
+        "trigger_teleport",        ANCHOR_TELEPORT_SRC, NAV_NODE_TELEPORT_SRC, 1);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
-        "trigger_changelevel",       ANCHOR_GENERIC, 1);
+        "trigger_changelevel",     ANCHOR_GENERIC, NAV_NODE_EXIT, 1);
 
     // Walk every remaining edict and add it as a generic anchor. Mappers
     // place items, monsters, buttons, doors, path_corners, info_notnull
@@ -490,8 +511,20 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 pos[1] = e->v.origin[1];
                 pos[2] = e->v.origin[2];
             }
+            // Classify by classname prefix for the debug-overlay color
+            // coding. Anything that doesn't match a known category stays
+            // generic; A* uses the same anchor_kind for all of these.
+            int nk = NAV_NODE_GENERIC;
+            if (!strncmp(cn, "item_", 5) || !strncmp(cn, "weapon_", 7))
+                nk = NAV_NODE_ITEM;
+            else if (!strncmp(cn, "monster_", 8))
+                nk = NAV_NODE_MONSTER;
+            else if (!strcmp(cn, "func_door") ||
+                     !strcmp(cn, "func_door_secret") ||
+                     !strcmp(cn, "func_button"))
+                nk = NAV_NODE_DOOR_BUTTON;
             anchors_push(&anchors, &anchor_cap, &anchor_n,
-                         pos, ANCHOR_GENERIC, e);
+                         pos, ANCHOR_GENERIC, nk, e);
         next_e:
             e = eng->ED_Next(e);
         }
@@ -517,7 +550,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
         }
         if (already) continue;
         anchors_push(&anchors, &anchor_cap, &anchor_n,
-                     dst->v.origin, ANCHOR_TELEPORT_DST, dst);
+                     dst->v.origin, ANCHOR_TELEPORT_DST,
+                     NAV_NODE_TELEPORT_DST, dst);
     }
 
     if (anchor_n == 0) {
@@ -576,11 +610,17 @@ static int bake_floodfill(sim_navmesh_t *m) {
         int existing = grid_find(&grd, m, seated);
         if (existing >= 0) {
             a->node_index = existing;
+            // Multiple anchors can map to the same seated node. Upgrade
+            // the node kind toward the more interesting category — the
+            // NAV_NODE_* enum values are ordered low-to-high importance.
+            if (a->node_kind > m->points[existing].kind)
+                m->points[existing].kind = a->node_kind;
             continue;
         }
         int idx = add_point(m, &cap_points, &grd, seated);
         if (idx < 0) continue;
-        a->node_index = idx;
+        a->node_index    = idx;
+        m->points[idx].kind = a->node_kind;
         if (q_tail >= q_cap) {
             int nc = q_cap ? q_cap * 2 : 256;
             int *nq = realloc(queue, sizeof(int) * nc);
@@ -754,6 +794,24 @@ static int bake_floodfill(sim_navmesh_t *m) {
         eng->Con_Print(buf);
     }
 
+    // Tag histogram for debug-overlay color coding.
+    {
+        int kc[8] = {0};
+        for (int i = 0; i < m->point_count; i++) {
+            int k = m->points[i].kind;
+            if (k >= 0 && k < 8) kc[k]++;
+        }
+        char buf[200];
+        snprintf(buf, sizeof(buf),
+                 "sim_nav: tagged %d spawn, %d exit, %d item, %d monster, "
+                 "%d tele_src, %d tele_dst, %d door/button\n",
+                 kc[NAV_NODE_PLAYER_SPAWN], kc[NAV_NODE_EXIT],
+                 kc[NAV_NODE_ITEM], kc[NAV_NODE_MONSTER],
+                 kc[NAV_NODE_TELEPORT_SRC], kc[NAV_NODE_TELEPORT_DST],
+                 kc[NAV_NODE_DOOR_BUTTON]);
+        eng->Con_Print(buf);
+    }
+
     // Connected-components diagnostic: how many islands did we end up with,
     // and how big is the biggest? Treat walk edges as bidirectional for this
     // purpose (the BFS may have added an edge in only one direction, but for
@@ -885,6 +943,33 @@ void Sim_Nav_Frame(void) {
                           s_mesh->points[e->to].pos,
                           color,
                           ztest);
+    }
+
+    // Per-node markers — short vertical bars at points of interest. Drawn
+    // after edges so they sit on top in screen-space order. Shared colors:
+    //   spawn + exit  -> 79  (green)
+    //   item          -> 254 (bright yellow)
+    //   monster       -> 251 (red)
+    //   teleport src/dst + door/button -> 220 (light blue)
+    for (int i = 0; i < s_mesh->point_count; i++) {
+        int k = s_mesh->points[i].kind;
+        if (k == NAV_NODE_GENERIC) continue;
+        if (has_range && !in_range[i]) continue;
+        int color;
+        switch (k) {
+        case NAV_NODE_PLAYER_SPAWN:
+        case NAV_NODE_EXIT:           color = 79;  break;
+        case NAV_NODE_ITEM:           color = 254; break;
+        case NAV_NODE_MONSTER:        color = 251; break;
+        case NAV_NODE_TELEPORT_SRC:
+        case NAV_NODE_TELEPORT_DST:
+        case NAV_NODE_DOOR_BUTTON:    color = 220; break;
+        default: continue;
+        }
+        vec3_t top = { s_mesh->points[i].pos[0],
+                       s_mesh->points[i].pos[1],
+                       s_mesh->points[i].pos[2] + 32.0f };
+        eng->SV_DebugLine(s_mesh->points[i].pos, top, color, ztest);
     }
 }
 
