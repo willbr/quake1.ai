@@ -67,3 +67,8 @@
 "classname" "info_player_start"
 "origin" "-64 0 24"
 }
+{
+"classname" "light_torch_small_walltorch"
+"origin" "96 16 64"
+"light" "200"
+}
