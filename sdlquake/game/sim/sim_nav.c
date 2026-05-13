@@ -431,6 +431,53 @@ static int bake_floodfill(sim_navmesh_t *m) {
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
         "trigger_changelevel",       ANCHOR_GENERIC, 1);
 
+    // Walk every remaining edict and add it as a generic anchor. Mappers
+    // place items, monsters, buttons, doors, path_corners, info_notnull
+    // markers and lights at hand-tuned positions; many of them sit on or
+    // immediately above walkable floor, so they make excellent extra seeds
+    // for the flood. Entities we can't drop to floor (ceiling lights, brush
+    // interiors) are filtered out by seat_probe at phase 2. We skip:
+    //   - the world entity itself
+    //   - already-collected anchor entities (de-dup by pointer)
+    //   - entities with no classname (client slots, freed slots)
+    //   - the trigger_teleport / changelevel classes we already handle
+    //     above with proper kinds
+    {
+        edict_t *e = eng->ED_Next(g->world);
+        while (e != g->world) {
+            const char *cn = e->v.classname;
+            if (!cn || !cn[0])                                 goto next_e;
+            if (!strcmp(cn, "navmesh_probe"))                  goto next_e;
+            if (!strcmp(cn, "info_player_start"))              goto next_e;
+            if (!strcmp(cn, "info_player_coop"))               goto next_e;
+            if (!strcmp(cn, "info_player_deathmatch"))         goto next_e;
+            if (!strcmp(cn, "testplayerstart"))                goto next_e;
+            if (!strcmp(cn, "trigger_teleport"))               goto next_e;
+            if (!strcmp(cn, "trigger_changelevel"))            goto next_e;
+            // Brush entities have origin (0,0,0) and meaningful mins/maxs;
+            // point entities have meaningful origin. Pick the right one.
+            vec3_t pos;
+            if (e->v.origin[0] == 0.0f && e->v.origin[1] == 0.0f &&
+                e->v.origin[2] == 0.0f)
+            {
+                // Brush; only useful if it has a bbox.
+                if (e->v.maxs[0] == e->v.mins[0] &&
+                    e->v.maxs[1] == e->v.mins[1] &&
+                    e->v.maxs[2] == e->v.mins[2])
+                    goto next_e;
+                entity_center(e, pos);
+            } else {
+                pos[0] = e->v.origin[0];
+                pos[1] = e->v.origin[1];
+                pos[2] = e->v.origin[2];
+            }
+            anchors_push(&anchors, &anchor_cap, &anchor_n,
+                         pos, ANCHOR_GENERIC, e);
+        next_e:
+            e = eng->ED_Next(e);
+        }
+    }
+
     // Resolve each trigger_teleport's destination by `target` -> `targetname`
     // lookup (the destination can be info_teleport_destination, info_notnull,
     // path_corner, or any entity the mapper chose to target). Without this

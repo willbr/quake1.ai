@@ -10,7 +10,10 @@
 #include "r_debugdraw.h"
 #include "debug_lines.h"
 
-#define MAX_DEBUG_LINES 4096
+// Sized to hold a full navmesh draw on a dense map (~40k edges on
+// start.bsp) plus AI / stim overlay headroom. Each entry is ~36 bytes so
+// the table is ~2.3 MB.
+#define MAX_DEBUG_LINES 65536
 
 typedef struct {
     float start[3], end[3];
