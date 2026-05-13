@@ -268,6 +268,8 @@ void R_Init (void)
 	R_InitRGBTable ();
 
 	Cmd_AddCommand ("r_lit_info", R_LitInfo_f);
+
+	R_DecalsInit ();
 }
 
 /*
@@ -278,7 +280,9 @@ R_NewMap
 void R_NewMap (void)
 {
 	int		i;
-	
+
+	R_DecalsClear ();
+
 // clear out efrags in case the level hasn't been reloaded
 // FIXME: is this one short?
 	for (i=0 ; i<cl.worldmodel->numleafs ; i++)

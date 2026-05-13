@@ -353,4 +353,37 @@ void R_ClipEdge (mvertex_t *pv0, mvertex_t *pv1, clipplane_t *clip);
 void R_SplitEntityOnNode2 (mnode_t *node);
 void R_MarkLights (dlight_t *light, int bit, mnode_t *node);
 
+// -- decals ---------------------------------------------------------------
+
+typedef enum {
+	DECAL_BULLET,
+	DECAL_SPIKE,
+	DECAL_BLOOD_SPLAT,
+	DECAL_SCORCH,
+	DECAL_LIGHTNING,
+	DECAL_NUM_TYPES
+} decal_type_t;
+
+typedef struct stain_s {
+	short		*rgb;             // [smax*tmax*3], signed luxel deltas
+	int			smax, tmax;
+	int			generation;
+	int			last_touched_frame;
+	struct msurface_s *surf;
+	struct stain_s *lru_prev, *lru_next;
+} stain_t;
+
+extern cvar_t r_decals;
+extern cvar_t r_decals_max;
+extern cvar_t r_decals_intensity;
+extern cvar_t r_decals_bloodpool;
+extern cvar_t r_decals_bloodpool_radius;
+extern cvar_t r_decals_bloodpool_growtime;
+
+void R_DecalsInit (void);          // called once from R_Init (registers cvars + commands)
+void R_DecalsClear (void);         // called from R_NewMap (zero stain pool, reset bloodpools)
+void R_DecalsFrame (void);         // called per-frame from R_RenderView (advances bloodpools)
+void R_SpawnDecal (vec3_t pos, decal_type_t type);
+void R_SpawnBloodPool (vec3_t origin);
+
 #endif

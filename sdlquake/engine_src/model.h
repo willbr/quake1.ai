@@ -99,6 +99,8 @@ typedef struct
 	int			flags;
 } mtexinfo_t;
 
+struct stain_s;
+
 typedef struct msurface_s
 {
 	int			visframe;		// should be drawn when node is crossed
@@ -124,6 +126,10 @@ typedef struct msurface_s
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;		// [numstyles*surfsize]
 	byte		*rgb_samples;	// [numstyles*surfsize*3], NULL if no .lit loaded
+
+// decal stain layer (NULL until first impact on this surface)
+	struct stain_s	*stain;
+	int				cached_stain_gen;
 } msurface_t;
 
 typedef struct mnode_s
