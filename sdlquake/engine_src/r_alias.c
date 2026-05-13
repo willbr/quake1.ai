@@ -694,8 +694,16 @@ void R_AliasSetupFrame (void)
 	if ((prev_frame >= pmdl->numframes) || (prev_frame < 0))
 		prev_frame = frame;
 
-	// compute lerp factor; will stay 1.0 (no blend) until Task 5 wires the time formula
-	r_framelerp = 1.0f;
+	if (!r_lerpmodels.value || cl_nolerp.value || frame == prev_frame)
+	{
+		r_framelerp = 1.0f;
+	}
+	else
+	{
+		r_framelerp = (cl.time - currententity->frame_start_time) / 0.1f;
+		if (r_framelerp > 1.0f) r_framelerp = 1.0f;
+		if (r_framelerp < 0.0f) r_framelerp = 0.0f;
+	}
 
 	if (paliashdr->frames[frame].type == ALIAS_SINGLE)
 	{
@@ -716,7 +724,9 @@ void R_AliasSetupFrame (void)
 		return;
 	}
 
-	// ALIAS_GROUP path
+	// ALIAS_GROUP path (group lerp wired in Task 6; force snap for now)
+	r_framelerp = 1.0f;
+
 	paliasgroup = (maliasgroup_t *)
 				((byte *)paliashdr + paliashdr->frames[frame].frame);
 	pintervals = (float *)((byte *)paliashdr + paliasgroup->intervals);
