@@ -123,6 +123,7 @@ typedef struct msurface_s
 // lighting info
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;		// [numstyles*surfsize]
+	byte		*rgb_samples;	// [numstyles*surfsize*3], NULL if no .lit loaded
 } msurface_t;
 
 typedef struct mnode_s
@@ -359,6 +360,7 @@ typedef struct model_s
 
 	byte		*visdata;
 	byte		*lightdata;
+	byte		*rgblightdata;	// parallel to lightdata, NULL if no .lit loaded
 	char		*entities;
 
 //

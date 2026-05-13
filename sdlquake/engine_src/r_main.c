@@ -175,6 +175,25 @@ void	R_InitTextures (void)
 	}	
 }
 
+static void
+R_LitInfo_f (void)
+{
+	model_t *m = cl.worldmodel;
+	if (!m) {
+		Con_Printf ("no worldmodel\n");
+		return;
+	}
+	if (!m->rgblightdata) {
+		Con_Printf ("%s: no .lit loaded (mono)\n", m->name);
+		return;
+	}
+	Con_Printf ("%s: .lit loaded\n", m->name);
+	Con_Printf ("  first 3 RGB samples: (%d,%d,%d) (%d,%d,%d) (%d,%d,%d)\n",
+		m->rgblightdata[0], m->rgblightdata[1], m->rgblightdata[2],
+		m->rgblightdata[3], m->rgblightdata[4], m->rgblightdata[5],
+		m->rgblightdata[6], m->rgblightdata[7], m->rgblightdata[8]);
+}
+
 /*
 ===============
 R_Init
@@ -238,6 +257,8 @@ void R_Init (void)
 	D_Init ();
 
 	R_InitRGBTable ();
+
+	Cmd_AddCommand ("r_lit_info", R_LitInfo_f);
 }
 
 /*

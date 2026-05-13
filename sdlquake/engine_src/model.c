@@ -498,6 +498,59 @@ void Mod_LoadTextures (lump_t *l)
 
 /*
 =================
+Mod_LoadLITFile
+
+Attempts to load maps/<name>.lit alongside the BSP's mono lightmap. The
+.lit format (FitzQuake/QuakeSpasm standard) is:
+    char magic[4] = "QLIT"
+    int  version  = 1
+    byte rgb[3 * mono_lightmap_byte_count]
+
+On any mismatch or load failure we set rgblightdata to NULL and stay mono.
+Bad sidecars never Sys_Error.
+=================
+*/
+static void
+Mod_LoadLITFile (int mono_size)
+{
+	char    litname[MAX_QPATH];
+	byte   *raw;
+
+	loadmodel->rgblightdata = NULL;
+
+	if (mono_size <= 0)
+		return;
+
+	// loadmodel->name is "maps/e1m1.bsp" -> "maps/e1m1.lit"
+	COM_StripExtension (loadmodel->name, litname);
+	strcat (litname, ".lit");
+
+	raw = (byte *)COM_LoadHunkFile (litname);
+	if (!raw)
+		return;
+
+	// header: 4-byte magic + 4-byte version + RGB samples
+	if (com_filesize < 8 || raw[0] != 'Q' || raw[1] != 'L' || raw[2] != 'I' || raw[3] != 'T') {
+		Con_Printf ("ignoring %s: bad magic\n", litname);
+		return;
+	}
+	if (LittleLong (*(int *)(raw + 4)) != 1) {
+		Con_Printf ("ignoring %s: unsupported version %d\n",
+		            litname, LittleLong (*(int *)(raw + 4)));
+		return;
+	}
+
+	if (com_filesize - 8 != mono_size * 3) {
+		Con_Printf ("ignoring %s: size mismatch (%d vs %d)\n",
+		            litname, com_filesize - 8, mono_size * 3);
+		return;
+	}
+
+	loadmodel->rgblightdata = raw + 8;
+}
+
+/*
+=================
 Mod_LoadLighting
 =================
 */
@@ -506,10 +559,13 @@ void Mod_LoadLighting (lump_t *l)
 	if (!l->filelen)
 	{
 		loadmodel->lightdata = NULL;
+		loadmodel->rgblightdata = NULL;
 		return;
 	}
-	loadmodel->lightdata = Hunk_AllocName ( l->filelen, loadname);	
+	loadmodel->lightdata = Hunk_AllocName ( l->filelen, loadname);
 	memcpy (loadmodel->lightdata, mod_base + l->fileofs, l->filelen);
+
+	Mod_LoadLITFile (l->filelen);
 }
 
 
@@ -801,10 +857,15 @@ void Mod_LoadFaces (lump_t *l)
 		for (i=0 ; i<MAXLIGHTMAPS ; i++)
 			out->styles[i] = in->styles[i];
 		i = LittleLong(in->lightofs);
-		if (i == -1)
+		if (i == -1) {
 			out->samples = NULL;
-		else
+			out->rgb_samples = NULL;
+		} else {
 			out->samples = loadmodel->lightdata + i;
+			out->rgb_samples = loadmodel->rgblightdata
+				? loadmodel->rgblightdata + i * 3
+				: NULL;
+		}
 		
 	// set the drawing flags flag
 		
