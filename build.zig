@@ -41,6 +41,7 @@ pub fn build(b: *std.Build) void {
         "d_vars.c", "d_zpoint.c",
         "host.c", "host_cmd.c",
         "keys.c",
+        "line_editor.c",
         "mathlib.c",
         "menu.c",
         "model.c",
