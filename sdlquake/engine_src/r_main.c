@@ -124,6 +124,9 @@ cvar_t	r_waterwarp = {"r_waterwarp","1"};
 cvar_t	r_fullbright = {"r_fullbright","0"};
 cvar_t	r_coloredlight    = {"r_coloredlight",    "1", true};	// archived
 cvar_t	r_colored_dlights = {"r_colored_dlights", "1", true};	// archived
+
+static float r_coloredlight_last    = -1.0f;	// forces flush on first frame
+static float r_colored_dlights_last = -1.0f;
 cvar_t	r_drawentities = {"r_drawentities","1"};
 cvar_t	r_drawviewmodel = {"r_drawviewmodel","1"};
 cvar_t	r_aliasstats = {"r_polymodelstats","0"};
@@ -1175,6 +1178,17 @@ void R_RenderView (void)
 
 	if ( (size_t)(&r_warpbuffer) & 3 )
 		Sys_Error ("Globals are missaligned");
+
+	/* If either coloured-lighting cvar has changed since last frame, flush the
+	   surface cache so the new path's pixels replace any stale colour/mono
+	   cached output. One-frame rebuild cost only on toggle. */
+	if (r_coloredlight.value    != r_coloredlight_last ||
+	    r_colored_dlights.value != r_colored_dlights_last)
+	{
+		D_FlushCaches ();
+		r_coloredlight_last    = r_coloredlight.value;
+		r_colored_dlights_last = r_colored_dlights.value;
+	}
 
 	R_RenderView_ ();
 }
