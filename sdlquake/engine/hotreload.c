@@ -386,7 +386,7 @@ static void engine_sv_traceline(float *start, float *end, int nomons, edict_t *s
     game_globals.trace_inopen     = (float)tr.inopen;
     game_globals.trace_inwater    = (float)tr.inwater;
     game_globals.trace_plane_dist = tr.plane.dist;
-    game_globals.trace_ent        = tr.ent;
+    game_globals.trace_ent        = tr.ent ? tr.ent : svb_edicts();
     game_globals.trace_endpos[0]       = tr.endpos[0];
     game_globals.trace_endpos[1]       = tr.endpos[1];
     game_globals.trace_endpos[2]       = tr.endpos[2];
@@ -824,7 +824,7 @@ static void engine_sv_tracemove(float *start, float *mins, float *maxs,
     game_globals.trace_inopen     = (float)tr.inopen;
     game_globals.trace_inwater    = (float)tr.inwater;
     game_globals.trace_plane_dist = tr.plane.dist;
-    game_globals.trace_ent        = tr.ent;
+    game_globals.trace_ent        = tr.ent ? tr.ent : svb_edicts();
     game_globals.trace_endpos[0]       = tr.endpos[0];
     game_globals.trace_endpos[1]       = tr.endpos[1];
     game_globals.trace_endpos[2]       = tr.endpos[2];
