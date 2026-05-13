@@ -488,6 +488,17 @@ void W_FireLightning(void) {
     eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[1]);
     eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[2]);
 
+    // Spark shower at the bolt's visible endpoint. Velocity scaled by the
+    // trace plane normal pushes the sparks back off the surface; if the
+    // bolt hit nothing (max range), normal is zero and the sparks settle
+    // in place — also fine.
+    vec3_t spark_vel = {
+        g->trace_plane_normal[0] * 80,
+        g->trace_plane_normal[1] * 80,
+        g->trace_plane_normal[2] * 80 + 20
+    };
+    eng->SV_Particle(g->trace_endpos, spark_vel, 225, 60);
+
     vec3_t lend = {g->trace_endpos[0]+g->v_forward[0]*4,
                    g->trace_endpos[1]+g->v_forward[1]*4,
                    g->trace_endpos[2]+g->v_forward[2]*4};
