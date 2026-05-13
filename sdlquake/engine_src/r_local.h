@@ -267,6 +267,8 @@ extern int				a_skinwidth;
 extern mtriangle_t		*ptriangles;
 extern int				numtriangles;
 extern aliashdr_t		*paliashdr;
+extern trivertx_t		*r_apverts_prev;
+extern float			r_framelerp;
 extern mdl_t			*pmdl;
 extern float			leftclip, topclip, rightclip, bottomclip;
 extern int				r_acliptype;

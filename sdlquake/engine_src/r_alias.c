@@ -33,6 +33,8 @@ affinetridesc_t	r_affinetridesc;
 void *			acolormap;	// FIXME: should go away
 
 trivertx_t		*r_apverts;
+trivertx_t		*r_apverts_prev;
+float			r_framelerp;
 
 // TODO: these probably will go away with optimized rasterization
 mdl_t				*pmdl;
@@ -651,8 +653,8 @@ set r_apverts
 */
 void R_AliasSetupFrame (void)
 {
-	int				frame;
-	int				i, numframes;
+	int				frame, prev_frame;
+	int				i, prev_i, numframes;
 	maliasgroup_t	*paliasgroup;
 	float			*pintervals, fullinterval, targettime, time;
 
@@ -663,13 +665,33 @@ void R_AliasSetupFrame (void)
 		frame = 0;
 	}
 
+	prev_frame = currententity->prev_frame;
+	if ((prev_frame >= pmdl->numframes) || (prev_frame < 0))
+		prev_frame = frame;
+
+	// compute lerp factor; will stay 1.0 (no blend) until Task 5 wires the time formula
+	r_framelerp = 1.0f;
+
 	if (paliashdr->frames[frame].type == ALIAS_SINGLE)
 	{
 		r_apverts = (trivertx_t *)
 				((byte *)paliashdr + paliashdr->frames[frame].frame);
+
+		if (paliashdr->frames[prev_frame].type == ALIAS_SINGLE)
+		{
+			r_apverts_prev = (trivertx_t *)
+					((byte *)paliashdr + paliashdr->frames[prev_frame].frame);
+		}
+		else
+		{
+			// mixed single/group transition — don't lerp
+			r_apverts_prev = r_apverts;
+			r_framelerp = 1.0f;
+		}
 		return;
 	}
-	
+
+	// ALIAS_GROUP path
 	paliasgroup = (maliasgroup_t *)
 				((byte *)paliashdr + paliashdr->frames[frame].frame);
 	pintervals = (float *)((byte *)paliashdr + paliasgroup->intervals);
@@ -678,10 +700,8 @@ void R_AliasSetupFrame (void)
 
 	time = cl.time + currententity->syncbase;
 
-//
-// when loading in Mod_LoadAliasGroup, we guaranteed all interval values
-// are positive, so we don't have to worry about division by 0
-//
+	// when loading in Mod_LoadAliasGroup, we guaranteed all interval values
+	// are positive, so we don't have to worry about division by 0
 	targettime = time - ((int)(time / fullinterval)) * fullinterval;
 
 	for (i=0 ; i<(numframes-1) ; i++)
@@ -692,6 +712,11 @@ void R_AliasSetupFrame (void)
 
 	r_apverts = (trivertx_t *)
 				((byte *)paliashdr + paliasgroup->frames[i].frame);
+
+	prev_i = (i == 0) ? (numframes - 1) : (i - 1);
+	r_apverts_prev = (trivertx_t *)
+				((byte *)paliashdr + paliasgroup->frames[prev_i].frame);
+	// keep r_framelerp at 1.0 here; Task 6 wires the intra-group alpha
 }
 
 
