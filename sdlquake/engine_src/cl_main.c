@@ -499,12 +499,17 @@ void CL_RelinkEntities (void)
 		}
 
 		// track frame transitions for vertex interpolation
-		if (ent->forcelink || ent->frame != ent->prev_frame_observed)
 		{
-			ent->prev_frame = ent->forcelink ? ent->frame
-			                                 : ent->prev_frame_observed;
-			ent->prev_frame_observed = ent->frame;
-			ent->frame_start_time = cl.time;
+			qboolean snap_lerp = ent->forcelink ||
+			                     ent->model != ent->prev_model_for_lerp;
+			if (snap_lerp || ent->frame != ent->prev_frame_observed)
+			{
+				ent->prev_frame = snap_lerp ? ent->frame
+				                            : ent->prev_frame_observed;
+				ent->prev_frame_observed = ent->frame;
+				ent->frame_start_time = cl.time;
+			}
+			ent->prev_model_for_lerp = ent->model;
 		}
 
 		VectorCopy (ent->origin, oldorg);

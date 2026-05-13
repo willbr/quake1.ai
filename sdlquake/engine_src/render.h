@@ -55,6 +55,7 @@ typedef struct entity_s
 	int						prev_frame;			// frame we are lerping FROM
 	int						prev_frame_observed;	// last frame value seen, for change detection
 	float					frame_start_time;	// cl.time when ent->frame last changed
+	struct model_s			*prev_model_for_lerp;	// last ent->model seen, for change detection
 	float					syncbase;		// for client-side animations
 	byte					*colormap;
 	int						effects;		// light, particals, etc

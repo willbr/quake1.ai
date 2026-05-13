@@ -954,6 +954,19 @@ void V_CalcRefdef (void)
 	view->frame = cl.stats[STAT_WEAPONFRAME];
 	view->colormap = vid.colormap;
 
+	// track frame transitions for vertex interpolation (viewmodel is outside cl_entities[])
+	{
+		qboolean snap_lerp = (view->model != view->prev_model_for_lerp);
+		if (snap_lerp || view->frame != view->prev_frame_observed)
+		{
+			view->prev_frame = snap_lerp ? view->frame
+			                             : view->prev_frame_observed;
+			view->prev_frame_observed = view->frame;
+			view->frame_start_time = cl.time;
+		}
+		view->prev_model_for_lerp = view->model;
+	}
+
 // set up the refresh position
 	VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
 
