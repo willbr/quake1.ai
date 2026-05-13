@@ -801,8 +801,8 @@ static void *engine_load_file(const char *path, int *out_size) {
     return buf;
 }
 
-static void engine_debug_line(float *start, float *end, int color) {
-    DebugLines_Add(start, end, color);
+static void engine_debug_line(float *start, float *end, int color, int ztest) {
+    DebugLines_Add(start, end, color, ztest);
 }
 
 // ---------------------------------------------------------------------------

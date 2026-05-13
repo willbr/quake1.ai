@@ -15,6 +15,7 @@
 typedef struct {
     float start[3], end[3];
     int   color;
+    int   ztest;
 } debug_line_entry_t;
 
 static debug_line_entry_t s_lines[MAX_DEBUG_LINES];
@@ -22,13 +23,15 @@ static int                s_count;
 
 extern float scr_con_current;
 
-void DebugLines_Add(const float start[3], const float end[3], int color)
+void DebugLines_Add(const float start[3], const float end[3],
+                    int color, int ztest)
 {
     if (s_count >= MAX_DEBUG_LINES) return;
     debug_line_entry_t *l = &s_lines[s_count++];
     l->start[0] = start[0]; l->start[1] = start[1]; l->start[2] = start[2];
     l->end[0]   = end[0];   l->end[1]   = end[1];   l->end[2]   = end[2];
     l->color    = color;
+    l->ztest    = ztest;
 }
 
 void DebugLines_Draw(void)
@@ -51,7 +54,7 @@ void DebugLines_Draw(void)
             vec3_t va, vb;
             RDD_ToView(s_lines[i].start, va);
             RDD_ToView(s_lines[i].end,   vb);
-            RDD_DrawLine3D_View(va, vb, s_lines[i].color);
+            RDD_DrawLine3D_ViewZ(va, vb, s_lines[i].color, s_lines[i].ztest);
         }
     }
     s_count = 0;

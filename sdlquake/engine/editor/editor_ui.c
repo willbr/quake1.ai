@@ -276,6 +276,19 @@ static void draw_toolbar(void)
     }
     IG_SameLine(0, -1);
     {
+        // Navmesh z-test. When on, edges are occluded by world geometry
+        // (only the portion the camera can directly see). Companion to the
+        // navmesh toggle — has no effect when navmesh is off.
+        int on = Cvar_VariableValue("sim_nav_ztest") != 0.0f;
+        if (IG_Checkbox("z-test", &on))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "sim_nav_ztest %d\n", on ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
         // Face mode: clicks set the active face on the singly-selected
         // brush instead of replacing the brush selection. Active face
         // gates the inspector's alignment widgets and gets a white

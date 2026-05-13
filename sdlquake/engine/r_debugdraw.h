@@ -33,6 +33,13 @@ int  RDD_Project(const vec3_t view, float *out_sx, float *out_sy);
 // lines (both endpoints behind near plane) are silently dropped.
 void RDD_DrawLine3D_View(const vec3_t view_a, const vec3_t view_b, int color);
 
+// Same as RDD_DrawLine3D_View, but when ztest is non-zero each pixel is gated
+// on the software renderer's d_pzbuffer — pixels behind world geometry are
+// suppressed. Bayer dither (RDD_BeginFrame's density) still applies. ztest=0
+// matches the original draw-through-everything behaviour.
+void RDD_DrawLine3D_ViewZ(const vec3_t view_a, const vec3_t view_b,
+                          int color, int ztest);
+
 // Draw a Bayer-dithered line (clipped to r_refdef.vrect) between two
 // already-projected screen-space points.
 void RDD_DrawLine2D(int x0, int y0, int x1, int y1, int color);

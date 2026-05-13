@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 11
+#define GAME_API_VERSION 12
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -156,9 +156,11 @@ typedef struct engine_api_s {
     // Returns NULL if the file is not found. out_size receives the file length.
     void *(*LoadFile)(const char *path, int *out_size);
 
-    // Debug line overlay — drawn into vid.buffer this frame only.
-    // color is a Quake palette index (0-255). Call every frame to keep visible.
-    void  (*SV_DebugLine)(vec3_t start, vec3_t end, int color);
+    // Debug line overlay — drawn into vid.buffer this frame only. Color is
+    // a Quake palette index (0-255). ztest != 0 occludes the line against
+    // the world depth buffer so only the un-walled portion is visible.
+    // Call every frame to keep the line visible.
+    void  (*SV_DebugLine)(vec3_t start, vec3_t end, int color, int ztest);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

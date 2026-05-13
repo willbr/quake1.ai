@@ -260,7 +260,8 @@ static sim_navmesh_t *load_mesh(const char *path) {
 void Sim_Nav_Init(void) {
     s_mesh = 0;
     s_ready = 0;
-    eng->Cvar_Register("sim_nav_debug", "0");
+    eng->Cvar_Register("sim_nav_debug",  "0");
+    eng->Cvar_Register("sim_nav_ztest",  "0");
 }
 
 int            Sim_Nav_IsReady(void) { return s_ready; }
@@ -268,14 +269,17 @@ sim_navmesh_t *Sim_Nav_Get(void)     { return s_mesh; }
 
 void Sim_Nav_Frame(void) {
     int i;
+    int ztest;
     if (!s_ready || !s_mesh) return;
     if (eng->Cvar_VariableValue("sim_nav_debug") <= 0.0f) return;
 
+    ztest = eng->Cvar_VariableValue("sim_nav_ztest") > 0.0f;
     for (i = 0; i < s_mesh->edge_count; i++) {
         nav_edge_t *e = &s_mesh->edges[i];
         eng->SV_DebugLine(s_mesh->points[e->from].pos,
                           s_mesh->points[e->to].pos,
-                          244);   // sky blue
+                          244,    // sky blue
+                          ztest);
     }
 }
 

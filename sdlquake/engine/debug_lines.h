@@ -4,8 +4,11 @@
 #define DEBUG_LINES_H
 
 // Add a line to be drawn this frame. color is a Quake palette index (0-255).
-// Lines are cleared after each DebugLines_Draw() call.
-void DebugLines_Add(const float start[3], const float end[3], int color);
+// When ztest is non-zero the line is occluded by world geometry (sampled
+// against d_pzbuffer at draw time). Lines are cleared after every
+// DebugLines_Draw() call.
+void DebugLines_Add(const float start[3], const float end[3],
+                    int color, int ztest);
 
 // Project and draw all queued lines into vid.buffer, then clear the queue.
 // Called from VID_Update() before the SDL texture upload.

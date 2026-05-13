@@ -374,8 +374,8 @@ void Sim_AI_Frame(void) {
                             eye[1] + r * (float)sin(yaw - kHalfFov),
                             eye[2] };
 
-            eng->SV_DebugLine(eye, tip1, color);
-            eng->SV_DebugLine(eye, tip2, color);
+            eng->SV_DebugLine(eye, tip1, color, 0);
+            eng->SV_DebugLine(eye, tip2, color, 0);
         }
     }
 }
