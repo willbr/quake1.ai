@@ -1,4 +1,30 @@
-// sim_nav.c -- BSP walkable-surface extraction, navmesh bake, A* pathfinding.
+// sim_nav.c -- Anchor-seeded flood-fill navmesh bake + A* pathfinding.
+//
+// Bake algorithm:
+//   1. Iterate spawned entities to gather anchor positions:
+//        info_player_start / _coop / _deathmatch / testplayerstart
+//        info_teleport_destination
+//        trigger_teleport      (bbox centre)
+//        trigger_changelevel   (bbox centre)
+//   2. For each anchor: SetOrigin probe, DropToFloor; on success add a seed
+//      node and push to the BFS queue. Record entity refs for teleporters
+//      so we can wire edges in step 4.
+//   3. BFS expand each node by attempting SV_WalkMove in 8 compass
+//      directions at FLOOD_STEP units. Each successful move yields a new
+//      origin; dedupe against existing nodes within FLOOD_DEDUPE, then add
+//      a walk edge to the (existing or new) target node.
+//   4. Resolve teleporter pairs by `target`/`targetname` and add a directed
+//      zero-cost edge from each trigger_teleport source node to its
+//      info_teleport_destination node.
+//
+// The probe has classname "navmesh_probe" and health 0 so multi_touch /
+// teleport_touch / changelevel_touch all bail before doing anything.
+//
+// The cache file format is bumped to v2 to invalidate caches baked by the
+// old centroid-based extractor.
+//
+// Public API (Sim_Nav_Init / _LevelInit / _IsReady / _Get / _Frame /
+// _PathTo) is unchanged.
 
 #include "sim.h"
 #include "../game_defs.h"
@@ -11,40 +37,22 @@
 extern engine_api_t   *eng;
 extern game_globals_t *g;
 
-// ---------------------------------------------------------------------------
-// BSP file structures (from Quake WinQuake bspfile.h).
-// Re-declared locally to avoid including engine headers.
-// ---------------------------------------------------------------------------
-#define BSPVERSION 29
+#define NAV_MAGIC      0x4E41564D    // 'NAVM'
+#define NAV_VERSION    2
 
-typedef struct { int fileofs, filelen; } bsp_lump_t;
-typedef struct {
-    int        version;
-    bsp_lump_t entities, planes, miptex, vertexes, visibility, nodes,
-               texinfo, faces, lighting, clipnodes, leafs, marksurfaces,
-               edges, surfedges, models;
-} bsp_header_t;
+#define FLOOD_STEP     32.0f
+#define FLOOD_DEDUPE   16.0f
+#define DEDUPE_Z       48.0f         // don't merge nodes on different floors
+#define MAX_NODES      8192
+#define MAX_EXPAND_ITERS 65536       // BFS iter safety cap
 
-typedef struct { float point[3]; } bsp_vertex_t;
-typedef struct { unsigned short v[2]; } bsp_edge_t;
-typedef struct {
-    short  planenum;
-    short  side;
-    int    firstedge;
-    short  numedges;
-    short  texinfo;
-    unsigned char styles[4];
-    int    lightofs;
-} bsp_face_t;
-
-typedef struct {
-    float normal[3];
-    float dist;
-    int   type;
-} bsp_plane_t;
+#define PROBE_HALF_X   16.0f
+#define PROBE_HALF_Y   16.0f
+#define PROBE_MIN_Z   (-24.0f)
+#define PROBE_MAX_Z   ( 32.0f)
 
 // ---------------------------------------------------------------------------
-// Navmesh types
+// Types
 // ---------------------------------------------------------------------------
 typedef struct {
     vec3_t pos;
@@ -60,154 +68,85 @@ struct sim_navmesh_s {
     int          point_count;
     nav_edge_t  *edges;
     int          edge_count;
-    int         *adj_offsets;   // CSR: offsets into adj[] per point
-    int         *adj;           // CSR: edge indices
+    int         *adj_offsets;
+    int         *adj;
 };
 
 static sim_navmesh_t *s_mesh;
 static int            s_ready;
 
 // ---------------------------------------------------------------------------
-// Step 1: extract walkable face centroids from an in-memory BSP buffer.
+// Spatial dedupe grid (xy hash; z checked per-candidate).
 // ---------------------------------------------------------------------------
-static int extract_walkable_points(void *raw, int raw_size,
-                                   nav_point_t **out_points,
-                                   int *out_count)
-{
-    (void)raw_size;
-    bsp_header_t *h = (bsp_header_t *)raw;
-    if (h->version != BSPVERSION) { free(raw); return 0; }
+#define GRID_CELL    64.0f
+#define GRID_BUCKETS 4093
 
-    bsp_vertex_t *verts     = (bsp_vertex_t *)((char *)raw + h->vertexes.fileofs);
-    int           nverts     = h->vertexes.filelen / (int)sizeof(bsp_vertex_t);
+typedef struct grid_node_s {
+    int                 idx;
+    struct grid_node_s *next;
+} grid_node_t;
 
-    bsp_edge_t   *edges      = (bsp_edge_t  *)((char *)raw + h->edges.fileofs);
-    int          *surfedges   = (int         *)((char *)raw + h->surfedges.fileofs);
+typedef struct {
+    grid_node_t *buckets[GRID_BUCKETS];
+    grid_node_t *pool;
+    int          pool_used;
+    int          pool_cap;
+} grid_t;
 
-    bsp_face_t   *faces      = (bsp_face_t  *)((char *)raw + h->faces.fileofs);
-    int           nfaces      = h->faces.filelen / (int)sizeof(bsp_face_t);
-
-    bsp_plane_t  *planes     = (bsp_plane_t *)((char *)raw + h->planes.fileofs);
-
-    int cap = 1024, n = 0;
-    nav_point_t *pts = (nav_point_t *)malloc(sizeof(nav_point_t) * cap);
-    if (!pts) { return 0; }
-
-    for (int fi = 0; fi < nfaces; fi++) {
-        const bsp_face_t  *f = &faces[fi];
-        const bsp_plane_t *p = &planes[f->planenum];
-        // Plane normal flips with side flag.
-        float nx = p->normal[0], ny = p->normal[1], nz = p->normal[2];
-        if (f->side) { nx = -nx; ny = -ny; nz = -nz; }
-        if (nz < 0.7f) continue;   // not walkable
-
-        // Compute face centroid from edge vertices.
-        float cx = 0, cy = 0, cz = 0;
-        int   nv = 0;
-        for (int e = 0; e < f->numedges; e++) {
-            int   se   = surfedges[f->firstedge + e];
-            int   vidx = (se >= 0) ? (int)edges[se].v[0] : (int)edges[-se].v[1];
-            if (vidx < 0 || vidx >= nverts) continue;
-            cx += verts[vidx].point[0];
-            cy += verts[vidx].point[1];
-            cz += verts[vidx].point[2];
-            nv++;
-        }
-        if (nv == 0) continue;
-        cx /= nv; cy /= nv; cz /= nv;
-
-        if (n == cap) {
-            cap *= 2;
-            nav_point_t *tmp = (nav_point_t *)realloc(pts, sizeof(nav_point_t) * cap);
-            if (!tmp) break;
-            pts = tmp;
-        }
-        pts[n].pos[0] = cx;
-        pts[n].pos[1] = cy;
-        pts[n].pos[2] = cz + 16.0f;   // lift to standing height
-        n++;
-    }
-
-    *out_points = pts;
-    *out_count  = n;
-    return 1;
+static unsigned grid_hash(int cx, int cy) {
+    return ((unsigned)cx * 73856093u ^ (unsigned)cy * 19349663u) % GRID_BUCKETS;
 }
 
-// ---------------------------------------------------------------------------
-// Step 2: allocate a probe entity for walkmove testing.
-// ---------------------------------------------------------------------------
-
-// Need an entity to probe with. Allocate once, reuse, free at end.
-static edict_t *alloc_probe(void) {
-    edict_t *e = eng->ED_Alloc();
-    e->v.movetype = MOVETYPE_STEP;
-    e->v.solid    = SOLID_SLIDEBOX;
-    eng->SV_SetSize(e, (vec3_t){-16, -16, -24}, (vec3_t){16, 16, 32});
-    return e;
-}
-
-static int build_edges(sim_navmesh_t *m) {
-    int   cap = 4096, n = 0;
-    nav_edge_t *e = malloc(sizeof(nav_edge_t) * cap);
-
-    edict_t *probe = alloc_probe();
-    if (!e) { eng->ED_Free(probe); return 0; }
-
-    for (int i = 0; i < m->point_count; i++) {
-        eng->SV_SetOrigin(probe, m->points[i].pos);
-        if (!eng->SV_DropToFloor(probe)) continue;
-
-        for (int j = 0; j < m->point_count; j++) {
-            if (i == j) continue;
-            float dx = m->points[i].pos[0] - m->points[j].pos[0];
-            float dy = m->points[i].pos[1] - m->points[j].pos[1];
-            float dz = m->points[i].pos[2] - m->points[j].pos[2];
-            float d  = (float)sqrt(dx*dx + dy*dy + dz*dz);
-            if (d > 96.0f) continue;
-            // Probe walkmove from i to j.
-            eng->SV_SetOrigin(probe, m->points[i].pos);
-            float yaw = (float)(atan2(-dy, -dx) * 180.0 / 3.14159265358979);
-            int ok = eng->SV_WalkMove(probe, yaw, d);
-            if (!ok) continue;
-
-            if (n == cap) {
-                cap *= 2;
-                nav_edge_t *tmp = realloc(e, sizeof(nav_edge_t) * cap);
-                if (!tmp) { free(e); eng->ED_Free(probe); return 0; }
-                e = tmp;
+static int grid_find(const grid_t *grd, const sim_navmesh_t *m, const vec3_t pos) {
+    int   cx = (int)floorf(pos[0] / GRID_CELL);
+    int   cy = (int)floorf(pos[1] / GRID_CELL);
+    float r2 = FLOOD_DEDUPE * FLOOD_DEDUPE;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            unsigned h = grid_hash(cx + dx, cy + dy);
+            for (grid_node_t *n = grd->buckets[h]; n; n = n->next) {
+                const float *p = m->points[n->idx].pos;
+                float ez = p[2] - pos[2];
+                if (ez >  DEDUPE_Z) continue;
+                if (ez < -DEDUPE_Z) continue;
+                float ex = p[0] - pos[0];
+                float ey = p[1] - pos[1];
+                if (ex*ex + ey*ey + ez*ez <= r2)
+                    return n->idx;
             }
-            e[n].from   = i;
-            e[n].to     = j;
-            e[n].weight = d;
-            n++;
         }
     }
+    return -1;
+}
 
-    eng->ED_Free(probe);
-    m->edges      = e;
-    m->edge_count = n;
+static int grid_insert(grid_t *grd, const vec3_t pos, int idx) {
+    if (grd->pool_used >= grd->pool_cap) {
+        int nc = grd->pool_cap ? grd->pool_cap * 2 : 1024;
+        grid_node_t *p = realloc(grd->pool, sizeof(grid_node_t) * nc);
+        if (!p) return 0;
+        grd->pool     = p;
+        grd->pool_cap = nc;
+    }
+    int      cx = (int)floorf(pos[0] / GRID_CELL);
+    int      cy = (int)floorf(pos[1] / GRID_CELL);
+    unsigned h  = grid_hash(cx, cy);
+    grid_node_t *n = &grd->pool[grd->pool_used++];
+    n->idx          = idx;
+    n->next         = grd->buckets[h];
+    grd->buckets[h] = n;
     return 1;
 }
 
-static void build_adjacency(sim_navmesh_t *m) {
-    m->adj_offsets = calloc(m->point_count + 1, sizeof(int));
-    if (!m->adj_offsets) return;
-    for (int i = 0; i < m->edge_count; i++) m->adj_offsets[m->edges[i].from + 1]++;
-    for (int i = 1; i <= m->point_count; i++) m->adj_offsets[i] += m->adj_offsets[i-1];
-
-    int *cursor = calloc(m->point_count, sizeof(int));
-    if (!cursor) { free(m->adj_offsets); m->adj_offsets = NULL; return; }
-    m->adj = malloc(sizeof(int) * m->edge_count);
-    if (!m->adj) { free(m->adj_offsets); m->adj_offsets = NULL; free(cursor); return; }
-    for (int i = 0; i < m->edge_count; i++) {
-        int from = m->edges[i].from;
-        m->adj[m->adj_offsets[from] + cursor[from]++] = i;
-    }
-    free(cursor);
+static void grid_clear(grid_t *grd) {
+    free(grd->pool);
+    grd->pool     = NULL;
+    grd->pool_cap = 0;
+    grd->pool_used = 0;
+    for (int i = 0; i < GRID_BUCKETS; i++) grd->buckets[i] = NULL;
 }
 
 // ---------------------------------------------------------------------------
-// Mesh helpers: free, save, load
+// Mesh helpers
 // ---------------------------------------------------------------------------
 static void free_mesh(sim_navmesh_t *m) {
     if (!m) return;
@@ -218,11 +157,156 @@ static void free_mesh(sim_navmesh_t *m) {
     free(m);
 }
 
+static int add_point(sim_navmesh_t *m, int *cap, grid_t *grd, const vec3_t pos) {
+    if (m->point_count >= MAX_NODES) return -1;
+    if (m->point_count >= *cap) {
+        int nc = *cap ? *cap * 2 : 256;
+        nav_point_t *p = realloc(m->points, sizeof(nav_point_t) * nc);
+        if (!p) return -1;
+        m->points = p;
+        *cap      = nc;
+    }
+    int idx = m->point_count++;
+    m->points[idx].pos[0] = pos[0];
+    m->points[idx].pos[1] = pos[1];
+    m->points[idx].pos[2] = pos[2];
+    grid_insert(grd, pos, idx);
+    return idx;
+}
+
+static int add_edge(sim_navmesh_t *m, int *cap, int from, int to, float weight) {
+    if (m->edge_count >= *cap) {
+        int nc = *cap ? *cap * 2 : 1024;
+        nav_edge_t *e = realloc(m->edges, sizeof(nav_edge_t) * nc);
+        if (!e) return 0;
+        m->edges = e;
+        *cap     = nc;
+    }
+    nav_edge_t *e = &m->edges[m->edge_count++];
+    e->from   = from;
+    e->to     = to;
+    e->weight = weight;
+    return 1;
+}
+
+static void build_adjacency(sim_navmesh_t *m) {
+    m->adj_offsets = calloc(m->point_count + 1, sizeof(int));
+    if (!m->adj_offsets) return;
+    for (int i = 0; i < m->edge_count; i++)
+        m->adj_offsets[m->edges[i].from + 1]++;
+    for (int i = 1; i <= m->point_count; i++)
+        m->adj_offsets[i] += m->adj_offsets[i-1];
+
+    int *cursor = calloc(m->point_count, sizeof(int));
+    if (!cursor) { free(m->adj_offsets); m->adj_offsets = NULL; return; }
+    m->adj = malloc(sizeof(int) * (m->edge_count > 0 ? m->edge_count : 1));
+    if (!m->adj) { free(m->adj_offsets); m->adj_offsets = NULL; free(cursor); return; }
+    for (int i = 0; i < m->edge_count; i++) {
+        int from = m->edges[i].from;
+        m->adj[m->adj_offsets[from] + cursor[from]++] = i;
+    }
+    free(cursor);
+}
+
+// ---------------------------------------------------------------------------
+// Probe
+// ---------------------------------------------------------------------------
+static edict_t *alloc_probe(void) {
+    edict_t *e = eng->ED_Alloc();
+    // Distinct classname so multi_touch / changelevel_touch (which gate on
+    // classname == "player") leave us alone. Zero health makes
+    // teleport_touch bail before relocating us.
+    e->v.classname  = "navmesh_probe";
+    e->v.movetype   = MOVETYPE_STEP;
+    e->v.solid      = SOLID_SLIDEBOX;
+    e->v.health     = 0;
+    e->v.takedamage = DAMAGE_NO;
+    eng->SV_SetSize(e,
+        (vec3_t){-PROBE_HALF_X, -PROBE_HALF_Y, PROBE_MIN_Z},
+        (vec3_t){ PROBE_HALF_X,  PROBE_HALF_Y, PROBE_MAX_Z});
+    return e;
+}
+
+// SetOrigin to `pos` then DropToFloor. On success, copies the resulting
+// floor-seated origin to `out` and returns 1. DropToFloor also sets
+// FL_ONGROUND, which SV_WalkMove requires.
+static int seat_probe(edict_t *probe, const vec3_t pos, vec3_t out) {
+    eng->SV_SetOrigin(probe, (float *)pos);
+    if (!eng->SV_DropToFloor(probe)) return 0;
+    out[0] = probe->v.origin[0];
+    out[1] = probe->v.origin[1];
+    out[2] = probe->v.origin[2];
+    return 1;
+}
+
+static void entity_center(edict_t *e, vec3_t out) {
+    out[0] = e->v.origin[0] + (e->v.mins[0] + e->v.maxs[0]) * 0.5f;
+    out[1] = e->v.origin[1] + (e->v.mins[1] + e->v.maxs[1]) * 0.5f;
+    out[2] = e->v.origin[2] + (e->v.mins[2] + e->v.maxs[2]) * 0.5f;
+}
+
+// ---------------------------------------------------------------------------
+// Anchor / teleport collection
+// ---------------------------------------------------------------------------
+typedef enum {
+    ANCHOR_GENERIC      = 0,
+    ANCHOR_TELEPORT_SRC = 1,   // trigger_teleport (entity has `target`)
+    ANCHOR_TELEPORT_DST = 2,   // info_teleport_destination (`targetname`)
+} anchor_kind_t;
+
+typedef struct {
+    vec3_t        pos;
+    anchor_kind_t kind;
+    edict_t      *entity;       // valid for TELEPORT_SRC / TELEPORT_DST
+    int           node_index;   // assigned after seating; -1 if no floor
+} anchor_t;
+
+static int anchors_push(anchor_t **arr, int *cap, int *n,
+                        const vec3_t pos, anchor_kind_t kind, edict_t *ent)
+{
+    if (*n >= *cap) {
+        int nc = *cap ? *cap * 2 : 64;
+        anchor_t *p = realloc(*arr, sizeof(anchor_t) * nc);
+        if (!p) return 0;
+        *arr = p;
+        *cap = nc;
+    }
+    anchor_t *a = &(*arr)[(*n)++];
+    a->pos[0]     = pos[0];
+    a->pos[1]     = pos[1];
+    a->pos[2]     = pos[2];
+    a->kind       = kind;
+    a->entity     = ent;
+    a->node_index = -1;
+    return 1;
+}
+
+static void collect_anchors_by_classname(anchor_t **arr, int *cap, int *n,
+                                         const char *classname,
+                                         anchor_kind_t kind, int use_bbox_center)
+{
+    edict_t *e = eng->ED_Find(g->world, "classname", (char *)classname);
+    while (e != g->world) {
+        vec3_t pos;
+        if (use_bbox_center) entity_center(e, pos);
+        else {
+            pos[0] = e->v.origin[0];
+            pos[1] = e->v.origin[1];
+            pos[2] = e->v.origin[2];
+        }
+        anchors_push(arr, cap, n, pos, kind, e);
+        e = eng->ED_Find(e, "classname", (char *)classname);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Save / load (cache)
+// ---------------------------------------------------------------------------
 static int save_mesh(const char *path, const sim_navmesh_t *m) {
     FILE *f = fopen(path, "wb");
     if (!f) return 0;
-    int magic = 0x4E41564D;     // 'NAVM'
-    int ver   = 1;
+    int magic = NAV_MAGIC;
+    int ver   = NAV_VERSION;
     fwrite(&magic, 4, 1, f);
     fwrite(&ver,   4, 1, f);
     fwrite(&m->point_count, 4, 1, f);
@@ -237,48 +321,240 @@ static sim_navmesh_t *load_mesh(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
     int magic, ver, np, ne;
-    fread(&magic, 4, 1, f); fread(&ver, 4, 1, f);
-    fread(&np, 4, 1, f);    fread(&ne, 4, 1, f);
-    if (magic != 0x4E41564D || ver != 1) { fclose(f); return 0; }
+    if (fread(&magic, 4, 1, f) != 1 ||
+        fread(&ver,   4, 1, f) != 1 ||
+        fread(&np,    4, 1, f) != 1 ||
+        fread(&ne,    4, 1, f) != 1)
+    { fclose(f); return 0; }
+    if (magic != NAV_MAGIC || ver != NAV_VERSION) { fclose(f); return 0; }
+    if (np < 0 || np > MAX_NODES || ne < 0)       { fclose(f); return 0; }
+
     sim_navmesh_t *m = calloc(1, sizeof(*m));
     if (!m) { fclose(f); return 0; }
     m->point_count = np;
     m->edge_count  = ne;
-    m->points = malloc(sizeof(nav_point_t) * np);
-    m->edges  = malloc(sizeof(nav_edge_t)  * ne);
+    m->points = malloc(sizeof(nav_point_t) * (np > 0 ? np : 1));
+    m->edges  = malloc(sizeof(nav_edge_t)  * (ne > 0 ? ne : 1));
     if (!m->points || !m->edges) { fclose(f); free_mesh(m); return 0; }
-    fread(m->points, sizeof(nav_point_t), np, f);
-    fread(m->edges,  sizeof(nav_edge_t),  ne, f);
+    if (np > 0 && fread(m->points, sizeof(nav_point_t), np, f) != (size_t)np) {
+        fclose(f); free_mesh(m); return 0;
+    }
+    if (ne > 0 && fread(m->edges, sizeof(nav_edge_t), ne, f) != (size_t)ne) {
+        fclose(f); free_mesh(m); return 0;
+    }
     fclose(f);
     build_adjacency(m);
     return m;
 }
 
 // ---------------------------------------------------------------------------
+// Push current mesh to imgui dev overlay (2D xy-only).
+// ---------------------------------------------------------------------------
+static void push_to_imgui(const sim_navmesh_t *m) {
+    int np = m->point_count;
+    if (np <= 0) { eng->ImguiNav_Set(NULL, 0, NULL, 0); return; }
+    if (np > 4096) np = 4096;
+    float *xy = malloc(sizeof(float) * 2 * np);
+    if (!xy) return;
+    for (int i = 0; i < np; i++) {
+        xy[2*i+0] = m->points[i].pos[0];
+        xy[2*i+1] = m->points[i].pos[1];
+    }
+    int ne = m->edge_count;
+    unsigned short *eds = NULL;
+    int wrote = 0;
+    if (ne > 0) {
+        eds = malloc(sizeof(unsigned short) * 2 * ne);
+        if (eds) {
+            for (int i = 0; i < ne; i++) {
+                int a = m->edges[i].from;
+                int b = m->edges[i].to;
+                if (a < np && b < np && a < 65536 && b < 65536) {
+                    eds[2*wrote+0] = (unsigned short)a;
+                    eds[2*wrote+1] = (unsigned short)b;
+                    wrote++;
+                }
+            }
+        }
+    }
+    eng->ImguiNav_Set(xy, np, eds, wrote);
+    free(eds);
+    free(xy);
+}
+
+// ---------------------------------------------------------------------------
+// Flood-fill bake
+// ---------------------------------------------------------------------------
+static const float k_yaws[8] = {
+    0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f
+};
+
+static int bake_floodfill(sim_navmesh_t *m) {
+    edict_t  *probe       = alloc_probe();
+    grid_t    grd         = {0};
+    int       cap_points  = 0;
+    int       cap_edges   = 0;
+    int      *queue       = NULL;
+    int       q_head = 0, q_tail = 0, q_cap = 0;
+    anchor_t *anchors     = NULL;
+    int       anchor_cap  = 0;
+    int       anchor_n    = 0;
+    int       iters       = 0;
+
+    // --- Phase 1: collect anchors ----------------------------------------
+    collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
+        "info_player_start",       ANCHOR_GENERIC, 0);
+    collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
+        "info_player_coop",        ANCHOR_GENERIC, 0);
+    collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
+        "info_player_deathmatch",  ANCHOR_GENERIC, 0);
+    collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
+        "testplayerstart",         ANCHOR_GENERIC, 0);
+    collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
+        "info_teleport_destination", ANCHOR_TELEPORT_DST, 0);
+    collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
+        "trigger_teleport",          ANCHOR_TELEPORT_SRC, 1);
+    collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
+        "trigger_changelevel",       ANCHOR_GENERIC, 1);
+
+    // --- Phase 2: seat seeds + push to queue ------------------------------
+    for (int i = 0; i < anchor_n; i++) {
+        anchor_t *a = &anchors[i];
+        vec3_t   seated;
+        if (!seat_probe(probe, a->pos, seated)) continue;
+        int existing = grid_find(&grd, m, seated);
+        if (existing >= 0) {
+            a->node_index = existing;
+            continue;
+        }
+        int idx = add_point(m, &cap_points, &grd, seated);
+        if (idx < 0) continue;
+        a->node_index = idx;
+        if (q_tail >= q_cap) {
+            int nc = q_cap ? q_cap * 2 : 256;
+            int *nq = realloc(queue, sizeof(int) * nc);
+            if (!nq) continue;
+            queue = nq;
+            q_cap = nc;
+        }
+        queue[q_tail++] = idx;
+    }
+
+    // --- Phase 3: BFS expand ----------------------------------------------
+    while (q_head < q_tail && iters < MAX_EXPAND_ITERS) {
+        iters++;
+        int cur = queue[q_head++];
+        if (cur < 0 || cur >= m->point_count) continue;
+        vec3_t cur_pos;
+        cur_pos[0] = m->points[cur].pos[0];
+        cur_pos[1] = m->points[cur].pos[1];
+        cur_pos[2] = m->points[cur].pos[2];
+
+        for (int d = 0; d < 8; d++) {
+            // Re-seat probe at current node every iteration: SV_WalkMove
+            // requires FL_ONGROUND, and a previous failed walkmove can
+            // leave the probe's origin / flags in a partial state.
+            vec3_t scratch;
+            if (!seat_probe(probe, cur_pos, scratch)) break;
+            (void)scratch;
+
+            if (!eng->SV_WalkMove(probe, k_yaws[d], FLOOD_STEP)) continue;
+
+            vec3_t end;
+            end[0] = probe->v.origin[0];
+            end[1] = probe->v.origin[1];
+            end[2] = probe->v.origin[2];
+
+            // Drop again so the recorded position is firmly on the floor
+            // (walkmove already drops, but normalises height for dedupe).
+            int next_idx = grid_find(&grd, m, end);
+            if (next_idx < 0) {
+                if (m->point_count >= MAX_NODES) continue;
+                next_idx = add_point(m, &cap_points, &grd, end);
+                if (next_idx < 0) continue;
+                if (q_tail >= q_cap) {
+                    int nc = q_cap ? q_cap * 2 : 256;
+                    int *nq = realloc(queue, sizeof(int) * nc);
+                    if (!nq) continue;
+                    queue = nq;
+                    q_cap = nc;
+                }
+                queue[q_tail++] = next_idx;
+            }
+            if (next_idx == cur) continue;
+
+            float dx = m->points[next_idx].pos[0] - cur_pos[0];
+            float dy = m->points[next_idx].pos[1] - cur_pos[1];
+            float dz = m->points[next_idx].pos[2] - cur_pos[2];
+            float w  = (float)sqrt(dx*dx + dy*dy + dz*dz);
+            if (w < 1.0f) w = 1.0f;
+            add_edge(m, &cap_edges, cur, next_idx, w);
+        }
+    }
+
+    // --- Phase 4: teleporter edges ---------------------------------------
+    // For each TELEPORT_SRC anchor, find its destination by matching
+    // `target` (on src) to `targetname` (on dst).
+    int teleport_edges = 0;
+    for (int i = 0; i < anchor_n; i++) {
+        if (anchors[i].kind != ANCHOR_TELEPORT_SRC)          continue;
+        if (anchors[i].node_index < 0)                       continue;
+        if (!anchors[i].entity || !anchors[i].entity->v.target) continue;
+
+        const char *want = anchors[i].entity->v.target;
+        int dst_node = -1;
+        for (int j = 0; j < anchor_n; j++) {
+            if (anchors[j].kind != ANCHOR_TELEPORT_DST)         continue;
+            if (anchors[j].node_index < 0)                      continue;
+            if (!anchors[j].entity || !anchors[j].entity->v.targetname) continue;
+            if (strcmp(anchors[j].entity->v.targetname, want) != 0) continue;
+            dst_node = anchors[j].node_index;
+            break;
+        }
+        if (dst_node < 0) continue;
+        add_edge(m, &cap_edges, anchors[i].node_index, dst_node, 0.0f);
+        teleport_edges++;
+    }
+
+    {
+        char buf[200];
+        snprintf(buf, sizeof(buf),
+                 "sim_nav: bake %d nodes, %d edges (%d teleport, %d iters)\n",
+                 m->point_count, m->edge_count, teleport_edges, iters);
+        eng->Con_Print(buf);
+    }
+
+    eng->ED_Free(probe);
+    free(queue);
+    free(anchors);
+    grid_clear(&grd);
+    return m->point_count > 0;
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 void Sim_Nav_Init(void) {
-    s_mesh = 0;
+    s_mesh  = 0;
     s_ready = 0;
-    eng->Cvar_Register("sim_nav_debug",  "0");
-    eng->Cvar_Register("sim_nav_ztest",  "0");
+    eng->Cvar_Register("sim_nav_debug", "0");
+    eng->Cvar_Register("sim_nav_ztest", "0");
 }
 
 int            Sim_Nav_IsReady(void) { return s_ready; }
 sim_navmesh_t *Sim_Nav_Get(void)     { return s_mesh; }
 
 void Sim_Nav_Frame(void) {
-    int i;
-    int ztest;
     if (!s_ready || !s_mesh) return;
     if (eng->Cvar_VariableValue("sim_nav_debug") <= 0.0f) return;
-
-    ztest = eng->Cvar_VariableValue("sim_nav_ztest") > 0.0f;
-    for (i = 0; i < s_mesh->edge_count; i++) {
+    int ztest = eng->Cvar_VariableValue("sim_nav_ztest") > 0.0f;
+    for (int i = 0; i < s_mesh->edge_count; i++) {
         nav_edge_t *e = &s_mesh->edges[i];
+        // Teleport edges (weight 0) drawn in a contrasting colour.
+        int color = (e->weight == 0.0f) ? 192 : 244;
         eng->SV_DebugLine(s_mesh->points[e->from].pos,
                           s_mesh->points[e->to].pos,
-                          244,    // sky blue
+                          color,
                           ztest);
     }
 }
@@ -298,6 +574,8 @@ void Sim_Nav_LevelInit(const char *mapname) {
         eng->Con_Print("sim_nav: bsp not found\n");
         return;
     }
+    free(bsp_raw);   // We only needed the size for the cache key.
+
     snprintf(nav_path, sizeof(nav_path),
              "id1/cache/navmesh/%s-%d.nav", mapname, bsp_sz);
 
@@ -305,101 +583,41 @@ void Sim_Nav_LevelInit(const char *mapname) {
     s_mesh = load_mesh(nav_path);
     if (s_mesh) {
         char buf[160];
-        snprintf(buf, sizeof(buf), "sim_nav: loaded %d pts %d edges from cache\n",
+        snprintf(buf, sizeof(buf),
+                 "sim_nav: loaded %d pts %d edges from cache\n",
                  s_mesh->point_count, s_mesh->edge_count);
         eng->Con_Print(buf);
-        {
-            // Push to imgui as 2D xy-only.
-            int np = s_mesh->point_count;
-            if (np > 4096) np = 4096;
-            float *xy = malloc(sizeof(float) * 2 * np);
-            if (xy) {
-                for (int i = 0; i < np; i++) {
-                    xy[2*i+0] = s_mesh->points[i].pos[0];
-                    xy[2*i+1] = s_mesh->points[i].pos[1];
-                }
-                int ne = 0;
-                unsigned short *eds = malloc(sizeof(unsigned short) * 2 * s_mesh->edge_count);
-                if (eds) {
-                    for (int i = 0; i < s_mesh->edge_count; i++) {
-                        int a = s_mesh->edges[i].from;
-                        int b = s_mesh->edges[i].to;
-                        if (a < 65536 && b < 65536) {
-                            eds[2*ne+0] = (unsigned short)a;
-                            eds[2*ne+1] = (unsigned short)b;
-                            ne++;
-                        }
-                    }
-                    eng->ImguiNav_Set(xy, np, eds, ne);
-                    free(eds);
-                }
-                free(xy);
-            }
-        }
+        push_to_imgui(s_mesh);
         s_ready = 1;
-        free(bsp_raw);
         return;
     }
 
-    // Bake from scratch.
-    eng->Con_Print("sim_nav: baking...\n");
+    // Bake fresh.
+    eng->Con_Print("sim_nav: baking via flood-fill...\n");
     s_mesh = calloc(1, sizeof(*s_mesh));
-    if (!s_mesh) { free(bsp_raw); return; }
-    if (!extract_walkable_points(bsp_raw, bsp_sz, &s_mesh->points, &s_mesh->point_count)) {
-        eng->Con_Print("sim_nav: extract failed\n");
-        free_mesh(s_mesh); s_mesh = 0; free(bsp_raw); return;
-    }
-    free(bsp_raw);
-    if (!build_edges(s_mesh)) {
-        eng->Con_Print("sim_nav: edge build failed\n");
-        free_mesh(s_mesh); s_mesh = 0; return;
+    if (!s_mesh) return;
+
+    if (!bake_floodfill(s_mesh)) {
+        eng->Con_Print("sim_nav: bake produced no nodes (no spawn anchors?)\n");
+        free_mesh(s_mesh);
+        s_mesh = 0;
+        return;
     }
     build_adjacency(s_mesh);
 
-    // Make cache directory and save (best-effort, Windows-compatible).
     _mkdir("id1\\cache");
     _mkdir("id1\\cache\\navmesh");
     save_mesh(nav_path, s_mesh);
 
-    {
-        int np = s_mesh->point_count;
-        if (np > 4096) np = 4096;
-        float *xy = malloc(sizeof(float) * 2 * np);
-        if (xy) {
-            for (int i = 0; i < np; i++) {
-                xy[2*i+0] = s_mesh->points[i].pos[0];
-                xy[2*i+1] = s_mesh->points[i].pos[1];
-            }
-            int ne = 0;
-            unsigned short *eds = malloc(sizeof(unsigned short) * 2 * s_mesh->edge_count);
-            if (eds) {
-                for (int i = 0; i < s_mesh->edge_count; i++) {
-                    int a = s_mesh->edges[i].from;
-                    int b = s_mesh->edges[i].to;
-                    if (a < 65536 && b < 65536) {
-                        eds[2*ne+0] = (unsigned short)a;
-                        eds[2*ne+1] = (unsigned short)b;
-                        ne++;
-                    }
-                }
-                eng->ImguiNav_Set(xy, np, eds, ne);
-                free(eds);
-            }
-            free(xy);
-        }
-    }
-    char buf[160];
-    snprintf(buf, sizeof(buf), "sim_nav: baked %d pts %d edges\n",
-             s_mesh->point_count, s_mesh->edge_count);
-    eng->Con_Print(buf);
+    push_to_imgui(s_mesh);
     s_ready = 1;
 }
 
 // ---------------------------------------------------------------------------
-// A* — small open-set, no priority queue. O(N²) for v1; fine for ~1k nodes.
+// A* — small open-set, no priority queue. O(N^2) per step; fine for ~few k.
 // ---------------------------------------------------------------------------
 static int nearest_point(const sim_navmesh_t *m, const vec3_t pos) {
-    int   best = -1;
+    int   best    = -1;
     float best_d2 = 1e18f;
     for (int i = 0; i < m->point_count; i++) {
         float dx = m->points[i].pos[0] - pos[0];
@@ -430,7 +648,7 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
         return 1;
     }
 
-    int N = s_mesh->point_count;
+    int    N      = s_mesh->point_count;
     float *gscore = malloc(sizeof(float) * N);
     float *fscore = malloc(sizeof(float) * N);
     int   *came   = malloc(sizeof(int)   * N);
@@ -444,12 +662,12 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
 
     gscore[start] = 0;
     fscore[start] = dist3(s_mesh->points[start].pos, s_mesh->points[goal].pos);
-    open[start] = 1;
+    open[start]   = 1;
 
     int found = 0;
     while (1) {
-        int   cur  = -1;
-        float bf = 1e18f;
+        int   cur = -1;
+        float bf  = 1e18f;
         for (int i = 0; i < N; i++) {
             if (!open[i]) continue;
             if (fscore[i] < bf) { bf = fscore[i]; cur = i; }
@@ -477,12 +695,10 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
 
     int written = 0;
     if (found) {
-        // Reconstruct path: walk came[] backwards into a temp buffer, reverse.
-        int  tmp[1024];
-        int  tn = 0;
-        int  c  = goal;
+        int tmp[1024];
+        int tn = 0;
+        int c  = goal;
         while (c != -1 && tn < 1024) { tmp[tn++] = c; c = came[c]; }
-        // Reverse and copy to out.
         for (int i = tn - 1; i >= 0 && written < max_out; i--) {
             out[written][0] = s_mesh->points[tmp[i]].pos[0];
             out[written][1] = s_mesh->points[tmp[i]].pos[1];
