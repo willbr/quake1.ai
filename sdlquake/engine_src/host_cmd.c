@@ -1917,6 +1917,45 @@ void Host_Stopdemo_f (void)
 
 /*
 ==================
+Host_OpenDoors_f / Host_OpenDoorsSecret_f
+
+Debug helpers: open every func_door (or func_door_secret) currently in the
+level. Implementation lives in game.dll; engine-side registration keeps
+Cmd_AddCommand off the post-host_initialized path.
+==================
+*/
+static void Host_OpenDoors_f (void)
+{
+	if (!sv.active)
+	{
+		Con_Printf ("opendoors: no server running\n");
+		return;
+	}
+	if (!g_game_api || !g_game_api->open_all_doors)
+	{
+		Con_Printf ("opendoors: not available in this build\n");
+		return;
+	}
+	g_game_api->open_all_doors ();
+}
+
+static void Host_OpenDoorsSecret_f (void)
+{
+	if (!sv.active)
+	{
+		Con_Printf ("opendoors_secret: no server running\n");
+		return;
+	}
+	if (!g_game_api || !g_game_api->open_all_secret_doors)
+	{
+		Con_Printf ("opendoors_secret: not available in this build\n");
+		return;
+	}
+	g_game_api->open_all_secret_doors ();
+}
+
+/*
+==================
 Host_InitCommands
 ==================
 */
@@ -1966,4 +2005,7 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("viewprev", Host_Viewprev_f);
 
 	Cmd_AddCommand ("mcache", Mod_Print);
+
+	Cmd_AddCommand ("opendoors",        Host_OpenDoors_f);
+	Cmd_AddCommand ("opendoors_secret", Host_OpenDoorsSecret_f);
 }

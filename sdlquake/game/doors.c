@@ -4,6 +4,7 @@
 #include "game_types.h"
 #include "game_defs.h"
 #include <string.h>
+#include <stdio.h>
 #include <math.h>
 
 extern engine_api_t   *eng;
@@ -569,4 +570,58 @@ void spawn_func_door_secret(edict_t *e) {
     e->v.oldorigin[0] = e->v.origin[0];
     e->v.oldorigin[1] = e->v.origin[1];
     e->v.oldorigin[2] = e->v.origin[2];
+}
+
+// ---------------------------------------------------------------------------
+// Console-command entry points — invoked from the engine via game_api_t.
+// Walk all matching edicts and force them open. Used as a debug aid.
+// ---------------------------------------------------------------------------
+// Iterate all edicts with classname "door". spawn_func_door_secret rewrites
+// its own classname to "door" (matching the original QC), so secret doors
+// share the bucket and are distinguished by v.use == fd_secret_use_fn.
+// ED_Find follows the QC convention: returns `world` as the "no match"
+// sentinel, not NULL — the loop must compare against g->world to terminate.
+void Doors_OpenAll(void) {
+    int fired = 0;
+    edict_t *prev_self = g->self, *prev_activator = g->activator;
+    g->activator = g->world;
+    edict_t *d = eng->ED_Find(NULL, "classname", "door");
+    while (d && d != g->world) {
+        edict_t *next = eng->ED_Find(d, "classname", "door");
+        int is_secret = (d->v.use == fd_secret_use_fn);
+        int is_slave  = (d->v.owner && d->v.owner != d);
+        int st        = (int)d->v.state;
+        if (!is_secret && !is_slave && st != STATE_UP && st != STATE_TOP) {
+            g->self = d;
+            door_fire(d);
+            fired++;
+        }
+        d = next;
+    }
+    g->self = prev_self;
+    g->activator = prev_activator;
+    char msg[64];
+    snprintf(msg, sizeof msg, "opendoors: opened %d door(s)\n", fired);
+    eng->Con_Print(msg);
+}
+
+void Doors_OpenAllSecret(void) {
+    int fired = 0;
+    edict_t *prev_self = g->self, *prev_activator = g->activator;
+    g->activator = g->world;
+    edict_t *d = eng->ED_Find(NULL, "classname", "door");
+    while (d && d != g->world) {
+        edict_t *next = eng->ED_Find(d, "classname", "door");
+        if (d->v.use == fd_secret_use_fn) {
+            g->self = d;
+            d->v.use(d, g->world);
+            fired++;
+        }
+        d = next;
+    }
+    g->self = prev_self;
+    g->activator = prev_activator;
+    char msg[64];
+    snprintf(msg, sizeof msg, "opendoors_secret: triggered %d door(s)\n", fired);
+    eng->Con_Print(msg);
 }

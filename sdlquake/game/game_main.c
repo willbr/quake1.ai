@@ -58,6 +58,10 @@ static void game_set_change_parms(edict_t *c)      { SetChangeParms(c); }
 void game_entity_spawn(edict_t *e, const char *classname);
 const char *const *game_list_spawn_classes(int *out_count);
 
+// Defined in doors.c — console-command dispatch targets.
+void Doors_OpenAll(void);
+void Doors_OpenAllSecret(void);
+
 // Per-render-frame debug overlay hook. Runs even while the sim is paused
 // (editor open, sv.paused), so debug visualisations stay live.
 static void game_debug_draw_overlays(void)
@@ -83,6 +87,8 @@ static game_api_t s_api = {
     game_set_change_parms,
     game_list_spawn_classes,
     game_debug_draw_overlays,
+    Doors_OpenAll,
+    Doors_OpenAllSecret,
 };
 
 #ifdef _WIN32

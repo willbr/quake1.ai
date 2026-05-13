@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 14
+#define GAME_API_VERSION 15
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -216,6 +216,12 @@ typedef struct game_api_s {
     // pause has frozen the sim. Implementations should re-submit lines via
     // SV_DebugLine each frame (DebugLines_Add clears after every draw).
     void  (*debug_draw_overlays)(void);
+
+    // Console-command targets (registered engine-side by Host_InitCommands,
+    // dispatched here so static door helpers stay inside game.dll). Slots
+    // may be NULL in older DLLs — engine handlers must null-check.
+    void  (*open_all_doors)(void);
+    void  (*open_all_secret_doors)(void);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);
