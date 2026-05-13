@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #endif
 #include <fcntl.h>
 #include "quakedef.h"
+#include "line_editor.h"
 
 int 		con_linewidth;
 
@@ -54,8 +55,8 @@ qboolean	con_debuglog;
 
 extern	char	key_lines[CMDLINES][MAXCMDLINE];
 extern	int		edit_line;
-extern	int		key_linepos;
-		
+extern	line_editor_t	console_le;
+
 
 qboolean	con_initialized;
 
@@ -75,8 +76,7 @@ void Con_ToggleConsole_f (void)
 		if (cls.state == ca_connected)
 		{
 			key_dest = key_game;
-			key_lines[edit_line][1] = 0;	// clear any typing
-			key_linepos = 1;
+			LE_Reset (&console_le);
 		}
 		else
 		{
@@ -519,40 +519,55 @@ static void Con_DrawCharScaled (int x, int y, int num, int s)
 ================
 Con_DrawInput
 
-The input line scrolls horizontally if typing goes beyond the right edge
+Renders the live edit line from console_le. The buffer is not mutated;
+each frame we walk visible columns and compute what character belongs
+there. The blinking cursor glyph overlays whatever character sits at the
+cursor position.
+
+The input line scrolls horizontally if the cursor passes the right edge.
 ================
 */
 void Con_DrawInput (void)
 {
 	int		y;
-	int		i;
-	char	*text;
+	int		col;
 	int		s = Con_Scale();
+	int		cursor_col;		/* logical column of cursor (0 = prompt slot) */
+	int		col_offset;
+	int		cursor_glyph;
 
 	if (key_dest != key_console && !con_forcedup)
-		return;		// don't draw anything
+		return;
 
-	text = key_lines[edit_line];
+	/* Logical text: ']' at col 0, console_le.buf at cols 1..len, ' ' at col len+1.
+	 * Cursor sits at col 1 + console_le.cursor. */
+	cursor_col = 1 + console_le.cursor;
 
-// add the cursor frame
-	text[key_linepos] = 10+((int)(realtime*con_cursorspeed)&1);
+	/* Horizontal scroll so the cursor stays visible. */
+	col_offset = 0;
+	if (cursor_col >= con_linewidth)
+		col_offset = cursor_col - con_linewidth + 1;
 
-// fill out remainder with spaces
-	for (i=key_linepos+1 ; i< con_linewidth ; i++)
-		text[i] = ' ';
+	cursor_glyph = 10 + ((int)(realtime * con_cursorspeed) & 1);
 
-//	prestep if horizontally scrolling
-	if (key_linepos >= con_linewidth)
-		text += 1 + key_linepos - con_linewidth;
+	y = con_vislines - 16 * s;
 
-// draw it
-	y = con_vislines - 16*s;
+	for (col = 0 ; col < con_linewidth ; col++)
+	{
+		int logical_col = col + col_offset;
+		int ch;
 
-	for (i=0 ; i<con_linewidth ; i++)
-		Con_DrawCharScaled ((i+1)*8*s, y, text[i], s);
+		if (logical_col == cursor_col)
+			ch = cursor_glyph;
+		else if (logical_col == 0)
+			ch = ']';
+		else if (logical_col >= 1 && logical_col <= console_le.len)
+			ch = (unsigned char)console_le.buf[logical_col - 1];
+		else
+			ch = ' ';
 
-// remove cursor
-	key_lines[edit_line][key_linepos] = 0;
+		Con_DrawCharScaled ((col + 1) * 8 * s, y, ch, s);
+	}
 }
 
 

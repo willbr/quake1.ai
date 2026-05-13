@@ -18,6 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 #include "quakedef.h"
+#include "line_editor.h"
 
 /*
 
@@ -29,10 +30,13 @@ key up events are sent even if in console mode
 char	key_lines[CMDLINES][MAXCMDLINE];
 int		key_linepos;
 int		shift_down=false;
+int		ctrl_down=false;
 int		key_lastpress;
 
 int		edit_line=0;
 int		history_line=0;
+
+line_editor_t console_le;
 
 keydest_t	key_dest;
 
@@ -152,23 +156,24 @@ keyname_t keynames[] =
 // Tab-completion cycling state.
 //
 // One static state machine for the console's Tab key. Pressing Tab snapshots
-// the current partial, walks the cmd / cvar / alias registries to collect
-// every match, replaces the line with the first match, and remembers what it
-// wrote. Subsequent Tabs (while the line content still matches what we wrote
-// last time) advance through the match list; Shift+Tab walks it backwards.
-// After the last match the cycle visits a "partial restored" state (the
-// user's original typed text, no completion) before wrapping back to the
-// first match. Any edit to the line is detected on the next Tab by comparing
+// the current partial from console_le, walks the cmd / cvar / alias
+// registries to collect every match, replaces the editor contents with the
+// first match (followed by a space), and remembers what it wrote.
+// Subsequent Tabs (while the editor still matches what we wrote last time)
+// advance through the match list; Shift+Tab walks it backwards. After the
+// last match the cycle visits a "partial restored" state (the user's
+// original typed text, no completion) before wrapping back to the first
+// match. Any edit to the line is detected on the next Tab by comparing
 // against tab_committed_line, and starts a fresh cycle.
 //============================================================================
 #define TAB_MAX_MATCHES 256
 
-static char  tab_partial[MAXCMDLINE];
+static char  tab_partial[LE_MAX_LINE];
 static int   tab_partial_len;
 static char *tab_matches[TAB_MAX_MATCHES];
-static int   tab_match_count;          // 0 ⇒ no cycle in progress
-static int   tab_index;                // -1 ⇒ partial restored, 0..count-1 ⇒ match N
-static char  tab_committed_line[MAXCMDLINE];
+static int   tab_match_count;			/* 0 => no cycle in progress */
+static int   tab_index;					/* -1 => partial restored, 0..count-1 => match N */
+static char  tab_committed_line[LE_MAX_LINE];
 
 static void Key_TabComplete (qboolean reverse)
 {
@@ -177,11 +182,11 @@ static void Key_TabComplete (qboolean reverse)
 	qboolean cycling;
 	int		i, j;
 
-	partial = key_lines[edit_line] + 1;
-	partial_len = Q_strlen (partial);
+	partial = console_le.buf;
+	partial_len = console_le.len;
 
 	cycling = (tab_match_count > 0)
-		&& !Q_strcmp (key_lines[edit_line], tab_committed_line);
+		&& !Q_strcmp (console_le.buf, tab_committed_line);
 
 	if (!cycling)
 	{
@@ -203,8 +208,8 @@ static void Key_TabComplete (qboolean reverse)
 		if (n == TAB_MAX_MATCHES)
 			Con_Printf ("tab completion: %d match limit reached, truncating\n", TAB_MAX_MATCHES);
 
-		// Dedup in place. n is small in practice (typically < 30), so O(n^2)
-		// is fine. Aliases share a namespace with cmds/cvars and may collide.
+		/* Dedup in place. n is small in practice (typically < 30), so O(n^2)
+		 * is fine. Aliases share a namespace with cmds/cvars and may collide. */
 		dedup_count = 0;
 		for (i = 0 ; i < n ; i++)
 		{
@@ -245,29 +250,52 @@ static void Key_TabComplete (qboolean reverse)
 
 	if (tab_index == -1)
 	{
-		Q_strcpy (key_lines[edit_line] + 1, tab_partial);
-		key_linepos = tab_partial_len + 1;
-		key_lines[edit_line][key_linepos] = 0;
+		LE_SetText (&console_le, tab_partial);
 	}
 	else
 	{
-		char	*name = tab_matches[tab_index];
-		int		name_len = Q_strlen (name);
-		Q_strcpy (key_lines[edit_line] + 1, name);
-		key_linepos = name_len + 1;
-		key_lines[edit_line][key_linepos] = ' ';
-		key_linepos++;
-		key_lines[edit_line][key_linepos] = 0;
+		LE_SetText (&console_le, tab_matches[tab_index]);
+		LE_InsertChar (&console_le, ' ');
 	}
 
-	Q_strcpy (tab_committed_line, key_lines[edit_line]);
+	Q_strcpy (tab_committed_line, console_le.buf);
+}
+
+static void Key_HistoryPrev (void)
+{
+	do
+	{
+		history_line = (history_line - 1) & CMDLINES_MASK;
+	} while (history_line != edit_line
+			&& !key_lines[history_line][1]);
+	if (history_line == edit_line)
+		history_line = (edit_line + 1) & CMDLINES_MASK;
+	LE_SetText (&console_le, key_lines[history_line] + 1);
+}
+
+static void Key_HistoryNext (void)
+{
+	if (history_line == edit_line)
+		return;
+	do
+	{
+		history_line = (history_line + 1) & CMDLINES_MASK;
+	}
+	while (history_line != edit_line
+		&& !key_lines[history_line][1]);
+	if (history_line == edit_line)
+		LE_Reset (&console_le);
+	else
+		LE_SetText (&console_le, key_lines[history_line] + 1);
 }
 
 /*
 ====================
 Key_Console
 
-Interactive line editing and console scrollback
+Interactive line editing and console scrollback. All line edits flow
+through console_le; the ring slot at key_lines[edit_line] is only written
+when Enter commits a line.
 ====================
 */
 void Key_Console (int key)
@@ -276,44 +304,49 @@ void Key_Console (int key)
 	{
 		int prev;
 
-		Cbuf_AddText (key_lines[edit_line]+1);	// skip the >
-		Cbuf_AddText ("\n");
-		Con_Printf ("%s\n",key_lines[edit_line]);
+		/* Commit editor contents into the ring slot. console_le.buf is
+		 * capped at MAXCMDLINE-2 so ']' + content + NUL fits. */
+		key_lines[edit_line][0] = ']';
+		Q_strcpy (key_lines[edit_line] + 1, console_le.buf);
 
-		// Empty line: don't advance the ring, don't save.
-		if (!key_lines[edit_line][1])
+		Cbuf_AddText (console_le.buf);
+		Cbuf_AddText ("\n");
+		Con_Printf ("]%s\n", console_le.buf);
+
+		/* Empty line: don't advance the ring, don't save. */
+		if (!console_le.buf[0])
 		{
-			key_linepos = 1;
+			LE_Reset (&console_le);
 			if (cls.state == ca_disconnected)
 				SCR_UpdateScreen ();
 			return;
 		}
 
-		// Duplicate of the immediately previous command: keep the previous
-		// entry as the most recent, clear the just-typed slot, and skip the
-		// save (file already reflects this state).
+		/* Duplicate of the immediately previous command: keep the previous
+		 * entry as the most recent, clear the just-typed slot, and skip the
+		 * save (file already reflects this state). */
 		prev = (edit_line - 1) & CMDLINES_MASK;
 		if (key_lines[prev][1]
-			&& !Q_strcmp (key_lines[edit_line]+1, key_lines[prev]+1))
+			&& !Q_strcmp (console_le.buf, key_lines[prev] + 1))
 		{
 			key_lines[edit_line][1] = 0;
-			key_linepos = 1;
 			history_line = edit_line;
+			LE_Reset (&console_le);
 			if (cls.state == ca_disconnected)
 				SCR_UpdateScreen ();
 			return;
 		}
 
-		// New entry: advance ring and persist.
+		/* New entry: advance ring and persist. */
 		edit_line = (edit_line + 1) & CMDLINES_MASK;
 		history_line = edit_line;
 		key_lines[edit_line][0] = ']';
 		key_lines[edit_line][1] = 0;
-		key_linepos = 1;
+		LE_Reset (&console_le);
 		Key_SaveHistory ();
 		if (cls.state == ca_disconnected)
-			SCR_UpdateScreen ();	// force an update, because the command
-									// may take some time
+			SCR_UpdateScreen ();	/* force an update, because the command
+									 * may take some time */
 		return;
 	}
 
@@ -322,51 +355,18 @@ void Key_Console (int key)
 		Key_TabComplete (shift_down);
 		return;
 	}
-	
-	if (key == K_BACKSPACE || key == K_LEFTARROW)
-	{
-		if (key_linepos > 1)
-			key_linepos--;
-		return;
-	}
 
-	if (key == K_UPARROW)
-	{
-		do
-		{
-			history_line = (history_line - 1) & CMDLINES_MASK;
-		} while (history_line != edit_line
-				&& !key_lines[history_line][1]);
-		if (history_line == edit_line)
-			history_line = (edit_line+1) & CMDLINES_MASK;
-		Q_strcpy(key_lines[edit_line], key_lines[history_line]);
-		key_linepos = Q_strlen(key_lines[edit_line]);
-		return;
-	}
+	if (key == K_BACKSPACE)	{ LE_DeleteBack    (&console_le); return; }
+	if (key == K_LEFTARROW)	{ LE_MoveLeft      (&console_le); return; }
+	if (key == K_RIGHTARROW){ LE_MoveRight     (&console_le); return; }
+	if (key == K_DEL)		{ LE_DeleteForward (&console_le); return; }
+	if (key == K_HOME)		{ LE_BeginningOfLine(&console_le); return; }
+	if (key == K_END)		{ LE_EndOfLine     (&console_le); return; }
 
-	if (key == K_DOWNARROW)
-	{
-		if (history_line == edit_line) return;
-		do
-		{
-			history_line = (history_line + 1) & CMDLINES_MASK;
-		}
-		while (history_line != edit_line
-			&& !key_lines[history_line][1]);
-		if (history_line == edit_line)
-		{
-			key_lines[edit_line][0] = ']';
-			key_linepos = 1;
-		}
-		else
-		{
-			Q_strcpy(key_lines[edit_line], key_lines[history_line]);
-			key_linepos = Q_strlen(key_lines[edit_line]);
-		}
-		return;
-	}
+	if (key == K_UPARROW)	{ Key_HistoryPrev (); return; }
+	if (key == K_DOWNARROW)	{ Key_HistoryNext (); return; }
 
-	if (key == K_PGUP || key==K_MWHEELUP)
+	if (key == K_PGUP || key == K_MWHEELUP)
 	{
 		con_backscroll += 2;
 		if (con_backscroll > con_totallines - (vid.height>>3) - 1)
@@ -374,7 +374,7 @@ void Key_Console (int key)
 		return;
 	}
 
-	if (key == K_PGDN || key==K_MWHEELDOWN)
+	if (key == K_PGDN || key == K_MWHEELDOWN)
 	{
 		con_backscroll -= 2;
 		if (con_backscroll < 0)
@@ -382,28 +382,10 @@ void Key_Console (int key)
 		return;
 	}
 
-	if (key == K_HOME)
-	{
-		con_backscroll = con_totallines - (vid.height>>3) - 1;
-		return;
-	}
-
-	if (key == K_END)
-	{
-		con_backscroll = 0;
-		return;
-	}
-	
 	if (key < 32 || key > 127)
-		return;	// non printable
-		
-	if (key_linepos < MAXCMDLINE-1)
-	{
-		key_lines[edit_line][key_linepos] = key;
-		key_linepos++;
-		key_lines[edit_line][key_linepos] = 0;
-	}
+		return;	/* non printable */
 
+	LE_InsertChar (&console_le, key);
 }
 
 //============================================================================
@@ -803,6 +785,7 @@ void Key_Init (void)
 	Cmd_AddCommand ("unbindall",Key_Unbindall_f);
 
 	Key_LoadHistory ();
+	LE_Reset (&console_le);
 }
 
 /*
@@ -845,6 +828,8 @@ void Key_Event (int key, qboolean down)
 
 	if (key == K_SHIFT)
 		shift_down = down;
+	if (key == K_CTRL)
+		ctrl_down = down;
 
 //
 // handle escape specialy, so the user can never unbind it
