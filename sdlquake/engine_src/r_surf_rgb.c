@@ -71,6 +71,11 @@ void R_DrawSurfaceBlock8_mip0_rgb (void)
                 lightR += lightR_step;
                 lightG += lightG_step;
                 lightB += lightB_step;
+                /* clamp underflow: arithmetic-shift step + small accumulator
+                   can wrap unsigned to ~0xFFFFFFFx, which extracts as huge */
+                if ((int)lightR < 0) lightR = 0;
+                if ((int)lightG < 0) lightG = 0;
+                if ((int)lightB < 0) lightB = 0;
             }
 
             psource += sourcetstep;
@@ -132,6 +137,11 @@ void R_DrawSurfaceBlock8_mip1_rgb (void)
                 lightR += lightR_step;
                 lightG += lightG_step;
                 lightB += lightB_step;
+                /* clamp underflow: arithmetic-shift step + small accumulator
+                   can wrap unsigned to ~0xFFFFFFFx, which extracts as huge */
+                if ((int)lightR < 0) lightR = 0;
+                if ((int)lightG < 0) lightG = 0;
+                if ((int)lightB < 0) lightB = 0;
             }
 
             psource += sourcetstep;
@@ -193,6 +203,11 @@ void R_DrawSurfaceBlock8_mip2_rgb (void)
                 lightR += lightR_step;
                 lightG += lightG_step;
                 lightB += lightB_step;
+                /* clamp underflow: arithmetic-shift step + small accumulator
+                   can wrap unsigned to ~0xFFFFFFFx, which extracts as huge */
+                if ((int)lightR < 0) lightR = 0;
+                if ((int)lightG < 0) lightG = 0;
+                if ((int)lightB < 0) lightB = 0;
             }
 
             psource += sourcetstep;
@@ -254,6 +269,11 @@ void R_DrawSurfaceBlock8_mip3_rgb (void)
                 lightR += lightR_step;
                 lightG += lightG_step;
                 lightB += lightB_step;
+                /* clamp underflow: arithmetic-shift step + small accumulator
+                   can wrap unsigned to ~0xFFFFFFFx, which extracts as huge */
+                if ((int)lightR < 0) lightR = 0;
+                if ((int)lightG < 0) lightG = 0;
+                if ((int)lightB < 0) lightB = 0;
             }
 
             psource += sourcetstep;
