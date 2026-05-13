@@ -395,6 +395,7 @@ void R_DrawSurface (void)
 	qboolean use_rgb =
 		r_pixbytes == 1 &&
 		r_coloredlight.value &&
+		!r_fullbright.value &&
 		r_drawsurf.surf->rgb_samples != NULL;
 
 	if (use_rgb) R_BuildLightMap_RGB ();
