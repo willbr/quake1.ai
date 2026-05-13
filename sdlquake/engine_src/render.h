@@ -52,6 +52,9 @@ typedef struct entity_s
 	struct model_s			*model;			// NULL = no model
 	struct efrag_s			*efrag;			// linked list of efrags
 	int						frame;
+	int						prev_frame;			// frame we are lerping FROM
+	int						prev_frame_observed;	// last frame value seen, for change detection
+	float					frame_start_time;	// cl.time when ent->frame last changed
 	float					syncbase;		// for client-side animations
 	byte					*colormap;
 	int						effects;		// light, particals, etc

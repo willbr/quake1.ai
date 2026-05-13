@@ -61,6 +61,7 @@ extern cvar_t	r_clearcolor;
 extern cvar_t	r_waterwarp;
 extern cvar_t	r_fullbright;
 extern cvar_t	r_coloredlight;
+extern cvar_t	r_lerpmodels;
 extern cvar_t	r_colored_dlights;
 extern cvar_t	r_drawentities;
 extern cvar_t	r_aliasstats;

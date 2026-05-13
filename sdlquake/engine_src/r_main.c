@@ -124,6 +124,7 @@ cvar_t	r_waterwarp = {"r_waterwarp","1"};
 cvar_t	r_fullbright = {"r_fullbright","0"};
 cvar_t	r_coloredlight    = {"r_coloredlight",    "1", true};	// archived
 cvar_t	r_colored_dlights = {"r_colored_dlights", "1", true};	// archived
+cvar_t	r_lerpmodels      = {"r_lerpmodels",      "1", true};	// archived
 
 static float r_coloredlight_last    = -1.0f;	// forces flush on first frame
 static float r_colored_dlights_last = -1.0f;
@@ -227,6 +228,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_fullbright);
 	Cvar_RegisterVariable (&r_coloredlight);
 	Cvar_RegisterVariable (&r_colored_dlights);
+	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_drawentities);
 	Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_aliasstats);
