@@ -1057,6 +1057,16 @@ SetVisibilityByPassages ();
 		de_time1 = se_time2;
 	}
 
+	// Debug-line overlay (navmesh, AI sight cones, etc.) draws AFTER the world
+	// but BEFORE entities so monsters and items can naturally overdraw the
+	// lines. ztest still gates each pixel against d_pzbuffer so walls occlude
+	// lines too. Bbox / path overlays stay in VID_Update for now since they
+	// are typically used to inspect entities and benefit from sitting on top.
+	{
+		extern void DebugLines_Draw(void);
+		DebugLines_Draw();
+	}
+
 	R_DrawEntitiesOnList ();
 
 	// Phase 7 editor: wireframe brush overlay + gizmo, drawn after world+

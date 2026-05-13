@@ -478,7 +478,9 @@ void VID_Update(vrect_t *rects)
 
     RPaths_Draw();
     RBBox_Draw();
-    DebugLines_Draw();
+    // DebugLines_Draw() moved into R_RenderView_ (between world and entities)
+    // so monsters / items naturally overdraw debug lines. Bbox / path overlays
+    // stay here — they're meant to sit on top of entities.
 
     void *pixels;
     int pitch;
