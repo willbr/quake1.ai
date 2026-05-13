@@ -56,6 +56,48 @@ int light_compile_to_memory(light_options_t *opts,
  */
 int light_bench(const char *bsp_path);
 
+/*
+ * Set the entity-data lump (dentdata) directly from a caller-provided
+ * string. The string is COM_Parse-style: `{ "key" "value" ... }` blocks
+ * separated by whitespace. Used by the live-bake path so editor edits
+ * can flow into LIGHT's LoadEntities without round-tripping through a
+ * .map file on disk.
+ */
+void light_set_entdata(const char *ents, int ents_len);
+
+/*
+ * Run LightWorld against the BSP currently sitting in qbsp's globals.
+ * Caller must have populated those globals via a prior
+ * qbsp_compile_to_memory + light_compile_to_memory pass; this entry
+ * just re-runs the bake (LoadEntities + MakeTnodes + LightWorld). On
+ * success the caller can snapshot the result via light_snapshot_result.
+ *
+ * Designed for the SDL_Thread live-bake worker: no allocation, no
+ * membuf, no setjmp. Returns 0 on success, non-zero on failure.
+ */
+int light_relight_in_place(void);
+
+/*
+ * Copy the most recent bake's output into caller buffers. `out_mono`
+ * must hold at least `mono_cap` bytes (caller should size to
+ * MAX_MAP_LIGHTING = 0x100000); `out_rgb` must hold at least 3x
+ * `mono_cap`. `out_lightofs` must hold at least `max_faces` ints.
+ *
+ * Returns 0 on success and writes:
+ *   *out_mono_size = lightdatasize (bytes written into out_mono)
+ *   *out_face_count = numfaces (entries written into out_lightofs)
+ *
+ * Returns -1 on capacity overflow without touching the caller buffers.
+ *
+ * Lightofs values are the new per-face byte offsets into out_mono; the
+ * caller uses these to repoint each engine surface's `samples` and
+ * `rgb_samples` after copying out_mono / out_rgb into its own buffer.
+ */
+int light_snapshot_result(unsigned char *out_mono, int mono_cap,
+                          unsigned char *out_rgb,
+                          int          *out_lightofs, int max_faces,
+                          int *out_mono_size, int *out_face_count);
+
 #ifdef __cplusplus
 }
 #endif

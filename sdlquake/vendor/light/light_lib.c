@@ -188,6 +188,75 @@ int light_compile_to_memory(light_options_t *opts,
     return 0;
 }
 
+/* Stash a caller-provided entity string into dentdata. The bake's
+ * LoadEntities reads from there. We trim to fit MAX_MAP_ENTSTRING -- if
+ * the user's scene is bigger than 64 KiB of entity text we'd already
+ * have other problems. */
+void light_set_entdata(const char *ents, int ents_len)
+{
+    int n = ents_len;
+    if (n < 0) n = 0;
+    if (n >= MAX_MAP_ENTSTRING) n = MAX_MAP_ENTSTRING - 1;
+    if (ents && n > 0) memcpy(dentdata, ents, (size_t)n);
+    dentdata[n] = '\0';
+    entdatasize = n + 1;
+}
+
+/* Worker-thread entry: just run the bake against whatever's currently
+ * in qbsp's globals + light_set_entdata'd dentdata. No setjmp here --
+ * the worker thread does its own try/catch via SDL_Thread + atomics.
+ * Any Error() longjmp would land in the main thread's setjmp slot,
+ * which would be a disaster. So we set qbsp_err_jmp to NULL for the
+ * duration; an Error() will exit the process, which we treat as
+ * "should not happen during routine relights" and accept the cost. */
+int light_relight_in_place(void)
+{
+    if (numfaces <= 0) return 1;
+
+    light_reset_state();
+
+    /* Clear destination buffers so an aborted face doesn't leave stale
+     * bytes from a prior bake. light_rgb_dlightdata is `extern byte[]`
+     * here so we use MAX_MAP_LIGHTING*3 explicitly. */
+    memset(dlightdata, 0, sizeof(dlightdata));
+    memset(light_rgb_dlightdata, 0, MAX_MAP_LIGHTING * 3);
+    lightdatasize = 0;
+
+    qbsp_err_jmp = NULL;   /* Error() will abort; see comment above */
+
+    LoadEntities();
+    MakeTnodes(&dmodels[0]);
+    LightWorld();
+    /* WriteEntitiesToString rebuilds dentdata from the in-memory
+     * entities[] (which LoadEntities populated). Skip it: we don't
+     * re-serialise the BSP and the caller's edit_scene is the source
+     * of truth for the next bake anyway. */
+    return 0;
+}
+
+int light_snapshot_result(unsigned char *out_mono, int mono_cap,
+                          unsigned char *out_rgb,
+                          int          *out_lightofs, int max_faces,
+                          int *out_mono_size, int *out_face_count)
+{
+    int i;
+    if (!out_mono || !out_rgb || !out_lightofs ||
+        !out_mono_size || !out_face_count)
+        return -1;
+    if (lightdatasize > mono_cap || numfaces > max_faces)
+        return -1;
+
+    memcpy(out_mono, dlightdata, (size_t)lightdatasize);
+    memcpy(out_rgb,  light_rgb_dlightdata, (size_t)lightdatasize * 3);
+
+    for (i = 0; i < numfaces; i++)
+        out_lightofs[i] = dfaces[i].lightofs;
+
+    *out_mono_size  = lightdatasize;
+    *out_face_count = numfaces;
+    return 0;
+}
+
 /* Stand-alone bench: read a real .bsp from disk via the shared
  * cmdlib/bspfile path, then run the bake without touching qbsp's
  * globals. Discards the result. Wired to the `light_bench <name>`

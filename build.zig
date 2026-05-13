@@ -98,6 +98,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/editor/edit_texcache.c",
         "sdlquake/engine/editor/editor_classlist.c",
         "sdlquake/engine/editor/collide.c",
+        "sdlquake/engine/editor/light_bake_thread.c",
     };
 
     const imgui_dir = "sdlquake/vendor/imgui-1.92.8";

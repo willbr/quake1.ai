@@ -210,6 +210,16 @@ static void draw_toolbar(void)
      * only way to see colour/intensity edits in the rendered .bsp. */
     if (IG_Button("Compile + Light")) Cbuf_AddText("editor_compile_full\n");
     IG_SameLine(0, -1);
+    /* Background re-bake. Needs editor_compile_full to have populated
+     * qbsp's globals at least once this session. Runs on an SDL_Thread;
+     * the result lands ~2s later via Editor_LightBake_Poll. */
+    {
+        extern int Editor_LightBake_InProgress(void);
+        int busy = Editor_LightBake_InProgress();
+        if (IG_Button(busy ? "Re-baking..." : "Refresh Lighting"))
+            if (!busy) Cbuf_AddText("editor_relight\n");
+    }
+    IG_SameLine(0, -1);
     if (IG_Button("Textures..."))  s_show_tex_browser = !s_show_tex_browser;
     IG_SameLine(0, -1);
     if (IG_Button("Add Entity..."))s_show_spawn_dialog = !s_show_spawn_dialog;

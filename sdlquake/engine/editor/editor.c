@@ -22,6 +22,7 @@
 #include "virtual_fs.h"         // Editor_VFS_*
 #include "qbsp_lib.h"           // qbsp_compile_to_memory
 #include "light_lib.h"          // light_compile_to_memory (mono Stage 1)
+#include "light_bake_thread.h"  // background light-bake worker
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -848,6 +849,25 @@ static void Editor_Cmd_LightBench_f(void)
     light_bench(path);
 }
 
+/*
+ * editor_relight: trigger a background light bake against the BSP
+ * currently sitting in qbsp's globals. Requires that editor_compile_full
+ * has been run at least once this session -- otherwise qbsp's dfaces
+ * etc. are empty and the worker would crash. The bake runs on an
+ * SDL_Thread; the result lands via Editor_LightBake_Poll which runs
+ * every editor frame.
+ */
+static void Editor_Cmd_Relight_f(void)
+{
+    int rc = Editor_LightBake_Trigger();
+    if (rc == 0)
+        Con_Printf("editor_relight: bake queued (background)\n");
+    else if (rc == 1)
+        Con_Printf("editor_relight: bake already in flight\n");
+    else
+        Con_Printf("editor_relight: failed (run editor_compile_full first?)\n");
+}
+
 static void Editor_Cmd_Redo_f(void)
 {
     if (!History_Redo()) Con_Printf("editor: nothing to redo\n");
@@ -1407,8 +1427,10 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_compile", Editor_Cmd_Compile_f);
     Cmd_AddCommand("editor_compile_full", Editor_Cmd_CompileFull_f);
     Cmd_AddCommand("light_bench", Editor_Cmd_LightBench_f);
+    Cmd_AddCommand("editor_relight", Editor_Cmd_Relight_f);
 
     History_Init();
+    Editor_LightBake_Init();
 
     Cvar_RegisterVariable(&editor_camera);
     Cvar_RegisterVariable(&editor_grid_snap);
@@ -1438,6 +1460,7 @@ void Editor_Shutdown(void)
 {
     extern void Editor_TexCache_Shutdown(void);
     if (!s_inited) return;
+    Editor_LightBake_Shutdown();
     Editor_TexCache_Shutdown();
     Editor_VFS_Shutdown();
     Scene_Shutdown();
@@ -1729,6 +1752,11 @@ void Editor_PreRender(void)
     extern cvar_t sensitivity, m_pitch, m_yaw;
 
     if (!s_open) return;
+
+    /* Live bake worker poll. If a previous Trigger has finished, the
+     * snapshot lands into cl.worldmodel + every surface gets repointed
+     * + dlightframe bumped so the cache rebuilds on this frame. */
+    Editor_LightBake_Poll();
 
     editor_refresh_light_preview();
 
