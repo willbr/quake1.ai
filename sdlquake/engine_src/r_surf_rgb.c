@@ -81,6 +81,14 @@ void R_DrawSurfaceBlock8_mip0_rgb (void)
             psource += sourcetstep;
             lightR_r += lightR_rstep; lightG_r += lightG_rstep; lightB_r += lightB_rstep;
             lightR_l += lightR_lstep; lightG_l += lightG_lstep; lightB_l += lightB_lstep;
+            /* corner accumulators can underflow when interpolating into shadow;
+               same root cause as the per-pixel clamp inside the bx loop */
+            if ((int)lightR_r < 0) lightR_r = 0;
+            if ((int)lightG_r < 0) lightG_r = 0;
+            if ((int)lightB_r < 0) lightB_r = 0;
+            if ((int)lightR_l < 0) lightR_l = 0;
+            if ((int)lightG_l < 0) lightG_l = 0;
+            if ((int)lightB_l < 0) lightB_l = 0;
             prowdest += surfrowbytes;
         }
 
@@ -147,6 +155,14 @@ void R_DrawSurfaceBlock8_mip1_rgb (void)
             psource += sourcetstep;
             lightR_r += lightR_rstep; lightG_r += lightG_rstep; lightB_r += lightB_rstep;
             lightR_l += lightR_lstep; lightG_l += lightG_lstep; lightB_l += lightB_lstep;
+            /* corner accumulators can underflow when interpolating into shadow;
+               same root cause as the per-pixel clamp inside the bx loop */
+            if ((int)lightR_r < 0) lightR_r = 0;
+            if ((int)lightG_r < 0) lightG_r = 0;
+            if ((int)lightB_r < 0) lightB_r = 0;
+            if ((int)lightR_l < 0) lightR_l = 0;
+            if ((int)lightG_l < 0) lightG_l = 0;
+            if ((int)lightB_l < 0) lightB_l = 0;
             prowdest += surfrowbytes;
         }
 
@@ -213,6 +229,14 @@ void R_DrawSurfaceBlock8_mip2_rgb (void)
             psource += sourcetstep;
             lightR_r += lightR_rstep; lightG_r += lightG_rstep; lightB_r += lightB_rstep;
             lightR_l += lightR_lstep; lightG_l += lightG_lstep; lightB_l += lightB_lstep;
+            /* corner accumulators can underflow when interpolating into shadow;
+               same root cause as the per-pixel clamp inside the bx loop */
+            if ((int)lightR_r < 0) lightR_r = 0;
+            if ((int)lightG_r < 0) lightG_r = 0;
+            if ((int)lightB_r < 0) lightB_r = 0;
+            if ((int)lightR_l < 0) lightR_l = 0;
+            if ((int)lightG_l < 0) lightG_l = 0;
+            if ((int)lightB_l < 0) lightB_l = 0;
             prowdest += surfrowbytes;
         }
 
@@ -279,6 +303,14 @@ void R_DrawSurfaceBlock8_mip3_rgb (void)
             psource += sourcetstep;
             lightR_r += lightR_rstep; lightG_r += lightG_rstep; lightB_r += lightB_rstep;
             lightR_l += lightR_lstep; lightG_l += lightG_lstep; lightB_l += lightB_lstep;
+            /* corner accumulators can underflow when interpolating into shadow;
+               same root cause as the per-pixel clamp inside the bx loop */
+            if ((int)lightR_r < 0) lightR_r = 0;
+            if ((int)lightG_r < 0) lightG_r = 0;
+            if ((int)lightB_r < 0) lightB_r = 0;
+            if ((int)lightR_l < 0) lightR_l = 0;
+            if ((int)lightG_l < 0) lightG_l = 0;
+            if ((int)lightB_l < 0) lightB_l = 0;
             prowdest += surfrowbytes;
         }
 
