@@ -724,9 +724,7 @@ void R_AliasSetupFrame (void)
 		return;
 	}
 
-	// ALIAS_GROUP path (group lerp wired in Task 6; force snap for now)
-	r_framelerp = 1.0f;
-
+	// ALIAS_GROUP path
 	paliasgroup = (maliasgroup_t *)
 				((byte *)paliashdr + paliashdr->frames[frame].frame);
 	pintervals = (float *)((byte *)paliashdr + paliasgroup->intervals);
@@ -751,7 +749,27 @@ void R_AliasSetupFrame (void)
 	prev_i = (i == 0) ? (numframes - 1) : (i - 1);
 	r_apverts_prev = (trivertx_t *)
 				((byte *)paliashdr + paliasgroup->frames[prev_i].frame);
-	// keep r_framelerp at 1.0 here; Task 6 wires the intra-group alpha
+
+	if (r_lerpmodels.value && !cl_nolerp.value)
+	{
+		float t_lo = (i == 0) ? 0.0f : pintervals[i-1];
+		float t_hi = pintervals[i];
+		float span = t_hi - t_lo;
+		if (span > 0.0f)
+		{
+			r_framelerp = (targettime - t_lo) / span;
+			if (r_framelerp > 1.0f) r_framelerp = 1.0f;
+			if (r_framelerp < 0.0f) r_framelerp = 0.0f;
+		}
+		else
+		{
+			r_framelerp = 1.0f;
+		}
+	}
+	else
+	{
+		r_framelerp = 1.0f;
+	}
 }
 
 
