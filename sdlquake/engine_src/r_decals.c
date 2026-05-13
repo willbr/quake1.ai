@@ -246,7 +246,7 @@ static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal)
 // Walks 1024 units forward and slaps a stain on whatever's there.
 static void R_DecalsTest_f (void)
 {
-	vec3_t  forward, right, up, end, spawn_pos;
+	vec3_t  forward, right, up, end;
 	trace_t tr;
 	msurface_t *surf;
 	mtexinfo_t *tex;
@@ -264,9 +264,6 @@ static void R_DecalsTest_f (void)
 		Con_Printf ("r_decals_test: nothing in front\n");
 		return;
 	}
-
-	// Step 1 unit back along the trace so the projection lands on the surface side.
-	VectorMA (tr.endpos, -1.0f, forward, spawn_pos);
 
 	surf = R_PointOnSurface_World (tr.endpos, tr.plane.normal);
 	if (!surf) {
@@ -290,7 +287,6 @@ static void R_DecalsTest_f (void)
 	Stain_PaintKernel (surf, lu, lv, -120, -120, -120, K3x3, 3, 16);
 	Con_Printf ("r_decals_test: stained luxel (%d,%d) of surface %p\n",
 		lu, lv, (void*)surf);
-	(void)spawn_pos;
 }
 
 void R_SpawnDecal (vec3_t pos, decal_type_t type)
