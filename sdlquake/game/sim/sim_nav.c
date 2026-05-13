@@ -51,6 +51,12 @@ extern game_globals_t *g;
 #define PROBE_MIN_Z   (-24.0f)
 #define PROBE_MAX_Z   ( 32.0f)
 
+// Max vertical change accepted after a walkmove+drop. Keeps the flood from
+// falling into bottomless pits / off cliffs while still tolerating Quake
+// staircase heights (STEPSIZE = 18 up; we add slack for ramps and small
+// drops between adjacent steps).
+#define POST_WALK_MAX_DROP_Z  48.0f
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -227,6 +233,13 @@ static edict_t *alloc_probe(void) {
     e->v.solid      = SOLID_SLIDEBOX;
     e->v.health     = 0;
     e->v.takedamage = DAMAGE_NO;
+    // FL_PARTIALGROUND tells SV_movestep to accept positions where the bbox
+    // bottom isn't fully supported by floor and to advance through "walked
+    // off an edge" cases. Without it, the flood stalls at every doorway
+    // threshold, pit lip, and stair edge in start.bsp. We compensate by
+    // dropping the probe to floor after every successful walkmove and
+    // rejecting moves whose vertical drop exceeds POST_WALK_MAX_DROP_Z.
+    e->v.flags      = (float)FL_PARTIALGROUND;
     eng->SV_SetSize(e,
         (vec3_t){-PROBE_HALF_X, -PROBE_HALF_Y, PROBE_MIN_Z},
         (vec3_t){ PROBE_HALF_X,  PROBE_HALF_Y, PROBE_MAX_Z});
@@ -414,11 +427,32 @@ static int bake_floodfill(sim_navmesh_t *m) {
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
         "testplayerstart",         ANCHOR_GENERIC, 0);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
-        "info_teleport_destination", ANCHOR_TELEPORT_DST, 0);
-    collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
         "trigger_teleport",          ANCHOR_TELEPORT_SRC, 1);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
         "trigger_changelevel",       ANCHOR_GENERIC, 1);
+
+    // Resolve each trigger_teleport's destination by `target` -> `targetname`
+    // lookup (the destination can be info_teleport_destination, info_notnull,
+    // path_corner, or any entity the mapper chose to target). Without this
+    // step, destination rooms have no anchor and the flood never reaches
+    // them.
+    int src_count_before_resolve = anchor_n;
+    for (int i = 0; i < src_count_before_resolve; i++) {
+        if (anchors[i].kind != ANCHOR_TELEPORT_SRC) continue;
+        edict_t *src = anchors[i].entity;
+        if (!src || !src->v.target) continue;
+        edict_t *dst = eng->ED_Find(g->world, "targetname", src->v.target);
+        if (dst == g->world) continue;
+        int already = 0;
+        for (int j = 0; j < anchor_n; j++) {
+            if (anchors[j].kind == ANCHOR_TELEPORT_DST &&
+                anchors[j].entity == dst)
+            { already = 1; break; }
+        }
+        if (already) continue;
+        anchors_push(&anchors, &anchor_cap, &anchor_n,
+                     dst->v.origin, ANCHOR_TELEPORT_DST, dst);
+    }
 
     if (anchor_n == 0) {
         free(anchors);
@@ -470,22 +504,39 @@ static int bake_floodfill(sim_navmesh_t *m) {
         cur_pos[2] = m->points[cur].pos[2];
 
         for (int d = 0; d < 8; d++) {
-            // Re-seat probe at current node every iteration: SV_WalkMove
-            // requires FL_ONGROUND, and a previous failed walkmove can
-            // leave the probe's origin / flags in a partial state.
+            // Re-seat probe at current node every iteration. seat_probe
+            // sets FL_ONGROUND (required by SV_WalkMove) and is also how
+            // we recover from the previous iteration's walkmove possibly
+            // leaving the probe mid-air (FL_PARTIALGROUND off-edge path).
             vec3_t scratch;
             if (!seat_probe(probe, cur_pos, scratch)) break;
             (void)scratch;
 
+            // SV_movestep CLEARS FL_PARTIALGROUND on every normal-success
+            // path (sv_move.c:215-219), so we must set it again on every
+            // walkmove or only the first one is lenient about CheckBottom /
+            // off-edge.
+            probe->v.flags = (float)((int)probe->v.flags | FL_PARTIALGROUND);
+
             if (!eng->SV_WalkMove(probe, k_yaws[d], FLOOD_STEP)) continue;
+
+            // Walkmove may have left us off-edge in mid-air (FL_PARTIALGROUND
+            // off-edge case). Re-drop to floor; if no floor within ~256
+            // units, reject the move so we don't add unreachable nodes.
+            if (!eng->SV_DropToFloor(probe)) continue;
 
             vec3_t end;
             end[0] = probe->v.origin[0];
             end[1] = probe->v.origin[1];
             end[2] = probe->v.origin[2];
 
-            // Drop again so the recorded position is firmly on the floor
-            // (walkmove already drops, but normalises height for dedupe).
+            // Reject moves with too large a vertical change: prevents the
+            // flood from "jumping" off cliffs or down deep pits and giving
+            // back-edges that the player can't actually walk back along.
+            float dz = end[2] - cur_pos[2];
+            if (dz < -POST_WALK_MAX_DROP_Z || dz > POST_WALK_MAX_DROP_Z)
+                continue;
+
             int next_idx = grid_find(&grd, m, end);
             if (next_idx < 0) {
                 if (m->point_count >= MAX_NODES) continue;
@@ -502,10 +553,10 @@ static int bake_floodfill(sim_navmesh_t *m) {
             }
             if (next_idx == cur) continue;
 
-            float dx = m->points[next_idx].pos[0] - cur_pos[0];
-            float dy = m->points[next_idx].pos[1] - cur_pos[1];
-            float dz = m->points[next_idx].pos[2] - cur_pos[2];
-            float w  = (float)sqrt(dx*dx + dy*dy + dz*dz);
+            float ex = m->points[next_idx].pos[0] - cur_pos[0];
+            float ey = m->points[next_idx].pos[1] - cur_pos[1];
+            float ez = m->points[next_idx].pos[2] - cur_pos[2];
+            float w  = (float)sqrt(ex*ex + ey*ey + ez*ez);
             if (w < 1.0f) w = 1.0f;
             add_edge(m, &cap_edges, cur, next_idx, w);
         }
@@ -541,6 +592,49 @@ static int bake_floodfill(sim_navmesh_t *m) {
                  "sim_nav: bake %d nodes, %d edges (%d teleport, %d iters)\n",
                  m->point_count, m->edge_count, teleport_edges, iters);
         eng->Con_Print(buf);
+    }
+
+    // Connected-components diagnostic: how many islands did we end up with,
+    // and how big is the biggest? Treat walk edges as bidirectional for this
+    // purpose (the BFS may have added an edge in only one direction, but for
+    // reachability analysis we want undirected). Teleport edges are directed
+    // but counted here anyway so we report the *intended* reachability.
+    {
+        int *comp = calloc(m->point_count, sizeof(int));
+        int *stk  = malloc(sizeof(int) * m->point_count);
+        if (comp && stk) {
+            int n_comp = 0, biggest = 0;
+            for (int s = 0; s < m->point_count; s++) {
+                if (comp[s]) continue;
+                n_comp++;
+                int top = 0;
+                stk[top++] = s;
+                comp[s] = n_comp;
+                int size = 0;
+                while (top > 0) {
+                    int v = stk[--top];
+                    size++;
+                    for (int k = 0; k < m->edge_count; k++) {
+                        if (m->edges[k].from == v && !comp[m->edges[k].to]) {
+                            comp[m->edges[k].to] = n_comp;
+                            stk[top++] = m->edges[k].to;
+                        } else if (m->edges[k].to == v && !comp[m->edges[k].from]) {
+                            comp[m->edges[k].from] = n_comp;
+                            stk[top++] = m->edges[k].from;
+                        }
+                    }
+                }
+                if (size > biggest) biggest = size;
+            }
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                     "sim_nav: connectivity %d components, largest=%d (%.0f%%)\n",
+                     n_comp, biggest,
+                     100.0 * biggest / (m->point_count > 0 ? m->point_count : 1));
+            eng->Con_Print(buf);
+        }
+        free(comp);
+        free(stk);
     }
 
     eng->ED_Free(probe);
