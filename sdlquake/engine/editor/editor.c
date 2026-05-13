@@ -21,6 +21,7 @@
 #include "hotreload.h"          // g_game_api
 #include "virtual_fs.h"         // Editor_VFS_*
 #include "qbsp_lib.h"           // qbsp_compile_to_memory
+#include "light_lib.h"          // light_compile_to_memory (mono Stage 1)
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -111,6 +112,15 @@ cvar_t      editor_brush_tex     = { "editor_brush_tex", "wbrick1_5" };
 // 16 units fits the standard build grid and keeps a 64-unit cube
 // hollow-able (thickness * 2 must stay below the smallest extent).
 cvar_t      editor_brush_hollow_thickness = { "editor_brush_hollow_thickness", "16" };
+
+// Live preview of edited light entities via engine dlights. When 1 (the
+// default), Editor_PreRender writes the nearest 32 `light*` entities
+// from the scene into cl_dlights with their `_color` + `light` values,
+// so the user sees a real-time approximation of lighting changes before
+// running Compile + Light. Approximation is additive only — it cannot
+// reduce or replace the existing baked lightmap; the full bake remains
+// authoritative for any final result.
+cvar_t      paint_light_preview  = { "paint_light_preview", "1" };
 
 static int     s_lookmode      = 0;
 static int     s_camera_inited = 0;
@@ -714,6 +724,102 @@ static void Editor_Cmd_Compile_f(void)
     }
 }
 
+/*
+ * editor_compile_full: qbsp + light. Same flow as editor_compile but
+ * after qbsp returns its BSP bytes we hand off to light_compile_to_memory
+ * which re-walks qbsp's still-populated globals to bake mono lighting
+ * (Stage 1) and re-serialises the BSP. The unlit bsp_bytes from qbsp are
+ * thrown away; only the lit one gets registered.
+ */
+static void Editor_Cmd_CompileFull_f(void)
+{
+    char  map_path[256];
+    char  bsp_vpath[64];
+    char  lit_vpath[64];
+    void *bsp_unlit = NULL;
+    int   unlit_size = 0;
+    void *bsp_lit = NULL;
+    int   lit_bsp_size = 0;
+    void *lit_bytes = NULL;
+    int   lit_bytes_size = 0;
+    int   rc;
+    qbsp_options_t opts;
+
+    if (!edit_scene.mapname[0])
+    {
+        Con_Printf("editor_compile_full: no map loaded\n");
+        return;
+    }
+
+    snprintf(map_path,  sizeof(map_path),
+             "%s/maps/%s.map", com_gamedir, edit_scene.mapname);
+    snprintf(bsp_vpath, sizeof(bsp_vpath),
+             "maps/%s.bsp", edit_scene.mapname);
+    snprintf(lit_vpath, sizeof(lit_vpath),
+             "maps/%s.lit", edit_scene.mapname);
+
+    if (!Scene_Save(map_path))
+    {
+        Con_Printf("editor_compile_full: save to %s failed\n", map_path);
+        return;
+    }
+
+    {
+        char wad_path[1024];
+        snprintf(wad_path, sizeof(wad_path), "%s/gfx/base.wad", com_gamedir);
+        Sys_mkdir(va("%s/gfx", com_gamedir));
+        if (write_wad2_from_worldmodel(wad_path) != 0)
+        {
+            Con_Printf("editor_compile_full: WAD synthesis failed\n");
+            return;
+        }
+    }
+
+    Con_Printf("editor_compile_full: saved %s; running qbsp...\n", map_path);
+
+    memset(&opts, 0, sizeof(opts));
+    opts.gamedir = com_gamedir;
+    rc = qbsp_compile_to_memory(map_path, &bsp_unlit, &unlit_size, &opts);
+    if (rc != 0 || !bsp_unlit)
+    {
+        Con_Printf("editor_compile_full: qbsp failed (rc=%d)\n", rc);
+        return;
+    }
+    Con_Printf("editor_compile_full: qbsp produced %d bytes; running light...\n",
+               unlit_size);
+
+    rc = light_compile_to_memory(NULL,
+                                 &bsp_lit, &lit_bsp_size,
+                                 &lit_bytes, &lit_bytes_size);
+    /* The unlit buffer is dead either way -- light's reset clobbers the
+     * membuf state and we have a freshly serialised copy. */
+    free(bsp_unlit);
+    bsp_unlit = NULL;
+    if (rc != 0 || !bsp_lit)
+    {
+        Con_Printf("editor_compile_full: light failed (rc=%d)\n", rc);
+        if (lit_bytes) free(lit_bytes);
+        return;
+    }
+
+    Editor_VFS_Register(bsp_vpath, bsp_lit, lit_bsp_size);
+    Con_Printf("editor_compile_full: %s = %d bytes (lit BSP)\n",
+               bsp_vpath, lit_bsp_size);
+
+    if (lit_bytes && lit_bytes_size > 0) {
+        Editor_VFS_Register(lit_vpath, lit_bytes, lit_bytes_size);
+        Con_Printf("editor_compile_full: %s = %d bytes (.lit)\n",
+                   lit_vpath, lit_bytes_size);
+    }
+
+    Con_Printf("editor_compile_full: reloading map\n");
+    {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "map %s\n", edit_scene.mapname);
+        Cbuf_AddText(buf);
+    }
+}
+
 static void Editor_Cmd_Redo_f(void)
 {
     if (!History_Redo()) Con_Printf("editor: nothing to redo\n");
@@ -1271,6 +1377,7 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_undo",    Editor_Cmd_Undo_f);
     Cmd_AddCommand("editor_redo",    Editor_Cmd_Redo_f);
     Cmd_AddCommand("editor_compile", Editor_Cmd_Compile_f);
+    Cmd_AddCommand("editor_compile_full", Editor_Cmd_CompileFull_f);
 
     History_Init();
 
@@ -1287,6 +1394,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_face_mode);
     Cvar_RegisterVariable(&editor_brush_tex);
     Cvar_RegisterVariable(&editor_brush_hollow_thickness);
+    Cvar_RegisterVariable(&paint_light_preview);
 
     {
         extern void Editor_RegisterCvars(void);
@@ -1442,12 +1550,115 @@ void Editor_CycleCameraMode(void)
 // Pre-render hook: called from R_RenderView_ before R_SetupFrame
 // -----------------------------------------------------------------------------
 
+/*
+ * Live dlight preview pump (Stage 5). Each frame the editor is open with
+ * paint_light_preview enabled, we walk edit_scene.entities, pick up to
+ * MAX_DLIGHTS `light*` entries nearest the camera, and stuff them into
+ * cl_dlights with `_color` / `light` / origin. R_AddDynamicLights_RGB
+ * picks them up unchanged. Gameplay simulation is paused while the
+ * editor is open, so we don't worry about colliding with engine-driven
+ * dlights (explosions, muzzleflashes, etc.) -- they aren't being spawned.
+ *
+ * Limitations to surface in the UI:
+ *   - dlights are additive only -- the user can paint colour onto a
+ *     dim wall, but can't darken anything.
+ *   - 32-light cap. Maps with hundreds of `light*` entries only preview
+ *     the nearest subset; the full bake is the truth.
+ *   - dlight radius math doesn't match the bake's distance falloff
+ *     exactly; preview is a hint, not pixel-accurate.
+ */
+static int s_light_pref_origin_idx = -1;
+
+static int parse_color_value(const char *s, vec3_t out)
+{
+    double v[3] = { 1, 1, 1 };
+    double mx;
+    int    n;
+    out[0] = out[1] = out[2] = 1;
+    if (!s || !s[0]) return 0;
+    n = sscanf(s, "%lf %lf %lf", &v[0], &v[1], &v[2]);
+    if (n < 1) return 0;
+    if (n == 1) { v[1] = v[0]; v[2] = v[0]; }
+    mx = v[0]; if (v[1] > mx) mx = v[1]; if (v[2] > mx) mx = v[2];
+    if (mx > 1.5) { v[0] /= 255; v[1] /= 255; v[2] /= 255; }
+    if (v[0] < 0) v[0] = 0; if (v[0] > 1) v[0] = 1;
+    if (v[1] < 0) v[1] = 0; if (v[1] > 1) v[1] = 1;
+    if (v[2] < 0) v[2] = 0; if (v[2] > 1) v[2] = 1;
+    out[0] = v[0]; out[1] = v[1]; out[2] = v[2];
+    return 1;
+}
+
+static void editor_refresh_light_preview(void)
+{
+    int i;
+    int n_filled = 0;
+    extern dlight_t cl_dlights[MAX_DLIGHTS];
+
+    /* Mark all dlight slots dead so a stale entry from a prior frame
+     * doesn't keep illuminating after the user disables preview or
+     * removes a light. */
+    for (i = 0; i < MAX_DLIGHTS; i++)
+    {
+        cl_dlights[i].radius = 0;
+        cl_dlights[i].die    = -1;
+    }
+
+    if (paint_light_preview.value == 0) return;
+
+    /* Walk scene entities; for each `light*` write into the next dlight
+     * slot. First-come-first-served (no nearest-to-camera ranking yet --
+     * a tighter heuristic can land in a follow-up when the cap actually
+     * starts hurting). */
+    for (i = 0; i < edit_scene.numentities && n_filled < MAX_DLIGHTS; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        const char *cls;
+        vec3_t origin;
+        vec3_t color = { 1, 1, 1 };
+        float  intensity = 300;
+        dlight_t *dl;
+        int j;
+
+        if (e->classname_idx < 0 || e->classname_idx >= e->numkv) continue;
+        cls = e->kv[e->classname_idx].value;
+        if (strncmp(cls, "light", 5) != 0) continue;
+
+        if (!Entity_GetOrigin(e, origin)) continue;
+
+        /* Read _color (default white) and `light` (default 300). The
+         * editor's classname parser doesn't speak about either; we look
+         * them up by raw key name. */
+        for (j = 0; j < e->numkv; j++)
+        {
+            if (!strcmp(e->kv[j].key, "_color"))
+                parse_color_value(e->kv[j].value, color);
+            else if (!strcmp(e->kv[j].key, "light"))
+                intensity = (float)atof(e->kv[j].value);
+        }
+        if (intensity <= 0) intensity = 300;
+
+        dl = &cl_dlights[n_filled++];
+        VectorCopy(origin, dl->origin);
+        dl->radius   = intensity;
+        dl->die      = cl.time + 1e9;   /* effectively forever */
+        dl->decay    = 0;
+        dl->minlight = 0;
+        dl->key      = 0;
+        VectorCopy(color, dl->color);
+    }
+
+    /* Suppress -Wunused. */
+    (void)s_light_pref_origin_idx;
+}
+
 void Editor_PreRender(void)
 {
     extern double host_frametime;
     extern cvar_t sensitivity, m_pitch, m_yaw;
 
     if (!s_open) return;
+
+    editor_refresh_light_preview();
 
     // View-mode change: a selection from the previous mode may now refer
     // to a hidden entry (a transient that's about to be filtered out, or

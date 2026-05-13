@@ -138,6 +138,20 @@ int  IG_DragFloat(const char *label, float *v, float speed,
 {
     return ImGui::DragFloat(label, v, speed, vmin, vmax) ? 1 : 0;
 }
+int  IG_SliderFloat(const char *label, float *v,
+                    float vmin, float vmax, const char *format)
+{
+    return ImGui::SliderFloat(label, v, vmin, vmax,
+                              format ? format : "%.3f") ? 1 : 0;
+}
+int  IG_ColorEdit3(const char *label, float col[3])
+{
+    return ImGui::ColorEdit3(label, col) ? 1 : 0;
+}
+int  IG_CollapsingHeader(const char *label, int flags)
+{
+    return ImGui::CollapsingHeader(label, (ImGuiTreeNodeFlags)flags) ? 1 : 0;
+}
 int  IG_IsItemActivated(void)            { return ImGui::IsItemActivated() ? 1 : 0; }
 int  IG_IsItemDeactivatedAfterEdit(void) { return ImGui::IsItemDeactivatedAfterEdit() ? 1 : 0; }
 int  IG_IsItemHovered(void)              { return ImGui::IsItemHovered() ? 1 : 0; }

@@ -1472,7 +1472,145 @@ void Editor_RenderScene(void)
     if (Editor_IsOpen())
         draw_target_links();
 
+    if (Editor_IsOpen())
+        Editor_DrawLightGizmos();
+
     Editor_GizmoDraw();
+}
+
+// -----------------------------------------------------------------------------
+// Light entity gizmos (Stage 6 of the coloured-lighting editor work).
+//
+// `light*` point entities don't have a model in vanilla Quake, so the default
+// editor bbox is just a 16-unit cube -- gives no sense of position priority,
+// no colour cue, no indication of reach. These gizmos surface that
+// information directly in the viewport: a 3D star at every light's origin,
+// a reach sphere for the selected light, and a cone for spotlights.
+// -----------------------------------------------------------------------------
+
+static void draw_light_star(const vec3_t origin, byte color)
+{
+    /* 6-arm asterisk (each axis-aligned plus 4 diagonals on the XY plane). */
+    const float r = 6.0f;
+    vec3_t a, b;
+    int i;
+    static const float dirs[14][3] = {
+        { 1, 0, 0}, {-1, 0, 0},
+        { 0, 1, 0}, { 0,-1, 0},
+        { 0, 0, 1}, { 0, 0,-1},
+        { 0.707f,  0.707f, 0}, {-0.707f, -0.707f, 0},
+        { 0.707f, -0.707f, 0}, {-0.707f,  0.707f, 0},
+        { 0.707f, 0,  0.707f}, {-0.707f, 0, -0.707f},
+        { 0.707f, 0, -0.707f}, {-0.707f, 0,  0.707f},
+    };
+    for (i = 0; i < 14; i += 2)
+    {
+        a[0] = origin[0] + dirs[i][0]   * r;
+        a[1] = origin[1] + dirs[i][1]   * r;
+        a[2] = origin[2] + dirs[i][2]   * r;
+        b[0] = origin[0] + dirs[i+1][0] * r;
+        b[1] = origin[1] + dirs[i+1][1] * r;
+        b[2] = origin[2] + dirs[i+1][2] * r;
+        Editor_DrawLine3DOver(a, b, color);
+    }
+}
+
+static void draw_light_sphere(const vec3_t origin, float radius, byte color)
+{
+    /* Three wireframe great circles -- XY, YZ, XZ -- 16 segments each. The
+     * eye fills in the rest. Cheap, ~50 lines per sphere. */
+    const int N = 16;
+    int axis;
+    for (axis = 0; axis < 3; axis++)
+    {
+        vec3_t prev = {0, 0, 0};
+        int i;
+        for (i = 0; i <= N; i++)
+        {
+            float a = ((float)i / N) * 2.0f * (float)M_PI;
+            float c = (float)cos(a) * radius;
+            float s = (float)sin(a) * radius;
+            vec3_t p;
+            p[0] = origin[0]; p[1] = origin[1]; p[2] = origin[2];
+            if (axis == 0)      { p[0] += c; p[1] += s; }
+            else if (axis == 1) { p[1] += c; p[2] += s; }
+            else                { p[0] += c; p[2] += s; }
+            if (i > 0)
+                Editor_DrawLine3DOver(prev, p, color);
+            VectorCopy(p, prev);
+        }
+    }
+}
+
+void Editor_DrawLightGizmos(void)
+{
+    int i, j;
+    int sel_ent_idx = -1;
+    edit_entity_t *sel = Scene_GetSelectedEntity();
+
+    if (sel) {
+        for (i = 0; i < edit_scene.numentities; i++)
+            if (&edit_scene.entities[i] == sel) { sel_ent_idx = i; break; }
+    }
+
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        const char *cls;
+        vec3_t origin;
+        float light = 0;
+        int is_selected = (i == sel_ent_idx);
+        byte glyph_color = EDIT_COLOR_LIGHT;
+        const char *target = NULL;
+
+        if (e->classname_idx < 0 || e->classname_idx >= e->numkv) continue;
+        cls = e->kv[e->classname_idx].value;
+        if (strncmp(cls, "light", 5) != 0) continue;
+        if (!Entity_GetOrigin(e, origin)) continue;
+
+        for (j = 0; j < e->numkv; j++)
+        {
+            if (!strcmp(e->kv[j].key, "light"))
+                light = (float)atof(e->kv[j].value);
+            else if (!strcmp(e->kv[j].key, "target"))
+                target = e->kv[j].value;
+        }
+        if (light <= 0) light = 300;
+
+        draw_light_star(origin, is_selected ? EDIT_COLOR_SELECTED : glyph_color);
+
+        if (is_selected)
+            draw_light_sphere(origin, light, glyph_color);
+
+        /* Spotlight indicator: line origin -> target's origin, if the
+         * target name resolves to another entity. */
+        if (target && target[0])
+        {
+            int k;
+            for (k = 0; k < edit_scene.numentities; k++)
+            {
+                edit_entity_t *t = &edit_scene.entities[k];
+                vec3_t torg;
+                int found = 0;
+                int kk;
+                for (kk = 0; kk < t->numkv; kk++)
+                {
+                    if (!strcmp(t->kv[kk].key, "targetname")
+                        && !strcmp(t->kv[kk].value, target))
+                    {
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found) continue;
+                if (!Entity_GetOrigin(t, torg)) break;
+                Editor_DrawLine3DOver(origin, torg,
+                                      is_selected ? EDIT_COLOR_SELECTED
+                                                  : glyph_color);
+                break;
+            }
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------

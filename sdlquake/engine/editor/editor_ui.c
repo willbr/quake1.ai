@@ -200,6 +200,16 @@ static void draw_toolbar(void)
     IG_SameLine(0, -1);
     if (IG_Button("Close (F2)"))   Cbuf_AddText("editor\n");
     IG_SameLine(0, -1);
+    /* qbsp-only fast iteration on geometry: the map reloads with the
+     * existing .lit (if any), so lighting stays whatever the last bake
+     * produced. */
+    if (IG_Button("Compile"))      Cbuf_AddText("editor_compile\n");
+    IG_SameLine(0, -1);
+    /* qbsp + light: re-bakes lightmaps from the current `light*` entities
+     * in the scene. Slower (single-threaded direct lighting), but the
+     * only way to see colour/intensity edits in the rendered .bsp. */
+    if (IG_Button("Compile + Light")) Cbuf_AddText("editor_compile_full\n");
+    IG_SameLine(0, -1);
     if (IG_Button("Textures..."))  s_show_tex_browser = !s_show_tex_browser;
     IG_SameLine(0, -1);
     if (IG_Button("Add Entity..."))s_show_spawn_dialog = !s_show_spawn_dialog;
@@ -1621,6 +1631,173 @@ static void draw_face_alignment(edit_brush_t *b)
 // Inspector
 // -----------------------------------------------------------------------------
 
+/* Light entity rich controls — drawn above the generic kv list when the
+ * selected entity's classname starts with "light". Each widget reads the
+ * current kv into native form, lets the user edit it, and writes back as
+ * the canonical Quake key string ("_color" "r g b" / "light" "300" /
+ * "style" "1" / etc.). The generic kv list below still works for anything
+ * outside the special cases. */
+
+static int is_light_entity(const edit_entity_t *e)
+{
+    int idx;
+    if (!e) return 0;
+    idx = e->classname_idx;
+    if (idx < 0 || idx >= e->numkv) return 0;
+    return strncmp(e->kv[idx].value, "light", 5) == 0;
+}
+
+static void parse_color_kv(const char *s, float out[3])
+{
+    double v[3] = { 1.0, 1.0, 1.0 };
+    double mx;
+    int n;
+    out[0] = out[1] = out[2] = 1.0f;
+    if (!s || !s[0]) return;
+    n = sscanf(s, "%lf %lf %lf", &v[0], &v[1], &v[2]);
+    if (n < 1) return;
+    /* If only one component was supplied, broadcast it. Patched ericw
+     * tools occasionally write a single scalar for legacy mono fixtures. */
+    if (n == 1) { v[1] = v[0]; v[2] = v[0]; }
+    /* 0..255 detection -- anything above 1.5 (with some safety margin
+     * over 1.0 floating point fuzz) is read as 0..255 byte triple. */
+    mx = v[0]; if (v[1] > mx) mx = v[1]; if (v[2] > mx) mx = v[2];
+    if (mx > 1.5)
+    {
+        v[0] /= 255.0; v[1] /= 255.0; v[2] /= 255.0;
+    }
+    if (v[0] < 0) v[0] = 0; if (v[0] > 1) v[0] = 1;
+    if (v[1] < 0) v[1] = 0; if (v[1] > 1) v[1] = 1;
+    if (v[2] < 0) v[2] = 0; if (v[2] > 1) v[2] = 1;
+    out[0] = (float)v[0]; out[1] = (float)v[1]; out[2] = (float)v[2];
+}
+
+static const char *s_light_style_names[] = {
+    "0 normal",
+    "1 flicker A",
+    "2 slow strong pulse",
+    "3 candle A",
+    "4 fast strobe",
+    "5 gentle pulse",
+    "6 flicker B",
+    "7 candle B",
+    "8 candle C",
+    "9 slow strobe",
+    "10 fluorescent flicker",
+    "11 slow pulse not fade",
+};
+enum { LIGHT_STYLE_N = (int)(sizeof(s_light_style_names)/sizeof(s_light_style_names[0])) };
+
+static const char *s_light_falloff_names[] = {
+    "0 linear (default)",
+    "1 1/x",
+    "2 1/x^2",
+    "3 no falloff",
+};
+
+static void draw_light_inspector_panel(edit_entity_t *e)
+{
+    float color[3] = { 1, 1, 1 };
+    float intensity = 300.0f;
+    int   style = 0;
+    int   delay = 0;
+    char  buf[64];
+    int   idx;
+
+    idx = kv_lookup(e, "_color");
+    if (idx >= 0) parse_color_kv(e->kv[idx].value, color);
+    idx = kv_lookup(e, "light");
+    if (idx >= 0) intensity = (float)atof(e->kv[idx].value);
+    idx = kv_lookup(e, "style");
+    if (idx >= 0) style = atoi(e->kv[idx].value);
+    idx = kv_lookup(e, "delay");
+    if (idx >= 0) delay = atoi(e->kv[idx].value);
+
+    if (style < 0 || style >= LIGHT_STYLE_N) style = 0;
+    if (delay < 0 || delay > 3) delay = 0;
+
+    IG_TextUnformatted("light controls");
+    IG_Separator();
+
+    IG_SetNextItemWidth(220);
+    if (IG_ColorEdit3("colour", color))
+    {
+        snprintf(buf, sizeof(buf), "%.3f %.3f %.3f", color[0], color[1], color[2]);
+        Entity_SetKV(e, "_color", buf);
+    }
+    if (IG_IsItemDeactivatedAfterEdit()) History_Push("light colour");
+
+    IG_SetNextItemWidth(220);
+    if (IG_DragFloat("intensity", &intensity, 1.0f, 0.0f, 4000.0f))
+    {
+        snprintf(buf, sizeof(buf), "%d", (int)intensity);
+        Entity_SetKV(e, "light", buf);
+    }
+    if (IG_IsItemDeactivatedAfterEdit()) History_Push("light intensity");
+
+    IG_SetNextItemWidth(220);
+    if (IG_Combo("style", &style, s_light_style_names, LIGHT_STYLE_N))
+    {
+        snprintf(buf, sizeof(buf), "%d", style);
+        History_Push("light style");
+        Entity_SetKV(e, "style", buf);
+    }
+
+    IG_SetNextItemWidth(220);
+    if (IG_Combo("falloff", &delay, s_light_falloff_names, 4))
+    {
+        snprintf(buf, sizeof(buf), "%d", delay);
+        History_Push("light falloff");
+        Entity_SetKV(e, "delay", buf);
+    }
+
+    if (IG_CollapsingHeader("spotlight", 0))
+    {
+        float cone = 0;
+        float angle = 0;
+        char  target[64] = "";
+        idx = kv_lookup(e, "_cone");
+        if (idx >= 0) cone = (float)atof(e->kv[idx].value);
+        idx = kv_lookup(e, "_angle");
+        if (idx >= 0) angle = (float)atof(e->kv[idx].value);
+        idx = kv_lookup(e, "target");
+        if (idx >= 0)
+        {
+            int n = (int)strlen(e->kv[idx].value);
+            if (n >= (int)sizeof(target)) n = (int)sizeof(target) - 1;
+            memcpy(target, e->kv[idx].value, n);
+            target[n] = '\0';
+        }
+
+        IG_SetNextItemWidth(220);
+        if (IG_SliderFloat("cone half-angle", &cone, 0, 90, "%.1f deg"))
+        {
+            snprintf(buf, sizeof(buf), "%.1f", cone);
+            Entity_SetKV(e, "_cone", buf);
+        }
+        if (IG_IsItemDeactivatedAfterEdit()) History_Push("light cone");
+
+        IG_SetNextItemWidth(220);
+        if (IG_SliderFloat("angle (pitch)", &angle, -90, 90, "%.1f deg"))
+        {
+            snprintf(buf, sizeof(buf), "%.1f", angle);
+            Entity_SetKV(e, "_angle", buf);
+        }
+        if (IG_IsItemDeactivatedAfterEdit()) History_Push("light angle");
+
+        IG_SetNextItemWidth(220);
+        if (IG_InputText("target", target, sizeof(target),
+                         IG_ITF_EnterReturnsTrue))
+        {
+            History_Push("light target");
+            Entity_SetKV(e, "target", target);
+        }
+    }
+
+    IG_TextUnformatted("(Compile + Light re-bakes lighting from these.)");
+    IG_Separator();
+}
+
 static void draw_inspector(void)
 {
     edit_entity_t *e;
@@ -1646,6 +1823,9 @@ static void draw_inspector(void)
         IG_End();
         return;
     }
+
+    if (is_light_entity(e))
+        draw_light_inspector_panel(e);
 
     IG_TextUnformatted("entity keys");
     IG_Separator();

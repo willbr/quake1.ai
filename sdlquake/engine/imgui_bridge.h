@@ -114,6 +114,10 @@ int   IG_DragFloat3(const char *label, float v[3], float speed);
 int   IG_InputFloat3(const char *label, float v[3]);
 int   IG_DragFloat (const char *label, float *v, float speed,
                     float vmin, float vmax);
+int   IG_SliderFloat(const char *label, float *v,
+                     float vmin, float vmax, const char *format);
+int   IG_ColorEdit3 (const char *label, float col[3]);
+int   IG_CollapsingHeader(const char *label, int flags);  /* flags=0 default */
 // Item state queries — used to gate per-drag history pushes (snapshot on
 // activate, push on deactivate-after-edit so each drag becomes one undo
 // step, not hundreds). IsItemHovered drives tooltip-on-thumbnail UX.

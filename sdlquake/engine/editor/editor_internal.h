@@ -62,6 +62,11 @@ void Editor_DrawLine3D   (const vec3_t a, const vec3_t b, byte color);
 // whatever's already on screen. Used by the gizmo so axis arrows stay
 // visible (and clickable) even when behind a brush.
 void Editor_DrawLine3DOver(const vec3_t a, const vec3_t b, byte color);
+// Viewport gizmos for `light*` point entities: a 3D star at every light's
+// origin, a wireframe reach sphere for the selected light, and a line to
+// the target for spotlights. Drawn from Editor_RenderScene after the
+// brush passes so the gizmos layer over filled geometry.
+void Editor_DrawLightGizmos(void);
 // Pick the topmost entity under (sx, sy). For brush hits, *out_plane is
 // set to the hit face's plane index (`b->planes[N]` index, stable across
 // recompiles); -1 for point-entity / runtime-edict hits. out_plane may

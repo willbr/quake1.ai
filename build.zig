@@ -191,6 +191,44 @@ pub fn build(b: *std.Build) void {
     // `#include "..."` which clang resolves relative to the source file's
     // directory automatically.
 
+    // Vendored id-LIGHT (id Software, GPLv2). Same in-process pattern as
+    // qbsp: the editor runs qbsp_compile_to_memory(), then
+    // light_compile_to_memory() to bake lighting on the BSP qbsp left
+    // sitting in shared globals (dfaces / dplanes / dlightdata / ...).
+    // Light's own .c files include cmdlib.h/mathlib.h/bspfile.h which
+    // live in vendor/qbsp/ — pass -Isdlquake/vendor/qbsp via the flags
+    // so clang resolves those, then -include both namespace headers so
+    // qbsp's symbol renames apply (cmdlib/mathlib/bspfile) on top of
+    // light's own renames (entities, LightFace, ...).
+    // light's .c files include "cmdlib.h" / "mathlib.h" / "bspfile.h" --
+    // those headers live alongside the source in vendor/light/ (verbatim
+    // copies of vendor/qbsp/ originals) so clang's "directory of source"
+    // search resolves them locally. The .c implementations live in
+    // vendor/qbsp/ and are linked into the binary once; light's TUs
+    // reference them via the matching header declarations.
+    const light_c_flags: []const []const u8 = &.{
+        "-DWIN32",
+        "-DDOUBLEVEC_T",
+        "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+        "-include", "sdlquake/vendor/light/light_namespace.h",
+        "-fno-strict-aliasing",
+        "-fwrapv",
+        "-std=gnu89",
+        "-fcommon",
+        "-w",
+        "-fno-sanitize=undefined",
+    };
+    mod.addCSourceFiles(.{
+        .files = &.{
+            "sdlquake/vendor/light/light.c",
+            "sdlquake/vendor/light/entities.c",
+            "sdlquake/vendor/light/ltface.c",
+            "sdlquake/vendor/light/trace.c",
+            "sdlquake/vendor/light/light_lib.c",
+        },
+        .flags = light_c_flags,
+    });
+
     // Dear ImGui core + SDL3/SDL_Renderer backends + our C++ bridge (no logic)
     mod.addCSourceFiles(.{
         .files = &.{
