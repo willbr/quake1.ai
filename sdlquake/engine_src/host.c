@@ -267,16 +267,18 @@ void Host_WriteConfiguration (void)
 	if (host_initialized & !isDedicated)
 	{
 		f = fopen (va("%s/config.cfg",com_gamedir), "w");
-		if (!f)
+		if (f)
+		{
+			Key_WriteBindings (f);
+			Cvar_WriteVariables (f);
+			fclose (f);
+		}
+		else
 		{
 			Con_Printf ("Couldn't write config.cfg.\n");
-			return;
 		}
-		
-		Key_WriteBindings (f);
-		Cvar_WriteVariables (f);
 
-		fclose (f);
+		Key_SaveHistory ();
 	}
 }
 
