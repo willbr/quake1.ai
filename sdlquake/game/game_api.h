@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 15
+#define GAME_API_VERSION 16
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -173,6 +173,11 @@ typedef struct engine_api_s {
     // the bake claims is traversable. Writes the same trace_* globals.
     void  (*SV_TraceMove)(vec3_t start, vec3_t mins, vec3_t maxs,
                           vec3_t end, int nomonsters, edict_t *skip);
+
+    // Spawn a growing blood pool on the floor beneath origin. Called from
+    // game.dll's Killed() on monster death. No-op if no floor within 64
+    // units, or if r_decals/r_decals_bloodpool is 0.
+    void  (*spawn_blood_pool)(const vec3_t origin);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

@@ -86,6 +86,7 @@ double Sys_FloatTime(void);
 void   Host_Error(char *error, ...);
 void   Cbuf_AddText(char *text);
 void   AngleVectors(float *angles, float *forward, float *right, float *up);
+void   R_SpawnBloodPool(vec3_t origin);
 
 // ---------------------------------------------------------------------------
 // Entity / server types (condensed forward decls)
@@ -833,6 +834,13 @@ static void engine_sv_tracemove(float *start, float *mins, float *maxs,
     game_globals.trace_plane_normal[2] = tr.plane.normal[2];
 }
 
+static void engine_spawn_blood_pool(const vec3_t origin)
+{
+    vec3_t o;
+    o[0] = origin[0]; o[1] = origin[1]; o[2] = origin[2];
+    R_SpawnBloodPool(o);
+}
+
 // ---------------------------------------------------------------------------
 // imgui Nav panel shims
 // ---------------------------------------------------------------------------
@@ -933,6 +941,7 @@ static engine_api_t engine_funcs = {
     engine_debug_line,
     engine_get_view_origin,
     engine_sv_tracemove,
+    engine_spawn_blood_pool,
 };
 
 // ---------------------------------------------------------------------------
