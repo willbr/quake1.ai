@@ -1,29 +1,29 @@
-* command history for the console
-    * up and down
-    * CTRL+R for search
-    * usualy readline hotkeys
-* procgen textures
-* review what can be extracted in to libraries
-* threading
-
 # Ideas
+
+## Next 5
+
+1. **model interpolation** — small change, smooths 10 Hz monster animation, huge perceived-quality win
+2. **decals** (bullet holes, blood) — combat feedback for the Phase 8 immersive-sim work; contained scope
+3. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
+4. **coloured lights** — modernises the renderer's look; pairs with Phase 8 atmospheric scenes
+5. **console: CTRL+R search + readline hotkeys** — finish the history work started in recent commits
 
 ## Rendering & visuals
 
 * decals — bullet holes, blood, dirt & grime, scratches
-* coloured lights
-* fog
+* coloured lights (also flickering torches, muzzle flashes)
+* atmospheric distance fog + vibrant palette (Star Fox 64, Zelda)
 * texture filtering
 * model interpolation
-* more particle effects
+* more particle effects — billboarded sprites, explosions, blood, dust, lens flares
+* billboard text that floats in game
 * dynamic player shadow (Mario 64 blob / stencil) for grounding in dark levels
 * vertex lighting & smooth shading (N64-style soft gradients on walls and characters)
 * simple real-time shadows projected from monsters and props
-* vibrant palette + atmospheric distance fog (Star Fox 64, Zelda)
-* billboarded particles & sprites — explosions, blood, dust, lens flares
 * texture animation & environment mapping for water, lava, metal
 * low-poly charm enhanced with normal maps or baked lighting
-* dynamic lighting effects — coloured lights, flickering torches, muzzle flashes
+* procgen textures
+* better visuals & effects — enhanced textures, particles, art direction (Gran Turismo, Crash Bandicoot)
 * review the software renderer — what cool things could we add?
 
 ## Debug rendering
@@ -63,16 +63,17 @@
 
 ## Engine & platform
 
+* threading
+* review what can be extracted into libraries
 * use SDL_net
-* remove malloc, use areans
-* intern all strings so i dont need to use strcmp
-* replace stdlib & null terminated strings
+* remove malloc, use arenas
+* intern all strings so I don't need to use strcmp
+* replace stdlib & null-terminated strings
 * replace build.zig with build.c
 * uncapped framerate with fixed physics
 * increased engine limits
 * BSP2 support
 * what SDL3 features should I use?
-* remove malloc added by claude
 
 ## Environmental fx
 
@@ -85,25 +86,26 @@
 * mouse support for the default menu
 * rebuilt main menu in imgui (dev overlay already done)
 * custom HUD
+* console command history — CTRL+R search, usual readline hotkeys
 
 ## Editor & live workflow
 
-* remove on disk files, .h1 .h2 .pts, hull files and leak point files
+* remove on-disk files: .h1, .h2, .pts, hull files, leak point files
 * live `.map` editing
 * live entity editing
-* selction mode brush, face, edge vertext, group
+* selection mode: brush, face, edge, vertex, group
 * brush boolean ops — subtract, intersect, hollow
 * live texture painting (paint lightmap or diffuse onto a face, hot-reload)
 * undo / redo stack with branch points
 * light baking on a worker thread, progressive refinement
 * prefab library, drag-and-drop entity templates
-* edge to stairs gizmo
-* room tool, and corridoors
-* lattice modifer
-* gizmo rect, that lets you move on two axis at once
+* edge-to-stairs gizmo
+* room tool, and corridors
+* lattice modifier
+* gizmo rect that lets you move on two axes at once
 * sqlite file format for maps that includes undo data
-* value .map 220 version support
-* bsp -> .map
+* Valve .map 220 version support
+* bsp → .map
 * new map format
     * sqlite base
     * raw map data
@@ -161,6 +163,7 @@
 * WASM web client (SDL3 builds for emscripten)
 * spectator free-cam
 * cooperative campaign
+* split-screen deathmatch, bots (GoldenEye, Mario Kart 64)
 * speedrun leaderboards stored in SQLite
 
 ## Persistence & save
@@ -214,6 +217,7 @@
 * crossbow
 * axe — throw it, God of War style
 * something interesting on mouse2
+* creative weapons & gadgets — remote mines, cloaking, special ammo (Perfect Dark, Star Fox 64)
 
 ## Stealth gameplay
 
@@ -296,12 +300,6 @@
 
 * tighter controls & polish — responsive movement and weapon handling (Tekken 3, Tony Hawk's Pro Skater 2)
 * tight first-person controls — smooth aiming, iron sights, console-style precision (GoldenEye, Perfect Dark)
-* better visuals & effects — enhanced textures, particles, art direction (Gran Turismo, Crash Bandicoot)
-* creative weapons & gadgets — remote mines, cloaking, special ammo (Perfect Dark, Star Fox 64)
-
-## Multiplayer game modes
-
-* multiplayer mayhem — split-screen deathmatch, bots, co-op (GoldenEye, Mario Kart 64)
 
 ## Content pipeline & CI
 
@@ -316,8 +314,7 @@
 * docs on file formats
 * docs on the code
 
-## Cutscene Editor
+## Cutscene editor
 
 * camera movements
 * record stub dialog and sounds
-
