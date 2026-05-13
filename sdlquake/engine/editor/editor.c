@@ -827,6 +827,27 @@ static void Editor_Cmd_CompileFull_f(void)
     }
 }
 
+/*
+ * light_bench <mapname>: load <gamedir>/maps/<mapname>.bsp from disk
+ * and run the bake once, printing per-phase timing. Used to size the
+ * cost of a live re-bake vs the dlight preview. The BSP must already
+ * exist on disk -- vendored LIGHT's LoadBSPFile uses raw fopen and
+ * doesn't see PAK contents. Run editor_compile_full once to materialise
+ * a BSP into the VFS (then extract by hand if needed).
+ */
+static void Editor_Cmd_LightBench_f(void)
+{
+    char path[1024];
+    const char *name;
+    if (Cmd_Argc() < 2) {
+        Con_Printf("usage: light_bench <mapname>\n");
+        return;
+    }
+    name = Cmd_Argv(1);
+    snprintf(path, sizeof(path), "%s/maps/%s.bsp", com_gamedir, name);
+    light_bench(path);
+}
+
 static void Editor_Cmd_Redo_f(void)
 {
     if (!History_Redo()) Con_Printf("editor: nothing to redo\n");
@@ -1385,6 +1406,7 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_redo",    Editor_Cmd_Redo_f);
     Cmd_AddCommand("editor_compile", Editor_Cmd_Compile_f);
     Cmd_AddCommand("editor_compile_full", Editor_Cmd_CompileFull_f);
+    Cmd_AddCommand("light_bench", Editor_Cmd_LightBench_f);
 
     History_Init();
 

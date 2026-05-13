@@ -47,6 +47,15 @@ int light_compile_to_memory(light_options_t *opts,
                             void **out_bsp, int *out_size,
                             void **out_lit, int *out_lit_size);
 
+/*
+ * Stand-alone bench/diagnostic: loads `bsp_path` (a regular .bsp on
+ * disk) into LIGHT's globals via the ported LoadBSPFile, runs the bake,
+ * times each phase, and discards the output. Used by the `light_bench`
+ * console command to size the cost of a full re-bake when sketching
+ * whether on-edit live baking is feasible. Returns 0 on success.
+ */
+int light_bench(const char *bsp_path);
+
 #ifdef __cplusplus
 }
 #endif

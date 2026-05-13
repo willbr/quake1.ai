@@ -130,10 +130,21 @@ int light_compile_to_memory(light_options_t *opts,
         return 1;
     }
 
-    LoadEntities();
-    MakeTnodes(&dmodels[0]);
-    LightWorld();
-    WriteEntitiesToString();
+    {
+        double t0, t1, t2, t3;
+        extern double I_FloatTime(void);
+        t0 = I_FloatTime();
+        LoadEntities();
+        t1 = I_FloatTime();
+        MakeTnodes(&dmodels[0]);
+        t2 = I_FloatTime();
+        LightWorld();
+        t3 = I_FloatTime();
+        WriteEntitiesToString();
+        Con_Printf("light timing: load=%.3fs tnodes=%.3fs bake=%.3fs (faces=%d, lights=%d)\n",
+                   t1 - t0, t2 - t1, t3 - t2,
+                   numfaces, num_entities);
+    }
 
     /* Re-emit the BSP with updated lightdata + entdata. WriteBSPFile
      * inspects qbsp_membuf_active and routes its bytes into the membuf
@@ -153,6 +164,7 @@ int light_compile_to_memory(light_options_t *opts,
         return 1;
     }
 
+    /* End of normal compile path -- emit .lit if requested. */
     if (out_lit && out_lit_size && lightdatasize > 0) {
         /* QLIT v1 sidecar: 4 byte magic + int32 version + RGB stream.
          * Total bytes = 8 + 3 * lightdatasize. The RGB stream is sliced
@@ -173,5 +185,63 @@ int light_compile_to_memory(light_options_t *opts,
             *out_lit_size = lit_total;
         }
     }
+    return 0;
+}
+
+/* Stand-alone bench: read a real .bsp from disk via the shared
+ * cmdlib/bspfile path, then run the bake without touching qbsp's
+ * globals. Discards the result. Wired to the `light_bench <name>`
+ * console command. */
+int light_bench(const char *bsp_path)
+{
+    extern double I_FloatTime(void);
+    jmp_buf err_buf;
+    double  tL0, tL1, t0, t1, t2, t3;
+    int     lit_size;
+
+    if (!bsp_path || !bsp_path[0]) {
+        Con_Printf("light_bench: no bsp_path\n");
+        return 1;
+    }
+
+    light_reset_state();
+
+    qbsp_err_jmp    = &err_buf;
+    qbsp_err_msg[0] = '\0';
+    if (setjmp(err_buf) != 0) {
+        Con_Printf("light_bench: %s\n", qbsp_err_msg);
+        qbsp_err_jmp = NULL;
+        return 1;
+    }
+
+    tL0 = I_FloatTime();
+    LoadBSPFile((char *)bsp_path);
+    tL1 = I_FloatTime();
+    Con_Printf("light_bench: LoadBSPFile %.3fs (faces=%d, ents=%d bytes)\n",
+               tL1 - tL0, numfaces, entdatasize);
+
+    /* Clear any stale lighting in dlightdata from a prior bake.
+     * light_rgb_dlightdata is `extern byte[]` here (real size lives in
+     * light.c); use the matching MAX_MAP_LIGHTING*3 constant for the
+     * memset rather than sizeof on an incomplete type. */
+    lightdatasize = 0;
+    memset(dlightdata, 0, sizeof(dlightdata));
+    memset(light_rgb_dlightdata, 0, MAX_MAP_LIGHTING * 3);
+
+    t0 = I_FloatTime();
+    LoadEntities();
+    t1 = I_FloatTime();
+    MakeTnodes(&dmodels[0]);
+    t2 = I_FloatTime();
+    LightWorld();
+    t3 = I_FloatTime();
+
+    lit_size = lightdatasize * 3;
+    Con_Printf("light_bench: load=%.3fs tnodes=%.3fs bake=%.3fs total=%.3fs\n",
+               t1 - t0, t2 - t1, t3 - t2, t3 - t0);
+    Con_Printf("light_bench: %d lights, %d ent strings, lit=%d bytes\n",
+               num_entities, num_entities, lit_size);
+
+    qbsp_err_jmp = NULL;
     return 0;
 }

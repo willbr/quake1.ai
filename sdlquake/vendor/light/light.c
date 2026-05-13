@@ -1,5 +1,6 @@
 // lighting.c
 
+#include <stdint.h>
 #include "light.h"
 
 /*
@@ -36,7 +37,12 @@ byte *GetFileSpace (int size)
 	byte	*buf;
 
 	LOCK;
-	file_p = (byte *)(((long)file_p + 3)&~3);
+	/* Original id source used `(long)file_p` for the 4-byte alignment
+	 * step. On Windows x64 `long` is 32-bit but pointers are 64-bit, so
+	 * that cast silently truncates the upper half and produces a wild
+	 * pointer when the buffer's high address is non-zero. Use uintptr_t
+	 * so the alignment math stays inside the pointer's true width. */
+	file_p = (byte *)(((uintptr_t)file_p + 3) & ~(uintptr_t)3);
 	buf = file_p;
 	file_p += size;
 	UNLOCK;
