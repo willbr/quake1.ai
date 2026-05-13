@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 12
+#define GAME_API_VERSION 13
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -161,6 +161,11 @@ typedef struct engine_api_s {
     // the world depth buffer so only the un-walled portion is visible.
     // Call every frame to keep the line visible.
     void  (*SV_DebugLine)(vec3_t start, vec3_t end, int color, int ztest);
+
+    // Current render-camera origin (r_origin). Used by overlays to cull
+    // submission by distance; far edges are skipped before the cross-DLL
+    // SV_DebugLine call even fires.
+    void  (*Get_ViewOrigin)(vec3_t out);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

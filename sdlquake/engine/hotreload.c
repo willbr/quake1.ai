@@ -805,6 +805,13 @@ static void engine_debug_line(float *start, float *end, int color, int ztest) {
     DebugLines_Add(start, end, color, ztest);
 }
 
+static void engine_get_view_origin(float *out) {
+    extern float r_origin[3];
+    out[0] = r_origin[0];
+    out[1] = r_origin[1];
+    out[2] = r_origin[2];
+}
+
 // ---------------------------------------------------------------------------
 // imgui Nav panel shims
 // ---------------------------------------------------------------------------
@@ -903,6 +910,7 @@ static engine_api_t engine_funcs = {
     engine_cvar_register,
     engine_load_file,
     engine_debug_line,
+    engine_get_view_origin,
 };
 
 // ---------------------------------------------------------------------------

@@ -806,6 +806,11 @@ void Sim_Nav_Init(void) {
     s_ready = 0;
     eng->Cvar_Register("sim_nav_debug", "0");
     eng->Cvar_Register("sim_nav_ztest", "0");
+    // Edges with both endpoints beyond this radius (Quake units) from the
+    // camera are skipped before submission. 0 disables culling. Default
+    // 1024 keeps a generous view radius while bounding draw cost on dense
+    // meshes (e1m1: ~6k nodes / 60k edges).
+    eng->Cvar_Register("sim_nav_debug_range", "1024");
 }
 
 int            Sim_Nav_IsReady(void) { return s_ready; }
@@ -815,8 +820,31 @@ void Sim_Nav_Frame(void) {
     if (!s_ready || !s_mesh) return;
     if (eng->Cvar_VariableValue("sim_nav_debug") <= 0.0f) return;
     int ztest = eng->Cvar_VariableValue("sim_nav_ztest") > 0.0f;
+
+    // Distance cull: dropping the cross-DLL SV_DebugLine call entirely for
+    // far edges saves both submission cost and downstream draw cost. We
+    // mask in-range once per node (O(N)) instead of testing each edge's
+    // endpoints (O(E)) since E ≈ 9N on a typical bake.
+    float range     = eng->Cvar_VariableValue("sim_nav_debug_range");
+    int   has_range = (range > 0.0f);
+    float r2        = range * range;
+    vec3_t cam;
+    unsigned char in_range[MAX_NODES];
+    if (has_range) {
+        eng->Get_ViewOrigin(cam);
+        int np = s_mesh->point_count;
+        if (np > MAX_NODES) np = MAX_NODES;
+        for (int i = 0; i < np; i++) {
+            float dx = s_mesh->points[i].pos[0] - cam[0];
+            float dy = s_mesh->points[i].pos[1] - cam[1];
+            float dz = s_mesh->points[i].pos[2] - cam[2];
+            in_range[i] = (dx*dx + dy*dy + dz*dz) <= r2;
+        }
+    }
+
     for (int i = 0; i < s_mesh->edge_count; i++) {
         nav_edge_t *e = &s_mesh->edges[i];
+        if (has_range && !in_range[e->from] && !in_range[e->to]) continue;
         // Teleport edges (weight 0) drawn in a contrasting colour.
         int color = (e->weight == 0.0f) ? 192 : 244;
         eng->SV_DebugLine(s_mesh->points[e->from].pos,
