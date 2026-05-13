@@ -1289,13 +1289,28 @@ edict_t *EDICT_NUM(int n)
 
 int NUM_FOR_EDICT(edict_t *e)
 {
-	int		b;
-	
-	b = (byte *)e - (byte *)sv.edicts;
-	b = b / pr_edict_size;
-	
+	ptrdiff_t off;
+	int       b;
+
+	off = (byte *)e - (byte *)sv.edicts;
+	b   = (int)(off / pr_edict_size);
+
 	if (b < 0 || b >= sv.num_edicts)
-		Sys_Error ("NUM_FOR_EDICT: bad pointer");
+	{
+		Con_Printf ("NUM_FOR_EDICT: bad pointer\n"
+			"  e             = %p\n"
+			"  sv.edicts     = %p\n"
+			"  sv.num_edicts = %d  (max=%d, edict_size=%d)\n"
+			"  byte offset   = %lld  -> index %d (out of range)\n",
+			(void *)e, (void *)sv.edicts,
+			sv.num_edicts, sv.max_edicts, pr_edict_size,
+			(long long)off, b);
+		// Force a debugger-catchable crash: __builtin_trap on clang
+		// becomes UD2 on x86, which the OS reports as an access
+		// violation / illegal instruction with a real call stack
+		// (vs. Sys_Error -> exit(1) which loses the frames).
+		__builtin_trap ();
+	}
 	return b;
 }
 
