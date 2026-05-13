@@ -131,9 +131,11 @@ void R_BuildLightMap_RGB(void)
     if (surf->dlightframe == r_framecount)
         R_AddDynamicLights_RGB();
 
-    /* RGB path is multiplicative — do NOT invert like mono. */
+    /* RGB path is multiplicative — do NOT invert like mono. Shift one bit
+       less than the natural 8.8->6.8 rescale to compensate for the gamma
+       curve baked into mono's vid.colormap. */
     for (int i = 0; i < size * 3; i++) {
-        unsigned v = blocklights_rgb[i] >> (8 - VID_CBITS);
+        unsigned v = blocklights_rgb[i] >> (7 - VID_CBITS);
         if (v > (64u << 8)) v = (64u << 8);
         blocklights_rgb[i] = v;
     }
@@ -142,7 +144,7 @@ void R_BuildLightMap_RGB(void)
 
 Same shape as `R_BuildLightMap`, three channels. `R_AddDynamicLights_RGB` is the mono function with `temp` multiplied per channel by `cl_dlights[lnum].color[0..2]` — the rest of its distance/falloff math is unchanged.
 
-The final bound/clamp loop differs from the mono path: mono inverts (high blocklights = darker row index) to fit its row-indexed colormap, but the RGB writer multiplies `light_int * basepal[tex]`, so the RGB path keeps the natural sense (high blocklights = bright) and only clamps the integer part to 64 (which the writer's `r6 > 63` clamp caps to 63 = fullbright).
+The final bound/clamp loop differs from the mono path: mono inverts (high blocklights = darker row index) to fit its row-indexed colormap, but the RGB writer multiplies `light_int * basepal[tex]`, so the RGB path keeps the natural sense (high blocklights = bright) and only clamps the integer part to 64 (which the writer's `r6 > 63` clamp caps to 63 = fullbright). The rescale shift is one bit shallower than the natural `8.8 -> 6.8` conversion to compensate for the gamma curve baked into mono's `vid.colormap`: mono mid-tones look brighter than a linear `basepal * fraction` would predict, so the linear RGB multiplier needs ~2x boost to match. Fullbright still saturates cleanly at the 64<<8 cap; dark stays dark.
 
 Lightstyles already modulate brightness via `lightadj[]`; with `.lit` the colour stays fixed and brightness flickers as it always has. No lightstyle logic changes.
 

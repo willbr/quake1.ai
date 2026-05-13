@@ -333,11 +333,12 @@ void R_BuildLightMap_RGB (void)
 		R_AddDynamicLights_RGB ();
 
 	/* RGB path is multiplicative (light_int * basepal[tex]), not LUT-indexed
-	   like mono — so we do NOT invert. Just rescale 8.8 -> 6.8 fixed and clamp
-	   the integer part to 64 (which the writer's r6 > 63 clamp caps to 63 =
-	   fullbright). */
+	   like mono — so we do NOT invert. Shift one bit less than the natural
+	   8.8->6.8 rescale to compensate for the gamma curve baked into mono's
+	   vid.colormap (mono mid-tones come out brighter than linear; RGB
+	   multiplies linearly). The 64<<8 cap saturates fullbright cleanly. */
 	for (i = 0; i < size * 3; i++) {
-		unsigned v = blocklights_rgb[i] >> (8 - VID_CBITS);
+		unsigned v = blocklights_rgb[i] >> (7 - VID_CBITS);
 		if (v > (64u << 8)) v = (64u << 8);
 		blocklights_rgb[i] = v;
 	}
