@@ -1,12 +1,11 @@
 # Ideas
 
-## Next 5
+## Next 4
 
 1. **model interpolation** — small change, smooths 10 Hz monster animation, huge perceived-quality win
 2. **decals** (bullet holes, blood) — combat feedback for the Phase 8 immersive-sim work; contained scope
 3. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
 4. **coloured lights** — modernises the renderer's look; pairs with Phase 8 atmospheric scenes
-5. **console: CTRL+R search + readline hotkeys** — finish the history work started in recent commits
 
 ## Rendering & visuals
 
@@ -86,7 +85,6 @@
 * mouse support for the default menu
 * rebuilt main menu in imgui (dev overlay already done)
 * custom HUD
-* console command history — CTRL+R search, usual readline hotkeys
 
 ## Editor & live workflow
 
