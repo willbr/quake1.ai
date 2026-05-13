@@ -1544,15 +1544,26 @@ static void draw_light_sphere(const vec3_t origin, float radius, byte color)
 
 void Editor_DrawLightGizmos(void)
 {
+    extern cvar_t editor_light_gizmos;
     int i, j;
     int sel_ent_idx = -1;
-    edit_entity_t *sel = Scene_GetSelectedEntity();
+    int verbosity = (int)editor_light_gizmos.value;
+    edit_entity_t *sel;
 
+    /* 0 = off entirely. */
+    if (verbosity <= 0) return;
+
+    sel = Scene_GetSelectedEntity();
     if (sel) {
         for (i = 0; i < edit_scene.numentities; i++)
             if (&edit_scene.entities[i] == sel) { sel_ent_idx = i; break; }
     }
 
+    /* Mode 1 (default) only draws the gizmo for the selected entity. Mode
+     * 2 draws stars for every light* in the scene. Real Quake maps carry
+     * hundreds of point lights (start.bsp has 267) so the default mode
+     * is conservative; the cvar is exposed for the rare case the user
+     * wants every light visible at once. */
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
@@ -1566,6 +1577,9 @@ void Editor_DrawLightGizmos(void)
         if (e->classname_idx < 0 || e->classname_idx >= e->numkv) continue;
         cls = e->kv[e->classname_idx].value;
         if (strncmp(cls, "light", 5) != 0) continue;
+
+        if (verbosity == 1 && !is_selected) continue;
+
         if (!Entity_GetOrigin(e, origin)) continue;
 
         for (j = 0; j < e->numkv; j++)

@@ -122,6 +122,13 @@ cvar_t      editor_brush_hollow_thickness = { "editor_brush_hollow_thickness", "
 // authoritative for any final result.
 cvar_t      paint_light_preview  = { "paint_light_preview", "1" };
 
+// Light-gizmo verbosity in the editor viewport. 0 = none, 1 = selected
+// light only (default; Quake maps frequently carry 100+ light entities
+// so the all-lights mode would drown the viewport in stars), 2 = all.
+// Independent of paint_light_preview, which drives the runtime dlight
+// approximation rather than the wireframe markers.
+cvar_t      editor_light_gizmos  = { "editor_light_gizmos", "1" };
+
 static int     s_lookmode      = 0;
 static int     s_camera_inited = 0;
 static vec3_t  s_cam_origin;
@@ -1395,6 +1402,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_brush_tex);
     Cvar_RegisterVariable(&editor_brush_hollow_thickness);
     Cvar_RegisterVariable(&paint_light_preview);
+    Cvar_RegisterVariable(&editor_light_gizmos);
 
     {
         extern void Editor_RegisterCvars(void);
@@ -1588,11 +1596,36 @@ static int parse_color_value(const char *s, vec3_t out)
     return 1;
 }
 
+/* Per-frame buffer of light-entity candidates we sort by distance to
+ * the editor camera. Static so we don't repeatedly heap-alloc; sized for
+ * the largest Quake map's light count (start.bsp has 267, jam maps go
+ * higher). If a future map exceeds MAX_LIGHT_CANDIDATES we just stop
+ * gathering -- the preview already truncates to MAX_DLIGHTS. */
+#define MAX_LIGHT_CANDIDATES 1024
+typedef struct {
+    vec3_t origin;
+    vec3_t color;
+    float  intensity;
+    float  dist_sq;
+} light_cand_t;
+static light_cand_t s_light_cands[MAX_LIGHT_CANDIDATES];
+
+static int light_cand_cmp(const void *a, const void *b)
+{
+    float da = ((const light_cand_t *)a)->dist_sq;
+    float db = ((const light_cand_t *)b)->dist_sq;
+    if (da < db) return -1;
+    if (da > db) return 1;
+    return 0;
+}
+
 static void editor_refresh_light_preview(void)
 {
-    int i;
-    int n_filled = 0;
+    int i, n_cands = 0;
+    int n_filled;
     extern dlight_t cl_dlights[MAX_DLIGHTS];
+    extern vec3_t   r_origin;     /* current view origin (set by R_SetupFrame) */
+    vec3_t cam;
 
     /* Mark all dlight slots dead so a stale entry from a prior frame
      * doesn't keep illuminating after the user disables preview or
@@ -1605,29 +1638,26 @@ static void editor_refresh_light_preview(void)
 
     if (paint_light_preview.value == 0) return;
 
-    /* Walk scene entities; for each `light*` write into the next dlight
-     * slot. First-come-first-served (no nearest-to-camera ranking yet --
-     * a tighter heuristic can land in a follow-up when the cap actually
-     * starts hurting). */
-    for (i = 0; i < edit_scene.numentities && n_filled < MAX_DLIGHTS; i++)
+    VectorCopy(r_origin, cam);
+
+    /* Pass 1: gather every `light*` entity into the candidate buffer
+     * with its dist-squared to the camera. */
+    for (i = 0; i < edit_scene.numentities && n_cands < MAX_LIGHT_CANDIDATES; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
         const char *cls;
-        vec3_t origin;
+        light_cand_t *c;
         vec3_t color = { 1, 1, 1 };
-        float  intensity = 300;
-        dlight_t *dl;
+        float intensity = 300;
+        vec3_t origin;
+        float dx, dy, dz;
         int j;
 
         if (e->classname_idx < 0 || e->classname_idx >= e->numkv) continue;
         cls = e->kv[e->classname_idx].value;
         if (strncmp(cls, "light", 5) != 0) continue;
-
         if (!Entity_GetOrigin(e, origin)) continue;
 
-        /* Read _color (default white) and `light` (default 300). The
-         * editor's classname parser doesn't speak about either; we look
-         * them up by raw key name. */
         for (j = 0; j < e->numkv; j++)
         {
             if (!strcmp(e->kv[j].key, "_color"))
@@ -1637,14 +1667,34 @@ static void editor_refresh_light_preview(void)
         }
         if (intensity <= 0) intensity = 300;
 
-        dl = &cl_dlights[n_filled++];
-        VectorCopy(origin, dl->origin);
-        dl->radius   = intensity;
-        dl->die      = cl.time + 1e9;   /* effectively forever */
+        c = &s_light_cands[n_cands++];
+        VectorCopy(origin, c->origin);
+        VectorCopy(color,  c->color);
+        c->intensity = intensity;
+        dx = origin[0] - cam[0];
+        dy = origin[1] - cam[1];
+        dz = origin[2] - cam[2];
+        c->dist_sq = dx*dx + dy*dy + dz*dz;
+    }
+
+    /* Pass 2: sort by distance, take the nearest MAX_DLIGHTS, write them
+     * into cl_dlights. This is what makes the preview legible in dense
+     * maps -- start.bsp's 267 lights would otherwise have only the
+     * arbitrary first 32 visible. */
+    qsort(s_light_cands, (size_t)n_cands, sizeof(light_cand_t), light_cand_cmp);
+
+    n_filled = n_cands < MAX_DLIGHTS ? n_cands : MAX_DLIGHTS;
+    for (i = 0; i < n_filled; i++)
+    {
+        dlight_t *dl = &cl_dlights[i];
+        light_cand_t *c = &s_light_cands[i];
+        VectorCopy(c->origin, dl->origin);
+        dl->radius   = c->intensity;
+        dl->die      = cl.time + 1e9;
         dl->decay    = 0;
         dl->minlight = 0;
         dl->key      = 0;
-        VectorCopy(color, dl->color);
+        VectorCopy(c->color, dl->color);
     }
 
     /* Suppress -Wunused. */
