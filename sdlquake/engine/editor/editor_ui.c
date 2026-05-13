@@ -633,6 +633,13 @@ static int brush_list_visible(int e_idx)
     {
         if (e->live_ent && !e->live_ent->free) return 1;
         if (e->live_static) return 1;
+        /* `light*` entities are compile-time only -- the engine drops
+         * them on map load (qrad consumes them at bake time, the live
+         * server never spawns them). Without this branch the brushes
+         * panel hides 224 of start.bsp's 267 lights even with the
+         * category checkbox enabled, because none of them have a
+         * live_ent / live_static. */
+        if (Editor_EntityCategory(e) == EDIT_CAT_LIGHT) return 1;
         return 0;
     }
     if (e->transient) return 0;
