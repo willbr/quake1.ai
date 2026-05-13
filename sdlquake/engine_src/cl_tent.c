@@ -111,6 +111,37 @@ void CL_ParseBeam (model_t *m)
 
 /*
 =================
+CL_LastBeamEnd
+=================
+*/
+// Return the most recent active beam's end position, or zero if none exists.
+// Call immediately after CL_ParseBeam to pick up the just-parsed beam.
+static void CL_LastBeamEnd (vec3_t out_end)
+{
+	int     i;
+	beam_t *latest = NULL;
+	float   latest_time = -1.0f;
+	for (i = 0; i < MAX_BEAMS; i++) {
+		beam_t *b = &cl_beams[i];
+		if (!b->model) continue;
+		if (b->endtime > latest_time) {
+			latest_time = b->endtime;
+			latest = b;
+		}
+	}
+	if (latest) {
+		out_end[0] = latest->end[0];
+		out_end[1] = latest->end[1];
+		out_end[2] = latest->end[2];
+	} else {
+		out_end[0] = 0.0f;
+		out_end[1] = 0.0f;
+		out_end[2] = 0.0f;
+	}
+}
+
+/*
+=================
 CL_ParseTEnt
 =================
 */
@@ -225,17 +256,20 @@ void CL_ParseTEnt (void)
 
 	case TE_LIGHTNING1:				// lightning bolts
 		CL_ParseBeam (Mod_ForName("progs/bolt.mdl", true));
+		{ vec3_t end; CL_LastBeamEnd (end); R_SpawnDecal (end, DECAL_LIGHTNING); }
 		break;
-	
+
 	case TE_LIGHTNING2:				// lightning bolts
 		CL_ParseBeam (Mod_ForName("progs/bolt2.mdl", true));
+		{ vec3_t end; CL_LastBeamEnd (end); R_SpawnDecal (end, DECAL_LIGHTNING); }
 		break;
-	
+
 	case TE_LIGHTNING3:				// lightning bolts
 		CL_ParseBeam (Mod_ForName("progs/bolt3.mdl", true));
+		{ vec3_t end; CL_LastBeamEnd (end); R_SpawnDecal (end, DECAL_LIGHTNING); }
 		break;
-	
-// PGM 01/21/97 
+
+// PGM 01/21/97
 	case TE_BEAM:				// grappling hook beam
 		CL_ParseBeam (Mod_ForName("progs/beam.mdl", true));
 		break;
