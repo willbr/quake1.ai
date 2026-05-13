@@ -498,6 +498,15 @@ void CL_RelinkEntities (void)
 			continue;
 		}
 
+		// track frame transitions for vertex interpolation
+		if (ent->forcelink || ent->frame != ent->prev_frame_observed)
+		{
+			ent->prev_frame = ent->forcelink ? ent->frame
+			                                 : ent->prev_frame_observed;
+			ent->prev_frame_observed = ent->frame;
+			ent->frame_start_time = cl.time;
+		}
+
 		VectorCopy (ent->origin, oldorg);
 
 		if (ent->forcelink)
