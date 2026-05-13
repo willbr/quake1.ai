@@ -77,6 +77,7 @@ typedef struct
 	float	decay;				// drop this each second
 	float	minlight;			// don't add when contributing less
 	int		key;
+	vec3_t	color;			// per-channel multiplier, default {1,1,1}
 #ifdef QUAKE2
 	qboolean	dark;			// subtracts light instead of adding
 #endif

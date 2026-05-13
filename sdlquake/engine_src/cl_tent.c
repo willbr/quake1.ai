@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_tent.c -- client side temporary entities
 
 #include "quakedef.h"
+#include "cl_dlight_colors.h"
 
 int			num_temp_entities;
 entity_t	cl_temp_entities[MAX_TEMP_ENTITIES];
@@ -198,12 +199,13 @@ void CL_ParseTEnt (void)
 		R_ParticleExplosion (pos);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
+		VectorCopy (DLIGHT_COLOR_EXPLOSION, dl->color);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
-		
+
 	case TE_TAREXPLOSION:			// tarbaby explosion
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();
@@ -254,6 +256,7 @@ void CL_ParseTEnt (void)
 		R_ParticleExplosion2 (pos, colorStart, colorLength);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
+		VectorCopy (DLIGHT_COLOR_EXPLOSION, dl->color);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
@@ -281,6 +284,7 @@ void CL_ParseTEnt (void)
 		R_ParticleExplosion (endpos);
 		dl = CL_AllocDlight (-1);
 		VectorCopy (endpos, dl->origin);
+		VectorCopy (DLIGHT_COLOR_LIGHTNING, dl->color);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;

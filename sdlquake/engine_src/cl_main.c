@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
+#include "cl_dlight_colors.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -329,6 +330,7 @@ dlight_t *CL_AllocDlight (int key)
 			{
 				memset (dl, 0, sizeof(*dl));
 				dl->key = key;
+				dl->color[0] = dl->color[1] = dl->color[2] = 1.0f;
 				return dl;
 			}
 		}
@@ -342,6 +344,7 @@ dlight_t *CL_AllocDlight (int key)
 		{
 			memset (dl, 0, sizeof(*dl));
 			dl->key = key;
+			dl->color[0] = dl->color[1] = dl->color[2] = 1.0f;
 			return dl;
 		}
 	}
@@ -349,6 +352,7 @@ dlight_t *CL_AllocDlight (int key)
 	dl = &cl_dlights[0];
 	memset (dl, 0, sizeof(*dl));
 	dl->key = key;
+	dl->color[0] = dl->color[1] = dl->color[2] = 1.0f;
 	return dl;
 }
 
@@ -547,22 +551,25 @@ void CL_RelinkEntities (void)
 			AngleVectors (ent->angles, fv, rv, uv);
 			 
 			VectorMA (dl->origin, 18, fv, dl->origin);
+			VectorCopy (DLIGHT_COLOR_MUZZLE, dl->color);
 			dl->radius = 200 + (rand()&31);
 			dl->minlight = 32;
 			dl->die = cl.time + 0.1;
 		}
 		if (ent->effects & EF_BRIGHTLIGHT)
-		{			
+		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
 			dl->origin[2] += 16;
+			VectorCopy (DLIGHT_COLOR_BRIGHTLIGHT, dl->color);
 			dl->radius = 400 + (rand()&31);
 			dl->die = cl.time + 0.001;
 		}
 		if (ent->effects & EF_DIMLIGHT)
-		{			
+		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
+			VectorCopy (DLIGHT_COLOR_DIMLIGHT, dl->color);
 			dl->radius = 200 + (rand()&31);
 			dl->die = cl.time + 0.001;
 		}
@@ -597,6 +604,7 @@ void CL_RelinkEntities (void)
 			R_RocketTrail (oldorg, ent->origin, 0);
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin, dl->origin);
+			VectorCopy (DLIGHT_COLOR_ROCKET, dl->color);
 			dl->radius = 200;
 			dl->die = cl.time + 0.01;
 		}

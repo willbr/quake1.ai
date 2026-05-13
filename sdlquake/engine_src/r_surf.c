@@ -199,12 +199,15 @@ void R_AddDynamicLights_RGB (void)
 				{
 					unsigned add = (unsigned)((rad - dist) * 256);
 					int      idx = (t*smax + s) * 3;
-					/* TASK6: replace 1.0f with cl_dlights[lnum].color[N] */
-					blocklights_rgb[idx + 0] += (unsigned)(add * 1.0f);
-					/* TASK6: replace 1.0f with cl_dlights[lnum].color[N] */
-					blocklights_rgb[idx + 1] += (unsigned)(add * 1.0f);
-					/* TASK6: replace 1.0f with cl_dlights[lnum].color[N] */
-					blocklights_rgb[idx + 2] += (unsigned)(add * 1.0f);
+					if (r_colored_dlights.value) {
+						blocklights_rgb[idx + 0] += (unsigned)(add * cl_dlights[lnum].color[0]);
+						blocklights_rgb[idx + 1] += (unsigned)(add * cl_dlights[lnum].color[1]);
+						blocklights_rgb[idx + 2] += (unsigned)(add * cl_dlights[lnum].color[2]);
+					} else {
+						blocklights_rgb[idx + 0] += add;
+						blocklights_rgb[idx + 1] += add;
+						blocklights_rgb[idx + 2] += add;
+					}
 				}
 			}
 		}
