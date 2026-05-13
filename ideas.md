@@ -7,10 +7,12 @@
 3. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
 4. **coloured lights** — modernises the renderer's look; pairs with Phase 8 atmospheric scenes
 
+
 ## Rendering & visuals
 
 * decals — bullet holes, blood, dirt & grime, scratches
 * coloured lights (also flickering torches, muzzle flashes)
+* bump mapping
 * atmospheric distance fog + vibrant palette (Star Fox 64, Zelda)
 * texture filtering
 * model interpolation
