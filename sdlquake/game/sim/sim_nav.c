@@ -57,6 +57,25 @@ extern game_globals_t *g;
 // drops between adjacent steps).
 #define POST_WALK_MAX_DROP_Z  48.0f
 
+// Jump / drop edge synthesis (phase 3.5). Walkmove caps step-up at 18, so
+// ledges higher than that are unreachable via the BFS. After the flood
+// settles we look for pairs of nodes within these ranges and add directed
+// edges if a point trace at the higher endpoint is clear. JUMP_MAX_UP
+// corresponds to a single Quake player jump (~64 units of vertical gain).
+//
+// Drops are kept aggressive on the vertical axis (you can survive most
+// Quake falls) but tight on the horizontal: limiting drop xy to ~32
+// (roughly the player bbox half-width plus a margin) gives "step off the
+// ledge" edges without burying the overlay in long diagonal drops that
+// are almost always redundant with a walkable path around.
+#define JUMP_MAX_XY        96.0f
+#define JUMP_MIN_UP        20.0f   // skip ranges walkmove already handles
+#define JUMP_MAX_UP        64.0f
+#define DROP_MAX_XY        40.0f
+#define DROP_MAX_DOWN      192.0f
+#define JUMP_COST_BIAS     48.0f
+#define DROP_COST_BIAS     16.0f
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -641,6 +660,51 @@ static int bake_floodfill(sim_navmesh_t *m) {
         }
     }
 
+    // --- Phase 3.5: jump and drop edges ---------------------------------
+    // Walkmove caps step-up at STEPSIZE = 18, so any ledge higher than that
+    // is its own component even when the player can clearly jump onto it
+    // (e.g. the start-room ledges on e1m1 with the shells/armor pickups).
+    // After the BFS settles, look for node pairs that are within jump or
+    // drop range but didn't get a walk edge, and add one if a point trace
+    // at the higher level is clear.
+    int jump_edges_added = 0;
+    int drop_edges_added = 0;
+    for (int i = 0; i < m->point_count; i++) {
+        for (int j = 0; j < m->point_count; j++) {
+            if (i == j) continue;
+            float dx = m->points[j].pos[0] - m->points[i].pos[0];
+            float dy = m->points[j].pos[1] - m->points[i].pos[1];
+            float dz = m->points[j].pos[2] - m->points[i].pos[2];
+            float xy = (float)sqrt(dx*dx + dy*dy);
+            if (xy < 1.0f) continue;
+
+            int kind = 0;   // 1 = jump up, 2 = drop down
+            if (dz > JUMP_MIN_UP && dz <= JUMP_MAX_UP && xy <= JUMP_MAX_XY)
+                kind = 1;
+            else if (dz < -JUMP_MIN_UP && dz >= -DROP_MAX_DOWN && xy <= DROP_MAX_XY)
+                kind = 2;
+            if (!kind) continue;
+
+            // Validate the path with a point trace at the higher endpoint's
+            // standing height. Catches walls between the two nodes. Uses
+            // nomonsters=1 so trace doesn't bother iterating live monsters
+            // (we cleared their solids anyway, but be explicit).
+            float high_z = (dz > 0) ? m->points[j].pos[2] : m->points[i].pos[2];
+            vec3_t start = { m->points[i].pos[0], m->points[i].pos[1],
+                             high_z + 16.0f };
+            vec3_t end   = { m->points[j].pos[0], m->points[j].pos[1],
+                             high_z + 16.0f };
+            eng->SV_Traceline(start, end, 1, NULL);
+            if (g->trace_fraction < 0.999f) continue;
+
+            float dist = (float)sqrt(xy*xy + dz*dz);
+            float bias = (kind == 1) ? JUMP_COST_BIAS : DROP_COST_BIAS;
+            add_edge(m, &cap_edges, i, j, dist + bias);
+            if (kind == 1) jump_edges_added++;
+            else           drop_edges_added++;
+        }
+    }
+
     // --- Phase 4: teleporter edges ---------------------------------------
     // For each TELEPORT_SRC anchor, find its destination by matching
     // `target` (on src) to `targetname` (on dst).
@@ -668,8 +732,11 @@ static int bake_floodfill(sim_navmesh_t *m) {
     {
         char buf[200];
         snprintf(buf, sizeof(buf),
-                 "sim_nav: bake %d nodes, %d edges (%d teleport, %d iters)\n",
-                 m->point_count, m->edge_count, teleport_edges, iters);
+                 "sim_nav: bake %d nodes, %d edges (%d walk, %d jump, "
+                 "%d drop, %d teleport, %d iters)\n",
+                 m->point_count, m->edge_count,
+                 m->edge_count - jump_edges_added - drop_edges_added - teleport_edges,
+                 jump_edges_added, drop_edges_added, teleport_edges, iters);
         eng->Con_Print(buf);
     }
 
