@@ -159,6 +159,36 @@ void R_DecalsFrame (void)
 }
 
 // ---------------------------------------------------------------------------
+// Per-decal-type kernels and centre deltas. Indexed by decal_type_t.
+// 3x3 falloff [1 2 1 / 2 4 2 / 1 2 1], norm 16.
+// 5x5 wider falloff for scorch, norm 256.
+// ---------------------------------------------------------------------------
+
+static const int K3x3[9]  = { 1, 2, 1, 2, 4, 2, 1, 2, 1 };
+static const int K5x5[25] = {
+	 1,  4,  6,  4,  1,
+	 4, 16, 24, 16,  4,
+	 6, 24, 36, 24,  6,
+	 4, 16, 24, 16,  4,
+	 1,  4,  6,  4,  1,
+};
+
+typedef struct {
+	const int *k;
+	int        ksize;
+	int        knorm;
+	int        dr, dg, db;
+} decal_kernel_t;
+
+static const decal_kernel_t decal_kernels[DECAL_NUM_TYPES] = {
+	/* DECAL_BULLET      */ { K3x3, 3,  16, -40, -40, -40 },
+	/* DECAL_SPIKE       */ { K3x3, 3,  16, -40, -40, -40 },
+	/* DECAL_BLOOD_SPLAT */ { K3x3, 3,  16, +60, -40, -40 },
+	/* DECAL_SCORCH      */ { K5x5, 5, 256, -80, -80, -80 },
+	/* DECAL_LIGHTNING   */ { K3x3, 3,  16, -50, -60, -40 },
+};
+
+// ---------------------------------------------------------------------------
 // Internal: paint a single luxel kernel into a surface's stain buffer.
 // kernel is a 3x3 or 5x5 (ksize) weight grid summing to ~16 (3x3) or ~256 (5x5).
 // dr/dg/db are the centre-delta values; per-luxel delta = (centre * weight) / norm.
@@ -241,18 +271,13 @@ static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal)
 	return best;
 }
 
-// Dev command: spawn a bullet-style decal at the spot the player is looking at.
-// Usage: r_decals_test (defaults to bullet).
-// Walks 1024 units forward and slaps a stain on whatever's there.
+// Dev command: spawn a decal at the spot the player is looking at.
+// Usage: r_decals_test [bullet|spike|blood|scorch|lightning]
 static void R_DecalsTest_f (void)
 {
 	vec3_t  forward, right, up, end;
 	trace_t tr;
-	msurface_t *surf;
-	mtexinfo_t *tex;
-	float   u, vv;
-	int     lu, lv, smax, tmax;
-	static const int K3x3[9] = { 1, 2, 1, 2, 4, 2, 1, 2, 1 };
+	decal_type_t type = DECAL_BULLET;
 
 	AngleVectors (r_refdef.viewangles, forward, right, up);
 	(void)right; (void)up;
@@ -265,34 +290,114 @@ static void R_DecalsTest_f (void)
 		return;
 	}
 
-	surf = R_PointOnSurface_World (tr.endpos, tr.plane.normal);
-	if (!surf) {
-		Con_Printf ("r_decals_test: no world surface at hit point\n");
-		return;
+	if (Cmd_Argc() > 1) {
+		const char *t = Cmd_Argv(1);
+		if      (!Q_strcasecmp(t, "bullet"))    type = DECAL_BULLET;
+		else if (!Q_strcasecmp(t, "spike"))     type = DECAL_SPIKE;
+		else if (!Q_strcasecmp(t, "blood"))     type = DECAL_BLOOD_SPLAT;
+		else if (!Q_strcasecmp(t, "scorch"))    type = DECAL_SCORCH;
+		else if (!Q_strcasecmp(t, "lightning")) type = DECAL_LIGHTNING;
 	}
 
-	tex = surf->texinfo;
-	u  = DotProduct(tr.endpos, tex->vecs[0]) + tex->vecs[0][3];
-	vv = DotProduct(tr.endpos, tex->vecs[1]) + tex->vecs[1][3];
-	lu = ((int)floor(u)  - surf->texturemins[0]) >> 4;
-	lv = ((int)floor(vv) - surf->texturemins[1]) >> 4;
-	smax = (surf->extents[0] >> 4) + 1;
-	tmax = (surf->extents[1] >> 4) + 1;
-	if (lu < 0 || lu >= smax || lv < 0 || lv >= tmax) {
-		Con_Printf ("r_decals_test: luxel out of bounds (%d,%d) in %dx%d\n",
-			lu, lv, smax, tmax);
-		return;
+	R_SpawnDecal (tr.endpos, type);
+	Con_Printf ("r_decals_test: spawned type %d at %.1f %.1f %.1f\n",
+		(int)type, tr.endpos[0], tr.endpos[1], tr.endpos[2]);
+}
+
+// Fire a short trace from `pos` along several directions; return the closest
+// world surface hit within 8 game units. Returns NULL if none.
+// Also writes the hit point and surface normal back out.
+static msurface_t *Retrace_ForDecal (vec3_t pos, vec3_t out_hit, vec3_t out_normal)
+{
+	vec3_t dirs[7];
+	int    ndirs = 7;
+	int    i;
+	msurface_t *best;
+	float       best_len;
+	vec3_t      best_hit, best_nrm;
+	trace_t     tr;
+	vec3_t      end;
+	float       len;
+	float       elen;
+	extern server_t sv;
+
+	/* Axis-aligned probe directions */
+	dirs[1][0] =  1; dirs[1][1] =  0; dirs[1][2] =  0;
+	dirs[2][0] = -1; dirs[2][1] =  0; dirs[2][2] =  0;
+	dirs[3][0] =  0; dirs[3][1] =  1; dirs[3][2] =  0;
+	dirs[4][0] =  0; dirs[4][1] = -1; dirs[4][2] =  0;
+	dirs[5][0] =  0; dirs[5][1] =  0; dirs[5][2] =  1;
+	dirs[6][0] =  0; dirs[6][1] =  0; dirs[6][2] = -1;
+
+	/* First direction: eye -> pos (back toward the surface that was hit) */
+	VectorSubtract (r_refdef.vieworg, pos, dirs[0]);
+	elen = VectorLength (dirs[0]);
+	if (elen < 0.001f) {
+		dirs[0][0] = 1; dirs[0][1] = 0; dirs[0][2] = 0;
+	} else {
+		dirs[0][0] /= elen;
+		dirs[0][1] /= elen;
+		dirs[0][2] /= elen;
 	}
 
-	Stain_PaintKernel (surf, lu, lv, -120, -120, -120, K3x3, 3, 16);
-	Con_Printf ("r_decals_test: stained luxel (%d,%d) of surface %p\n",
-		lu, lv, (void*)surf);
+	best     = NULL;
+	best_len = 8.0f;
+
+	for (i = 0; i < ndirs; i++) {
+		VectorMA (pos, 8.0f, dirs[i], end);
+		tr = SV_Move (pos, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
+		if (tr.fraction >= 1.0f || tr.allsolid) continue;
+
+		len = tr.fraction * 8.0f;
+		if (len >= best_len) continue;
+
+		/* Only stamp world geometry, not brush entities */
+		if (tr.ent != NULL && tr.ent != sv.edicts) continue;
+
+		{
+			msurface_t *s = R_PointOnSurface_World (tr.endpos, tr.plane.normal);
+			if (!s) continue;
+
+			best = s;
+			best_len = len;
+			VectorCopy (tr.endpos,       best_hit);
+			VectorCopy (tr.plane.normal, best_nrm);
+		}
+	}
+
+	if (best) {
+		if (out_hit)    VectorCopy (best_hit, out_hit);
+		if (out_normal) VectorCopy (best_nrm, out_normal);
+	}
+	return best;
 }
 
 void R_SpawnDecal (vec3_t pos, decal_type_t type)
 {
-	(void)pos; (void)type;
-	// Filled in Task 8.
+	vec3_t      hit, normal;
+	msurface_t *surf;
+	mtexinfo_t *tex;
+	float       u, v;
+	int         lu, lv, smax, tmax;
+	const decal_kernel_t *dk;
+
+	if (!r_decals.value) return;
+	if (type < 0 || type >= DECAL_NUM_TYPES) return;
+
+	surf = Retrace_ForDecal (pos, hit, normal);
+	if (!surf) return;
+
+	tex = surf->texinfo;
+	u = DotProduct(hit, tex->vecs[0]) + tex->vecs[0][3];
+	v = DotProduct(hit, tex->vecs[1]) + tex->vecs[1][3];
+	lu = ((int)floor(u) - surf->texturemins[0]) >> 4;
+	lv = ((int)floor(v) - surf->texturemins[1]) >> 4;
+	smax = (surf->extents[0] >> 4) + 1;
+	tmax = (surf->extents[1] >> 4) + 1;
+	if (lu < 0 || lu >= smax || lv < 0 || lv >= tmax) return;
+
+	dk = &decal_kernels[type];
+	Stain_PaintKernel (surf, lu, lv, dk->dr, dk->dg, dk->db, dk->k, dk->ksize, dk->knorm);
 }
 
 void R_SpawnBloodPool (vec3_t origin)
