@@ -517,6 +517,38 @@ static int bake_floodfill(sim_navmesh_t *m) {
     int       q_head = 0, q_tail = 0, q_cap = 0;
     int       iters       = 0;
 
+    // Temporarily clear every non-world, non-probe entity's `solid` so the
+    // probe doesn't collide with monsters, doors, plats, buttons, etc. The
+    // walkmove probe inherits Quake's normal bbox-vs-bbox trace clipping;
+    // without this step the probe stops at every monster spawn, creating
+    // holes in the navmesh around each enemy. We restore solid values
+    // after the bake completes. World (edict 0) is left solid so the probe
+    // continues to collide with the level geometry it needs to walk on.
+    typedef struct { edict_t *e; float solid; } solid_save_t;
+    solid_save_t *solid_saves     = NULL;
+    int           solid_saves_cap = 0;
+    int           solid_saves_n   = 0;
+    {
+        edict_t *it = eng->ED_Next(g->world);
+        while (it != g->world) {
+            if (it != probe && it->v.solid > (float)SOLID_NOT) {
+                if (solid_saves_n >= solid_saves_cap) {
+                    int nc = solid_saves_cap ? solid_saves_cap * 2 : 128;
+                    solid_save_t *ns = realloc(solid_saves,
+                                               sizeof(solid_save_t) * nc);
+                    if (!ns) break;
+                    solid_saves     = ns;
+                    solid_saves_cap = nc;
+                }
+                solid_saves[solid_saves_n].e     = it;
+                solid_saves[solid_saves_n].solid = it->v.solid;
+                solid_saves_n++;
+                it->v.solid = (float)SOLID_NOT;
+            }
+            it = eng->ED_Next(it);
+        }
+    }
+
     // --- Phase 2: seat seeds + push to queue ------------------------------
     for (int i = 0; i < anchor_n; i++) {
         anchor_t *a = &anchors[i];
@@ -683,6 +715,14 @@ static int bake_floodfill(sim_navmesh_t *m) {
         free(comp);
         free(stk);
     }
+
+    // Restore every entity's solid value before we hand control back to
+    // the engine — otherwise monsters would be untouchable and doors /
+    // plats / buttons inert for the rest of the level.
+    for (int i = 0; i < solid_saves_n; i++) {
+        solid_saves[i].e->v.solid = solid_saves[i].solid;
+    }
+    free(solid_saves);
 
     eng->ED_Free(probe);
     free(queue);
