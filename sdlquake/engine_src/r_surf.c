@@ -265,6 +265,20 @@ void R_BuildLightMap (void)
 	if (surf->dlightframe == r_framecount)
 		R_AddDynamicLights ();
 
+	// Stain layer (decals). Mono path uses Rec.601 luminance of the RGB delta.
+	if (surf->stain) {
+		short *s = surf->stain->rgb;
+		float kscale = r_decals_intensity.value;
+		int   ks    = (int)(kscale * 256.0f);  // pre-scale into 8.8
+		for (i = 0; i < size; i++) {
+			int dy = (3 * s[i*3 + 0] + 6 * s[i*3 + 1] + 1 * s[i*3 + 2]) / 10;
+			int b  = (int)blocklights[i] + dy * ks;
+			if (b < 0) b = 0;
+			blocklights[i] = (unsigned)b;
+		}
+		surf->stain->last_touched_frame = r_framecount;
+	}
+
 // bound, invert, and shift
 	for (i=0 ; i<size ; i++)
 	{
