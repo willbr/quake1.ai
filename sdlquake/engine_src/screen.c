@@ -524,13 +524,34 @@ SCR_DrawLoading
 void SCR_DrawLoading (void)
 {
 	qpic_t	*pic;
+	int		s, x, y;
+	byte	*source;
 
 	if (!scr_drawloading)
 		return;
-		
+
 	pic = Draw_CachePic ("gfx/loading.lmp");
-	Draw_Pic ( (vid.width - pic->width)/2, 
-		(vid.height - 48 - pic->height)/2, pic);
+	s = Scr_Scale();
+	x = (vid.width  - pic->width  * s) / 2;
+	y = (vid.height - 48 * s - pic->height * s) / 2;
+	source = pic->data;
+	for (int v = 0; v < pic->height; v++)
+	{
+		for (int yy = 0; yy < s; yy++)
+		{
+			int sy = y + v * s + yy;
+			if (sy < 0 || sy >= vid.height)
+				continue;
+			byte *dst = (byte *)vid.buffer + sy * vid.rowbytes + x;
+			for (int u = 0; u < pic->width; u++)
+			{
+				byte c = source[v * pic->width + u];
+				byte *p = dst + u * s;
+				for (int xx = 0; xx < s; xx++)
+					p[xx] = c;
+			}
+		}
+	}
 }
 
 
