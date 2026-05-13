@@ -284,13 +284,14 @@ R_BuildLightMap_RGB
 
 Three-channel sibling of R_BuildLightMap. Reads from surf->rgb_samples
 (must be non-NULL; caller's responsibility), writes blocklights_rgb in
-the same 8.8 fixed range as the mono path (64..16320 per channel).
+6.8 fixed-point, range 0..16384 per channel. Unlike the mono path we
+do NOT invert: the RGB block writer is multiplicative (light_int *
+basepal[tex]), so high blocklights means bright output.
 ===============
 */
 void R_BuildLightMap_RGB (void)
 {
 	int			smax, tmax;
-	int			t;
 	int			i, size;
 	byte		*lightmap;
 	unsigned	scale;
@@ -331,10 +332,14 @@ void R_BuildLightMap_RGB (void)
 	if (surf->dlightframe == r_framecount)
 		R_AddDynamicLights_RGB ();
 
+	/* RGB path is multiplicative (light_int * basepal[tex]), not LUT-indexed
+	   like mono — so we do NOT invert. Just rescale 8.8 -> 6.8 fixed and clamp
+	   the integer part to 64 (which the writer's r6 > 63 clamp caps to 63 =
+	   fullbright). */
 	for (i = 0; i < size * 3; i++) {
-		t = (255*256 - (int)blocklights_rgb[i]) >> (8 - VID_CBITS);
-		if (t < (1 << 6)) t = (1 << 6);
-		blocklights_rgb[i] = t;
+		unsigned v = blocklights_rgb[i] >> (8 - VID_CBITS);
+		if (v > (64u << 8)) v = (64u << 8);
+		blocklights_rgb[i] = v;
 	}
 }
 

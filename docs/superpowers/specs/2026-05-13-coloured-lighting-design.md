@@ -131,15 +131,18 @@ void R_BuildLightMap_RGB(void)
     if (surf->dlightframe == r_framecount)
         R_AddDynamicLights_RGB();
 
+    /* RGB path is multiplicative — do NOT invert like mono. */
     for (int i = 0; i < size * 3; i++) {
-        int t = (255*256 - (int)blocklights_rgb[i]) >> (8 - VID_CBITS);
-        if (t < (1 << 6)) t = (1 << 6);
-        blocklights_rgb[i] = t;
+        unsigned v = blocklights_rgb[i] >> (8 - VID_CBITS);
+        if (v > (64u << 8)) v = (64u << 8);
+        blocklights_rgb[i] = v;
     }
 }
 ```
 
 Same shape as `R_BuildLightMap`, three channels. `R_AddDynamicLights_RGB` is the mono function with `temp` multiplied per channel by `cl_dlights[lnum].color[0..2]` — the rest of its distance/falloff math is unchanged.
+
+The final bound/clamp loop differs from the mono path: mono inverts (high blocklights = darker row index) to fit its row-indexed colormap, but the RGB writer multiplies `light_int * basepal[tex]`, so the RGB path keeps the natural sense (high blocklights = bright) and only clamps the integer part to 64 (which the writer's `r6 > 63` clamp caps to 63 = fullbright).
 
 Lightstyles already modulate brightness via `lightadj[]`; with `.lit` the colour stays fixed and brightness flickers as it always has. No lightstyle logic changes.
 
@@ -158,7 +161,7 @@ if (b6 > 63) b6 = 63;
 *dest++ = rgbtable[(r << 12) | (g << 6) | b6];
 ```
 
-`lightR`, `lightG`, `lightB` are 8.8 fixed-point per-channel light values interpolated across the block, mirroring how the mono writer uses `light` (8.8) with `(light & 0xFF00) + pix` to index `vid.colormap`. After `R_BuildLightMap_RGB` each channel sits in 64..16320, so `lightR >> 8` gives the integer part in 0..63. `basepal_r[tex]` is 0..255.
+`lightR`, `lightG`, `lightB` are 8.8 fixed-point per-channel light values interpolated across the block, mirroring how the mono writer uses `light` (8.8) with `(light & 0xFF00) + pix` to index `vid.colormap`. After `R_BuildLightMap_RGB` each channel sits in 0..16384, so `lightR >> 8` gives the integer part in 0..64 (the post-clamp `r6 > 63` cap turns 64 into 63 = fullbright). `basepal_r[tex]` is 0..255.
 
 `RGB_SHIFT` starts at **8** (so `(63 * 255) >> 8 ≈ 62`, mapping the full light range into a 6-bit channel before LUT lookup). Final value is calibrated by comparing mid-tone output of the mono and RGB paths on a flat wall via the `r_coloredlight 0/1` toggle. The clamping `if`s handle additive dlight contributions overshooting 63; on hot paths the compiler should turn them into `min` intrinsics.
 
