@@ -38,7 +38,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    2
+#define NAV_VERSION    3
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -685,16 +685,32 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 kind = 2;
             if (!kind) continue;
 
-            // Validate the path with a point trace at the higher endpoint's
-            // standing height. Catches walls between the two nodes. Uses
-            // nomonsters=1 so trace doesn't bother iterating live monsters
-            // (we cleared their solids anyway, but be explicit).
-            float high_z = (dz > 0) ? m->points[j].pos[2] : m->points[i].pos[2];
-            vec3_t start = { m->points[i].pos[0], m->points[i].pos[1],
-                             high_z + 16.0f };
-            vec3_t end   = { m->points[j].pos[0], m->points[j].pos[1],
-                             high_z + 16.0f };
-            eng->SV_Traceline(start, end, 1, NULL);
+            // Validate the jump/drop with an L-shape trace from the lower
+            // endpoint. A single horizontal trace at high_z + 16 (the old
+            // version) would pass *above* geometry sitting between the two
+            // floors — e.g. a bridge slab — and connect the floor under the
+            // bridge to the bridge top through the slab. The L-shape catches
+            // that:
+            //   1. vertical trace from lower's standing height straight up
+            //      to high_z + 16, at lower's xy. Catches a bridge bottom or
+            //      any overhead obstruction at the lower point.
+            //   2. horizontal trace from there to upper's xy at high_z + 16.
+            //      Catches walls between the two nodes at the higher level.
+            // nomonsters=1 — monster solids are already cleared during bake
+            // but be explicit so the trace doesn't iterate the list.
+            int    lo      = (dz > 0) ? i : j;
+            int    up      = (dz > 0) ? j : i;
+            float  high_z  = m->points[up].pos[2];
+            vec3_t lo_pos  = { m->points[lo].pos[0], m->points[lo].pos[1],
+                               m->points[lo].pos[2] + 16.0f };
+            vec3_t lo_top  = { m->points[lo].pos[0], m->points[lo].pos[1],
+                               high_z + 16.0f };
+            vec3_t up_top  = { m->points[up].pos[0], m->points[up].pos[1],
+                               high_z + 16.0f };
+
+            eng->SV_Traceline(lo_pos, lo_top, 1, NULL);
+            if (g->trace_fraction < 0.999f) continue;
+            eng->SV_Traceline(lo_top, up_top, 1, NULL);
             if (g->trace_fraction < 0.999f) continue;
 
             float dist = (float)sqrt(xy*xy + dz*dz);
