@@ -168,6 +168,30 @@ static void Scr_DrawCharScaled (int x, int y, int num, int s)
 	}
 }
 
+// Nearest-neighbor blit of an opaque qpic_t into vid.buffer. (x, y) are
+// framebuffer-space pixel coords (already scaled); pic is drawn at s× size.
+static void Scr_DrawPicScaled (int x, int y, qpic_t *pic, int s)
+{
+	byte *source = pic->data;
+	for (int v = 0; v < pic->height; v++)
+	{
+		for (int yy = 0; yy < s; yy++)
+		{
+			int sy = y + v * s + yy;
+			if (sy < 0 || sy >= vid.height)
+				continue;
+			byte *dst = (byte *)vid.buffer + sy * vid.rowbytes + x;
+			for (int u = 0; u < pic->width; u++)
+			{
+				byte c = source[v * pic->width + u];
+				byte *p = dst + u * s;
+				for (int xx = 0; xx < s; xx++)
+					p[xx] = c;
+			}
+		}
+	}
+}
+
 void SCR_DrawCenterString (void)
 {
 	char	*start;
@@ -502,6 +526,7 @@ DrawPause
 void SCR_DrawPause (void)
 {
 	qpic_t	*pic;
+	int		s, x, y;
 
 	if (!scr_showpause.value)		// turn off for screenshots
 		return;
@@ -510,8 +535,10 @@ void SCR_DrawPause (void)
 		return;
 
 	pic = Draw_CachePic ("gfx/pause.lmp");
-	Draw_Pic ( (vid.width - pic->width)/2, 
-		(vid.height - 48 - pic->height)/2, pic);
+	s = Scr_Scale();
+	x = (vid.width  - pic->width  * s) / 2;
+	y = (vid.height - 48 * s - pic->height * s) / 2;
+	Scr_DrawPicScaled (x, y, pic, s);
 }
 
 
@@ -525,7 +552,6 @@ void SCR_DrawLoading (void)
 {
 	qpic_t	*pic;
 	int		s, x, y;
-	byte	*source;
 
 	if (!scr_drawloading)
 		return;
@@ -534,24 +560,7 @@ void SCR_DrawLoading (void)
 	s = Scr_Scale();
 	x = (vid.width  - pic->width  * s) / 2;
 	y = (vid.height - 48 * s - pic->height * s) / 2;
-	source = pic->data;
-	for (int v = 0; v < pic->height; v++)
-	{
-		for (int yy = 0; yy < s; yy++)
-		{
-			int sy = y + v * s + yy;
-			if (sy < 0 || sy >= vid.height)
-				continue;
-			byte *dst = (byte *)vid.buffer + sy * vid.rowbytes + x;
-			for (int u = 0; u < pic->width; u++)
-			{
-				byte c = source[v * pic->width + u];
-				byte *p = dst + u * s;
-				for (int xx = 0; xx < s; xx++)
-					p[xx] = c;
-			}
-		}
-	}
+	Scr_DrawPicScaled (x, y, pic, s);
 }
 
 
