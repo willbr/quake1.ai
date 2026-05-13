@@ -129,7 +129,6 @@ typedef struct msurface_s
 
 // decal stain layer (NULL until first impact on this surface)
 	struct stain_s	*stain;
-	int				cached_stain_gen;
 } msurface_t;
 
 typedef struct mnode_s

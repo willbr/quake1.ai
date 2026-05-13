@@ -326,8 +326,6 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel)
 	cache->lightadj[2] = r_drawsurf.lightadj[2];
 	cache->lightadj[3] = r_drawsurf.lightadj[3];
 	cache->stain_gen = surface->stain ? surface->stain->generation : 0;
-	if (surface->stain) surface->cached_stain_gen = surface->stain->generation;
-	else                surface->cached_stain_gen = 0;
 
 //
 // draw and light the surface texture

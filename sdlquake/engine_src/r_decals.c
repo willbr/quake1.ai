@@ -77,8 +77,8 @@ static void Stain_LRU_Touch (stain_t *s)
 static void Stain_FreeSlot (stain_slot_t *slot)
 {
 	if (slot->header.surf) {
-		// Bump generation on the orphaned surface so the cache rebuilds without the stain.
-		slot->header.surf->cached_stain_gen = -1;  // force mismatch on next check
+		// Setting stain to NULL forces a cache mismatch (cache->stain_gen != 0)
+		// on next render, so the surface rebuilds without the stain.
 		slot->header.surf->stain = NULL;
 	}
 	Stain_LRU_Unlink (&slot->header);
@@ -107,9 +107,22 @@ static stain_slot_t *Stain_AllocSlot (msurface_t *surf)
 	slot->free_next = NULL;
 	r_stain_count++;
 
-	slot->header.rgb = slot->payload;
-	slot->header.smax = (surf->extents[0] >> 4) + 1;
-	slot->header.tmax = (surf->extents[1] >> 4) + 1;
+	{
+		int smax = (surf->extents[0] >> 4) + 1;
+		int tmax = (surf->extents[1] >> 4) + 1;
+		if (smax > STAIN_MAX_LUXELS_DIM || tmax > STAIN_MAX_LUXELS_DIM) {
+			// Surface lightmap exceeds the engine's blocklights cap — already
+			// undefined behaviour upstream. Refuse to stain rather than overflow
+			// our payload.
+			slot->free_next = r_stain_freelist;
+			r_stain_freelist = slot;
+			r_stain_count--;
+			return NULL;
+		}
+		slot->header.rgb = slot->payload;
+		slot->header.smax = smax;
+		slot->header.tmax = tmax;
+	}
 	slot->header.generation = 1;
 	slot->header.last_touched_frame = r_framecount;
 	slot->header.surf = surf;
@@ -375,7 +388,6 @@ static void R_DecalsTest_f (void)
 	(void)right; (void)up;
 	VectorMA (r_refdef.vieworg, 1024.0f, forward, end);
 
-	memset (&tr, 0, sizeof(tr));
 	tr = SV_Move (r_refdef.vieworg, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
 	if (tr.fraction >= 1.0f) {
 		Con_Printf ("r_decals_test: nothing in front\n");
@@ -421,7 +433,7 @@ static msurface_t *Retrace_ForDecal (vec3_t pos, vec3_t out_hit, vec3_t out_norm
 	dirs[5][0] =  0; dirs[5][1] =  0; dirs[5][2] =  1;
 	dirs[6][0] =  0; dirs[6][1] =  0; dirs[6][2] = -1;
 
-	/* First direction: eye -> pos (back toward the surface that was hit) */
+	/* First direction: direction from impact toward eye (the side the surface faces) */
 	VectorSubtract (r_refdef.vieworg, pos, dirs[0]);
 	elen = VectorLength (dirs[0]);
 	if (elen < 0.001f) {
