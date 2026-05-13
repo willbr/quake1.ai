@@ -280,13 +280,17 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel)
 //
 	cache = surface->cachespots[miplevel];
 
-	if (cache && !cache->dlight && surface->dlightframe != r_framecount
-			&& cache->texture == r_drawsurf.texture
-			&& cache->lightadj[0] == r_drawsurf.lightadj[0]
-			&& cache->lightadj[1] == r_drawsurf.lightadj[1]
-			&& cache->lightadj[2] == r_drawsurf.lightadj[2]
-			&& cache->lightadj[3] == r_drawsurf.lightadj[3] )
-		return cache;
+	{
+		int cur_stain_gen = surface->stain ? surface->stain->generation : 0;
+		if (cache && !cache->dlight && surface->dlightframe != r_framecount
+				&& cache->texture == r_drawsurf.texture
+				&& cache->lightadj[0] == r_drawsurf.lightadj[0]
+				&& cache->lightadj[1] == r_drawsurf.lightadj[1]
+				&& cache->lightadj[2] == r_drawsurf.lightadj[2]
+				&& cache->lightadj[3] == r_drawsurf.lightadj[3]
+				&& cache->stain_gen == cur_stain_gen )
+			return cache;
+	}
 
 //
 // determine shape of surface
@@ -315,12 +319,15 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel)
 		cache->dlight = 0;
 
 	r_drawsurf.surfdat = (pixel_t *)cache->data;
-	
+
 	cache->texture = r_drawsurf.texture;
 	cache->lightadj[0] = r_drawsurf.lightadj[0];
 	cache->lightadj[1] = r_drawsurf.lightadj[1];
 	cache->lightadj[2] = r_drawsurf.lightadj[2];
 	cache->lightadj[3] = r_drawsurf.lightadj[3];
+	cache->stain_gen = surface->stain ? surface->stain->generation : 0;
+	if (surface->stain) surface->cached_stain_gen = surface->stain->generation;
+	else                surface->cached_stain_gen = 0;
 
 //
 // draw and light the surface texture
