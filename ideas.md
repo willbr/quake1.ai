@@ -1,13 +1,10 @@
-* gizmo Plane handles: small colored squares on the XY, XZ, and YZ planes for easy planar movement and scaling
-* render the gizmo using imgui?
-* refactor into libries I can reuse
-* review native c code vs old quakec
-* review what can be extracted in to libraries
 * command history for the console
     * up and down
     * CTRL+R for search
     * usualy readline hotkeys
 * procgen textures
+* review what can be extracted in to libraries
+* threading
 
 # Ideas
 
@@ -33,7 +30,6 @@
 
 * flame graph for render timings
 * flat-shaded mode (no texturing, solid face colours)
-* no-lighting / fullbright mode
 * wireframe overlay (edges only, or edges over solid)
 * BSP leaf / node boundaries
 * PVS visualisation for current leaf
@@ -54,6 +50,16 @@
 * link arrows for `target` / `targetname` relationships
 * spawnflags / classname labels floating over each edict
 * health / AI-state HUD per visible monster (idle / hunt / attack)
+* master grunt gives orders
+* flanking
+* using cover
+* use grenades
+* how can flying wizard things use the nav mesh
+* nav mesh
+    * steps
+    * falls
+    * buttons
+    * lifts
 
 ## Engine & platform
 
@@ -66,6 +72,7 @@
 * increased engine limits
 * BSP2 support
 * what SDL3 features should I use?
+* remove malloc added by claude
 
 ## Environmental fx
 
@@ -129,8 +136,6 @@
 ## Modding ecosystem
 
 * multi-DLL plugin loader (load N `game.dll`s, each owning a subsystem)
-* mod browser fetching from a URL or git repo
-* in-game Lua sandbox for quick scripting without a rebuild
 * per-map cvar profiles (auto-applied on map load)
 * asset hot-reload for textures / sounds / models, not just code
 
@@ -138,7 +143,6 @@
 
 * optional GPU path that emulates the 8-bit palette + dither exactly
 * CRT / scanline / chromatic-aberration post FX
-* VR mode (SDL3 GPU API; OpenXR layer)
 * path-traced reference renderer for screenshot comparisons
 * HDR bloom that respects the palette
 * stereoscopic 3D / anaglyph
