@@ -112,7 +112,6 @@ qboolean R_AliasCheckBBox (void)
 	float				zi, basepts[8][3], v0, v1, frac;
 	finalvert_t			*pv0, *pv1, viewpts[16];
 	auxvert_t			*pa0, *pa1, viewaux[16];
-	maliasframedesc_t	*pframedesc;
 	qboolean			zclipped, zfullyclipped;
 	unsigned			anyclip, allclip;
 	int					minz;
@@ -126,7 +125,7 @@ qboolean R_AliasCheckBBox (void)
 
 	R_AliasSetUpTransform (0);
 
-// construct the base bounding box for this frame
+// construct the base bounding box, unioned across current and previous frames
 	frame = currententity->frame;
 // TODO: don't repeat this check when drawing?
 	if ((frame >= pmdl->numframes) || (frame < 0))
@@ -136,25 +135,40 @@ qboolean R_AliasCheckBBox (void)
 		frame = 0;
 	}
 
-	pframedesc = &pahdr->frames[frame];
+	{
+		int prev_frame = currententity->prev_frame;
+		maliasframedesc_t *pf_cur, *pf_prev;
+		float bbmin[3], bbmax[3];
+		int k;
 
-// x worldspace coordinates
-	basepts[0][0] = basepts[1][0] = basepts[2][0] = basepts[3][0] =
-			(float)pframedesc->bboxmin.v[0];
-	basepts[4][0] = basepts[5][0] = basepts[6][0] = basepts[7][0] =
-			(float)pframedesc->bboxmax.v[0];
+		if ((prev_frame >= pmdl->numframes) || (prev_frame < 0))
+			prev_frame = frame;
 
-// y worldspace coordinates
-	basepts[0][1] = basepts[3][1] = basepts[5][1] = basepts[6][1] =
-			(float)pframedesc->bboxmin.v[1];
-	basepts[1][1] = basepts[2][1] = basepts[4][1] = basepts[7][1] =
-			(float)pframedesc->bboxmax.v[1];
+		pf_cur  = &pahdr->frames[frame];
+		pf_prev = &pahdr->frames[prev_frame];
 
-// z worldspace coordinates
-	basepts[0][2] = basepts[1][2] = basepts[4][2] = basepts[5][2] =
-			(float)pframedesc->bboxmin.v[2];
-	basepts[2][2] = basepts[3][2] = basepts[6][2] = basepts[7][2] =
-			(float)pframedesc->bboxmax.v[2];
+		for (k = 0; k < 3; k++)
+		{
+			float a_min = (float)pf_cur->bboxmin.v[k];
+			float a_max = (float)pf_cur->bboxmax.v[k];
+			float b_min = (float)pf_prev->bboxmin.v[k];
+			float b_max = (float)pf_prev->bboxmax.v[k];
+			bbmin[k] = (a_min < b_min) ? a_min : b_min;
+			bbmax[k] = (a_max > b_max) ? a_max : b_max;
+		}
+
+		// x worldspace coordinates
+		basepts[0][0] = basepts[1][0] = basepts[2][0] = basepts[3][0] = bbmin[0];
+		basepts[4][0] = basepts[5][0] = basepts[6][0] = basepts[7][0] = bbmax[0];
+
+		// y worldspace coordinates
+		basepts[0][1] = basepts[3][1] = basepts[5][1] = basepts[6][1] = bbmin[1];
+		basepts[1][1] = basepts[2][1] = basepts[4][1] = basepts[7][1] = bbmax[1];
+
+		// z worldspace coordinates
+		basepts[0][2] = basepts[1][2] = basepts[4][2] = basepts[5][2] = bbmin[2];
+		basepts[2][2] = basepts[3][2] = basepts[6][2] = basepts[7][2] = bbmax[2];
+	}
 
 	zclipped = false;
 	zfullyclipped = true;
