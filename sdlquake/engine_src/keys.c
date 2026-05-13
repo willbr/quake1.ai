@@ -514,6 +514,91 @@ void Key_WriteBindings (FILE *f)
 
 /*
 ===================
+Key_LoadHistory
+
+Loads <com_gamedir>/history.txt into the key_lines ring, oldest entry first.
+Each non-empty line is stored with a ']' prefix. After load, edit_line is
+positioned past the last loaded entry with a clean prompt; UpArrow walks
+back through the restored history. Silent no-op if the file is absent.
+===================
+*/
+void Key_LoadHistory (void)
+{
+	FILE	*f;
+	char	line[MAXCMDLINE];
+	int		n, len;
+
+	f = fopen (va("%s/history.txt", com_gamedir), "r");
+	if (!f)
+		return;
+
+	n = 0;
+	while (n < CMDLINES - 1 && fgets(line, sizeof(line), f))
+	{
+		// Strip trailing newline / CR.
+		len = (int)strlen(line);
+		while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+			line[--len] = 0;
+		if (len == 0)
+			continue;
+		// Reserve byte 0 for ']' and one byte for NUL.
+		if (len > MAXCMDLINE - 2)
+		{
+			line[MAXCMDLINE - 2] = 0;
+			len = MAXCMDLINE - 2;
+		}
+		key_lines[n][0] = ']';
+		memcpy (&key_lines[n][1], line, (size_t)len + 1);
+		n++;
+	}
+	fclose (f);
+
+	edit_line = n & CMDLINES_MASK;
+	history_line = edit_line;
+	key_lines[edit_line][0] = ']';
+	key_lines[edit_line][1] = 0;
+	key_linepos = 1;
+}
+
+/*
+===================
+Key_SaveHistory
+
+Rewrites <com_gamedir>/history.txt from the ring buffer, oldest first.
+Skips the current edit slot (a live prompt, not a committed command) and
+any empty slots. Bounded by CMDLINES * MAXCMDLINE (~32 KB) so the
+truncate-and-rewrite-per-Enter cost is negligible.
+===================
+*/
+void Key_SaveHistory (void)
+{
+	FILE	*f;
+	int		i;
+
+	if (!host_initialized || isDedicated)
+		return;
+
+	f = fopen (va("%s/history.txt", com_gamedir), "w");
+	if (!f)
+	{
+		Con_Printf ("Couldn't write history.txt.\n");
+		return;
+	}
+
+	i = (edit_line + 1) & CMDLINES_MASK;
+	while (i != edit_line)
+	{
+		if (key_lines[i][1])
+			fprintf (f, "%s\n", key_lines[i] + 1);
+		i = (i + 1) & CMDLINES_MASK;
+	}
+
+	fclose (f);
+}
+
+
+/*
+===================
 Key_Init
 ===================
 */
