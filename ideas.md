@@ -2,8 +2,7 @@
 
 ## Next
 
-1. **decals** (bullet holes, blood) — combat feedback for the Phase 8 immersive-sim work; contained scope
-2. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
+1. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
 
 * review viz
 * review `func_detail`
@@ -18,7 +17,6 @@
 
 ## Rendering & visuals
 
-* decals — bullet holes, blood, dirt & grime, scratches
 * bump mapping
 * atmospheric distance fog + vibrant palette (Star Fox 64, Zelda)
 * texture filtering
