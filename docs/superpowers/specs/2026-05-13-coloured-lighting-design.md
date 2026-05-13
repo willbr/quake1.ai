@@ -148,19 +148,21 @@ Lightstyles already modulate brightness via `lightadj[]`; with `.lit` the colour
 Per-texel inner loop in `R_DrawSurfaceBlock8_mip0_rgb`:
 
 ```c
-unsigned tex = pbasesource[s_offset];     // palette index 0..255
-unsigned r = ((lightR >> 16) * basepal_r[tex]) >> RGB_SHIFT;
-unsigned g = ((lightG >> 16) * basepal_g[tex]) >> RGB_SHIFT;
-unsigned b = ((lightB >> 16) * basepal_b[tex]) >> RGB_SHIFT;
+unsigned tex = pbasesource[b];            // palette index 0..255
+unsigned r = ((lightR >> 8) * basepal_r[tex]) >> RGB_SHIFT;
+unsigned g = ((lightG >> 8) * basepal_g[tex]) >> RGB_SHIFT;
+unsigned b6 = ((lightB >> 8) * basepal_b[tex]) >> RGB_SHIFT;
 if (r > 63) r = 63;
 if (g > 63) g = 63;
-if (b > 63) b = 63;
-*dest++ = rgbtable[(r << 12) | (g << 6) | b];
+if (b6 > 63) b6 = 63;
+*dest++ = rgbtable[(r << 12) | (g << 6) | b6];
 ```
 
-`lightR`, `lightG`, `lightB` are interpolated 16.16 fixed-point values from the four corner channels of the current block, mirroring how the mono writer interpolates a single `lightleft`/`lightright` pair. `>> 16` takes the integer part (0..63 after the `R_BuildLightMap_RGB` shift). `basepal_r[tex]` is 0..255.
+`lightR`, `lightG`, `lightB` are 8.8 fixed-point per-channel light values interpolated across the block, mirroring how the mono writer uses `light` (8.8) with `(light & 0xFF00) + pix` to index `vid.colormap`. After `R_BuildLightMap_RGB` each channel sits in 64..16320, so `lightR >> 8` gives the integer part in 0..63. `basepal_r[tex]` is 0..255.
 
 `RGB_SHIFT` starts at **8** (so `(63 * 255) >> 8 ≈ 62`, mapping the full light range into a 6-bit channel before LUT lookup). Final value is calibrated by comparing mid-tone output of the mono and RGB paths on a flat wall via the `r_coloredlight 0/1` toggle. The clamping `if`s handle additive dlight contributions overshooting 63; on hot paths the compiler should turn them into `min` intrinsics.
+
+The local `b6` shadows the outer-loop `b` (16..0 block column counter) used in the mono variant — the variable names in the new file are renamed (`bx`, `by` for column/row, and `r6/g6/b6` for quantised channels) so the inner-loop body is unambiguous.
 
 The four mip variants (`mip0..mip3`) differ only in block size and step counts, matching the existing mono variants. They share an inline body via a macro or `static inline` helper, kept consistent with the upstream's `#include` pattern for `surf8.s` if a clean asm-free C path needs duplication.
 
