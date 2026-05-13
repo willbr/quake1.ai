@@ -335,6 +335,8 @@ void CL_UpdateTEnts (void)
 	entity_t	*ent;
 	float		yaw, pitch;
 	float		forward;
+	dlight_t	*dl;
+	int			beam_idx, seg_idx;
 
 	num_temp_entities = 0;
 
@@ -343,6 +345,8 @@ void CL_UpdateTEnts (void)
 	{
 		if (!b->model || b->endtime < cl.time)
 			continue;
+		beam_idx = (int)(b - cl_beams);
+		seg_idx = 0;
 
 	// if coming from the player, update the start position
 		if (b->entity == cl.viewentity)
@@ -386,6 +390,18 @@ void CL_UpdateTEnts (void)
 			ent->angles[0] = pitch;
 			ent->angles[1] = yaw;
 			ent->angles[2] = rand()%360;
+
+			// Bolt-segment dlight: pale-blue light at each 30-unit step
+			// along the lightning beam. Stable key per (beam,segment) so
+			// repeated CL_UpdateTEnts calls reuse the same slot instead
+			// of churning the dlight allocator. Negative key range avoids
+			// collision with entity-keyed dlights (EF_MUZZLEFLASH etc.).
+			dl = CL_AllocDlight (-2000 - (beam_idx * 32 + seg_idx));
+			VectorCopy (org, dl->origin);
+			VectorCopy (DLIGHT_COLOR_LIGHTNING, dl->color);
+			dl->radius = 100;
+			dl->die = cl.time + 0.1f;
+			seg_idx++;
 
 			for (i=0 ; i<3 ; i++)
 				org[i] += dist[i]*30;
