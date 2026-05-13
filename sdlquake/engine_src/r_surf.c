@@ -332,6 +332,25 @@ void R_BuildLightMap_RGB (void)
 	if (surf->dlightframe == r_framecount)
 		R_AddDynamicLights_RGB ();
 
+	// Stain layer (decals). Signed int16 deltas in luxel space; applied in 8.8 fixed-point.
+	if (surf->stain) {
+		short *s = surf->stain->rgb;
+		float kscale = r_decals_intensity.value;
+		int   ks    = (int)(kscale * 256.0f);  // pre-scale into 8.8
+		for (i = 0; i < size; i++) {
+			int br = (int)blocklights_rgb[i*3 + 0] + ((int)s[i*3 + 0] * ks);
+			int bg = (int)blocklights_rgb[i*3 + 1] + ((int)s[i*3 + 1] * ks);
+			int bb = (int)blocklights_rgb[i*3 + 2] + ((int)s[i*3 + 2] * ks);
+			if (br < 0) br = 0;
+			if (bg < 0) bg = 0;
+			if (bb < 0) bb = 0;
+			blocklights_rgb[i*3 + 0] = (unsigned)br;
+			blocklights_rgb[i*3 + 1] = (unsigned)bg;
+			blocklights_rgb[i*3 + 2] = (unsigned)bb;
+		}
+		surf->stain->last_touched_frame = r_framecount;
+	}
+
 	/* RGB path is multiplicative (light_int * basepal[tex]), not LUT-indexed
 	   like mono — so we do NOT invert. Shift one bit less than the natural
 	   8.8->6.8 rescale to compensate for the gamma curve baked into mono's
