@@ -291,7 +291,7 @@ static void R_DecalsTest_f (void)
 	}
 
 	if (Cmd_Argc() > 1) {
-		const char *t = Cmd_Argv(1);
+		char *t = Cmd_Argv(1);
 		if      (!Q_strcasecmp(t, "bullet"))    type = DECAL_BULLET;
 		else if (!Q_strcasecmp(t, "spike"))     type = DECAL_SPIKE;
 		else if (!Q_strcasecmp(t, "blood"))     type = DECAL_BLOOD_SPLAT;
@@ -374,7 +374,7 @@ static msurface_t *Retrace_ForDecal (vec3_t pos, vec3_t out_hit, vec3_t out_norm
 
 void R_SpawnDecal (vec3_t pos, decal_type_t type)
 {
-	vec3_t      hit, normal;
+	vec3_t      hit;
 	msurface_t *surf;
 	mtexinfo_t *tex;
 	float       u, v;
@@ -384,7 +384,7 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	if (!r_decals.value) return;
 	if (type < 0 || type >= DECAL_NUM_TYPES) return;
 
-	surf = Retrace_ForDecal (pos, hit, normal);
+	surf = Retrace_ForDecal (pos, hit, NULL);
 	if (!surf) return;
 
 	tex = surf->texinfo;
