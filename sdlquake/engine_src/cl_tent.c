@@ -400,7 +400,10 @@ void CL_UpdateTEnts (void)
 			VectorCopy (org, dl->origin);
 			VectorCopy (DLIGHT_COLOR_LIGHTNING, dl->color);
 			dl->radius = 200;
-			dl->die = cl.time + 0.1f;
+			// Match the beam's endtime so the dlight vanishes the same
+			// frame the bolt sprite does. A fixed cl.time+0.1 tail lingers
+			// ~100 ms past the beam, which reads as "lights stuck on".
+			dl->die = b->endtime;
 			seg_idx++;
 
 			for (i=0 ; i<3 ; i++)
