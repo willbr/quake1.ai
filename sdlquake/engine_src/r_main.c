@@ -122,6 +122,8 @@ cvar_t	r_graphheight = {"r_graphheight","10"};
 cvar_t	r_clearcolor = {"r_clearcolor","2"};
 cvar_t	r_waterwarp = {"r_waterwarp","1"};
 cvar_t	r_fullbright = {"r_fullbright","0"};
+cvar_t	r_coloredlight    = {"r_coloredlight",    "1", true};	// archived
+cvar_t	r_colored_dlights = {"r_colored_dlights", "1", true};	// archived
 cvar_t	r_drawentities = {"r_drawentities","1"};
 cvar_t	r_drawviewmodel = {"r_drawviewmodel","1"};
 cvar_t	r_aliasstats = {"r_polymodelstats","0"};
@@ -220,6 +222,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_RegisterVariable (&r_waterwarp);
 	Cvar_RegisterVariable (&r_fullbright);
+	Cvar_RegisterVariable (&r_coloredlight);
+	Cvar_RegisterVariable (&r_colored_dlights);
 	Cvar_RegisterVariable (&r_drawentities);
 	Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_aliasstats);

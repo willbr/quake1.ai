@@ -60,6 +60,8 @@ extern cvar_t	r_graphheight;
 extern cvar_t	r_clearcolor;
 extern cvar_t	r_waterwarp;
 extern cvar_t	r_fullbright;
+extern cvar_t	r_coloredlight;
+extern cvar_t	r_colored_dlights;
 extern cvar_t	r_drawentities;
 extern cvar_t	r_aliasstats;
 extern cvar_t	r_dspeeds;
@@ -79,6 +81,12 @@ extern byte basepal_g[256];          // host_basepal green slice
 extern byte basepal_b[256];          // host_basepal blue  slice
 
 void R_InitRGBTable (void);
+
+// ---- coloured-lighting blocklights (r_surf_rgb.c writers; R_BuildLightMap_RGB lives in r_surf.c) ----
+extern unsigned blocklights_rgb[18*18*3];   // R0,G0,B0, R1,G1,B1, ...
+
+void R_BuildLightMap_RGB (void);
+void R_AddDynamicLights_RGB (void);
 
 #define XCENTERING	(1.0 / 2.0)
 #define YCENTERING	(1.0 / 2.0)

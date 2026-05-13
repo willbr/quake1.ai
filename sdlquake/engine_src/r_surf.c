@@ -52,6 +52,7 @@ static void	(*surfmiptable[4])(void) = {
 
 
 unsigned		blocklights[18*18];
+unsigned		blocklights_rgb[18*18*3];
 
 /*
 ===============
@@ -141,6 +142,77 @@ void R_AddDynamicLights (void)
 
 /*
 ===============
+R_AddDynamicLights_RGB
+
+Mono R_AddDynamicLights, three channels. The dlight->color modulates each
+channel's contribution; default {1,1,1} reproduces mono behaviour.
+===============
+*/
+void R_AddDynamicLights_RGB (void)
+{
+	msurface_t	*surf;
+	int			lnum;
+	int			sd, td;
+	float		dist, rad, minlight;
+	vec3_t		impact, local;
+	int			s, t;
+	int			i;
+	int			smax, tmax;
+	mtexinfo_t	*tex;
+
+	surf = r_drawsurf.surf;
+	smax = (surf->extents[0]>>4)+1;
+	tmax = (surf->extents[1]>>4)+1;
+	tex  = surf->texinfo;
+
+	for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
+	{
+		if (!(surf->dlightbits & (1 << lnum)))
+			continue;
+
+		rad      = cl_dlights[lnum].radius;
+		dist     = DotProduct (cl_dlights[lnum].origin, surf->plane->normal) -
+				   surf->plane->dist;
+		rad     -= fabs(dist);
+		minlight = cl_dlights[lnum].minlight;
+		if (rad < minlight) continue;
+		minlight = rad - minlight;
+
+		for (i = 0; i < 3; i++)
+			impact[i] = cl_dlights[lnum].origin[i] - surf->plane->normal[i]*dist;
+
+		local[0] = DotProduct (impact, tex->vecs[0]) + tex->vecs[0][3];
+		local[1] = DotProduct (impact, tex->vecs[1]) + tex->vecs[1][3];
+		local[0] -= surf->texturemins[0];
+		local[1] -= surf->texturemins[1];
+
+		for (t = 0; t < tmax; t++)
+		{
+			td = local[1] - t*16;
+			if (td < 0) td = -td;
+			for (s = 0; s < smax; s++)
+			{
+				sd = local[0] - s*16;
+				if (sd < 0) sd = -sd;
+				dist = (sd > td) ? sd + (td>>1) : td + (sd>>1);
+				if (dist < minlight)
+				{
+					unsigned add = (unsigned)((rad - dist) * 256);
+					int      idx = (t*smax + s) * 3;
+					/* TASK6: replace 1.0f with cl_dlights[lnum].color[N] */
+					blocklights_rgb[idx + 0] += (unsigned)(add * 1.0f);
+					/* TASK6: replace 1.0f with cl_dlights[lnum].color[N] */
+					blocklights_rgb[idx + 1] += (unsigned)(add * 1.0f);
+					/* TASK6: replace 1.0f with cl_dlights[lnum].color[N] */
+					blocklights_rgb[idx + 2] += (unsigned)(add * 1.0f);
+				}
+			}
+		}
+	}
+}
+
+/*
+===============
 R_BuildLightMap
 
 Combine and scale multiple lightmaps into the 8.8 format in blocklights
@@ -199,6 +271,67 @@ void R_BuildLightMap (void)
 			t = (1 << 6);
 
 		blocklights[i] = t;
+	}
+}
+
+
+/*
+===============
+R_BuildLightMap_RGB
+
+Three-channel sibling of R_BuildLightMap. Reads from surf->rgb_samples
+(must be non-NULL; caller's responsibility), writes blocklights_rgb in
+the same 8.8 fixed range as the mono path (64..16320 per channel).
+===============
+*/
+void R_BuildLightMap_RGB (void)
+{
+	int			smax, tmax;
+	int			t;
+	int			i, size;
+	byte		*lightmap;
+	unsigned	scale;
+	int			maps;
+	msurface_t	*surf;
+	unsigned	amb;
+
+	surf = r_drawsurf.surf;
+	smax = (surf->extents[0]>>4)+1;
+	tmax = (surf->extents[1]>>4)+1;
+	size = smax * tmax;
+	lightmap = surf->rgb_samples;
+
+	if (r_fullbright.value || !cl.worldmodel->lightdata) {
+		for (i = 0; i < size * 3; i++) blocklights_rgb[i] = 0;
+		return;
+	}
+
+	amb = r_refdef.ambientlight << 8;
+	for (i = 0; i < size; i++) {
+		blocklights_rgb[i*3 + 0] = amb;
+		blocklights_rgb[i*3 + 1] = amb;
+		blocklights_rgb[i*3 + 2] = amb;
+	}
+
+	if (lightmap)
+		for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+		{
+			scale = r_drawsurf.lightadj[maps];	// 8.8 fixed
+			for (i = 0; i < size; i++) {
+				blocklights_rgb[i*3 + 0] += lightmap[i*3 + 0] * scale;
+				blocklights_rgb[i*3 + 1] += lightmap[i*3 + 1] * scale;
+				blocklights_rgb[i*3 + 2] += lightmap[i*3 + 2] * scale;
+			}
+			lightmap += size * 3;
+		}
+
+	if (surf->dlightframe == r_framecount)
+		R_AddDynamicLights_RGB ();
+
+	for (i = 0; i < size * 3; i++) {
+		t = (255*256 - (int)blocklights_rgb[i]) >> (8 - VID_CBITS);
+		if (t < (1 << 6)) t = (1 << 6);
+		blocklights_rgb[i] = t;
 	}
 }
 
