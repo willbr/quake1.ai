@@ -162,13 +162,43 @@ void Key_Console (int key)
 	
 	if (key == K_ENTER)
 	{
+		int prev;
+
 		Cbuf_AddText (key_lines[edit_line]+1);	// skip the >
 		Cbuf_AddText ("\n");
 		Con_Printf ("%s\n",key_lines[edit_line]);
+
+		// Empty line: don't advance the ring, don't save.
+		if (!key_lines[edit_line][1])
+		{
+			key_linepos = 1;
+			if (cls.state == ca_disconnected)
+				SCR_UpdateScreen ();
+			return;
+		}
+
+		// Duplicate of the immediately previous command: keep the previous
+		// entry as the most recent, clear the just-typed slot, and skip the
+		// save (file already reflects this state).
+		prev = (edit_line - 1) & CMDLINES_MASK;
+		if (key_lines[prev][1]
+			&& !Q_strcmp (key_lines[edit_line]+1, key_lines[prev]+1))
+		{
+			key_lines[edit_line][1] = 0;
+			key_linepos = 1;
+			history_line = edit_line;
+			if (cls.state == ca_disconnected)
+				SCR_UpdateScreen ();
+			return;
+		}
+
+		// New entry: advance ring and persist.
 		edit_line = (edit_line + 1) & CMDLINES_MASK;
 		history_line = edit_line;
 		key_lines[edit_line][0] = ']';
+		key_lines[edit_line][1] = 0;
 		key_linepos = 1;
+		Key_SaveHistory ();
 		if (cls.state == ca_disconnected)
 			SCR_UpdateScreen ();	// force an update, because the command
 									// may take some time
@@ -670,7 +700,7 @@ void Key_Init (void)
 	Cmd_AddCommand ("unbind",Key_Unbind_f);
 	Cmd_AddCommand ("unbindall",Key_Unbindall_f);
 
-
+	Key_LoadHistory ();
 }
 
 /*
