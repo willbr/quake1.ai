@@ -812,6 +812,27 @@ static void engine_get_view_origin(float *out) {
     out[2] = r_origin[2];
 }
 
+static void engine_sv_tracemove(float *start, float *mins, float *maxs,
+                                float *end, int nomons, edict_t *skip)
+{
+    extern trace_t SV_Move(float *start, float *mins, float *maxs,
+                           float *end, int type, edict_t *passedict);
+    trace_t tr = SV_Move(start, mins, maxs, end, nomons, skip);
+    game_globals.trace_allsolid   = (float)tr.allsolid;
+    game_globals.trace_startsolid = (float)tr.startsolid;
+    game_globals.trace_fraction   = tr.fraction;
+    game_globals.trace_inopen     = (float)tr.inopen;
+    game_globals.trace_inwater    = (float)tr.inwater;
+    game_globals.trace_plane_dist = tr.plane.dist;
+    game_globals.trace_ent        = tr.ent;
+    game_globals.trace_endpos[0]       = tr.endpos[0];
+    game_globals.trace_endpos[1]       = tr.endpos[1];
+    game_globals.trace_endpos[2]       = tr.endpos[2];
+    game_globals.trace_plane_normal[0] = tr.plane.normal[0];
+    game_globals.trace_plane_normal[1] = tr.plane.normal[1];
+    game_globals.trace_plane_normal[2] = tr.plane.normal[2];
+}
+
 // ---------------------------------------------------------------------------
 // imgui Nav panel shims
 // ---------------------------------------------------------------------------
@@ -911,6 +932,7 @@ static engine_api_t engine_funcs = {
     engine_load_file,
     engine_debug_line,
     engine_get_view_origin,
+    engine_sv_tracemove,
 };
 
 // ---------------------------------------------------------------------------

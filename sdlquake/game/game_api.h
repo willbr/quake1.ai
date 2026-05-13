@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 13
+#define GAME_API_VERSION 14
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -166,6 +166,13 @@ typedef struct engine_api_s {
     // submission by distance; far edges are skipped before the cross-DLL
     // SV_DebugLine call even fires.
     void  (*Get_ViewOrigin)(vec3_t out);
+
+    // Bbox sweep — like SV_Traceline but with non-zero mins/maxs so the
+    // trace accounts for entity volume. Required for navmesh validation
+    // where the player's 32x32x56 body must actually fit through any gap
+    // the bake claims is traversable. Writes the same trace_* globals.
+    void  (*SV_TraceMove)(vec3_t start, vec3_t mins, vec3_t maxs,
+                          vec3_t end, int nomonsters, edict_t *skip);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------
