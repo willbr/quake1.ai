@@ -438,7 +438,14 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 		else
 		{
 			p->die = cl.time + 0.1*(rand()%5);
-			p->color = (color&~7) + (rand()&7);
+			// Bolt cyan-white (244-246) is the only useful chunk inside
+			// the 240-247 block — 240-243 is yellow, 247 is red — so the
+			// default & ~7 mask poisons it. Special-case the lightning
+			// range to a tight 3-wide pick so it matches the bolt skin.
+			if (color >= 244 && color <= 246)
+				p->color = 244 + (rand() % 3);
+			else
+				p->color = (color&~7) + (rand()&7);
 			p->type = pt_slowgrav;
 			for (j=0 ; j<3 ; j++)
 			{
