@@ -216,6 +216,10 @@ static void sense_tick(ai_brain_t *b, edict_t *e) {
         if (b->state == AI_SEARCHING) {
             b->path_len = 0;
             b->path_idx = 0;
+            // Force an immediate replan on first SEARCHING tick — without
+            // this, a stale future-dated path_replan_time from a previous
+            // SEARCHING bout would delay the search by up to 2 s.
+            b->path_replan_time = 0.0f;
         }
     }
 }
@@ -259,18 +263,21 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         eng->SV_WalkMove(e, e->v.angles[1], 8.0f);
         break;
     case AI_SEARCHING: {
-        // Replan if no path or every 2 seconds.
-        if (b->path_len == 0 || g->time > b->path_replan_time) {
+        // Replan when the replan timer expires. Advance the timer up front so
+        // a failing search (path_len stays 0) does not re-trigger every brain
+        // tick — that was hammering A* at 10 Hz when a brain entered SEARCHING
+        // on a goal it couldn't reach (e.g. orphan teleporter destinations).
+        if (g->time > b->path_replan_time) {
+            b->path_replan_time = g->time + 2.0f;
             b->path_len = Sim_Nav_PathTo(e->v.origin, b->last_known_pos,
                                          b->path_pts, 32);
             b->path_idx = 0;
-            b->path_replan_time = g->time + 2.0f;
-            if (b->path_len == 0) {
-                // Fallback: stand-and-sweep at last_known_pos.
-                face_point(e, b->last_known_pos);
-                eng->SV_WalkMove(e, e->v.angles[1], 8.0f);
-                break;
-            }
+        }
+        if (b->path_len == 0) {
+            // No path (yet) — stand-and-sweep at last_known_pos.
+            face_point(e, b->last_known_pos);
+            eng->SV_WalkMove(e, e->v.angles[1], 8.0f);
+            break;
         }
         if (b->path_idx >= b->path_len) {
             // Reached the destination — sweep until state times out.

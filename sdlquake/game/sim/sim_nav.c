@@ -932,6 +932,38 @@ static float dist3(const vec3_t a, const vec3_t b) {
     return (float)sqrt(dx*dx + dy*dy + dz*dz);
 }
 
+// Binary min-heap over (fscore, node_index). Lazy decrease-key: on relax we
+// push a fresh entry; when popping, stale entries are recognised by `closed`
+// and skipped. Worst-case push count is one per edge relaxation (~E), which
+// caps heap size at E + 1 entries.
+typedef struct { float f; int i; } pq_entry_t;
+
+static void pq_push(pq_entry_t *h, int *n, float f, int i) {
+    int c = (*n)++;
+    h[c].f = f; h[c].i = i;
+    while (c > 0) {
+        int p = (c - 1) >> 1;
+        if (h[p].f <= h[c].f) break;
+        pq_entry_t t = h[p]; h[p] = h[c]; h[c] = t;
+        c = p;
+    }
+}
+
+static pq_entry_t pq_pop(pq_entry_t *h, int *n) {
+    pq_entry_t r = h[0];
+    h[0] = h[--(*n)];
+    int c = 0;
+    for (;;) {
+        int l = 2*c + 1, rr = 2*c + 2, s = c;
+        if (l  < *n && h[l ].f < h[s].f) s = l;
+        if (rr < *n && h[rr].f < h[s].f) s = rr;
+        if (s == c) break;
+        pq_entry_t t = h[s]; h[s] = h[c]; h[c] = t;
+        c = s;
+    }
+    return r;
+}
+
 int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out) {
     if (!s_mesh || !s_ready) return 0;
     int start = nearest_point(s_mesh, from);
@@ -947,32 +979,30 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
     }
 
     int    N      = s_mesh->point_count;
+    int    E      = s_mesh->edge_count;
+    int    heap_cap = E + 4;   // +slack so the initial seed always fits
     float *gscore = malloc(sizeof(float) * N);
     float *fscore = malloc(sizeof(float) * N);
     int   *came   = malloc(sizeof(int)   * N);
-    char  *open   = calloc(N, 1);
     char  *closed = calloc(N, 1);
-    if (!gscore || !fscore || !came || !open || !closed) {
-        free(gscore); free(fscore); free(came); free(open); free(closed);
+    pq_entry_t *heap = malloc(sizeof(pq_entry_t) * heap_cap);
+    int    heap_n = 0;
+    if (!gscore || !fscore || !came || !closed || !heap) {
+        free(gscore); free(fscore); free(came); free(closed); free(heap);
         return 0;
     }
     for (int i = 0; i < N; i++) { gscore[i] = 1e18f; fscore[i] = 1e18f; came[i] = -1; }
 
     gscore[start] = 0;
     fscore[start] = dist3(s_mesh->points[start].pos, s_mesh->points[goal].pos);
-    open[start]   = 1;
+    pq_push(heap, &heap_n, fscore[start], start);
 
     int found = 0;
-    while (1) {
-        int   cur = -1;
-        float bf  = 1e18f;
-        for (int i = 0; i < N; i++) {
-            if (!open[i]) continue;
-            if (fscore[i] < bf) { bf = fscore[i]; cur = i; }
-        }
-        if (cur < 0) break;
+    while (heap_n > 0) {
+        pq_entry_t top = pq_pop(heap, &heap_n);
+        int cur = top.i;
+        if (closed[cur]) continue;      // stale entry — better one was popped first
         if (cur == goal) { found = 1; break; }
-        open[cur]   = 0;
         closed[cur] = 1;
 
         int o0 = s_mesh->adj_offsets[cur];
@@ -986,7 +1016,7 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
                 came[nb]   = cur;
                 gscore[nb] = tentative;
                 fscore[nb] = tentative + dist3(s_mesh->points[nb].pos, s_mesh->points[goal].pos);
-                open[nb]   = 1;
+                pq_push(heap, &heap_n, fscore[nb], nb);
             }
         }
     }
@@ -1005,6 +1035,6 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
         }
     }
 
-    free(gscore); free(fscore); free(came); free(open); free(closed);
+    free(gscore); free(fscore); free(came); free(closed); free(heap);
     return written;
 }
