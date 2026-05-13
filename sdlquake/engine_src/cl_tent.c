@@ -399,7 +399,7 @@ void CL_UpdateTEnts (void)
 			dl = CL_AllocDlight (-2000 - (beam_idx * 32 + seg_idx));
 			VectorCopy (org, dl->origin);
 			VectorCopy (DLIGHT_COLOR_LIGHTNING, dl->color);
-			dl->radius = 100;
+			dl->radius = 200;
 			dl->die = cl.time + 0.1f;
 			seg_idx++;
 
