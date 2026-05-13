@@ -77,17 +77,21 @@ static int            s_ready;
 
 // ---------------------------------------------------------------------------
 // Spatial dedupe grid (xy hash; z checked per-candidate).
+//
+// The linked list is index-based, not pointer-based, so a `pool` realloc
+// can't dangle existing references. Buckets store -1 for empty; otherwise
+// they store an index into `pool`, whose `next` is itself an index.
 // ---------------------------------------------------------------------------
 #define GRID_CELL    64.0f
 #define GRID_BUCKETS 4093
 
-typedef struct grid_node_s {
-    int                 idx;
-    struct grid_node_s *next;
+typedef struct {
+    int idx;    // index into sim_navmesh_s::points
+    int next;   // index into pool, or -1
 } grid_node_t;
 
 typedef struct {
-    grid_node_t *buckets[GRID_BUCKETS];
+    int          buckets[GRID_BUCKETS];   // index into pool, or -1
     grid_node_t *pool;
     int          pool_used;
     int          pool_cap;
@@ -97,6 +101,21 @@ static unsigned grid_hash(int cx, int cy) {
     return ((unsigned)cx * 73856093u ^ (unsigned)cy * 19349663u) % GRID_BUCKETS;
 }
 
+static void grid_init(grid_t *grd, int cap) {
+    grd->pool      = calloc(cap > 0 ? cap : 1, sizeof(grid_node_t));
+    grd->pool_used = 0;
+    grd->pool_cap  = cap;
+    for (int i = 0; i < GRID_BUCKETS; i++) grd->buckets[i] = -1;
+}
+
+static void grid_free(grid_t *grd) {
+    free(grd->pool);
+    grd->pool     = NULL;
+    grd->pool_cap = 0;
+    grd->pool_used = 0;
+    for (int i = 0; i < GRID_BUCKETS; i++) grd->buckets[i] = -1;
+}
+
 static int grid_find(const grid_t *grd, const sim_navmesh_t *m, const vec3_t pos) {
     int   cx = (int)floorf(pos[0] / GRID_CELL);
     int   cy = (int)floorf(pos[1] / GRID_CELL);
@@ -104,15 +123,16 @@ static int grid_find(const grid_t *grd, const sim_navmesh_t *m, const vec3_t pos
     for (int dy = -1; dy <= 1; dy++) {
         for (int dx = -1; dx <= 1; dx++) {
             unsigned h = grid_hash(cx + dx, cy + dy);
-            for (grid_node_t *n = grd->buckets[h]; n; n = n->next) {
-                const float *p = m->points[n->idx].pos;
+            for (int ni = grd->buckets[h]; ni != -1; ni = grd->pool[ni].next) {
+                int          pi = grd->pool[ni].idx;
+                const float *p  = m->points[pi].pos;
                 float ez = p[2] - pos[2];
                 if (ez >  DEDUPE_Z) continue;
                 if (ez < -DEDUPE_Z) continue;
                 float ex = p[0] - pos[0];
                 float ey = p[1] - pos[1];
                 if (ex*ex + ey*ey + ez*ez <= r2)
-                    return n->idx;
+                    return pi;
             }
         }
     }
@@ -120,29 +140,15 @@ static int grid_find(const grid_t *grd, const sim_navmesh_t *m, const vec3_t pos
 }
 
 static int grid_insert(grid_t *grd, const vec3_t pos, int idx) {
-    if (grd->pool_used >= grd->pool_cap) {
-        int nc = grd->pool_cap ? grd->pool_cap * 2 : 1024;
-        grid_node_t *p = realloc(grd->pool, sizeof(grid_node_t) * nc);
-        if (!p) return 0;
-        grd->pool     = p;
-        grd->pool_cap = nc;
-    }
+    if (grd->pool_used >= grd->pool_cap) return 0;   // pool exhausted
     int      cx = (int)floorf(pos[0] / GRID_CELL);
     int      cy = (int)floorf(pos[1] / GRID_CELL);
     unsigned h  = grid_hash(cx, cy);
-    grid_node_t *n = &grd->pool[grd->pool_used++];
-    n->idx          = idx;
-    n->next         = grd->buckets[h];
-    grd->buckets[h] = n;
+    int      ni = grd->pool_used++;
+    grd->pool[ni].idx  = idx;
+    grd->pool[ni].next = grd->buckets[h];
+    grd->buckets[h]    = ni;
     return 1;
-}
-
-static void grid_clear(grid_t *grd) {
-    free(grd->pool);
-    grd->pool     = NULL;
-    grd->pool_cap = 0;
-    grd->pool_used = 0;
-    for (int i = 0; i < GRID_BUCKETS; i++) grd->buckets[i] = NULL;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +291,7 @@ static void collect_anchors_by_classname(anchor_t **arr, int *cap, int *n,
                                          const char *classname,
                                          anchor_kind_t kind, int use_bbox_center)
 {
-    edict_t *e = eng->ED_Find(g->world, "classname", (char *)classname);
+    edict_t *e = eng->ED_Find(g->world, "classname", classname);
     while (e != g->world) {
         vec3_t pos;
         if (use_bbox_center) entity_center(e, pos);
@@ -295,7 +301,7 @@ static void collect_anchors_by_classname(anchor_t **arr, int *cap, int *n,
             pos[2] = e->v.origin[2];
         }
         anchors_push(arr, cap, n, pos, kind, e);
-        e = eng->ED_Find(e, "classname", (char *)classname);
+        e = eng->ED_Find(e, "classname", classname);
     }
 }
 
@@ -390,18 +396,15 @@ static const float k_yaws[8] = {
 };
 
 static int bake_floodfill(sim_navmesh_t *m) {
-    edict_t  *probe       = alloc_probe();
-    grid_t    grd         = {0};
-    int       cap_points  = 0;
-    int       cap_edges   = 0;
-    int      *queue       = NULL;
-    int       q_head = 0, q_tail = 0, q_cap = 0;
     anchor_t *anchors     = NULL;
     int       anchor_cap  = 0;
     int       anchor_n    = 0;
-    int       iters       = 0;
 
     // --- Phase 1: collect anchors ----------------------------------------
+    // Done BEFORE allocating the probe so we can bail cheaply when the bake
+    // fires before ED_LoadFromFile has populated entities (the engine
+    // currently fires start_frame inside SV_SpawnServer at a point where the
+    // map is named but its entities lump has not been parsed yet).
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
         "info_player_start",       ANCHOR_GENERIC, 0);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
@@ -416,6 +419,22 @@ static int bake_floodfill(sim_navmesh_t *m) {
         "trigger_teleport",          ANCHOR_TELEPORT_SRC, 1);
     collect_anchors_by_classname(&anchors, &anchor_cap, &anchor_n,
         "trigger_changelevel",       ANCHOR_GENERIC, 1);
+
+    if (anchor_n == 0) {
+        free(anchors);
+        return 0;
+    }
+
+    eng->Con_Print("sim_nav: baking via flood-fill...\n");
+
+    edict_t  *probe       = alloc_probe();
+    grid_t    grd;
+    grid_init(&grd, MAX_NODES);
+    int       cap_points  = 0;
+    int       cap_edges   = 0;
+    int      *queue       = NULL;
+    int       q_head = 0, q_tail = 0, q_cap = 0;
+    int       iters       = 0;
 
     // --- Phase 2: seat seeds + push to queue ------------------------------
     for (int i = 0; i < anchor_n; i++) {
@@ -527,7 +546,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
     eng->ED_Free(probe);
     free(queue);
     free(anchors);
-    grid_clear(&grd);
+    grid_free(&grd);
     return m->point_count > 0;
 }
 
@@ -592,13 +611,16 @@ void Sim_Nav_LevelInit(const char *mapname) {
         return;
     }
 
-    // Bake fresh.
-    eng->Con_Print("sim_nav: baking via flood-fill...\n");
+    // Bake fresh. Sim_LevelInit is called from two places: once via
+    // spawn.c's "first entity_spawn" map-change hook (which runs BEFORE
+    // ED_LoadFromFile has actually populated the entities lump), and again
+    // from Sim_Frame's map-change check during the first SV_Physics tick
+    // (by which point all entities exist). The first call collects zero
+    // anchors and returns silently; the second produces the real mesh.
     s_mesh = calloc(1, sizeof(*s_mesh));
     if (!s_mesh) return;
 
     if (!bake_floodfill(s_mesh)) {
-        eng->Con_Print("sim_nav: bake produced no nodes (no spawn anchors?)\n");
         free_mesh(s_mesh);
         s_mesh = 0;
         return;
