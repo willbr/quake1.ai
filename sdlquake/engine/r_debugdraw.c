@@ -50,6 +50,61 @@ int RDD_Project(const vec3_t view, float *out_sx, float *out_sy)
     return 1;
 }
 
+// Liang-Barsky parametric clip of a line against [xmin,xmax) x [ymin,ymax).
+// Updates endpoints (and iz interpolation) in place; returns 0 if the line is
+// fully outside the viewport. Without this, debug overlays that project to
+// extreme screen coords (e.g. navmesh edges with one endpoint near the camera
+// at NEAR_CLIP=0.01) would still walk Bresenham across thousands of off-screen
+// pixels — the per-pixel viewport guard suppresses the *write* but not the
+// step, so 60k navmesh edges collapsed framerate to ~1 fps.
+static int clip_line_to_rect(int *x0, int *y0, float *iz0,
+                             int *x1, int *y1, float *iz1,
+                             int xmin, int ymin, int xmax, int ymax)
+{
+    float fx0 = (float)*x0, fy0 = (float)*y0;
+    float fx1 = (float)*x1, fy1 = (float)*y1;
+    float dx  = fx1 - fx0,  dy  = fy1 - fy0;
+    float t0 = 0.0f, t1 = 1.0f;
+    // xmax/ymax are exclusive — clip against the inclusive max (xmax-1, ymax-1).
+    float p[4] = { -dx, dx, -dy, dy };
+    float q[4] = { fx0 - (float)xmin,        (float)(xmax - 1) - fx0,
+                   fy0 - (float)ymin,        (float)(ymax - 1) - fy0 };
+    int i;
+    for (i = 0; i < 4; i++)
+    {
+        if (p[i] == 0.0f)
+        {
+            if (q[i] < 0.0f) return 0;   // parallel and outside
+        }
+        else
+        {
+            float t = q[i] / p[i];
+            if (p[i] < 0.0f) { if (t > t0) t0 = t; }
+            else             { if (t < t1) t1 = t; }
+        }
+    }
+    if (t0 > t1) return 0;
+    {
+        float niz0 = *iz0 + t0 * (*iz1 - *iz0);
+        float niz1 = *iz0 + t1 * (*iz1 - *iz0);
+        float nx0  = fx0 + t0 * dx;
+        float ny0  = fy0 + t0 * dy;
+        float nx1  = fx0 + t1 * dx;
+        float ny1  = fy0 + t1 * dy;
+        // Truncate to int and clamp defensively — float→int rounding could
+        // push a clipped endpoint one pixel past the bound.
+        int   ix0  = (int)nx0, iy0 = (int)ny0;
+        int   ix1  = (int)nx1, iy1 = (int)ny1;
+        if (ix0 < xmin) ix0 = xmin; if (ix0 >= xmax) ix0 = xmax - 1;
+        if (iy0 < ymin) iy0 = ymin; if (iy0 >= ymax) iy0 = ymax - 1;
+        if (ix1 < xmin) ix1 = xmin; if (ix1 >= xmax) ix1 = xmax - 1;
+        if (iy1 < ymin) iy1 = ymin; if (iy1 >= ymax) iy1 = ymax - 1;
+        *x0 = ix0; *y0 = iy0; *x1 = ix1; *y1 = iy1;
+        *iz0 = niz0; *iz1 = niz1;
+    }
+    return 1;
+}
+
 // Internal — Bresenham with optional iz interpolation + d_pzbuffer test.
 // When ztest is 0, iz0/iz1 are unused. When ztest is 1, the iz values are
 // linearly interpolated across the line steps and each pixel is gated on
@@ -70,8 +125,8 @@ static void draw_line2d_ext(int x0, int y0, float iz0,
     int adx, ady, steps;
     float iz, di;
 
-    if ((x0 < xmin && x1 < xmin) || (x0 >= xmax && x1 >= xmax) ||
-        (y0 < ymin && y1 < ymin) || (y0 >= ymax && y1 >= ymax))
+    if (!clip_line_to_rect(&x0, &y0, &iz0, &x1, &y1, &iz1,
+                           xmin, ymin, xmax, ymax))
         return;
 
     adx =  abs(x1 - x0);
@@ -85,10 +140,12 @@ static void draw_line2d_ext(int x0, int y0, float iz0,
     iz = iz0;
     di = steps > 0 ? (iz1 - iz0) / (float)steps : 0.0f;
 
+    // Endpoints are now guaranteed inside [xmin,xmax) x [ymin,ymax), so the
+    // per-pixel viewport guard can be dropped — Bresenham only walks visible
+    // pixels.
     for (;;)
     {
-        if (x0 >= xmin && x0 < xmax && y0 >= ymin && y0 < ymax &&
-            bayer4x4[y0 & 3][x0 & 3] < bayer_threshold)
+        if (bayer4x4[y0 & 3][x0 & 3] < bayer_threshold)
         {
             if (ztest)
             {
