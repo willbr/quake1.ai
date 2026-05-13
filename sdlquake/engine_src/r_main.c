@@ -236,6 +236,8 @@ void R_Init (void)
 #endif	// id386
 
 	D_Init ();
+
+	R_InitRGBTable ();
 }
 
 /*

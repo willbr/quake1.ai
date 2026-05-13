@@ -72,6 +72,14 @@ extern cvar_t	r_reportedgeout;
 extern cvar_t	r_maxedges;
 extern cvar_t	r_numedges;
 
+// ---- coloured-lighting LUT (r_lut.c) ----
+extern byte rgbtable[64*64*64];     // (r<<12)|(g<<6)|b -> nearest palette index
+extern byte basepal_r[256];          // host_basepal red   slice
+extern byte basepal_g[256];          // host_basepal green slice
+extern byte basepal_b[256];          // host_basepal blue  slice
+
+void R_InitRGBTable (void);
+
 #define XCENTERING	(1.0 / 2.0)
 #define YCENTERING	(1.0 / 2.0)
 
