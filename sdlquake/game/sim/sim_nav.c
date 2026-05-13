@@ -861,6 +861,26 @@ void Sim_Nav_Frame(void) {
     for (int i = 0; i < s_mesh->edge_count; i++) {
         nav_edge_t *e = &s_mesh->edges[i];
         if (has_range && !in_range[e->from] && !in_range[e->to]) continue;
+
+        // Dedupe bidirectional pairs in the visualization. The bake stores
+        // each direction independently (walk A->B and B->A; jump-up i->j and
+        // drop-down j->i for the same vertical pair), so without dedupe every
+        // undirected link is drawn twice on top of itself. Keep the
+        // lower-`from` direction; one-way edges (teleporters) still draw
+        // because they have no mirror in the data.
+        if (e->from > e->to) {
+            int o0 = s_mesh->adj_offsets[e->to];
+            int o1 = s_mesh->adj_offsets[e->to + 1];
+            int has_reverse = 0;
+            for (int k = o0; k < o1; k++) {
+                if (s_mesh->edges[s_mesh->adj[k]].to == e->from) {
+                    has_reverse = 1;
+                    break;
+                }
+            }
+            if (has_reverse) continue;
+        }
+
         // Teleport edges (weight 0) drawn in a contrasting colour.
         int color = (e->weight == 0.0f) ? 192 : 244;
         eng->SV_DebugLine(s_mesh->points[e->from].pos,
