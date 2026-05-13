@@ -91,6 +91,7 @@ static void Killed(edict_t *targ, edict_t *attacker)
     if ((int)g->self->v.flags & FL_MONSTER) {
         g->killed_monsters++;
         eng->MSG_WriteByte(MSG_ALL, SVC_KILLEDMONSTER);
+        eng->spawn_blood_pool(g->self->v.origin);
     }
 
     ClientObituary(g->self, attacker);
