@@ -389,9 +389,14 @@ void R_DrawSurface (void)
 	void			(*pblockdrawer)(void);
 	texture_t		*mt;
 
-// calculate the lightings
-	R_BuildLightMap ();
-	
+	qboolean use_rgb =
+		r_pixbytes == 1 &&
+		r_coloredlight.value &&
+		r_drawsurf.surf->rgb_samples != NULL;
+
+	if (use_rgb) R_BuildLightMap_RGB ();
+	else         R_BuildLightMap ();
+
 	surfrowbytes = r_drawsurf.rowbytes;
 
 	mt = r_drawsurf.texture;
@@ -414,9 +419,18 @@ void R_DrawSurface (void)
 
 //==============================
 
+	static void (*surfmiptable_rgb[4])(void) = {
+		R_DrawSurfaceBlock8_mip0_rgb,
+		R_DrawSurfaceBlock8_mip1_rgb,
+		R_DrawSurfaceBlock8_mip2_rgb,
+		R_DrawSurfaceBlock8_mip3_rgb
+	};
+
 	if (r_pixbytes == 1)
 	{
-		pblockdrawer = surfmiptable[r_drawsurf.surfmip];
+		pblockdrawer = use_rgb
+			? surfmiptable_rgb[r_drawsurf.surfmip]
+			: surfmiptable[r_drawsurf.surfmip];
 	// TODO: only needs to be set when there is a display settings change
 		horzblockstep = blocksize;
 	}
