@@ -57,6 +57,23 @@ int				r_anumverts;
 
 float	aliastransform[3][4];
 
+static inline void R_LerpVert (trivertx_t *cur, trivertx_t *prev, vec3_t out)
+{
+	if (r_framelerp >= 1.0f)
+	{
+		out[0] = cur->v[0];
+		out[1] = cur->v[1];
+		out[2] = cur->v[2];
+	}
+	else
+	{
+		float inv = 1.0f - r_framelerp;
+		out[0] = cur->v[0] * r_framelerp + prev->v[0] * inv;
+		out[1] = cur->v[1] * r_framelerp + prev->v[1] * inv;
+		out[2] = cur->v[2] * r_framelerp + prev->v[2] * inv;
+	}
+}
+
 typedef struct {
 	int	index0;
 	int	index1;
@@ -79,7 +96,7 @@ void R_AliasTransformAndProjectFinalVerts (finalvert_t *fv,
 void R_AliasSetUpTransform (int trivial_accept);
 void R_AliasTransformVector (vec3_t in, vec3_t out);
 void R_AliasTransformFinalVert (finalvert_t *fv, auxvert_t *av,
-	trivertx_t *pverts, stvert_t *pstverts);
+	trivertx_t *pverts, trivertx_t *pverts_prev, stvert_t *pstverts);
 void R_AliasProjectFinalVert (finalvert_t *fv, auxvert_t *av);
 
 
@@ -281,9 +298,9 @@ void R_AliasPreparePoints (void)
  	fv = pfinalverts;
 	av = pauxverts;
 
-	for (i=0 ; i<r_anumverts ; i++, fv++, av++, r_apverts++, pstverts++)
+	for (i=0 ; i<r_anumverts ; i++, fv++, av++, r_apverts++, r_apverts_prev++, pstverts++)
 	{
-		R_AliasTransformFinalVert (fv, av, r_apverts, pstverts);
+		R_AliasTransformFinalVert (fv, av, r_apverts, r_apverts_prev, pstverts);
 		if (av->fv[2] < ALIAS_Z_CLIP_PLANE)
 			fv->flags |= ALIAS_Z_CLIP;
 		else
@@ -415,16 +432,19 @@ R_AliasTransformFinalVert
 ================
 */
 void R_AliasTransformFinalVert (finalvert_t *fv, auxvert_t *av,
-	trivertx_t *pverts, stvert_t *pstverts)
+	trivertx_t *pverts, trivertx_t *pverts_prev, stvert_t *pstverts)
 {
 	int		temp;
 	float	lightcos, *plightnormal;
+	vec3_t	v;
 
-	av->fv[0] = DotProduct(pverts->v, aliastransform[0]) +
+	R_LerpVert (pverts, pverts_prev, v);
+
+	av->fv[0] = DotProduct(v, aliastransform[0]) +
 			aliastransform[0][3];
-	av->fv[1] = DotProduct(pverts->v, aliastransform[1]) +
+	av->fv[1] = DotProduct(v, aliastransform[1]) +
 			aliastransform[1][3];
-	av->fv[2] = DotProduct(pverts->v, aliastransform[2]) +
+	av->fv[2] = DotProduct(v, aliastransform[2]) +
 			aliastransform[2][3];
 
 	fv->v[2] = pstverts->s;
@@ -432,7 +452,7 @@ void R_AliasTransformFinalVert (finalvert_t *fv, auxvert_t *av,
 
 	fv->flags = pstverts->onseam;
 
-// lighting
+// lighting (use current frame's normal index — not lerped, see spec)
 	plightnormal = r_avertexnormals[pverts->lightnormalindex];
 	lightcos = DotProduct (plightnormal, r_plightvec);
 	temp = r_ambientlight;
@@ -463,13 +483,18 @@ void R_AliasTransformAndProjectFinalVerts (finalvert_t *fv, stvert_t *pstverts)
 	int			i, temp;
 	float		lightcos, *plightnormal, zi;
 	trivertx_t	*pverts;
+	trivertx_t	*pverts_prev;
+	vec3_t		v;
 
 	pverts = r_apverts;
+	pverts_prev = r_apverts_prev;
 
-	for (i=0 ; i<r_anumverts ; i++, fv++, pverts++, pstverts++)
+	for (i=0 ; i<r_anumverts ; i++, fv++, pverts++, pverts_prev++, pstverts++)
 	{
+		R_LerpVert (pverts, pverts_prev, v);
+
 	// transform and project
-		zi = 1.0 / (DotProduct(pverts->v, aliastransform[2]) +
+		zi = 1.0 / (DotProduct(v, aliastransform[2]) +
 				aliastransform[2][3]);
 
 	// x, y, and z are scaled down by 1/2**31 in the transform, so 1/z is
@@ -477,9 +502,9 @@ void R_AliasTransformAndProjectFinalVerts (finalvert_t *fv, stvert_t *pstverts)
 	// projection
 		fv->v[5] = zi;
 
-		fv->v[0] = ((DotProduct(pverts->v, aliastransform[0]) +
+		fv->v[0] = ((DotProduct(v, aliastransform[0]) +
 				aliastransform[0][3]) * zi) + aliasxcenter;
-		fv->v[1] = ((DotProduct(pverts->v, aliastransform[1]) +
+		fv->v[1] = ((DotProduct(v, aliastransform[1]) +
 				aliastransform[1][3]) * zi) + aliasycenter;
 
 		fv->v[2] = pstverts->s;
