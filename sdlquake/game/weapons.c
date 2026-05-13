@@ -488,16 +488,18 @@ void W_FireLightning(void) {
     eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[1]);
     eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[2]);
 
-    // Spark shower at the bolt's visible endpoint. Velocity scaled by the
-    // trace plane normal pushes the sparks back off the surface; if the
-    // bolt hit nothing (max range), normal is zero and the sparks settle
-    // in place — also fine.
+    // Spark shower at the bolt's visible endpoint. Color block 208-215
+    // (pure saturated blue, from gfx/palette.lmp) — not the original-QC
+    // 225, which lands in 224-231 = blood red. Engine-side
+    // R_RunParticleEffect applies ±150 per-particle velocity jitter so
+    // these fan out in random spiky directions; the small normal-aligned
+    // base velocity gives them a bias away from the surface.
     vec3_t spark_vel = {
-        g->trace_plane_normal[0] * 80,
-        g->trace_plane_normal[1] * 80,
-        g->trace_plane_normal[2] * 80 + 20
+        g->trace_plane_normal[0] * 30,
+        g->trace_plane_normal[1] * 30,
+        g->trace_plane_normal[2] * 30 + 20
     };
-    eng->SV_Particle(g->trace_endpos, spark_vel, 225, 60);
+    eng->SV_Particle(g->trace_endpos, spark_vel, 208, 60);
 
     vec3_t lend = {g->trace_endpos[0]+g->v_forward[0]*4,
                    g->trace_endpos[1]+g->v_forward[1]*4,
