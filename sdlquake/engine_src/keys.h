@@ -115,6 +115,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define K_MWHEELUP		239
 #define K_MWHEELDOWN	240
 
+// Console command-history ring buffer size. Must be a power of 2 — the
+// existing edit_line / history_line arithmetic uses `& CMDLINES_MASK`.
+#define	CMDLINES	128
+#define	CMDLINES_MASK	(CMDLINES - 1)
 
 
 typedef enum {key_game, key_console, key_message, key_menu} keydest_t;

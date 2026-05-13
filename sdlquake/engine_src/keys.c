@@ -27,7 +27,7 @@ key up events are sent even if in console mode
 
 
 #define		MAXCMDLINE	256
-char	key_lines[32][MAXCMDLINE];
+char	key_lines[CMDLINES][MAXCMDLINE];
 int		key_linepos;
 int		shift_down=false;
 int		key_lastpress;
@@ -165,7 +165,7 @@ void Key_Console (int key)
 		Cbuf_AddText (key_lines[edit_line]+1);	// skip the >
 		Cbuf_AddText ("\n");
 		Con_Printf ("%s\n",key_lines[edit_line]);
-		edit_line = (edit_line + 1) & 31;
+		edit_line = (edit_line + 1) & CMDLINES_MASK;
 		history_line = edit_line;
 		key_lines[edit_line][0] = ']';
 		key_linepos = 1;
@@ -202,11 +202,11 @@ void Key_Console (int key)
 	{
 		do
 		{
-			history_line = (history_line - 1) & 31;
+			history_line = (history_line - 1) & CMDLINES_MASK;
 		} while (history_line != edit_line
 				&& !key_lines[history_line][1]);
 		if (history_line == edit_line)
-			history_line = (edit_line+1)&31;
+			history_line = (edit_line+1) & CMDLINES_MASK;
 		Q_strcpy(key_lines[edit_line], key_lines[history_line]);
 		key_linepos = Q_strlen(key_lines[edit_line]);
 		return;
@@ -217,7 +217,7 @@ void Key_Console (int key)
 		if (history_line == edit_line) return;
 		do
 		{
-			history_line = (history_line + 1) & 31;
+			history_line = (history_line + 1) & CMDLINES_MASK;
 		}
 		while (history_line != edit_line
 			&& !key_lines[history_line][1]);
@@ -521,7 +521,7 @@ void Key_Init (void)
 {
 	int		i;
 
-	for (i=0 ; i<32 ; i++)
+	for (i=0 ; i<CMDLINES ; i++)
 	{
 		key_lines[i][0] = ']';
 		key_lines[i][1] = 0;
