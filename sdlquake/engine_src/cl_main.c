@@ -495,13 +495,18 @@ void CL_RelinkEntities (void)
 		if (ent->msgtime != cl.mtime[0])
 		{
 			ent->model = NULL;
+			ent->prev_model_for_lerp = NULL;	// snap vertex lerp on PVS re-entry
 			continue;
 		}
 
-		// track frame transitions for vertex interpolation
+		// track frame transitions for vertex interpolation. NOTE: do NOT
+		// use ent->forcelink here — the server sets U_NOLERP (which sets
+		// forcelink) on every MOVETYPE_STEP packet to disable origin/angle
+		// step lerp, but that fires every packet for every monster and
+		// would defeat vertex lerp entirely. Model-pointer change is the
+		// right snap signal (covers first-sight NULL→mdl and model swaps).
 		{
-			qboolean snap_lerp = ent->forcelink ||
-			                     ent->model != ent->prev_model_for_lerp;
+			qboolean snap_lerp = (ent->model != ent->prev_model_for_lerp);
 			if (snap_lerp || ent->frame != ent->prev_frame_observed)
 			{
 				ent->prev_frame = snap_lerp ? ent->frame
