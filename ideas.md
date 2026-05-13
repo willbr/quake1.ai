@@ -4,7 +4,6 @@
 
 1. **decals** (bullet holes, blood) — combat feedback for the Phase 8 immersive-sim work; contained scope
 2. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
-3. **coloured lights** — modernises the renderer's look; pairs with Phase 8 atmospheric scenes
 
 * review viz
 * review `func_detail`
@@ -20,11 +19,9 @@
 ## Rendering & visuals
 
 * decals — bullet holes, blood, dirt & grime, scratches
-* coloured lights (also flickering torches, muzzle flashes)
 * bump mapping
 * atmospheric distance fog + vibrant palette (Star Fox 64, Zelda)
 * texture filtering
-* model interpolation
 * more particle effects — billboarded sprites, explosions, blood, dust, lens flares
 * billboard text that floats in game
 * dynamic player shadow (Mario 64 blob / stencil) for grounding in dark levels
