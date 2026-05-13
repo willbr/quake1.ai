@@ -91,6 +91,11 @@ char 	*Cmd_CompleteCommand (char *partial);
 // attempts to match a partial command for automatic command line completion
 // returns NULL if nothing fits
 
+int Cmd_CompleteCommandAll (char *partial, char **out, int max, int count);
+int Cmd_CompleteAliasAll   (char *partial, char **out, int max, int count);
+// append every name starting with partial into out[count..max-1];
+// return the new count. Used for tab-completion cycling.
+
 int		Cmd_Argc (void);
 char	*Cmd_Argv (int arg);
 char	*Cmd_Args (void);

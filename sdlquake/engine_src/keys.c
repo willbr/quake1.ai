@@ -149,6 +149,121 @@ keyname_t keynames[] =
 */
 
 
+//============================================================================
+// Tab-completion cycling state.
+//
+// One static state machine for the console's Tab key. Pressing Tab snapshots
+// the current partial, walks the cmd / cvar / alias registries to collect
+// every match, replaces the line with the first match, and remembers what it
+// wrote. Subsequent Tabs (while the line content still matches what we wrote
+// last time) advance through the match list; Shift+Tab walks it backwards.
+// After the last match the cycle visits a "partial restored" state (the
+// user's original typed text, no completion) before wrapping back to the
+// first match. Any edit to the line is detected on the next Tab by comparing
+// against tab_committed_line, and starts a fresh cycle.
+//============================================================================
+#define TAB_MAX_MATCHES 256
+
+static char  tab_partial[MAXCMDLINE];
+static int   tab_partial_len;
+static char *tab_matches[TAB_MAX_MATCHES];
+static int   tab_match_count;          // 0 ⇒ no cycle in progress
+static int   tab_index;                // -1 ⇒ partial restored, 0..count-1 ⇒ match N
+static char  tab_committed_line[MAXCMDLINE];
+
+static void Key_TabComplete (qboolean reverse)
+{
+	char	*partial;
+	int		partial_len;
+	qboolean cycling;
+	int		i, j;
+
+	partial = key_lines[edit_line] + 1;
+	partial_len = Q_strlen (partial);
+
+	cycling = (tab_match_count > 0)
+		&& !Q_strcmp (key_lines[edit_line], tab_committed_line);
+
+	if (!cycling)
+	{
+		int n, dedup_count;
+
+		tab_match_count = 0;
+		tab_partial_len = 0;
+		if (partial_len == 0)
+			return;
+
+		Q_strcpy (tab_partial, partial);
+		tab_partial_len = partial_len;
+
+		n = 0;
+		n = Cmd_CompleteCommandAll   (tab_partial, tab_matches, TAB_MAX_MATCHES, n);
+		n = Cvar_CompleteVariableAll (tab_partial, tab_matches, TAB_MAX_MATCHES, n);
+		n = Cmd_CompleteAliasAll     (tab_partial, tab_matches, TAB_MAX_MATCHES, n);
+
+		if (n == TAB_MAX_MATCHES)
+			Con_Printf ("tab completion: %d match limit reached, truncating\n", TAB_MAX_MATCHES);
+
+		// Dedup in place. n is small in practice (typically < 30), so O(n^2)
+		// is fine. Aliases share a namespace with cmds/cvars and may collide.
+		dedup_count = 0;
+		for (i = 0 ; i < n ; i++)
+		{
+			for (j = 0 ; j < dedup_count ; j++)
+				if (!Q_strcmp (tab_matches[i], tab_matches[j]))
+					break;
+			if (j == dedup_count)
+				tab_matches[dedup_count++] = tab_matches[i];
+		}
+
+		if (dedup_count == 0)
+			return;
+
+		tab_match_count = dedup_count;
+		tab_index = reverse ? dedup_count - 1 : 0;
+	}
+	else
+	{
+		if (reverse)
+		{
+			if (tab_index == -1)
+				tab_index = tab_match_count - 1;
+			else if (tab_index == 0)
+				tab_index = -1;
+			else
+				tab_index--;
+		}
+		else
+		{
+			if (tab_index == -1)
+				tab_index = 0;
+			else if (tab_index == tab_match_count - 1)
+				tab_index = -1;
+			else
+				tab_index++;
+		}
+	}
+
+	if (tab_index == -1)
+	{
+		Q_strcpy (key_lines[edit_line] + 1, tab_partial);
+		key_linepos = tab_partial_len + 1;
+		key_lines[edit_line][key_linepos] = 0;
+	}
+	else
+	{
+		char	*name = tab_matches[tab_index];
+		int		name_len = Q_strlen (name);
+		Q_strcpy (key_lines[edit_line] + 1, name);
+		key_linepos = name_len + 1;
+		key_lines[edit_line][key_linepos] = ' ';
+		key_linepos++;
+		key_lines[edit_line][key_linepos] = 0;
+	}
+
+	Q_strcpy (tab_committed_line, key_lines[edit_line]);
+}
+
 /*
 ====================
 Key_Console
@@ -158,8 +273,6 @@ Interactive line editing and console scrollback
 */
 void Key_Console (int key)
 {
-	char	*cmd;
-	
 	if (key == K_ENTER)
 	{
 		int prev;
@@ -206,19 +319,9 @@ void Key_Console (int key)
 	}
 
 	if (key == K_TAB)
-	{	// command completion
-		cmd = Cmd_CompleteCommand (key_lines[edit_line]+1);
-		if (!cmd)
-			cmd = Cvar_CompleteVariable (key_lines[edit_line]+1);
-		if (cmd)
-		{
-			Q_strcpy (key_lines[edit_line]+1, cmd);
-			key_linepos = Q_strlen(cmd)+1;
-			key_lines[edit_line][key_linepos] = ' ';
-			key_linepos++;
-			key_lines[edit_line][key_linepos] = 0;
-			return;
-		}
+	{
+		Key_TabComplete (shift_down);
+		return;
 	}
 	
 	if (key == K_BACKSPACE || key == K_LEFTARROW)

@@ -589,18 +589,66 @@ char *Cmd_CompleteCommand (char *partial)
 {
 	cmd_function_t	*cmd;
 	int				len;
-	
+
 	len = Q_strlen(partial);
-	
+
 	if (!len)
 		return NULL;
-		
+
 // check functions
 	for (cmd=cmd_functions ; cmd ; cmd=cmd->next)
 		if (!Q_strncmp (partial,cmd->name, len))
 			return cmd->name;
 
 	return NULL;
+}
+
+/*
+============
+Cmd_CompleteCommandAll
+
+Appends every cmd_functions entry whose name starts with partial into out[],
+starting at index count, capped at max. Returns the new count.
+============
+*/
+int Cmd_CompleteCommandAll (char *partial, char **out, int max, int count)
+{
+	cmd_function_t	*cmd;
+	int				len;
+
+	len = Q_strlen(partial);
+	if (!len)
+		return count;
+
+	for (cmd = cmd_functions ; cmd && count < max ; cmd = cmd->next)
+		if (!Q_strncmp (partial, cmd->name, len))
+			out[count++] = cmd->name;
+
+	return count;
+}
+
+/*
+============
+Cmd_CompleteAliasAll
+
+Appends every cmd_alias entry whose name starts with partial into out[],
+starting at index count, capped at max. Returns the new count.
+============
+*/
+int Cmd_CompleteAliasAll (char *partial, char **out, int max, int count)
+{
+	cmdalias_t	*a;
+	int			len;
+
+	len = Q_strlen(partial);
+	if (!len)
+		return count;
+
+	for (a = cmd_alias ; a && count < max ; a = a->next)
+		if (!Q_strncmp (partial, a->name, len))
+			out[count++] = a->name;
+
+	return count;
 }
 
 /*

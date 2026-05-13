@@ -81,18 +81,42 @@ char *Cvar_CompleteVariable (char *partial)
 {
 	cvar_t		*cvar;
 	int			len;
-	
+
 	len = Q_strlen(partial);
-	
+
 	if (!len)
 		return NULL;
-		
+
 // check functions
 	for (cvar=cvar_vars ; cvar ; cvar=cvar->next)
 		if (!Q_strncmp (partial,cvar->name, len))
 			return cvar->name;
 
 	return NULL;
+}
+
+/*
+============
+Cvar_CompleteVariableAll
+
+Appends every cvar_vars entry whose name starts with partial into out[],
+starting at index count, capped at max. Returns the new count.
+============
+*/
+int Cvar_CompleteVariableAll (char *partial, char **out, int max, int count)
+{
+	cvar_t	*cvar;
+	int		len;
+
+	len = Q_strlen(partial);
+	if (!len)
+		return count;
+
+	for (cvar = cvar_vars ; cvar && count < max ; cvar = cvar->next)
+		if (!Q_strncmp (partial, cvar->name, len))
+			out[count++] = cvar->name;
+
+	return count;
 }
 
 
