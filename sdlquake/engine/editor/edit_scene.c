@@ -455,12 +455,12 @@ static void set_plane(edit_plane_t *pl,
     pl->t_scale = 1;
 }
 
-// Internal: write 6 axis-aligned plane definitions for the cube spanning
-// mins..maxs into `b`, then compile. `b` must be memset already. Returns 1
-// on a successful compile (i.e. the cube has volume), 0 otherwise.
-static int build_cube_brush(edit_brush_t *b,
-                            const vec3_t mins, const vec3_t maxs,
-                            const char *tex)
+// Write 6 axis-aligned plane definitions for the cube spanning mins..maxs
+// into `b`, then compile. `b` must be memset already. Returns 1 on a
+// successful compile (i.e. the cube has volume), 0 otherwise.
+int Editor_BuildCubeBrush(edit_brush_t *b,
+                          const vec3_t mins, const vec3_t maxs,
+                          const char *tex)
 {
     // Three points per face, chosen so cross(p0-p1, p2-p1) gives the
     // outward normal — qbsp's "CCW from outside" convention. Each pX is
@@ -516,7 +516,7 @@ int Scene_AddCubeBrush(const vec3_t mins, const vec3_t maxs, const char *texname
     b = &e->brushes[e->numbrushes];
     memset(b, 0, sizeof(*b));
 
-    if (!build_cube_brush(b, mins, maxs, tex))
+    if (!Editor_BuildCubeBrush(b, mins, maxs, tex))
     {
         Con_Printf("editor: Scene_AddCubeBrush: compile produced no faces\n");
         return 0;
@@ -603,7 +603,7 @@ int Scene_HollowBrush(int e_idx, int b_idx, float thickness)
     {
         edit_brush_t *b = &ws->brushes[ws->numbrushes];
         memset(b, 0, sizeof(*b));
-        if (!build_cube_brush(b, wmin[k], wmax[k], tex))
+        if (!Editor_BuildCubeBrush(b, wmin[k], wmax[k], tex))
         {
             Con_Printf("editor: Scene_HollowBrush: wall %d failed to compile\n", k);
             continue;

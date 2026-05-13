@@ -1388,6 +1388,10 @@ int Editor_ShouldDrawPlayer(void)
     // their own model would block the view.
     return s_open && (int)editor_camera.value == 0;
 }
+int Editor_HideTransientFX(void)
+{
+    return s_open && (int)editor_view_mode.value == 1;
+}
 
 // -----------------------------------------------------------------------------
 // Camera mode + lookmode helpers

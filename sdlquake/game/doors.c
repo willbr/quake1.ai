@@ -212,6 +212,7 @@ static void door_touch(edict_t *self, edict_t *other) {
 // ---------------------------------------------------------------------------
 static edict_t *spawn_field(vec3_t fmins, vec3_t fmaxs) {
     edict_t *trigger = eng->ED_Alloc();
+    trigger->v.classname = "trigger_door";  // EDIT_CAT_TRIGGER prefix → red AABB in editor
     trigger->v.movetype = MOVETYPE_NONE;
     trigger->v.solid    = SOLID_TRIGGER;
     trigger->v.owner    = g->self;

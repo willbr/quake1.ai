@@ -35,6 +35,7 @@ struct edit_plane_s;
 #define EDIT_COLOR_PATH         235     // bright orange     (219,127, 59) — path_*
 #define EDIT_COLOR_MISC         252     // pale cream        (255,243,147) — misc_*
 #define EDIT_COLOR_INFO          13     // light grey        (203,203,203) — info_null/notnull/command
+#define EDIT_COLOR_CLIP         209     // teal              (107,135,131) — clip brushes (per-brush, not a category)
 
 // Category index for filtering / colour-coding. Order is stable; UI
 // checkboxes index into a parallel filter array.
@@ -86,6 +87,15 @@ void Editor_FlatDrawBrush(const struct edit_brush_s *b);
 
 // render_tex.c
 void Editor_TexDrawBrush (const struct edit_brush_s *b);
+
+// edit_scene.c — build 6 axial planes for the AABB into `b` (memset by
+// caller) and compile. Returns 1 on a non-degenerate cube. Used by
+// Scene_AddCubeBrush / Scene_HollowBrush, and by render_wire.c to
+// synthesise a proxy brush when drawing a textured trigger volume that
+// has no .map source (BSP-populated scenes — start.bsp et al).
+int  Editor_BuildCubeBrush(struct edit_brush_s *b,
+                           const vec3_t mins, const vec3_t maxs,
+                           const char *tex);
 
 // Compute scaled+rotated s/t world axes (and shifts) for a plane, matching
 // qbsp's QuakeEd-style texinfo. Public so Brush_Translate can keep textures

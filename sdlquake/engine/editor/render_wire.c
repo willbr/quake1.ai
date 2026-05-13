@@ -336,9 +336,44 @@ enum {
 
 cvar_t editor_render_style = { "editor_render_style", "3" };
 
+// Override for trigger_* brush entities: 0 = single AABB (the readable
+// authoring view — uncluttered red box per volume), 1 = textured brushes
+// (shows the actual brush geometry with whatever texture the .map source
+// has, useful when sizing a trigger against world geometry). Applies to
+// trigger entities only; non-trigger brushes always follow
+// editor_render_style.
+cvar_t editor_trigger_render = { "editor_trigger_render", "0" };
+
+// Same idea but per-brush, for clip brushes (brushes with all faces using
+// the "clip" texture — invisible-in-game collision volumes). 0 = AABB per
+// brush in teal, 1 = textured (procedural-grid fallback since the BSP has
+// no "clip" miptex). Independent of editor_trigger_render so the user can
+// reveal one without the other.
+cvar_t editor_clip_render    = { "editor_clip_render",    "0" };
+
 void Editor_RegisterCvars(void)
 {
     Cvar_RegisterVariable(&editor_render_style);
+    Cvar_RegisterVariable(&editor_trigger_render);
+    Cvar_RegisterVariable(&editor_clip_render);
+}
+
+// True if every plane on this brush uses the "clip" texture (case-insensitive
+// prefix match — catches "clip", "Clip", "clip2", etc.). A clip brush has no
+// rendered geometry in vanilla Quake (qbsp strips clip faces from the visible
+// BSP, keeping them only in the clip hull), so the editor visualisation is
+// the only way to see / move them.
+static int brush_is_clip(const edit_brush_t *b)
+{
+    int i;
+    if (!b || b->numplanes <= 0) return 0;
+    for (i = 0; i < b->numplanes; i++)
+    {
+        const char *t = b->planes[i].texname;
+        if (!t || !t[0]) return 0;
+        if (Q_strncasecmp(t, "clip", 4) != 0) return 0;
+    }
+    return 1;
 }
 
 // Draw the 12 edges of an AABB. `through` = 1 → depth-bypass overlay (read
@@ -1139,6 +1174,8 @@ void Editor_RenderScene(void)
     int editor_open = Editor_IsOpen();
     extern cvar_t editor_view_mode;
     int view_map = (int)editor_view_mode.value == 1;
+    int trigger_tex = (int)editor_trigger_render.value == 1;
+    int clip_tex    = (int)editor_clip_render.value    == 1;
 
     if (!editor_open && !view_map) return;
     if (edit_scene.numentities == 0) return;
@@ -1161,21 +1198,67 @@ void Editor_RenderScene(void)
     }
 
     // Pass 1: filled faces (flat-shaded or textured).
+    //
+    // Trigger override: triggers always honour editor_trigger_render — bbox
+    // mode (0) skips them here so the single-AABB pass below has them to
+    // itself; textured mode (1) force-tex-draws them even in pure wire
+    // styles, so they pop against world wireframe. BSP-populated scenes
+    // have no .map brushes for triggers (start.bsp et al), so we
+    // synthesise a 6-plane cube from live_ent->v.absmin/absmax and feed
+    // that to the tex-draw path — same visual as bbox mode, just textured.
     {
         int do_flat = (style == EDIT_STYLE_FLAT || style == EDIT_STYLE_FLAT_WIRE);
         int do_tex  = (style == EDIT_STYLE_TEX  || style == EDIT_STYLE_TEX_WIRE);
-        if ((do_flat || do_tex) && !bsp_is_ours)
+        static edit_brush_t s_trigger_proxy;     // reused; faces alloc'd per call
+        if (!bsp_is_ours)
         {
             for (i = 0; i < edit_scene.numentities; i++)
             {
                 edit_entity_t *e = &edit_scene.entities[i];
+                int is_trigger = (Editor_EntityCategory(e) == EDIT_CAT_TRIGGER);
+                int trig_force_tex = (is_trigger && trigger_tex);
+                int drew_any = 0;
+                if (is_trigger && !trigger_tex) continue;  // bbox pass owns it
+                if (!do_flat && !do_tex && !trig_force_tex) continue;
+                // Brushes panel "Hide triggers" checkbox (and the other
+                // category filters / visible-only / skill filter) — apply
+                // to both real-brush and proxy-brush trigger drawing.
+                if (is_trigger && Editor_EntityHiddenByCategory(i)) continue;
                 for (j = 0; j < e->numbrushes; j++)
                 {
                     edit_brush_t *b = &e->brushes[j];
+                    int is_clip;
                     if (!b->valid) continue;
                     if (!brush_visible(b)) continue;
-                    if (do_tex)  Editor_TexDrawBrush(b);
-                    else         Editor_FlatDrawBrush(b);
+                    // Clip-brush override (per-brush; trigger entities don't
+                    // contain clip brushes in practice, but the predicate is
+                    // cheap and the rules compose). bbox mode: the clip AABB
+                    // pass below owns it. tex mode: force tex-draw, falling
+                    // back to the procedural grid since the BSP has no
+                    // "clip" miptex.
+                    is_clip = brush_is_clip(b);
+                    if (is_clip && !clip_tex) continue;
+                    if (trig_force_tex || do_tex || (is_clip && clip_tex))
+                        Editor_TexDrawBrush(b);
+                    else
+                        Editor_FlatDrawBrush(b);
+                    drew_any = 1;
+                }
+                // BSP-trigger proxy: synthesise a textured cube from the
+                // live edict's bbox when no .map brushes exist.
+                if (trig_force_tex && !drew_any
+                    && e->live_ent && !e->live_ent->free)
+                {
+                    const float *amn = e->live_ent->v.absmin;
+                    const float *amx = e->live_ent->v.absmax;
+                    if (amx[0] > amn[0] && amx[1] > amn[1] && amx[2] > amn[2])
+                    {
+                        Brush_FreeFaces(&s_trigger_proxy);
+                        memset(&s_trigger_proxy, 0, sizeof(s_trigger_proxy));
+                        if (Editor_BuildCubeBrush(&s_trigger_proxy, amn, amx,
+                                                  "trigger"))
+                            Editor_TexDrawBrush(&s_trigger_proxy);
+                    }
                 }
             }
         }
@@ -1193,6 +1276,11 @@ void Editor_RenderScene(void)
         for (i = 0; i < edit_scene.numentities; i++)
         {
             edit_entity_t *e = &edit_scene.entities[i];
+            int is_trigger = (Editor_EntityCategory(e) == EDIT_CAT_TRIGGER);
+            // bbox mode: the single-AABB pass below draws the trigger; skip
+            // the per-brush wireframe so we don't get a busy outline behind
+            // it. (For face-level work, toggle editor_trigger_render → tex.)
+            if (is_trigger && !trigger_tex) continue;
             for (j = 0; j < e->numbrushes; j++)
             {
                 edit_brush_t *b = &e->brushes[j];
@@ -1200,6 +1288,9 @@ void Editor_RenderScene(void)
                 int is_brush_ent = (i > 0);  /* non-worldspawn entity */
                 if (!b->valid) continue;
                 if (!brush_visible(b)) continue;
+                // Per-brush clip skip in bbox mode — the dedicated AABB
+                // pass below draws each clip brush in teal.
+                if (!clip_tex && brush_is_clip(b)) continue;
                 // Worldspawn brushes only need the wireframe in wire-all
                 // mode or when selected — the BSP renderer already draws
                 // them.  Non-worldspawn brush entities (func_door, etc.)
@@ -1243,6 +1334,86 @@ void Editor_RenderScene(void)
                         break;
                     }
                 }
+            }
+        }
+    }
+
+    // Pass 2.5: trigger-volume bbox. Only when editor_trigger_render == 0
+    // (the bbox view). Single AABB per trigger entity, computed as the
+    // union of its compiled brushes; falls back to live_ent->v.absmin/max
+    // for BSP-populated scenes that don't have .map brushes. Depth-bypass
+    // when selected so the user can always see what they picked.
+    //
+    // Uses HiddenByCategory (not Editor_EntityHidden) on purpose: triggers
+    // are authoring-only visualisations — the spawn function zeroes
+    // v.modelindex so cl_entities[N].model is NULL and the live-view
+    // "engine isn't drawing this" filter would hide every trigger in a
+    // BSP-populated scene (e.g. start.bsp's trigger_changelevels).
+    if (!trigger_tex)
+    {
+        for (i = 0; i < edit_scene.numentities; i++)
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            vec3_t tmin, tmax;
+            int    have_bbox = 0;
+            int    is_sel;
+            byte   color;
+            if (Editor_EntityCategory(e) != EDIT_CAT_TRIGGER) continue;
+            if (Editor_EntityHiddenByCategory(i)) continue;
+            tmin[0] = tmin[1] = tmin[2] =  1e30f;
+            tmax[0] = tmax[1] = tmax[2] = -1e30f;
+            for (j = 0; j < e->numbrushes; j++)
+            {
+                edit_brush_t *b = &e->brushes[j];
+                int k;
+                if (!b->valid) continue;
+                for (k = 0; k < 3; k++)
+                {
+                    if (b->mins[k] < tmin[k]) tmin[k] = b->mins[k];
+                    if (b->maxs[k] > tmax[k]) tmax[k] = b->maxs[k];
+                }
+                have_bbox = 1;
+            }
+            if (!have_bbox && e->live_ent && !e->live_ent->free)
+            {
+                const float *amn = e->live_ent->v.absmin;
+                const float *amx = e->live_ent->v.absmax;
+                if (amx[0] > amn[0] || amx[1] > amn[1] || amx[2] > amn[2])
+                {
+                    VectorCopy(amn, tmin);
+                    VectorCopy(amx, tmax);
+                    have_bbox = 1;
+                }
+            }
+            if (!have_bbox) continue;
+            is_sel = Scene_SelectionContains(i, -1);
+            color  = is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_TRIGGER;
+            draw_aabb_ex(tmin, tmax, color, is_sel);
+        }
+    }
+
+    // Pass 2.6: per-brush AABB for clip brushes. Mirrors the trigger
+    // bbox pass but keyed on the brush predicate (all faces "clip*")
+    // rather than the entity classname — clip brushes typically live in
+    // worldspawn alongside visible geometry. Honours per-brush selection
+    // colour. No BSP-loaded fallback: qbsp strips clip faces from the
+    // visible BSP, so a BSP-only scene has no clip brushes to draw.
+    if (!clip_tex)
+    {
+        for (i = 0; i < edit_scene.numentities; i++)
+        {
+            edit_entity_t *e = &edit_scene.entities[i];
+            for (j = 0; j < e->numbrushes; j++)
+            {
+                edit_brush_t *b = &e->brushes[j];
+                int is_sel;
+                byte color;
+                if (!b->valid) continue;
+                if (!brush_is_clip(b)) continue;
+                if (!brush_visible(b)) continue;
+                is_sel = Scene_SelectionContains(i, j);
+                color  = is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_CLIP;
+                draw_aabb_ex(b->mins, b->maxs, color, is_sel);
             }
         }
     }

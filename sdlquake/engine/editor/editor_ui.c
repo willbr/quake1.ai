@@ -238,6 +238,35 @@ static void draw_toolbar(void)
     }
     IG_SameLine(0, -1);
     {
+        // Trigger render mode: 0 = single red AABB per trigger volume
+        // (clean authoring view), 1 = render trigger brushes textured
+        // (face-level inspection). Independent of editor_render_style.
+        extern cvar_t editor_trigger_render;
+        int on = editor_trigger_render.value != 0.0f;
+        if (IG_Checkbox("trigger tex", &on))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_trigger_render %d\n", on ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
+        // Clip render mode: 0 = teal AABB per clip brush (clean view),
+        // 1 = textured (procedural-grid fallback since clip has no
+        // miptex). Per-brush, not per-entity — most clip brushes live
+        // in worldspawn alongside visible geometry.
+        extern cvar_t editor_clip_render;
+        int on = editor_clip_render.value != 0.0f;
+        if (IG_Checkbox("clip tex", &on))
+        {
+            char buf[40];
+            snprintf(buf, sizeof(buf), "editor_clip_render %d\n", on ? 1 : 0);
+            Cbuf_AddText(buf);
+        }
+    }
+    IG_SameLine(0, -1);
+    {
         // Per-entity facing / movedir arrow visibility. Selection always
         // overrides — a clicked entity shows its arrow either way.
         extern cvar_t editor_show_angles;
@@ -546,6 +575,11 @@ int Editor_EntityHidden(int e_idx)
     if (Editor_EntityHiddenByCategory(e_idx)) return 1;
     if (e_idx < 0 || e_idx >= edit_scene.numentities) return 0;
     e = &edit_scene.entities[e_idx];
+
+    // Triggers are always authoring-only — InitTrigger zeroes v.modelindex
+    // so the engine never draws them. Skipping the "engine isn't rendering"
+    // filter below keeps them visible + pickable in both live and map view.
+    if (Editor_EntityCategory(e) == EDIT_CAT_TRIGGER) return 0;
 
     // Live mode: hide entities the engine isn't visibly rendering. Once
     // realised as a live edict the engine's model decision is the truth —

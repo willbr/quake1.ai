@@ -115,6 +115,7 @@ static void plat_use(edict_t *self, edict_t *activator) {
 
 static void plat_spawn_inside_trigger(edict_t *plat) {
     edict_t *trigger      = eng->ED_Alloc();
+    trigger->v.classname  = "trigger_plat"; // EDIT_CAT_TRIGGER prefix → red AABB in editor
     trigger->v.touch      = plat_center_touch;
     trigger->v.movetype   = MOVETYPE_NONE;
     trigger->v.solid      = SOLID_TRIGGER;

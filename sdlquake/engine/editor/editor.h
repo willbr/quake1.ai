@@ -47,6 +47,11 @@ void Editor_CycleCameraMode(void);
 // free-fly mode the camera has detached so we want it visible.
 int  Editor_ShouldDrawPlayer(void);
 
+// 1 when the editor is open in "map" view-mode — gameplay-transient FX
+// (particles, rocket/fireball trails, explosions) should be suppressed so
+// the authoring view shows only what's in the .map.
+int  Editor_HideTransientFX(void);
+
 // ImGui hook: called from ImguiLayer_Render between NewFrame and Render.
 // Editor toolbar/inspector/brush list panels.
 void Editor_DrawUI(void);

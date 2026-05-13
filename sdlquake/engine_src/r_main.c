@@ -1080,7 +1080,11 @@ SetVisibilityByPassages ();
 		dp_time1 = Sys_FloatTime ();
 	}
 
-	R_DrawParticles ();
+	{
+		extern int Editor_HideTransientFX(void);
+		if (!Editor_HideTransientFX())
+			R_DrawParticles ();
+	}
 
 	// PHASE 6: 2D sprite viewmodel pass. Runs after particles so they sit on
 	// top of the world (vanilla feel) but never overdraw the gun -- and never
