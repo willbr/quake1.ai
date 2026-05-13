@@ -131,6 +131,23 @@ static stain_t *Stain_GetOrAlloc (msurface_t *surf)
 	return slot ? &slot->header : NULL;
 }
 
+// ---------------------------------------------------------------------------
+// Blood pools — growing radial stains on the floor under a dying monster.
+// ---------------------------------------------------------------------------
+
+#define MAX_ACTIVE_BLOODPOOLS 32
+
+typedef struct {
+	vec3_t       origin;          // floor hit point (centre of pool)
+	msurface_t  *surf;            // target floor surface
+	float        spawn_time;      // cl.time at spawn
+	float        radius_max;      // game units
+	float        radius_painted;  // last radius painted
+	qboolean     alive;
+} bloodpool_t;
+
+static bloodpool_t r_bloodpools[MAX_ACTIVE_BLOODPOOLS];
+
 void R_DecalsClear (void)
 {
 	int i, cap;
@@ -151,11 +168,86 @@ void R_DecalsClear (void)
 		r_stain_slots[i].free_next = r_stain_freelist;
 		r_stain_freelist = &r_stain_slots[i];
 	}
+
+	memset (r_bloodpools, 0, sizeof(r_bloodpools));
 }
 
+// Per-frame growth tick for active blood pools.
 void R_DecalsFrame (void)
 {
-	// Filled in Task 11.
+	int          i;
+	float        dur;
+	float        t, target, r_inner_sq, r_outer_sq;
+	int          luxel_radius, dx, dy, u, v, idx;
+	float        gx, gy, dsq, ou, ov;
+	int          olu, olv, smax, tmax;
+	int          nr, ng, nb;
+	bloodpool_t *bp;
+	msurface_t  *surf;
+	mtexinfo_t  *tex;
+	stain_t     *st;
+
+	dur = r_decals_bloodpool_growtime.value;
+	if (dur <= 0.001f) dur = 0.001f;
+
+	for (i = 0; i < MAX_ACTIVE_BLOODPOOLS; i++) {
+		bp = &r_bloodpools[i];
+		if (!bp->alive) continue;
+
+		t = (cl.time - bp->spawn_time) / dur;
+		if (t < 0.0f) t = 0.0f;
+		if (t > 1.0f) t = 1.0f;
+		target = bp->radius_max * t;
+		if (target <= bp->radius_painted) {
+			if (t >= 1.0f) bp->alive = false;
+			continue;
+		}
+
+		surf = bp->surf;
+		if (!surf) { bp->alive = false; continue; }
+
+		tex = surf->texinfo;
+		ou  = DotProduct(bp->origin, tex->vecs[0]) + tex->vecs[0][3];
+		ov  = DotProduct(bp->origin, tex->vecs[1]) + tex->vecs[1][3];
+		olu = ((int)floor(ou) - surf->texturemins[0]) >> 4;
+		olv = ((int)floor(ov) - surf->texturemins[1]) >> 4;
+		smax = (surf->extents[0] >> 4) + 1;
+		tmax = (surf->extents[1] >> 4) + 1;
+
+		luxel_radius = (int)((target / 16.0f) + 1.0f);
+		st = Stain_GetOrAlloc (surf);
+		if (!st) { bp->alive = false; continue; }
+
+		r_inner_sq = bp->radius_painted * bp->radius_painted;
+		r_outer_sq = target * target;
+
+		for (dy = -luxel_radius; dy <= luxel_radius; dy++) {
+			v = olv + dy;
+			if (v < 0 || v >= tmax) continue;
+			for (dx = -luxel_radius; dx <= luxel_radius; dx++) {
+				u = olu + dx;
+				if (u < 0 || u >= smax) continue;
+				gx  = dx * 16.0f;
+				gy  = dy * 16.0f;
+				dsq = gx*gx + gy*gy;
+				if (dsq < r_inner_sq || dsq > r_outer_sq) continue;
+				idx = (v * smax + u) * 3;
+				nr  = st->rgb[idx + 0] + 80;
+				ng  = st->rgb[idx + 1] - 60;
+				nb  = st->rgb[idx + 2] - 60;
+				if (nr > 4096)  nr = 4096;
+				if (ng < -4096) ng = -4096;
+				if (nb < -4096) nb = -4096;
+				st->rgb[idx + 0] = (short)nr;
+				st->rgb[idx + 1] = (short)ng;
+				st->rgb[idx + 2] = (short)nb;
+			}
+		}
+		st->generation++;
+		st->last_touched_frame = r_framecount;
+		bp->radius_painted = target;
+		if (t >= 1.0f) bp->alive = false;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +494,53 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 
 void R_SpawnBloodPool (vec3_t origin)
 {
-	(void)origin;
-	// Filled in Task 11.
+	vec3_t   end;
+	trace_t  tr;
+	msurface_t *surf;
+	int      i, slot;
+	float    oldest_time;
+	int      oldest_slot;
+	bloodpool_t *bp;
+
+	if (!r_decals.value || !r_decals_bloodpool.value) return;
+
+	// Trace straight down to find the floor.
+	end[0] = origin[0];
+	end[1] = origin[1];
+	end[2] = origin[2] - 64.0f;
+	tr = SV_Move (origin, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
+	if (tr.fraction >= 1.0f) return;
+	if (tr.plane.normal[2] < 0.7f) return;  // too steep
+
+	surf = R_PointOnSurface_World (tr.endpos, tr.plane.normal);
+	if (!surf) return;
+
+	// Find an empty slot or recycle the oldest.
+	slot         = -1;
+	oldest_time  = 1e9f;
+	oldest_slot  = 0;
+	for (i = 0; i < MAX_ACTIVE_BLOODPOOLS; i++) {
+		if (!r_bloodpools[i].alive) { slot = i; break; }
+		if (r_bloodpools[i].spawn_time < oldest_time) {
+			oldest_time = r_bloodpools[i].spawn_time;
+			oldest_slot = i;
+		}
+	}
+	if (slot < 0) {
+		// Force the oldest to finish instantly; its luxels stay permanent.
+		bp = &r_bloodpools[oldest_slot];
+		bp->radius_painted = bp->radius_max;
+		bp->alive          = false;
+		slot               = oldest_slot;
+	}
+
+	bp = &r_bloodpools[slot];
+	bp->origin[0]      = tr.endpos[0];
+	bp->origin[1]      = tr.endpos[1];
+	bp->origin[2]      = tr.endpos[2];
+	bp->surf           = surf;
+	bp->spawn_time     = cl.time;
+	bp->radius_max     = r_decals_bloodpool_radius.value;
+	bp->radius_painted = 0.0f;
+	bp->alive          = true;
 }

@@ -1055,6 +1055,7 @@ void R_RenderView_ (void)
 	}
 
 	R_SetupFrame ();
+	R_DecalsFrame ();
 
 #ifdef PASSAGES
 SetVisibilityByPassages ();
