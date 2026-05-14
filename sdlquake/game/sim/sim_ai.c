@@ -116,6 +116,12 @@ static float sense_intensity(ai_brain_t *b, edict_t *e, const stimulus_t *s) {
                 float occlusion = Wind_PathOcclusion(e->v.origin, s->origin);
                 los = 1.0f - occlusion;
                 if (los < 0) los = 0;
+                // Light tier (M5): if the stim is from the player (edict 1),
+                // multiply by the light tier at the player's location.
+                // Shadowed alcoves halve visibility.
+                if (s->source_edict == 1) {
+                    los *= Light_TierAt(s->origin);
+                }
             } else {
                 los = 0;
             }

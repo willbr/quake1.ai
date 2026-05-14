@@ -353,6 +353,8 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/sim/sim_nav.c",
             "sdlquake/game/sim/sim_arena.c",
             "sdlquake/game/sim/sim_wind.c",
+            "sdlquake/game/sim/sim_light.c",
+            "sdlquake/game/sim/sim_retrofit.c",
         },
         .flags = &.{
             "-std=c11",

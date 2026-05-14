@@ -291,6 +291,39 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
         }
     }
 
+    // Light-tier hook (M5): extinguish any flammable light entity inside
+    // the cone. Adds a darkness override visible to the AI sense filter
+    // and emits a STIM_LIGHT_CHANGE; the renderer's lightmap is untouched.
+    for (edict_t *le = eng->ED_Next(g->world); le; le = eng->ED_Next(le)) {
+        if (!le->v.classname) continue;
+        const char *cn = le->v.classname;
+        int is_flammable = (strncmp(cn, "light_torch", 11) == 0 ||
+                            strncmp(cn, "light_flame", 11) == 0);
+        if (!is_flammable) continue;
+        vec3_t to;
+        to[0] = le->v.origin[0] - eye[0];
+        to[1] = le->v.origin[1] - eye[1];
+        to[2] = le->v.origin[2] - eye[2];
+        float d = vlen(to);
+        if (d > range) continue;
+        if (d < 1.0f) continue;
+        float dirn[3] = { to[0]/d, to[1]/d, to[2]/d };
+        if (vdot(dirn, forward) < cone_cos) continue;
+
+        Light_AddOverride(le->v.origin, 192.0f, -80.0f);
+
+        // Stim emission so AI can react to "lights just went out".
+        stimulus_t ls;
+        memset(&ls, 0, sizeof(ls));
+        ls.kind        = STIM_LIGHT_CHANGE;
+        ls.origin[0]   = le->v.origin[0];
+        ls.origin[1]   = le->v.origin[1];
+        ls.origin[2]   = le->v.origin[2];
+        ls.intensity   = 0.6f;
+        ls.source_edict = eng->ED_GetNum(client);
+        Stim_Emit(&ls);
+    }
+
     // Spend energy + cooldown.
     s_p.energy -= CV("ph_gust_cost");
     if (s_p.energy < 0) s_p.energy = 0;

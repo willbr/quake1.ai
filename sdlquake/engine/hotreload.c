@@ -841,6 +841,18 @@ static void engine_spawn_blood_pool(const vec3_t origin)
     R_SpawnBloodPool(o);
 }
 
+// Lightmap sample at world-space point (Phase 8 / M5). Reuses the renderer's
+// existing R_LightPoint which traces down through the BSP, samples the
+// surface lightmap with style mixing, and clamps against ambientlight.
+// R_LightPoint already handles a NULL worldmodel by returning 255 (full
+// bright), so we don't need to guard against it here.
+static int engine_sample_lightmap(vec3_t pos)
+{
+    extern int R_LightPoint(vec3_t p);
+    vec3_t p = { pos[0], pos[1], pos[2] };
+    return R_LightPoint(p);
+}
+
 // ---------------------------------------------------------------------------
 // imgui Nav panel shims
 // ---------------------------------------------------------------------------
@@ -942,6 +954,7 @@ static engine_api_t engine_funcs = {
     engine_get_view_origin,
     engine_sv_tracemove,
     engine_spawn_blood_pool,
+    engine_sample_lightmap,
 };
 
 // ---------------------------------------------------------------------------

@@ -112,6 +112,20 @@ int Sim_Nav_PathTo(const vec3_t from,
                    int max_out);
 
 // ---------------------------------------------------------------------------
+// Retrofit (Phase 8 / M6)
+// ---------------------------------------------------------------------------
+void Sim_Retrofit_LevelInit(void);
+void Sim_Retrofit_Frame(void);
+
+// ---------------------------------------------------------------------------
+// Light tier (Phase 8 / M5)
+// ---------------------------------------------------------------------------
+void  Light_Init(void);
+void  Light_LevelInit(void);
+float Light_TierAt(const vec3_t pos);
+void  Light_AddOverride(const vec3_t pos, float radius, float delta);
+
+// ---------------------------------------------------------------------------
 // Wind / smoke field (Phase 8 / M4)
 // ---------------------------------------------------------------------------
 void  Wind_Init(void);

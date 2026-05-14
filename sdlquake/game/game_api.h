@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 17
+#define GAME_API_VERSION 18
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -178,6 +178,10 @@ typedef struct engine_api_s {
     // game.dll's Killed() on monster death. No-op if no floor within 64
     // units, or if r_decals/r_decals_bloodpool is 0.
     void  (*spawn_blood_pool)(const vec3_t origin);
+
+    // Sample the lightmap at a world-space point (Phase 8 / M5).
+    // Returns 0..255; 0 if no lightmap is available.
+    int   (*Sample_Lightmap)(vec3_t pos);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------
