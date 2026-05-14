@@ -12,8 +12,8 @@ WinQuake (1996 software renderer) ported to SDL3 + Zig, with a hot-reloading gam
 | 4 | done | Dear ImGui dev overlay (F12) |
 | 5 | done | QuakeC → C (progs ported to hot-reloadable game.dll) |
 | 6 | done | Wolf3D + Doom1 guns (sprites, sounds, fire rates) |
-| 7 | in progress | In-game 3D map editor |
-| 8 | planned | Immersive-sim systems (physics, reactive AI, Blink + Gust) |
+| 7 | done | In-game 3D map editor |
+| 8 | planned | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust) |
 
 ## Build
 
@@ -34,6 +34,15 @@ zig build game                              # rebuild game.dll only (fast iterat
 | `--hot-reload` | Poll `game.dll` for changes and reload without restart |
 | `+map <name>` | Load map on startup (e.g. `+map e1m1`) |
 | `--list-cvars` | Print all registered cvars and exit |
+
+## Scripts
+
+- `scripts/mcp_call.py` — one-shot CLI for the running MCP server (HTTP/SSE).
+  ```sh
+  python scripts/mcp_call.py screenshot
+  python scripts/mcp_call.py console_exec '{"command":"r_decals_debug 1"}'
+  python scripts/mcp_call.py get_player_state
+  ```
 
 ## Source
 

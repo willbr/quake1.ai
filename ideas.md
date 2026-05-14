@@ -2,8 +2,6 @@
 
 ## Next
 
-1. **`screenshot` MCP tool** — lets Claude *see* the game; force multiplier for every other AI-assisted task
-
 * review viz
 * review `func_detail`
 * light options
@@ -134,10 +132,8 @@
 
 * `record_demo` / `replay_demo` / `scrub_to_tick`
 * `rewind` — time-travel debugger via periodic state snapshots
-* `screenshot` tool returning PNG bytes so Claude can *see* the game
-* `set_player_pos` / `spawn_entity` / `damage_entity` for scripted test scenarios
+* `spawn_entity` / `damage_entity` for scripted test scenarios
 * A/B harness — run two `game.dll` builds side-by-side, compare metrics
-* expose the imgui console log as an MCP resource (live tail)
 
 ## Modding ecosystem
 
