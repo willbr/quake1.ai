@@ -89,14 +89,28 @@ zig build game                           # rebuild only game.dll (fast hot-reloa
 | 5 | ✅ done | QuakeC → C (port progs to hot-reloadable game.dll) |
 | 6 | ✅ done | Port Wolf3D & Doom1 guns into Quake (sprites, sounds, behaviour) |
 | 7 | ✅ done | In-game 3D map editor |
-| 8 | planned | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust) |
+| 8 | M3–M6 done; M7 stub | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust) |
 
 ### Phase 8 references
 
 - Design spec: `docs/superpowers/specs/2026-05-04-immersive-sim-systems-design.md`
-- Implementation plan (M1+M2+M2.5 only — AI substrate): `docs/superpowers/plans/2026-05-04-immersive-sim-m1-m2-ai-substrate.md`
-- Future plans (M3 Blink/Gust, M4 wind, M5 light, M6 retrofit, M7 bespoke map) not yet written.
-- All sim code lives in `sdlquake/game/sim/` inside the hot-reloadable `game.dll` (Approach 1 from the spec). M1+M2+M2.5 require no `engine_api_t` changes for the sim layer itself; one ABI bump for imgui debug-panel data hooks.
+- M1+M2+M2.5 plan: `docs/superpowers/plans/2026-05-04-immersive-sim-m1-m2-ai-substrate.md`
+- M7 design + skeleton: `docs/superpowers/plans/2026-05-14-phase8-m7-bespoke-level.md` and `id1/maps/m7_skeleton.map`
+- All sim code lives in `sdlquake/game/sim/` inside the hot-reloadable `game.dll` (Approach 1 from the spec).
+- `engine_api_t` ABI bumps in Phase 8: 16 → 17 (M3 added `button3`/`button4` in `entvars_t`), 17 → 18 (M5 added `Sample_Lightmap`).
+
+### Phase 8 milestones (2026-05-14)
+
+| M | Status | What it adds |
+|---|---|---|
+| M1 | ✅ | Stimulus bus + sense filter |
+| M2 | ✅ | AI FSM (IDLE/SUSPICIOUS/SEARCHING/COMBAT) with stand-and-sweep search |
+| M2.5 | ✅ | Navmesh bake + A* path-driven SEARCHING |
+| M3 | ✅ | `abilities.c`: Blink (hold-aim/release-commit, grate-pass) + Gust (cone push, prop kick + STIM_SOUND). `func_grate` entity. `+blink`/`+gust` cmds through new `clc_move` bits → `button3`/`button4`. q/f default binds. |
+| M4 | ✅ | `sim_wind.c`: voxel grid (≤64³ cells), semi-Lagrangian smoke advection, Gust impulse + clear, `info_wind_source` + `misc_smokegrenade` entities, `Wind_PathOcclusion` folded into AI sight LOS. |
+| M5 | ✅ | `sim_light.c`: `engine_api->Sample_Lightmap` (reuses `R_LightPoint`), `Light_TierAt` thresholds at 128, Gust extinguishes flammable lights via DLL-side override table. |
+| M6 | ✅ | `sim_retrofit.c`: id1 maps auto-get patrol routes from nearby navmesh points at level init. |
+| M7 | 🚧 skeleton | `id1/maps/m7_skeleton.map` exercises every Phase 8 system in one room; three-area layout + playtest is deferred content work. |
 
 ## Reference data
 
