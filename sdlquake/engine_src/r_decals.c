@@ -443,15 +443,54 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	float       u, v;
 	int         lu, lv, smax, tmax;
 	const decal_kernel_t *dk;
+	vec3_t      hit_buf;  // holds a swept hit point so pos can be re-aimed
 
 	if (!r_decals.value) return;
 	if (type < 0 || type >= DECAL_NUM_TYPES) return;
 
-	// TE_ impact positions are server trace endpoints — already on the surface
-	// plane within float precision. R_PointOnSurface_World has a 4-unit plane
-	// tolerance which handles the slop. Retracing would just whiff in 7
-	// directions from a point that's already touching the wall.
+	// Bullets / spikes: pos is the server trace endpoint, already on the
+	// surface plane — R_PointOnSurface_World's 4-unit tolerance handles it.
 	surf = R_PointOnSurface_World (pos, NULL);
+
+	// Explosions: pos is the missile origin at detonation time, which sits
+	// ~16-32 units off any wall because the missile has a bbox. If the direct
+	// surface lookup whiffs, sweep outward in 6 axis directions up to 64
+	// units to find the nearest world surface, then stamp on it.
+	if (!surf) {
+		static const float dirs[6][3] = {
+			{  1, 0, 0 }, { -1, 0, 0 },
+			{  0, 1, 0 }, {  0,-1, 0 },
+			{  0, 0, 1 }, {  0, 0,-1 },
+		};
+		float       best_len = 64.0f + 1.0f;
+		msurface_t *best     = NULL;
+		int         d;
+		for (d = 0; d < 6; d++) {
+			vec3_t      end;
+			trace_t     tr;
+			msurface_t *cand;
+			float       len;
+			end[0] = pos[0] + 64.0f * dirs[d][0];
+			end[1] = pos[1] + 64.0f * dirs[d][1];
+			end[2] = pos[2] + 64.0f * dirs[d][2];
+			tr = SV_Move (pos, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
+			if (tr.fraction >= 1.0f || tr.allsolid) continue;
+			len = tr.fraction * 64.0f;
+			if (len >= best_len) continue;
+			cand = R_PointOnSurface_World (tr.endpos, NULL);
+			if (!cand) continue;
+			best     = cand;
+			best_len = len;
+			hit_buf[0] = tr.endpos[0];
+			hit_buf[1] = tr.endpos[1];
+			hit_buf[2] = tr.endpos[2];
+		}
+		if (best) {
+			surf = best;
+			pos  = hit_buf;  // function-scope buffer keeps the hit alive
+		}
+	}
+
 	if (r_decals_debug.value) {
 		Con_Printf ("R_SpawnDecal: pos=%.2f %.2f %.2f type=%d surf=%p\n",
 			pos[0], pos[1], pos[2], (int)type, (void*)surf);
