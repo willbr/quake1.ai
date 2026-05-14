@@ -5,7 +5,8 @@ See docs/superpowers/specs/2026-05-13-decals-design.md.
 #include "quakedef.h"
 #include "r_local.h"
 
-static void R_DecalsTest_f (void);  /* forward decl — defined later in this file */
+static void R_DecalsTest_f (void);       /* forward decl — defined later in this file */
+static void R_DecalsTestGrid_f (void);   /* forward decl — defined later in this file */
 
 // Cvars (registered in R_DecalsInit).
 cvar_t r_decals                    = { "r_decals",                    "1", true };
@@ -26,6 +27,7 @@ void R_DecalsInit (void)
 	Cvar_RegisterVariable (&r_decals_bloodpool_growtime);
 	Cvar_RegisterVariable (&r_decals_debug);
 	Cmd_AddCommand ("r_decals_test", R_DecalsTest_f);
+	Cmd_AddCommand ("r_decals_test_grid", R_DecalsTestGrid_f);
 }
 
 // ---------------------------------------------------------------------------
@@ -453,8 +455,11 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 					if (s->flags & SURF_PLANEBACK) d = -d;
 					ad = d < 0 ? -d : d;
 					if (ad > 4.0f) continue;
-					// Same outward facing as primary (skip back-to-back coplanar faces)
-					if (pl != primary_plane) {
+					// Always check outward facing — a face sharing the same
+					// mplane_t pointer can still be the back-side of the wall
+					// (opposite SURF_PLANEBACK). Painting the back-side stains
+					// a hidden surface and looks like a gap on the visible one.
+					{
 						float nd = DotProduct(pl->normal, primary_plane->normal);
 						if (s->flags & SURF_PLANEBACK)        nd = -nd;
 						if (primary->flags & SURF_PLANEBACK)  nd = -nd;
@@ -567,6 +572,68 @@ static void R_DecalsTest_f (void)
 	Stain_PaintKernel (surf, lu, lv, -4096, -4096, -4096, K1x1_solid, 1, 1);
 	Con_Printf ("r_decals_test: single luxel black at (%d,%d) of surf %p at %.1f %.1f %.1f\n",
 		lu, lv, (void*)surf, tr.endpos[0], tr.endpos[1], tr.endpos[2]);
+}
+
+// Dev command: paint a 5x5 grid where every cell has a unique RGB delta.
+// Painted luxels show as colors that vary across the grid; any luxel inside
+// the grid footprint that renders as the gray base instead is a gap.
+// Requires r_lightmap 1 and r_coloredlight 1 for clean visualization.
+// Usage: r_decals_test_grid
+static void R_DecalsTestGrid_f (void)
+{
+	vec3_t      forward, right, up, end;
+	trace_t     tr;
+	msurface_t *primary;
+	mtexinfo_t *tex;
+	float       ulen2, vlen2;
+	vec3_t      step_u, step_v;
+	int         sx, sy, i;
+
+	AngleVectors (r_refdef.viewangles, forward, right, up);
+	(void)right; (void)up;
+	VectorMA (r_refdef.vieworg, 1024.0f, forward, end);
+
+	tr = SV_Move (r_refdef.vieworg, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
+	if (tr.fraction >= 1.0f) {
+		Con_Printf ("r_decals_test_grid: nothing in front\n");
+		return;
+	}
+
+	primary = R_PointOnSurface_World (tr.endpos, NULL, 4.0f);
+	if (!primary) {
+		Con_Printf ("r_decals_test_grid: no world surface at hit\n");
+		return;
+	}
+
+	tex = primary->texinfo;
+	ulen2 = tex->vecs[0][0]*tex->vecs[0][0] + tex->vecs[0][1]*tex->vecs[0][1] + tex->vecs[0][2]*tex->vecs[0][2];
+	vlen2 = tex->vecs[1][0]*tex->vecs[1][0] + tex->vecs[1][1]*tex->vecs[1][1] + tex->vecs[1][2]*tex->vecs[1][2];
+	if (ulen2 < 1e-6f || vlen2 < 1e-6f) return;
+	for (i = 0; i < 3; i++) {
+		step_u[i] = tex->vecs[0][i] * (16.0f / ulen2);
+		step_v[i] = tex->vecs[1][i] * (16.0f / vlen2);
+	}
+
+	// One 1x1 paint per cell with a unique (dr,dg,db) so each painted luxel
+	// has a distinguishable colour. Negative delta darkens; positive brightens.
+	// sx varies the red channel, sy varies the green, sx+sy varies blue.
+	for (sy = -2; sy <= 2; sy++) {
+		for (sx = -2; sx <= 2; sx++) {
+			vec3_t cell_world;
+			int    dr, dg, db;
+			cell_world[0] = tr.endpos[0] + sx * step_u[0] + sy * step_v[0];
+			cell_world[1] = tr.endpos[1] + sx * step_u[1] + sy * step_v[1];
+			cell_world[2] = tr.endpos[2] + sx * step_u[2] + sy * step_v[2];
+
+			dr = -800 + (sx + 2) * 400;  // -800, -400, 0, +400, +800
+			dg = -800 + (sy + 2) * 400;  // same range varying with sy
+			db = -400 + ((sx + sy) & 1) * 800;  // alternating dark/bright blue
+
+			Stain_PaintKernel_World (cell_world, primary, dr, dg, db, K1x1_solid, 1, 1);
+		}
+	}
+	Con_Printf ("r_decals_test_grid: painted 5x5 rainbow at %.1f %.1f %.1f\n",
+		tr.endpos[0], tr.endpos[1], tr.endpos[2]);
 }
 
 void R_SpawnDecal (vec3_t pos, decal_type_t type)
