@@ -52,6 +52,10 @@ typedef int mcp_raw_sock_t;
 #include "editor.h"            /* Editor_IsOpen */
 #include "edit_history.h"      /* History_Push */
 
+// From platform/vid_sdl.c — defined alongside the other VID helpers.
+extern int VID_SaveScreenshotPNG(const char *path);
+extern int VID_SamplePixel(int x, int y, byte *r, byte *g, byte *b, byte *idx);
+
 int mcp_active = 0;
 
 // ---------------------------------------------------------------------------
@@ -585,6 +589,81 @@ static void tool_console_tail(const char *id_json, int lines)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: screenshot -- save the current framebuffer as a PNG
+// ---------------------------------------------------------------------------
+
+#include <sys/stat.h>
+#ifdef _WIN32
+#  include <direct.h>
+#  define mcp_mkdir(p) _mkdir(p)
+#else
+#  define mcp_mkdir(p) mkdir((p), 0755)
+#endif
+
+static int mcp_next_screenshot_index(void)
+{
+    // Find the lowest free NNNN such that screenshots/shot_NNNN.png does
+    // not exist. Linear scan from 1, cap at 9999.
+    for (int i = 1; i <= 9999; i++) {
+        char path[256];
+        snprintf(path, sizeof(path), "screenshots/shot_%04d.png", i);
+        struct stat st;
+        if (stat(path, &st) != 0) return i;
+    }
+    return 0;
+}
+
+static void tool_screenshot(const char *id_json, const char *args)
+{
+    char path[512] = {0};
+    if (args) json_str(args, "path", path, sizeof(path));
+
+    if (!path[0])
+    {
+        mcp_mkdir("screenshots");   /* ignore errors -- may already exist */
+        int n = mcp_next_screenshot_index();
+        if (n == 0) { mcp_error(id_json, -32603, "screenshot dir full"); return; }
+        snprintf(path, sizeof(path), "screenshots/shot_%04d.png", n);
+    }
+
+    if (!VID_SaveScreenshotPNG(path))
+    {
+        mcp_error(id_json, -32603, "screenshot write failed");
+        return;
+    }
+
+    /* Resolve to an absolute path so the client can Read it directly. */
+    char abspath[1024];
+#ifdef _WIN32
+    if (!_fullpath(abspath, path, sizeof(abspath)))
+        strncpy(abspath, path, sizeof(abspath) - 1);
+#else
+    if (!realpath(path, abspath))
+        strncpy(abspath, path, sizeof(abspath) - 1);
+#endif
+    abspath[sizeof(abspath) - 1] = '\0';
+
+    extern viddef_t vid;
+    char raw[1024];
+    snprintf(raw, sizeof(raw),
+        "{\"path\":\"%s\",\"width\":%u,\"height\":%u}",
+        abspath, vid.width, vid.height);
+
+    /* Backslashes in the path must be escaped for JSON. */
+    char escaped[2048];
+    char *d = escaped;
+    char *end = escaped + sizeof(escaped) - 1;
+    const char *s = raw;
+    while (*s && d < end - 2) {
+        if (*s == '\\')      { *d++ = '\\'; *d++ = '\\'; s++; }
+        else if (*s == '"')  { *d++ = '\\'; *d++ = '"';  s++; }
+        else                 { *d++ = *s++; }
+    }
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
 // Tool: editor_get_scene — JSON dump of the current edit_scene
 // ---------------------------------------------------------------------------
 
@@ -795,6 +874,13 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
            "\"ent\":{\"type\":\"integer\"}," \
            "\"brush\":{\"type\":\"integer\",\"description\":\"Brush index, or -1 for point entity\"}}," \
          "\"required\":[\"ent\"]}}" \
+      "," \
+      "{\"name\":\"screenshot\"," \
+       "\"description\":\"Save the current framebuffer as a PNG. Returns the absolute path. Default location is screenshots/shot_NNNN.png\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"path\":{\"type\":\"string\",\"description\":\"Optional output path (relative or absolute)\"}}," \
+         "\"required\":[]}}" \
     "]}"
 
 // ---------------------------------------------------------------------------
@@ -894,6 +980,11 @@ static void mcp_dispatch(const char *line)
         {
             const char *args = strstr(line, "\"arguments\":");
             tool_editor_select(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "screenshot") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_screenshot(id_json, args ? args : "");
         }
         else
         {
