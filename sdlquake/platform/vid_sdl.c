@@ -574,14 +574,18 @@ int VID_SaveScreenshotPNG(const char *path)
     unsigned char *rgb = (unsigned char *)malloc((size_t)w * (size_t)h * 3);
     if (!rgb) return 0;
 
+    /* d_8to24table is packed as 0xAARRGGBB (see build_palette_slot); so the
+       red byte sits at bits 16..23, green at 8..15, blue at 0..7. Earlier
+       this routine wrote (c>>0) into R and (c>>16) into B, silently
+       swapping R/B in every screenshot. */
     for (int y = 0; y < h; y++) {
         const byte    *src = vid.buffer + y * rowbytes;
         unsigned char *dst = rgb        + y * w * 3;
         for (int x = 0; x < w; x++) {
             unsigned c = d_8to24table[src[x]];
-            dst[x*3 + 0] = (unsigned char)(c >>  0);  /* R */
+            dst[x*3 + 0] = (unsigned char)(c >> 16);  /* R */
             dst[x*3 + 1] = (unsigned char)(c >>  8);  /* G */
-            dst[x*3 + 2] = (unsigned char)(c >> 16);  /* B */
+            dst[x*3 + 2] = (unsigned char)(c >>  0);  /* B */
         }
     }
 
@@ -603,9 +607,10 @@ int VID_SamplePixel(int x, int y, byte *r, byte *g, byte *b, byte *idx)
 
     byte i = vid.buffer[y * (int)vid.rowbytes + x];
     unsigned c = d_8to24table[i];
-    if (r)   *r   = (byte)(c >>  0);
+    /* d_8to24table is 0xAARRGGBB; pulling R from bits 16..23, not bits 0..7. */
+    if (r)   *r   = (byte)(c >> 16);
     if (g)   *g   = (byte)(c >>  8);
-    if (b)   *b   = (byte)(c >> 16);
+    if (b)   *b   = (byte)(c >>  0);
     if (idx) *idx = i;
     return 1;
 }
