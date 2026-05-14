@@ -184,7 +184,12 @@ void qbsp_portbuf_append(const char *src, int len)
         int cap = qbsp_portbuf_cap ? qbsp_portbuf_cap : (1 << 16);
         while (cap < need) cap *= 2;
         qbsp_portbuf = (char *)realloc(qbsp_portbuf, (size_t)cap);
-        if (!qbsp_portbuf) Con_Printf("qbsp_portbuf: out of memory\n");
+        if (!qbsp_portbuf) {
+            Con_Printf("qbsp_portbuf: out of memory\n");
+            qbsp_portbuf_size = 0;
+            qbsp_portbuf_cap  = 0;
+            return;
+        }
         qbsp_portbuf_cap = cap;
     }
     memcpy(qbsp_portbuf + qbsp_portbuf_size, src, (size_t)len);
