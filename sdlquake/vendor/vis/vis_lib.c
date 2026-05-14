@@ -103,6 +103,7 @@ int vis_compile_in_place(const char *prt_path, const vis_options_t *opts)
     qbsp_err_msg[0] = '\0';
     if (setjmp(err_buf) != 0) {
         Con_Printf("vis: %s\n", qbsp_err_msg);
+        if (uncompressed) { free(uncompressed); uncompressed = NULL; }
         qbsp_err_jmp = NULL;
         return 1;
     }
@@ -161,6 +162,7 @@ int vis_bench(const char *bsp_path, const char *prt_path)
     qbsp_err_msg[0] = '\0';
     if (setjmp(err_buf) != 0) {
         Con_Printf("vis_bench: %s\n", qbsp_err_msg);
+        if (uncompressed) { free(uncompressed); uncompressed = NULL; }
         qbsp_err_jmp = NULL;
         return 1;
     }
