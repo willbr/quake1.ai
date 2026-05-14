@@ -231,6 +231,36 @@ pub fn build(b: *std.Build) void {
         .flags = light_c_flags,
     });
 
+    // Vendored id-VIS (id Software, GPLv2). Third member of the in-process
+    // compile trio. Caller invokes qbsp_compile_to_memory first (which
+    // leaves dfaces / dplanes / dleafs / etc. populated and writes a .prt
+    // alongside the destname), then vis_compile_in_place to fill dvisdata
+    // from that .prt, then light_compile_to_memory to bake lighting and
+    // re-serialise the final BSP. VIS's same-named types and globals
+    // (winding_t / plane_t / portal_t / leaf_t / numportals / portals / ...)
+    // collide with qbsp's; vis_namespace.h prefixes them.
+    const vis_c_flags: []const []const u8 = &.{
+        "-DWIN32",
+        "-DDOUBLEVEC_T",
+        "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+        "-include", "sdlquake/vendor/vis/vis_namespace.h",
+        "-fno-strict-aliasing",
+        "-fwrapv",
+        "-std=gnu89",
+        "-fcommon",
+        "-w",
+        "-fno-sanitize=undefined",
+    };
+    mod.addCSourceFiles(.{
+        .files = &.{
+            "sdlquake/vendor/vis/vis.c",
+            "sdlquake/vendor/vis/flow.c",
+            "sdlquake/vendor/vis/soundpvs.c",
+            "sdlquake/vendor/vis/vis_lib.c",
+        },
+        .flags = vis_c_flags,
+    });
+
     // Dear ImGui core + SDL3/SDL_Renderer backends + our C++ bridge (no logic)
     mod.addCSourceFiles(.{
         .files = &.{
