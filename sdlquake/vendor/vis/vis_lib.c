@@ -113,6 +113,7 @@ int vis_compile_in_place(const vis_options_t *opts)
     if (setjmp(err_buf) != 0) {
         Con_Printf("vis: %s\n", qbsp_err_msg);
         if (uncompressed) { free(uncompressed); uncompressed = NULL; }
+        vis_track_free_all();
         qbsp_err_jmp        = NULL;
         qbsp_portbuf_active = 0;
         qbsp_portbuf_reset();

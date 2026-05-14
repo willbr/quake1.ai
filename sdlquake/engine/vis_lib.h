@@ -18,13 +18,14 @@
  * memory branch and frees on exit. The disk .prt sidecar has been
  * removed from this pipeline.
  *
- * v1 caller invariants (M1):
- *   - One vis_compile_in_place call per process. Globals are not reset
- *     between calls; a second call may produce wrong output or crash.
+ * Caller invariants:
  *   - qbsp_compile_to_memory must have been called immediately before
  *     so qbsp_portbuf is populated. vis clears the portbuf on exit.
+ *   - Repeated calls in one process are supported (M2): vis_reset_state
+ *     clears all per-call globals and frees per-portal mightsee/visbits.
  *   - On failure, returns non-zero and prints via Con_Printf; the BSP
- *     globals are left in a likely-corrupt state. Caller should discard.
+ *     globals are left in a likely-corrupt state. Caller should discard
+ *     and call qbsp_compile_to_memory again before retrying.
  */
 
 #ifndef VIS_LIB_H
@@ -59,8 +60,6 @@ int vis_compile_in_place(const vis_options_t *opts);
  * the vis pass, times each phase, and discards the output. Used by the
  * `vis_bench` console command to size the cost of a full re-vis on
  * authoring-scale maps. Returns 0 on success.
- *
- * Same single-call caveat as vis_compile_in_place.
  */
 int vis_bench(const char *bsp_path, const char *prt_path);
 
