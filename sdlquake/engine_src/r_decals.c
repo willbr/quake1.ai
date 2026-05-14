@@ -249,11 +249,18 @@ void R_DecalsFrame (void)
 				dsq = gx*gx + gy*gy;
 				if (dsq < r_inner_sq || dsq > r_outer_sq) continue;
 				idx = (v * smax + u) * 3;
-				nr  = st->rgb[idx + 0] + 80;
-				ng  = st->rgb[idx + 1] - 60;
-				nb  = st->rgb[idx + 2] - 60;
+				// Blood guarantees a red tint regardless of previous stains:
+				// floor R at +200 (positive boost), ceiling G/B at −100 (dim).
+				// Pure accumulation would let a prior scorch's negative R
+				// dominate and turn the pool black.
+				nr  = st->rgb[idx + 0] + 200;
+				if (nr < 200)   nr = 200;
 				if (nr > 4096)  nr = 4096;
+				ng  = st->rgb[idx + 1] - 100;
+				if (ng > -100)  ng = -100;
 				if (ng < -4096) ng = -4096;
+				nb  = st->rgb[idx + 2] - 100;
+				if (nb > -100)  nb = -100;
 				if (nb < -4096) nb = -4096;
 				st->rgb[idx + 0] = (short)nr;
 				st->rgb[idx + 1] = (short)ng;
