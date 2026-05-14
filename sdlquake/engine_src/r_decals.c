@@ -291,8 +291,8 @@ typedef struct {
 } decal_kernel_t;
 
 static const decal_kernel_t decal_kernels[DECAL_NUM_TYPES] = {
-	/* DECAL_BULLET      */ { K3x3, 3,  16, -40, -40, -40 },
-	/* DECAL_SPIKE       */ { K3x3, 3,  16, -40, -40, -40 },
+	/* DECAL_BULLET      */ { K1x1_solid, 1,  1, -4096, -4096, -4096 },
+	/* DECAL_SPIKE       */ { K1x1_solid, 1,  1, -4096, -4096, -4096 },
 	/* DECAL_BLOOD_SPLAT */ { K3x3, 3,  16, +60, -40, -40 },
 	/* DECAL_SCORCH      */ { K5x5, 5, 256, -80, -80, -80 },
 	/* DECAL_LIGHTNING   */ { K3x3, 3,  16, -50, -60, -40 },
