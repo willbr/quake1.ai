@@ -358,7 +358,7 @@ static void Stain_AddCell (msurface_t *target, vec3_t cell_world,
 	tlv = ((int)floor(v) - target->texturemins[1]) >> 4;
 	tsmax = (target->extents[0] >> 4) + 1;
 	ttmax = (target->extents[1] >> 4) + 1;
-	if (r_decals_debug.value) {
+	if (r_decals_debug.value >= 2) {
 		Con_Printf ("    -> surf=%p uv=%.1f %.1f tlu=%d tlv=%d sz=%dx%d tmins=%d %d ext=%d %d\n",
 			(void*)target, u, v, tlu, tlv, tsmax, ttmax,
 			(int)target->texturemins[0], (int)target->texturemins[1],
@@ -445,11 +445,14 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 					float       d, ad, u, v;
 
 					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB | SURF_DRAWTILED)) continue;
-					// Same plane (allow loose 24-unit tolerance for BSP-split sub-faces)
+					// Tight 4-unit plane tolerance: only strict coplanar
+					// faces match. Looser tolerances paint on recessed /
+					// offset walls that are visually hidden behind the
+					// impact wall's edge, creating apparent gaps.
 					d  = DotProduct(cell_world, pl->normal) - pl->dist;
 					if (s->flags & SURF_PLANEBACK) d = -d;
 					ad = d < 0 ? -d : d;
-					if (ad > 24.0f) continue;
+					if (ad > 4.0f) continue;
 					// Same outward facing as primary (skip back-to-back coplanar faces)
 					if (pl != primary_plane) {
 						float nd = DotProduct(pl->normal, primary_plane->normal);
@@ -468,7 +471,7 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 					painted++;
 				}
 
-				if (r_decals_debug.value) {
+				if (r_decals_debug.value >= 2) {
 					Con_Printf ("  cell sx=%d sy=%d w=%d painted=%d at %.1f %.1f %.1f\n",
 						sx, sy, w, painted,
 						cell_world[0], cell_world[1], cell_world[2]);
