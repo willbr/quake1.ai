@@ -2,15 +2,13 @@
 
 ## Next
 
-* review viz
-* review `func_detail`
 * light options
     * dirt debug
     * ambient occlusion
     * phong shading
     * shadows
+    * radiosity
 
-* hide textures
 * 3 clicks to add a cluck, draw the plane then add height
 
 ## Rendering & visuals
