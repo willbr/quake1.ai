@@ -93,6 +93,8 @@
 #define pw                 vis_pw
 #define prl                vis_prl
 #define SurfaceBBox        vis_SurfaceBBox
+#define GetNextPortal      vis_GetNextPortal
+#define LeafThread         vis_LeafThread
 
 /* vis.c's old main is renamed and never called — vis_compile_in_place is
  * the real entry point. The rename also keeps it from colliding with
