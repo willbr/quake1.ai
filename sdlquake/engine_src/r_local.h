@@ -67,6 +67,7 @@ extern cvar_t	r_drawentities;
 extern cvar_t	r_aliasstats;
 extern cvar_t	r_dspeeds;
 extern cvar_t	r_drawflat;
+extern cvar_t	r_lightmap;
 extern cvar_t	r_ambient;
 extern cvar_t	r_reportsurfout;
 extern cvar_t	r_maxsurfs;

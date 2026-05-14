@@ -443,8 +443,22 @@ void R_DrawSurface (void)
 	surfrowbytes = r_drawsurf.rowbytes;
 
 	mt = r_drawsurf.texture;
-	
+
 	r_source = (byte *)mt + mt->offsets[r_drawsurf.surfmip];
+
+	// r_lightmap: replace texel sampling with a uniform mid-gray so the
+	// lightmap (including decal stains) is visible against a neutral base.
+	// 256*256 covers the largest possible texture; uniform fill means UV
+	// wrap is a no-op (every sample returns the same byte).
+	if (r_lightmap.value) {
+		static byte r_lightmap_const[256 * 256];
+		static qboolean r_lightmap_const_init = false;
+		if (!r_lightmap_const_init) {
+			memset (r_lightmap_const, 15, sizeof(r_lightmap_const));
+			r_lightmap_const_init = true;
+		}
+		r_source = r_lightmap_const;
+	}
 	
 // the fractional light values should range from 0 to (VID_GRADES - 1) << 16
 // from a source range of 0 - 255
