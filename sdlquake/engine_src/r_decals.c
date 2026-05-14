@@ -418,6 +418,7 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 			for (kx = 0; kx < ksize; kx++) {
 				vec3_t cell_world;
 				int    si;
+				int    painted = 0;
 
 				w = kernel[ky * ksize + kx];
 				if (!w) continue;
@@ -458,6 +459,13 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 					if (v < s->texturemins[1] || v > s->texturemins[1] + s->extents[1]) continue;
 
 					Stain_AddCell (s, cell_world, w, dr, dg, db, knorm);
+					painted++;
+				}
+
+				if (r_decals_debug.value) {
+					Con_Printf ("  cell sx=%d sy=%d w=%d painted=%d at %.1f %.1f %.1f\n",
+						sx, sy, w, painted,
+						cell_world[0], cell_world[1], cell_world[2]);
 				}
 			}
 		}
