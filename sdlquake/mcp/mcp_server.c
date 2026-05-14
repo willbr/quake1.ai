@@ -697,6 +697,66 @@ static void tool_sample_pixel(const char *id_json, const char *args)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: teleport -- move the player edict to a new origin and (optionally)
+// orient it. Sets fixangle so the engine pushes a svc_setangle to the
+// client on the next snapshot.
+// ---------------------------------------------------------------------------
+
+static void tool_teleport(const char *id_json, const char *args)
+{
+    extern server_t sv;
+    extern int      pr_edict_size;
+
+    if (!sv.active || sv.num_edicts < 2 || pr_edict_size <= 0)
+    {
+        mcp_error(id_json, -32602, "no active server");
+        return;
+    }
+
+    edict_t *player = (edict_t *)((byte *)sv.edicts + pr_edict_size);
+    if (player->free)
+    {
+        mcp_error(id_json, -32602, "no player edict");
+        return;
+    }
+
+    float origin[3] = {0,0,0};
+    if (!args || !json_vec3(args, "origin", origin))
+    {
+        mcp_error(id_json, -32602, "missing origin");
+        return;
+    }
+
+    float angles[3];
+    angles[0] = player->v.angles[0];
+    angles[1] = player->v.angles[1];
+    angles[2] = player->v.angles[2];
+    if (args) json_vec3(args, "angles", angles);   /* optional */
+
+    player->v.origin[0] = origin[0];
+    player->v.origin[1] = origin[1];
+    player->v.origin[2] = origin[2];
+    player->v.angles[0] = angles[0];
+    player->v.angles[1] = angles[1];
+    player->v.angles[2] = angles[2];
+    player->v.fixangle  = 1;
+    SV_LinkEdict(player, false);
+
+    char raw[160];
+    snprintf(raw, sizeof(raw),
+        "{\"origin\":[%.1f,%.1f,%.1f],\"angles\":[%.1f,%.1f,%.1f]}",
+        origin[0], origin[1], origin[2],
+        angles[0], angles[1], angles[2]);
+
+    char escaped[256];
+    char *d = escaped;
+    char *end = escaped + sizeof(escaped) - 1;
+    d = json_escape_append(d, end, raw);
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
 // Tool: editor_get_scene — JSON dump of the current edit_scene
 // ---------------------------------------------------------------------------
 
@@ -922,6 +982,14 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
            "\"x\":{\"type\":\"integer\",\"description\":\"0..vid.width-1\"}," \
            "\"y\":{\"type\":\"integer\",\"description\":\"0..vid.height-1\"}}," \
          "\"required\":[\"x\",\"y\"]}}" \
+      "," \
+      "{\"name\":\"teleport\"," \
+       "\"description\":\"Move the player edict to a new origin (and optionally new view angles). Requires an active single-player server. Takes effect on the next frame\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"origin\":{\"type\":\"array\",\"items\":{\"type\":\"number\"},\"minItems\":3,\"maxItems\":3,\"description\":\"[x,y,z] world units\"}," \
+           "\"angles\":{\"type\":\"array\",\"items\":{\"type\":\"number\"},\"minItems\":3,\"maxItems\":3,\"description\":\"[pitch,yaw,roll] degrees (optional)\"}}," \
+         "\"required\":[\"origin\"]}}" \
     "]}"
 
 // ---------------------------------------------------------------------------
@@ -1031,6 +1099,11 @@ static void mcp_dispatch(const char *line)
         {
             const char *args = strstr(line, "\"arguments\":");
             tool_sample_pixel(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "teleport") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_teleport(id_json, args ? args : "");
         }
         else
         {
