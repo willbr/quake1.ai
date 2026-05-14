@@ -14,6 +14,7 @@ cvar_t r_decals_intensity          = { "r_decals_intensity",          "1.0", tru
 cvar_t r_decals_bloodpool          = { "r_decals_bloodpool",          "1", true };
 cvar_t r_decals_bloodpool_radius   = { "r_decals_bloodpool_radius",   "24", true };
 cvar_t r_decals_bloodpool_growtime = { "r_decals_bloodpool_growtime", "3.0", true };
+cvar_t r_decals_debug              = { "r_decals_debug",              "0", false };
 
 void R_DecalsInit (void)
 {
@@ -23,6 +24,7 @@ void R_DecalsInit (void)
 	Cvar_RegisterVariable (&r_decals_bloodpool);
 	Cvar_RegisterVariable (&r_decals_bloodpool_radius);
 	Cvar_RegisterVariable (&r_decals_bloodpool_growtime);
+	Cvar_RegisterVariable (&r_decals_debug);
 	Cmd_AddCommand ("r_decals_test", R_DecalsTest_f);
 }
 
@@ -424,6 +426,10 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	// tolerance which handles the slop. Retracing would just whiff in 7
 	// directions from a point that's already touching the wall.
 	surf = R_PointOnSurface_World (pos, NULL);
+	if (r_decals_debug.value) {
+		Con_Printf ("R_SpawnDecal: pos=%.2f %.2f %.2f type=%d surf=%p\n",
+			pos[0], pos[1], pos[2], (int)type, (void*)surf);
+	}
 	if (!surf) return;
 
 	tex = surf->texinfo;
@@ -433,10 +439,23 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	lv = ((int)floor(v) - surf->texturemins[1]) >> 4;
 	smax = (surf->extents[0] >> 4) + 1;
 	tmax = (surf->extents[1] >> 4) + 1;
-	if (lu < 0 || lu >= smax || lv < 0 || lv >= tmax) return;
+	if (r_decals_debug.value) {
+		Con_Printf ("  uv=%.2f %.2f lu=%d lv=%d smax=%d tmax=%d tmins=%d %d ext=%d %d\n",
+			u, v, lu, lv, smax, tmax,
+			(int)surf->texturemins[0], (int)surf->texturemins[1],
+			(int)surf->extents[0], (int)surf->extents[1]);
+	}
+	if (lu < 0 || lu >= smax || lv < 0 || lv >= tmax) {
+		if (r_decals_debug.value) Con_Printf ("  rejected: luxel out of bounds\n");
+		return;
+	}
 
 	dk = &decal_kernels[type];
 	Stain_PaintKernel (surf, lu, lv, dk->dr, dk->dg, dk->db, dk->k, dk->ksize, dk->knorm);
+	if (r_decals_debug.value) {
+		Con_Printf ("  painted kernel %d (dr=%d dg=%d db=%d)\n",
+			dk->ksize, dk->dr, dk->dg, dk->db);
+	}
 }
 
 void R_SpawnBloodPool (vec3_t origin)

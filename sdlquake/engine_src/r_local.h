@@ -379,6 +379,7 @@ extern cvar_t r_decals_intensity;
 extern cvar_t r_decals_bloodpool;
 extern cvar_t r_decals_bloodpool_radius;
 extern cvar_t r_decals_bloodpool_growtime;
+extern cvar_t r_decals_debug;
 
 void R_DecalsInit (void);          // called once from R_Init (registers cvars + commands)
 void R_DecalsClear (void);         // called from R_NewMap (zero stain pool, reset bloodpools)
