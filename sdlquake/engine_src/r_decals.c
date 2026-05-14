@@ -338,6 +338,94 @@ static void Stain_PaintKernel (msurface_t *surf, int lu, int lv,
 	st->last_touched_frame = r_framecount;
 }
 
+// Forward decl: definition lives below.
+static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal);
+
+// Paint a kernel whose centre is at world-space point `center` and whose UV
+// basis comes from `primary`. Each cell is converted to world coordinates by
+// stepping along the primary surface's texture axes, then R_PointOnSurface_World
+// dispatches the paint to whichever coplanar world surface actually contains
+// that point. Cells over no surface (an open void past a face edge) drop.
+// This is what lets a scorch bleed across coplanar face boundaries.
+static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
+                                     int dr, int dg, int db,
+                                     const int *kernel, int ksize, int knorm)
+{
+	mtexinfo_t *tex = primary->texinfo;
+	vec3_t      step_u, step_v;
+	float       ulen2, vlen2;
+	int         half, kx, ky, w;
+	int         sx, sy;
+	int         i;
+
+	ulen2 = tex->vecs[0][0]*tex->vecs[0][0]
+	      + tex->vecs[0][1]*tex->vecs[0][1]
+	      + tex->vecs[0][2]*tex->vecs[0][2];
+	vlen2 = tex->vecs[1][0]*tex->vecs[1][0]
+	      + tex->vecs[1][1]*tex->vecs[1][1]
+	      + tex->vecs[1][2]*tex->vecs[1][2];
+	if (ulen2 < 1e-6f || vlen2 < 1e-6f) return;
+
+	// Inverse of the world→UV projection: world step per 16-UV-unit (luxel).
+	for (i = 0; i < 3; i++) {
+		step_u[i] = tex->vecs[0][i] * (16.0f / ulen2);
+		step_v[i] = tex->vecs[1][i] * (16.0f / vlen2);
+	}
+
+	half = ksize / 2;
+	for (ky = 0; ky < ksize; ky++) {
+		sy = ky - half;
+		for (kx = 0; kx < ksize; kx++) {
+			vec3_t      cell_world;
+			msurface_t *target;
+			mtexinfo_t *ttex;
+			stain_t    *st;
+			float       u, v;
+			int         tlu, tlv, tsmax, ttmax, idx, nr, ng, nb;
+
+			w = kernel[ky * ksize + kx];
+			if (!w) continue;
+			sx = kx - half;
+
+			cell_world[0] = center[0] + sx * step_u[0] + sy * step_v[0];
+			cell_world[1] = center[1] + sx * step_u[1] + sy * step_v[1];
+			cell_world[2] = center[2] + sx * step_u[2] + sy * step_v[2];
+
+			// Find whichever coplanar world surface this cell lands on.
+			// R_PointOnSurface_World's plane tolerance + UV-extent check
+			// naturally filters to faces that share primary's plane and
+			// physically contain this point.
+			target = R_PointOnSurface_World (cell_world, NULL);
+			if (!target) continue;
+
+			ttex = target->texinfo;
+			u = DotProduct(cell_world, ttex->vecs[0]) + ttex->vecs[0][3];
+			v = DotProduct(cell_world, ttex->vecs[1]) + ttex->vecs[1][3];
+			tlu = ((int)floor(u) - target->texturemins[0]) >> 4;
+			tlv = ((int)floor(v) - target->texturemins[1]) >> 4;
+			tsmax = (target->extents[0] >> 4) + 1;
+			ttmax = (target->extents[1] >> 4) + 1;
+			if (tlu < 0 || tlu >= tsmax || tlv < 0 || tlv >= ttmax) continue;
+
+			st = Stain_GetOrAlloc (target);
+			if (!st) continue;
+
+			idx = (tlv * st->smax + tlu) * 3;
+			nr = st->rgb[idx + 0] + (dr * w) / knorm;
+			ng = st->rgb[idx + 1] + (dg * w) / knorm;
+			nb = st->rgb[idx + 2] + (db * w) / knorm;
+			if (nr < -4096) nr = -4096; else if (nr > 4096) nr = 4096;
+			if (ng < -4096) ng = -4096; else if (ng > 4096) ng = 4096;
+			if (nb < -4096) nb = -4096; else if (nb > 4096) nb = 4096;
+			st->rgb[idx + 0] = (short)nr;
+			st->rgb[idx + 1] = (short)ng;
+			st->rgb[idx + 2] = (short)nb;
+			st->generation++;
+			st->last_touched_frame = r_framecount;
+		}
+	}
+}
+
 // Walk the world BSP to find the surface that point P lies on (or near).
 // Uses the surface plane and a small tolerance. Returns NULL if no match.
 static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal)
@@ -429,9 +517,6 @@ static void R_DecalsTest_f (void)
 void R_SpawnDecal (vec3_t pos, decal_type_t type)
 {
 	msurface_t *surf;
-	mtexinfo_t *tex;
-	float       u, v;
-	int         lu, lv, smax, tmax;
 	const decal_kernel_t *dk;
 	vec3_t      hit_buf;  // holds a swept hit point so pos can be re-aimed
 
@@ -487,26 +572,8 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	}
 	if (!surf) return;
 
-	tex = surf->texinfo;
-	u = DotProduct(pos, tex->vecs[0]) + tex->vecs[0][3];
-	v = DotProduct(pos, tex->vecs[1]) + tex->vecs[1][3];
-	lu = ((int)floor(u) - surf->texturemins[0]) >> 4;
-	lv = ((int)floor(v) - surf->texturemins[1]) >> 4;
-	smax = (surf->extents[0] >> 4) + 1;
-	tmax = (surf->extents[1] >> 4) + 1;
-	if (r_decals_debug.value) {
-		Con_Printf ("  uv=%.2f %.2f lu=%d lv=%d smax=%d tmax=%d tmins=%d %d ext=%d %d\n",
-			u, v, lu, lv, smax, tmax,
-			(int)surf->texturemins[0], (int)surf->texturemins[1],
-			(int)surf->extents[0], (int)surf->extents[1]);
-	}
-	if (lu < 0 || lu >= smax || lv < 0 || lv >= tmax) {
-		if (r_decals_debug.value) Con_Printf ("  rejected: luxel out of bounds\n");
-		return;
-	}
-
 	dk = &decal_kernels[type];
-	Stain_PaintKernel (surf, lu, lv, dk->dr, dk->dg, dk->db, dk->k, dk->ksize, dk->knorm);
+	Stain_PaintKernel_World (pos, surf, dk->dr, dk->dg, dk->db, dk->k, dk->ksize, dk->knorm);
 	if (r_decals_debug.value) {
 		Con_Printf ("  painted kernel %d (dr=%d dg=%d db=%d)\n",
 			dk->ksize, dk->dr, dk->dg, dk->db);
