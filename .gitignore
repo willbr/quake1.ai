@@ -30,3 +30,4 @@ id1/maps/start.map
 # light compilers; pair with a .bsp and regenerate per bake).
 id1/maps/*.lit
 id1/rgbtable.lmp
+screenshots/
