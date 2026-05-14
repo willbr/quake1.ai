@@ -265,19 +265,12 @@ void R_BuildLightMap (void)
 	if (surf->dlightframe == r_framecount)
 		R_AddDynamicLights ();
 
-	// Stain layer (decals). Mono path uses Rec.601 luminance of the RGB delta.
-	if (surf->stain) {
-		short *s = surf->stain->rgb;
-		float kscale = r_decals_intensity.value;
-		int   ks    = (int)(kscale * 256.0f);  // pre-scale into 8.8
-		for (i = 0; i < size; i++) {
-			int dy = (3 * s[i*3 + 0] + 6 * s[i*3 + 1] + 1 * s[i*3 + 2]) / 10;
-			int b  = (int)blocklights[i] + dy * ks;
-			if (b < 0) b = 0;
-			blocklights[i] = (unsigned)b;
-		}
-		surf->stain->last_touched_frame = r_framecount;
-	}
+	/* Stain (decal) layer is NOT applied here. Mono lightmap collapses RGB
+	   deltas into a single luminance channel, which is why decals used to
+	   show as colourless dark patches. Chroma now lives in the post-cache
+	   overlay (R_OverlayStain), run from R_DrawSurface after the writer
+	   fills the cache — so decals carry colour even on the mono path and
+	   even when r_fullbright is on. */
 
 // bound, invert, and shift
 	for (i=0 ; i<size ; i++)
@@ -346,24 +339,10 @@ void R_BuildLightMap_RGB (void)
 	if (surf->dlightframe == r_framecount)
 		R_AddDynamicLights_RGB ();
 
-	// Stain layer (decals). Signed int16 deltas in luxel space; applied in 8.8 fixed-point.
-	if (surf->stain) {
-		short *s = surf->stain->rgb;
-		float kscale = r_decals_intensity.value;
-		int   ks    = (int)(kscale * 256.0f);  // pre-scale into 8.8
-		for (i = 0; i < size; i++) {
-			int br = (int)blocklights_rgb[i*3 + 0] + ((int)s[i*3 + 0] * ks);
-			int bg = (int)blocklights_rgb[i*3 + 1] + ((int)s[i*3 + 1] * ks);
-			int bb = (int)blocklights_rgb[i*3 + 2] + ((int)s[i*3 + 2] * ks);
-			if (br < 0) br = 0;
-			if (bg < 0) bg = 0;
-			if (bb < 0) bb = 0;
-			blocklights_rgb[i*3 + 0] = (unsigned)br;
-			blocklights_rgb[i*3 + 1] = (unsigned)bg;
-			blocklights_rgb[i*3 + 2] = (unsigned)bb;
-		}
-		surf->stain->last_touched_frame = r_framecount;
-	}
+	/* Stain (decal) layer is applied as a post-pass in R_OverlayStain after
+	   the writer fills the cache, not here. See the matching note in the
+	   mono R_BuildLightMap. Keeps decal chroma identical across mono / RGB
+	   / fullbright paths. */
 
 	/* RGB path is multiplicative (light_int * basepal[tex]), not LUT-indexed
 	   like mono — so we do NOT invert. Shift one bit less than the natural
@@ -412,6 +391,113 @@ texture_t *R_TextureAnimation (texture_t *base)
 	}
 
 	return base;
+}
+
+
+/*
+===============
+R_OverlayStain
+
+Blend the per-luxel stain RGB delta onto the rendered palette indices
+in the surface cache. Runs after the writer (mono or RGB) has filled
+r_drawsurf.surfdat, so the base lighting math is untouched and decal
+chroma appears uniformly across mono / RGB / fullbright paths.
+
+Per-pixel: bilinear-interpolate the stain's 4 corner luxels, scale by
+r_decals_intensity, add to basepal_*[base_idx], clamp 0..255, quantise
+6 bits per channel, look up nearest palette in rgbtable[].
+===============
+*/
+static void R_OverlayStain (void)
+{
+	msurface_t *surf;
+	stain_t    *st;
+	byte       *dest;
+	int         w, h;
+	int         mip, shift, mask;
+	int         ks;
+	int         px, py;
+
+	surf = r_drawsurf.surf;
+	if (!surf->stain) return;
+	st = surf->stain;
+	ks = (int)(r_decals_intensity.value * 256.0f);
+	if (ks == 0) return;
+
+	dest  = (byte *)r_drawsurf.surfdat;
+	w     = r_drawsurf.surfwidth;
+	h     = r_drawsurf.surfheight;
+	mip   = r_drawsurf.surfmip;
+	shift = 4 - mip;
+	if (shift < 1) shift = 1;
+	mask  = (1 << shift) - 1;
+
+	for (py = 0; py < h; py++)
+	{
+		int lv0 = py >> shift;
+		int lv1 = lv0 + 1;
+		int fy  = py & mask;
+
+		if (lv0 >= st->tmax) lv0 = st->tmax - 1;
+		if (lv1 >= st->tmax) lv1 = st->tmax - 1;
+
+		for (px = 0; px < w; px++)
+		{
+			int lu0 = px >> shift;
+			int lu1 = lu0 + 1;
+			int fx  = px & mask;
+			int i00, i01, i10, i11;
+			int sr, sg, sb;
+			int sr_t, sg_t, sb_t, sr_b, sg_b, sb_b;
+			byte base_idx;
+			int r, g, b;
+
+			if (lu0 >= st->smax) lu0 = st->smax - 1;
+			if (lu1 >= st->smax) lu1 = st->smax - 1;
+
+			i00 = (lv0 * st->smax + lu0) * 3;
+			i01 = (lv0 * st->smax + lu1) * 3;
+			i10 = (lv1 * st->smax + lu0) * 3;
+			i11 = (lv1 * st->smax + lu1) * 3;
+
+			/* Quick reject: skip pixels whose 4 corner luxels are all zero
+			   stain. Common case — a 3x3 decal kernel only stains ~9 luxels
+			   on a much larger surface, so most pixels short-circuit here. */
+			if ((st->rgb[i00] | st->rgb[i00+1] | st->rgb[i00+2]
+			   | st->rgb[i01] | st->rgb[i01+1] | st->rgb[i01+2]
+			   | st->rgb[i10] | st->rgb[i10+1] | st->rgb[i10+2]
+			   | st->rgb[i11] | st->rgb[i11+1] | st->rgb[i11+2]) == 0)
+				continue;
+
+			/* Bilinear interp of stain RGB across the 4 corner luxels. */
+			sr_t = (int)st->rgb[i00+0] + ((((int)st->rgb[i01+0] - (int)st->rgb[i00+0]) * fx) >> shift);
+			sg_t = (int)st->rgb[i00+1] + ((((int)st->rgb[i01+1] - (int)st->rgb[i00+1]) * fx) >> shift);
+			sb_t = (int)st->rgb[i00+2] + ((((int)st->rgb[i01+2] - (int)st->rgb[i00+2]) * fx) >> shift);
+			sr_b = (int)st->rgb[i10+0] + ((((int)st->rgb[i11+0] - (int)st->rgb[i10+0]) * fx) >> shift);
+			sg_b = (int)st->rgb[i10+1] + ((((int)st->rgb[i11+1] - (int)st->rgb[i10+1]) * fx) >> shift);
+			sb_b = (int)st->rgb[i10+2] + ((((int)st->rgb[i11+2] - (int)st->rgb[i10+2]) * fx) >> shift);
+			sr   = sr_t + (((sr_b - sr_t) * fy) >> shift);
+			sg   = sg_t + (((sg_b - sg_t) * fy) >> shift);
+			sb   = sb_t + (((sb_b - sb_t) * fy) >> shift);
+
+			/* Scale stain * intensity into a 0..255 channel delta.
+			   ks = intensity * 256, so (s * ks) >> 8 = s * intensity. */
+			sr = (sr * ks) >> 8;
+			sg = (sg * ks) >> 8;
+			sb = (sb * ks) >> 8;
+
+			base_idx = dest[py * w + px];
+			r = (int)basepal_r[base_idx] + sr;
+			g = (int)basepal_g[base_idx] + sg;
+			b = (int)basepal_b[base_idx] + sb;
+			if (r < 0)   r = 0;   else if (r > 255) r = 255;
+			if (g < 0)   g = 0;   else if (g > 255) g = 255;
+			if (b < 0)   b = 0;   else if (b > 255) b = 255;
+
+			dest[py * w + px] = rgbtable[((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2)];
+		}
+	}
+	st->last_touched_frame = r_framecount;
 }
 
 
@@ -532,6 +618,8 @@ void R_DrawSurface (void)
 
 		pcolumndest += horzblockstep;
 	}
+
+	R_OverlayStain ();
 }
 
 
