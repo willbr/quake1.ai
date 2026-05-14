@@ -9,6 +9,8 @@
 #include "r_paths.h"
 #include "vid_palette.h"
 #include "debug_lines.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 // Menu helpers from menu.c (no shared header)
 extern void M_Print(int cx, int cy, char *str);
@@ -553,3 +555,37 @@ void D_BeginDirectRect(int x, int y, byte *pbitmap, int width, int height)
     { (void)x; (void)y; (void)pbitmap; (void)width; (void)height; }
 void D_EndDirectRect(int x, int y, int width, int height)
     { (void)x; (void)y; (void)width; (void)height; }
+
+// ---------------------------------------------------------------------------
+// VID_SaveScreenshotPNG -- write the current 8-bit framebuffer as a 24-bit
+// PNG. Returns 1 on success, 0 on failure. Caller is responsible for the
+// destination directory existing.
+// ---------------------------------------------------------------------------
+int VID_SaveScreenshotPNG(const char *path)
+{
+    if (!path || !path[0]) return 0;
+    if (!vid.buffer) return 0;
+
+    int w = (int)vid.width;
+    int h = (int)vid.height;
+    int rowbytes = (int)vid.rowbytes;
+    if (w <= 0 || h <= 0 || rowbytes < w) return 0;
+
+    unsigned char *rgb = (unsigned char *)malloc((size_t)w * (size_t)h * 3);
+    if (!rgb) return 0;
+
+    for (int y = 0; y < h; y++) {
+        const byte    *src = vid.buffer + y * rowbytes;
+        unsigned char *dst = rgb        + y * w * 3;
+        for (int x = 0; x < w; x++) {
+            unsigned c = d_8to24table[src[x]];
+            dst[x*3 + 0] = (unsigned char)(c >>  0);  /* R */
+            dst[x*3 + 1] = (unsigned char)(c >>  8);  /* G */
+            dst[x*3 + 2] = (unsigned char)(c >> 16);  /* B */
+        }
+    }
+
+    int ok = stbi_write_png(path, w, h, 3, rgb, w * 3);
+    free(rgb);
+    return ok ? 1 : 0;
+}
