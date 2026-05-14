@@ -358,6 +358,12 @@ static void Stain_AddCell (msurface_t *target, vec3_t cell_world,
 	tlv = ((int)floor(v) - target->texturemins[1]) >> 4;
 	tsmax = (target->extents[0] >> 4) + 1;
 	ttmax = (target->extents[1] >> 4) + 1;
+	if (r_decals_debug.value) {
+		Con_Printf ("    -> surf=%p uv=%.1f %.1f tlu=%d tlv=%d sz=%dx%d tmins=%d %d ext=%d %d\n",
+			(void*)target, u, v, tlu, tlv, tsmax, ttmax,
+			(int)target->texturemins[0], (int)target->texturemins[1],
+			(int)target->extents[0], (int)target->extents[1]);
+	}
 	if (tlu < 0 || tlu >= tsmax || tlv < 0 || tlv >= ttmax) return;
 
 	st = Stain_GetOrAlloc (target);
