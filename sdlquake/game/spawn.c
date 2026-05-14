@@ -35,6 +35,35 @@ static void spawn_info_patrol_node(edict_t *e) {
     e->v.movetype = MOVETYPE_NONE;
     Sim_Patrol_RegisterNode(e);
 }
+
+// info_wind_source -- M4. Per-tick wind injection in the cell at this
+// entity's origin. Reads "velocity" if present, else a default outward gust.
+static void spawn_info_wind_source(edict_t *e) {
+    e->v.solid    = SOLID_NOT;
+    e->v.movetype = MOVETYPE_NONE;
+    vec3_t v = { e->v.velocity[0], e->v.velocity[1], e->v.velocity[2] };
+    float mag = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+    if (mag < 1.0f) {                   // mapper left it unset
+        v[0] = 0; v[1] = 0; v[2] = 200; // gentle upward draft
+    }
+    Wind_RegisterSource(e, v);
+}
+
+// misc_smokegrenade -- M4 testing prop. A persistent smoke emitter at this
+// entity's origin. "amount" key sets per-tick injection (default 0.4),
+// "radius" sets affected cells (default 96).
+static void smokegrenade_think(edict_t *self) {
+    float amount = self->v.dmg > 0 ? self->v.dmg : 0.4f;
+    float radius = self->v.distance > 0 ? self->v.distance : 96.0f;
+    Wind_AddSmoke(self->v.origin, amount * 0.1f, radius);
+    self->v.nextthink = g->time + 0.1f;
+}
+static void spawn_misc_smokegrenade(edict_t *e) {
+    e->v.solid     = SOLID_NOT;
+    e->v.movetype  = MOVETYPE_NONE;
+    e->v.think     = smokegrenade_think;
+    e->v.nextthink = g->time + 0.5f;
+}
 void spawn_light(edict_t *e);
 void spawn_light_fluoro(edict_t *e);
 void spawn_light_fluorospark(edict_t *e);
@@ -51,6 +80,7 @@ void spawn_trap_shooter(edict_t *e);
 void spawn_air_bubbles(edict_t *e);
 void spawn_viewthing(edict_t *e);
 void spawn_func_wall(edict_t *e);
+void spawn_func_grate(edict_t *e);
 void spawn_func_illusionary(edict_t *e);
 void spawn_func_episodegate(edict_t *e);
 void spawn_func_bossgate(edict_t *e);
@@ -168,6 +198,9 @@ static const spawn_entry_t s_spawns[] = {
     { "air_bubbles",                  spawn_air_bubbles                     },
     { "viewthing",                    spawn_viewthing                       },
     { "func_wall",                    spawn_func_wall                       },
+    { "func_grate",                   spawn_func_grate                      },
+    { "info_wind_source",             spawn_info_wind_source                },
+    { "misc_smokegrenade",            spawn_misc_smokegrenade               },
     { "func_illusionary",             spawn_func_illusionary                },
     { "func_episodegate",             spawn_func_episodegate                },
     { "func_bossgate",                spawn_func_bossgate                   },

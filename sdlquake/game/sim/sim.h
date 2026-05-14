@@ -112,6 +112,23 @@ int Sim_Nav_PathTo(const vec3_t from,
                    int max_out);
 
 // ---------------------------------------------------------------------------
+// Wind / smoke field (Phase 8 / M4)
+// ---------------------------------------------------------------------------
+void  Wind_Init(void);
+void  Wind_LevelInit(void);
+void  Wind_Frame(void);
+void  Wind_DebugDraw(void);
+
+float Wind_GetSmokeAt(const vec3_t pos);
+float Wind_PathOcclusion(const vec3_t a, const vec3_t b);
+
+void  Wind_AddImpulse(const vec3_t origin, const vec3_t dir,
+                      float magnitude, float radius);
+void  Wind_AddSmoke(const vec3_t origin, float amount, float radius);
+void  Wind_ClearSmoke(const vec3_t origin, float amount, float radius);
+void  Wind_RegisterSource(edict_t *e, const vec3_t velocity);
+
+// ---------------------------------------------------------------------------
 // Arena (test)
 // ---------------------------------------------------------------------------
 void Sim_Arena_Init(void);

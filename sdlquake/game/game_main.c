@@ -4,6 +4,7 @@
 #include "game_types.h"
 #include "game_defs.h"
 #include "sim/sim.h"
+#include "abilities.h"
 
 engine_api_t   *eng;
 game_globals_t *g;
@@ -25,6 +26,7 @@ static void game_init(engine_api_t *engine, game_globals_t *globals)
     eng = engine;
     g   = globals;
     Sim_Init();
+    Abilities_Init();
 }
 
 static void game_shutdown(void) { }
@@ -67,6 +69,7 @@ void Doors_OpenAllSecret(void);
 static void game_debug_draw_overlays(void)
 {
     Sim_Nav_Frame();
+    Wind_DebugDraw();
 }
 
 static game_api_t s_api = {

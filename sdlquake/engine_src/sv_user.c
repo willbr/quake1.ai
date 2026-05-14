@@ -461,6 +461,8 @@ void SV_ReadClientMove (usercmd_t *move)
 	bits = MSG_ReadByte ();
 	host_client->edict->v.button0 = bits & 1;
 	host_client->edict->v.button2 = (bits & 2)>>1;
+	host_client->edict->v.button3 = (bits & 4)>>2;   /* Blink (Phase 8) */
+	host_client->edict->v.button4 = (bits & 8)>>3;   /* Gust  (Phase 8) */
 
 	i = MSG_ReadByte ();
 	if (i)

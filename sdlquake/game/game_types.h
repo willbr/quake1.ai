@@ -85,7 +85,9 @@ typedef struct entvars_s {
     edict_t *movetarget, *oldenemy, *trigger_field;
 
     // Player / combat
-    float   button0, button1, button2, impulse, fixangle;
+    // button3, button4 = Blink, Gust (Phase 8 / M3). Engine packs them
+    // into bits 2 and 3 of the clc_move button byte (sv_user.c).
+    float   button0, button1, button2, button3, button4, impulse, fixangle;
     float   idealpitch, ideal_yaw, yaw_speed;
     float   teleport_time;
     float   attack_finished, pain_finished;

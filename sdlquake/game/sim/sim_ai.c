@@ -110,7 +110,15 @@ static float sense_intensity(ai_brain_t *b, edict_t *e, const stimulus_t *s) {
             ref = 1024.0f * b->sense_hearing_mult; break;
         case STIM_SIGHT_ENTITY:
             ref = b->sense_sight_range;
-            los = los_clear(e->v.origin, s->origin) ? 1.0f : 0.0f;
+            if (los_clear(e->v.origin, s->origin)) {
+                // Wind/smoke occlusion (M4): reduce LOS intensity by the
+                // average smoke density along the sight line.
+                float occlusion = Wind_PathOcclusion(e->v.origin, s->origin);
+                los = 1.0f - occlusion;
+                if (los < 0) los = 0;
+            } else {
+                los = 0;
+            }
             break;
         case STIM_CORPSE:
             ref = 512.0f;

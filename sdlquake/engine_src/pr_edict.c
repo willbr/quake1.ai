@@ -858,6 +858,7 @@ static const native_field_t s_nfields[] = {
 	NF_FLOAT(modelindex), NF_FLOAT(frame), NF_FLOAT(skin), NF_FLOAT(effects),
 	NF_FLOAT(colormap), NF_FLOAT(team), NF_FLOAT(spawnflags), NF_FLOAT(worldtype),
 	NF_FLOAT(nextthink), NF_FLOAT(button0), NF_FLOAT(button1), NF_FLOAT(button2),
+	NF_FLOAT(button3), NF_FLOAT(button4),
 	NF_FLOAT(impulse), NF_FLOAT(fixangle), NF_FLOAT(idealpitch), NF_FLOAT(ideal_yaw),
 	NF_FLOAT(yaw_speed), NF_FLOAT(teleport_time), NF_FLOAT(attack_finished),
 	NF_FLOAT(pain_finished), NF_FLOAT(invincible_finished), NF_FLOAT(invisible_finished),

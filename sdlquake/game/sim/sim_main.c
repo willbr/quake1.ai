@@ -1,6 +1,7 @@
 // sim_main.c -- Top-level lifecycle dispatcher for the sim layer.
 
 #include "sim.h"
+#include "../abilities.h"
 #include <string.h>
 
 extern game_globals_t *g;
@@ -9,6 +10,7 @@ void Sim_Init(void) {
     Stim_Init();
     Sim_AI_Init();
     Sim_Nav_Init();
+    Wind_Init();
     Sim_Arena_Init();
 }
 
@@ -17,6 +19,8 @@ void Sim_LevelInit(const char *mapname) {
     Sim_AI_LevelInit();
     Sim_Nav_LevelInit(mapname);
     Sim_Patrol_Resolve();
+    Wind_LevelInit();
+    Abilities_LevelInit();
 }
 
 void Sim_Frame(void) {
@@ -39,6 +43,7 @@ void Sim_Frame(void) {
     }
 
     Sim_AI_Frame();
+    Wind_Frame();
     // Sim_Nav_Frame is now driven by game_api->debug_draw_overlays so the
     // navmesh overlay stays visible while the editor / engine has paused
     // the sim.

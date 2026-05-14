@@ -411,6 +411,20 @@ void spawn_func_wall(edict_t *e) {
     eng->SV_SetModel(e, e->v.model);
 }
 
+// func_grate -- Phase 8 / M3. Looks and collides like a func_wall, but Blink
+// validity traces temporarily set it SOLID_NOT so the player can phase
+// through it. The grate is registered with abilities.c so the trace pass
+// can find it.
+void Abilities_RegisterGrate(edict_t *e);   // abilities.h
+void spawn_func_grate(edict_t *e) {
+    e->v.angles[0] = e->v.angles[1] = e->v.angles[2] = 0;
+    e->v.movetype = MOVETYPE_PUSH;
+    e->v.solid    = SOLID_BSP;
+    e->v.use      = func_wall_use;
+    eng->SV_SetModel(e, e->v.model);
+    Abilities_RegisterGrate(e);
+}
+
 void spawn_func_illusionary(edict_t *e) {
     e->v.angles[0] = e->v.angles[1] = e->v.angles[2] = 0;
     e->v.movetype = MOVETYPE_NONE;

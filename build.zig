@@ -312,6 +312,7 @@ pub fn build(b: *std.Build) void {
     game_mod.addCSourceFiles(.{
         .files = &.{
             "sdlquake/game/game_main.c",
+            "sdlquake/game/abilities.c",
             "sdlquake/game/spawn.c",
             "sdlquake/game/subs.c",
             "sdlquake/game/combat.c",
@@ -351,6 +352,7 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/sim/sim_ai.c",
             "sdlquake/game/sim/sim_nav.c",
             "sdlquake/game/sim/sim_arena.c",
+            "sdlquake/game/sim/sim_wind.c",
         },
         .flags = &.{
             "-std=c11",

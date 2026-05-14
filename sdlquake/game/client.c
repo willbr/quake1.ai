@@ -3,6 +3,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "abilities.h"
 #include <string.h>
 #include <math.h>
 
@@ -831,6 +832,7 @@ void PlayerPostThink(edict_t *client)
         g->self->v.jump_flag = g->self->v.velocity[2];
 
     CheckPowerups();
+    Abilities_Frame(client);
 }
 
 // ---------------------------------------------------------------------------
