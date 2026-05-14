@@ -22,6 +22,7 @@
 #include "virtual_fs.h"         // Editor_VFS_*
 #include "qbsp_lib.h"           // qbsp_compile_to_memory
 #include "light_lib.h"          // light_compile_to_memory (mono Stage 1)
+#include "vis_lib.h"            // vis_compile_in_place
 #include "light_bake_thread.h"  // background light-bake worker
 
 #include <SDL3/SDL.h>
@@ -829,6 +830,154 @@ static void Editor_Cmd_CompileFull_f(void)
 }
 
 /*
+ * editor_compile_export: qbsp + vis + light. The "shippable BSP" pipeline.
+ * Same flow as editor_compile_full but adds vis_compile_in_place between
+ * qbsp and light, sourcing portal data from the .prt qbsp wrote alongside
+ * the destname.
+ *
+ * Args: optional [fast] (uses VIS -fast flood mode) or [level=N] (1-4,
+ * default 2). e.g. `editor_compile_export fast`, `editor_compile_export
+ * level=4`.
+ */
+static void Editor_Cmd_CompileExport_f(void)
+{
+    char  map_path[256];
+    char  prt_path[256];
+    char  bsp_vpath[64];
+    char  lit_vpath[64];
+    void *bsp_unlit = NULL;
+    int   unlit_size = 0;
+    void *bsp_lit   = NULL;
+    int   lit_bsp_size = 0;
+    void *lit_bytes = NULL;
+    int   lit_bytes_size = 0;
+    int   rc;
+    qbsp_options_t qopts;
+    vis_options_t  vopts;
+    int            i;
+
+    if (!edit_scene.mapname[0]) {
+        Con_Printf("editor_compile_export: no map loaded\n");
+        return;
+    }
+
+    memset(&vopts, 0, sizeof(vopts));
+    vopts.level = 2;
+    for (i = 1; i < Cmd_Argc(); i++) {
+        const char *a = Cmd_Argv(i);
+        if (!strcmp(a, "fast")) {
+            vopts.fast = 1;
+        } else if (!strncmp(a, "level=", 6)) {
+            vopts.level = atoi(a + 6);
+            if (vopts.level < 1) vopts.level = 1;
+            if (vopts.level > 4) vopts.level = 4;
+        } else if (!strcmp(a, "verbose")) {
+            vopts.verbose = 1;
+        } else if (!strcmp(a, "nosound")) {
+            vopts.skip_sound_pvs = 1;
+        } else {
+            Con_Printf("editor_compile_export: unknown arg \"%s\"\n", a);
+            return;
+        }
+    }
+
+    snprintf(map_path, sizeof(map_path),
+             "%s/maps/%s.map", com_gamedir, edit_scene.mapname);
+    snprintf(prt_path, sizeof(prt_path),
+             "%s/maps/%s.prt", com_gamedir, edit_scene.mapname);
+    snprintf(bsp_vpath, sizeof(bsp_vpath),
+             "maps/%s.bsp", edit_scene.mapname);
+    snprintf(lit_vpath, sizeof(lit_vpath),
+             "maps/%s.lit", edit_scene.mapname);
+
+    if (!Scene_Save(map_path)) {
+        Con_Printf("editor_compile_export: save to %s failed\n", map_path);
+        return;
+    }
+
+    {
+        char wad_path[1024];
+        snprintf(wad_path, sizeof(wad_path), "%s/gfx/base.wad", com_gamedir);
+        Sys_mkdir(va("%s/gfx", com_gamedir));
+        if (write_wad2_from_worldmodel(wad_path) != 0) {
+            Con_Printf("editor_compile_export: WAD synthesis failed\n");
+            return;
+        }
+    }
+
+    Con_Printf("editor_compile_export: saved %s; running qbsp...\n", map_path);
+
+    memset(&qopts, 0, sizeof(qopts));
+    qopts.gamedir = com_gamedir;
+    rc = qbsp_compile_to_memory(map_path, &bsp_unlit, &unlit_size, &qopts);
+    if (rc != 0 || !bsp_unlit) {
+        Con_Printf("editor_compile_export: qbsp failed (rc=%d)\n", rc);
+        return;
+    }
+    Con_Printf("editor_compile_export: qbsp produced %d bytes; running vis (level=%d%s%s)...\n",
+               unlit_size, vopts.level,
+               vopts.fast ? " fast" : "",
+               vopts.skip_sound_pvs ? " no-sound-pvs" : "");
+
+    rc = vis_compile_in_place(prt_path, &vopts);
+    if (rc != 0) {
+        Con_Printf("editor_compile_export: vis failed (rc=%d)\n", rc);
+        free(bsp_unlit);
+        return;
+    }
+    Con_Printf("editor_compile_export: vis complete; running light...\n");
+
+    rc = light_compile_to_memory(NULL,
+                                 &bsp_lit, &lit_bsp_size,
+                                 &lit_bytes, &lit_bytes_size);
+    free(bsp_unlit);
+    bsp_unlit = NULL;
+    if (rc != 0 || !bsp_lit) {
+        Con_Printf("editor_compile_export: light failed (rc=%d)\n", rc);
+        if (lit_bytes) free(lit_bytes);
+        return;
+    }
+
+    Editor_VFS_Register(bsp_vpath, bsp_lit, lit_bsp_size);
+    Con_Printf("editor_compile_export: %s = %d bytes (lit + vis'd BSP)\n",
+               bsp_vpath, lit_bsp_size);
+
+    if (lit_bytes && lit_bytes_size > 0) {
+        Editor_VFS_Register(lit_vpath, lit_bytes, lit_bytes_size);
+        Con_Printf("editor_compile_export: %s = %d bytes (.lit)\n",
+                   lit_vpath, lit_bytes_size);
+    }
+
+    Con_Printf("editor_compile_export: reloading map\n");
+    {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "map %s\n", edit_scene.mapname);
+        Cbuf_AddText(buf);
+    }
+}
+
+/*
+ * vis_bench <mapname>: load <gamedir>/maps/<mapname>.bsp + .prt from disk
+ * and run the vis pass once, printing per-phase timing. Used to size the
+ * cost of a full vis bake on a real map. The .bsp + .prt must already
+ * exist on disk -- vendored VIS's LoadBSPFile uses raw fopen and doesn't
+ * see PAK contents.
+ */
+static void Editor_Cmd_VisBench_f(void)
+{
+    char bsp_path[1024], prt_path[1024];
+    const char *name;
+    if (Cmd_Argc() < 2) {
+        Con_Printf("usage: vis_bench <mapname>\n");
+        return;
+    }
+    name = Cmd_Argv(1);
+    snprintf(bsp_path, sizeof(bsp_path), "%s/maps/%s.bsp", com_gamedir, name);
+    snprintf(prt_path, sizeof(prt_path), "%s/maps/%s.prt", com_gamedir, name);
+    vis_bench(bsp_path, prt_path);
+}
+
+/*
  * light_bench <mapname>: load <gamedir>/maps/<mapname>.bsp from disk
  * and run the bake once, printing per-phase timing. Used to size the
  * cost of a live re-bake vs the dlight preview. The BSP must already
@@ -1426,6 +1575,8 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_redo",    Editor_Cmd_Redo_f);
     Cmd_AddCommand("editor_compile", Editor_Cmd_Compile_f);
     Cmd_AddCommand("editor_compile_full", Editor_Cmd_CompileFull_f);
+    Cmd_AddCommand("editor_compile_export", Editor_Cmd_CompileExport_f);
+    Cmd_AddCommand("vis_bench",             Editor_Cmd_VisBench_f);
     Cmd_AddCommand("light_bench", Editor_Cmd_LightBench_f);
     Cmd_AddCommand("editor_relight", Editor_Cmd_Relight_f);
 
