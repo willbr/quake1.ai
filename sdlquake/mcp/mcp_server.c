@@ -41,6 +41,14 @@ typedef int mcp_raw_sock_t;
 #define mcp_sock_close(s) close(s)
 #endif
 
+#include <sys/stat.h>
+#ifdef _WIN32
+#  include <direct.h>
+#  define mcp_mkdir(p) _mkdir(p)
+#else
+#  define mcp_mkdir(p) mkdir((p), 0755)
+#endif
+
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -591,14 +599,6 @@ static void tool_console_tail(const char *id_json, int lines)
 // ---------------------------------------------------------------------------
 // Tool: screenshot -- save the current framebuffer as a PNG
 // ---------------------------------------------------------------------------
-
-#include <sys/stat.h>
-#ifdef _WIN32
-#  include <direct.h>
-#  define mcp_mkdir(p) _mkdir(p)
-#else
-#  define mcp_mkdir(p) mkdir((p), 0755)
-#endif
 
 static int mcp_next_screenshot_index(void)
 {
