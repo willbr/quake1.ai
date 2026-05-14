@@ -223,6 +223,11 @@ void R_DecalsFrame (void)
 		surf = bp->surf;
 		if (!surf) { bp->alive = false; continue; }
 
+		if (r_decals_debug.value) {
+			Con_Printf ("BloodPool[%d]: t=%.2f target=%.1f radius_painted=%.1f surf=%p\n",
+				i, t, target, bp->radius_painted, (void*)surf);
+		}
+
 		tex = surf->texinfo;
 		ou  = DotProduct(bp->origin, tex->vecs[0]) + tex->vecs[0][3];
 		ov  = DotProduct(bp->origin, tex->vecs[1]) + tex->vecs[1][3];
@@ -723,6 +728,11 @@ void R_SpawnBloodPool (vec3_t origin)
 	int      oldest_slot;
 	bloodpool_t *bp;
 
+	if (r_decals_debug.value) {
+		Con_Printf ("R_SpawnBloodPool: origin=%.1f %.1f %.1f rdecals=%d rbloodpool=%d\n",
+			origin[0], origin[1], origin[2],
+			(int)r_decals.value, (int)r_decals_bloodpool.value);
+	}
 	if (!r_decals.value || !r_decals_bloodpool.value) return;
 
 	// Trace straight down to find the floor.
@@ -730,10 +740,18 @@ void R_SpawnBloodPool (vec3_t origin)
 	end[1] = origin[1];
 	end[2] = origin[2] - 64.0f;
 	tr = SV_Move (origin, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
-	if (tr.fraction >= 1.0f) return;
-	if (tr.plane.normal[2] < 0.7f) return;  // too steep
+	if (r_decals_debug.value) {
+		Con_Printf ("  trace: frac=%.2f endpos=%.1f %.1f %.1f normal_z=%.2f\n",
+			tr.fraction, tr.endpos[0], tr.endpos[1], tr.endpos[2], tr.plane.normal[2]);
+	}
+	if (tr.fraction >= 1.0f) { if (r_decals_debug.value) Con_Printf ("  rejected: no floor within 64 units\n"); return; }
+	if (tr.plane.normal[2] < 0.7f) { if (r_decals_debug.value) Con_Printf ("  rejected: floor too steep\n"); return; }
 
 	surf = R_PointOnSurface_World (tr.endpos, tr.plane.normal, 4.0f);
+	if (r_decals_debug.value) {
+		Con_Printf ("  surf=%p rgb_samples=%s\n",
+			(void*)surf, surf && surf->rgb_samples ? "yes" : "NO");
+	}
 	if (!surf) return;
 
 	// Find an empty slot or recycle the oldest.
