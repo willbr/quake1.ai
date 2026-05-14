@@ -83,6 +83,22 @@ static int          mcp_q_tail = 0;   // read  index (main thread)
 static SDL_Mutex   *mcp_mutex  = NULL;
 static SDL_Thread  *mcp_thread = NULL;
 
+// ---------------------------------------------------------------------------
+// Pending response slots — `wait_frames` parks its JSON-RPC id here and
+// MCP_Frame drains them one frame at a time. Single-threaded (main thread
+// only); no locking needed.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    int  in_use;
+    int  frames_remaining;
+    int  frames_requested;
+    char id_json[64];
+} mcp_pending_wait_t;
+
+#define MCP_MAX_PENDING_WAITS  8
+static mcp_pending_wait_t mcp_pending_waits[MCP_MAX_PENDING_WAITS];
+
 static void mcp_enqueue(const char *line)
 {
     SDL_LockMutex(mcp_mutex);
@@ -788,6 +804,40 @@ static void tool_get_cvar(const char *id_json, const char *name)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: wait_frames -- delay this JSON-RPC response by N rendered frames
+// ---------------------------------------------------------------------------
+
+static void tool_wait_frames(const char *id_json, const char *args)
+{
+    int frames = 0;
+    if (!args || !json_int(args, "frames", &frames) || frames < 1)
+    {
+        mcp_error(id_json, -32602, "missing or invalid frames");
+        return;
+    }
+    if (frames > 60) frames = 60;
+
+    int slot = -1;
+    for (int i = 0; i < MCP_MAX_PENDING_WAITS; i++)
+        if (!mcp_pending_waits[i].in_use) { slot = i; break; }
+
+    if (slot < 0)
+    {
+        mcp_error(id_json, -32603, "too many pending waits");
+        return;
+    }
+
+    mcp_pending_waits[slot].in_use           = 1;
+    mcp_pending_waits[slot].frames_remaining = frames;
+    mcp_pending_waits[slot].frames_requested = frames;
+    strncpy(mcp_pending_waits[slot].id_json, id_json,
+            sizeof(mcp_pending_waits[slot].id_json) - 1);
+    mcp_pending_waits[slot].id_json[
+        sizeof(mcp_pending_waits[slot].id_json) - 1] = '\0';
+    /* No response yet — MCP_Frame will send it when the counter hits zero. */
+}
+
+// ---------------------------------------------------------------------------
 // Tool: editor_get_scene — JSON dump of the current edit_scene
 // ---------------------------------------------------------------------------
 
@@ -1028,6 +1078,13 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
          "\"properties\":{" \
            "\"name\":{\"type\":\"string\",\"description\":\"Cvar name\"}}," \
          "\"required\":[\"name\"]}}" \
+      "," \
+      "{\"name\":\"wait_frames\"," \
+       "\"description\":\"Delay this response by N rendered frames (clamped 1..60). Useful for syncing teleport+screenshot\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"frames\":{\"type\":\"integer\",\"description\":\"1..60\"}}," \
+         "\"required\":[\"frames\"]}}" \
     "]}"
 
 // ---------------------------------------------------------------------------
@@ -1153,6 +1210,11 @@ static void mcp_dispatch(const char *line)
             else
                 tool_get_cvar(id_json, name);
         }
+        else if (strcmp(tool_name, "wait_frames") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_wait_frames(id_json, args ? args : "");
+        }
         else
         {
             mcp_error(id_json, -32602, "unknown tool");
@@ -1219,6 +1281,27 @@ void MCP_Frame(void)
     mcp_slot_t slot;
     while (mcp_dequeue(&slot))
         mcp_dispatch(slot.line);
+
+    /* Tick any pending wait_frames responses. */
+    for (int i = 0; i < MCP_MAX_PENDING_WAITS; i++)
+    {
+        if (!mcp_pending_waits[i].in_use) continue;
+        mcp_pending_waits[i].frames_remaining--;
+        if (mcp_pending_waits[i].frames_remaining <= 0)
+        {
+            char raw[64];
+            snprintf(raw, sizeof(raw),
+                "{\"frames_waited\":%d}",
+                mcp_pending_waits[i].frames_requested);
+            char escaped[128];
+            char *d = escaped;
+            char *end = escaped + sizeof(escaped) - 1;
+            d = json_escape_append(d, end, raw);
+            *d = '\0';
+            mcp_text_result(mcp_pending_waits[i].id_json, escaped);
+            mcp_pending_waits[i].in_use = 0;
+        }
+    }
 }
 
 void MCP_Shutdown(void)
