@@ -614,9 +614,13 @@ static void R_DecalsTestGrid_f (void)
 		step_v[i] = tex->vecs[1][i] * (16.0f / vlen2);
 	}
 
+	Con_Printf ("r_decals_test_grid: primary surf=%p rgb_samples=%s\n",
+		(void*)primary, primary->rgb_samples ? "yes (RGB path)" : "NO (mono path)");
+
 	// One 1x1 paint per cell with a unique (dr,dg,db) so each painted luxel
-	// has a distinguishable colour. Negative delta darkens; positive brightens.
-	// sx varies the red channel, sy varies the green, sx+sy varies blue.
+	// has a distinguishable colour. Requires the impacted surface to have
+	// rgb_samples (.lit data) for the colour variation to be visible; the
+	// mono lightmap path collapses dr/dg/db into a luminance step.
 	for (sy = -2; sy <= 2; sy++) {
 		for (sx = -2; sx <= 2; sx++) {
 			vec3_t cell_world;
@@ -626,8 +630,8 @@ static void R_DecalsTestGrid_f (void)
 			cell_world[2] = tr.endpos[2] + sx * step_u[2] + sy * step_v[2];
 
 			dr = -800 + (sx + 2) * 400;  // -800, -400, 0, +400, +800
-			dg = -800 + (sy + 2) * 400;  // same range varying with sy
-			db = -400 + ((sx + sy) & 1) * 800;  // alternating dark/bright blue
+			dg = -800 + (sy + 2) * 400;
+			db = -400 + ((sx + sy) & 1) * 800;
 
 			Stain_PaintKernel_World (cell_world, primary, dr, dg, db, K1x1_solid, 1, 1);
 		}
