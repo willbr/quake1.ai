@@ -668,9 +668,15 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	msurface_t *surf;
 	const decal_kernel_t *dk;
 	vec3_t      hit_buf;  // holds a swept hit point so pos can be re-aimed
+	extern server_t sv;
 
 	if (!r_decals.value) return;
 	if (type < 0 || type >= DECAL_NUM_TYPES) return;
+	// Demo playback path (CL_ParseTEnt -> R_SpawnDecal) fires before
+	// sv.active is set; calling SV_Move into uninitialised sv.edicts
+	// dereferences a NULL hull pointer in SV_HullForEntity. Bail out --
+	// missing decals during demo playback are cosmetic.
+	if (!sv.active) return;
 
 	// Bullets / spikes: pos is the server trace endpoint, already on the
 	// surface plane — 4-unit tolerance handles float-precision slop.

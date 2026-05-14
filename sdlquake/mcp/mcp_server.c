@@ -74,6 +74,9 @@ int mcp_active = 0;
 #define MCP_QUEUE_SIZE  (1 << MCP_QUEUE_BITS)   // 16 slots
 #define MCP_QUEUE_MASK  (MCP_QUEUE_SIZE - 1)
 #define MCP_LINE_MAX    4096
+#define MCP_FRAME_MAX   65536      // SSE frame buffer + sync-call response slot.
+                                   // Fixes the pre-existing 4 KB truncation on
+                                   // large responses (e.g. list_entities).
 
 typedef struct { char line[MCP_LINE_MAX]; } mcp_slot_t;
 
@@ -136,6 +139,24 @@ static mcp_raw_sock_t   mcp_sse_sock    = (mcp_raw_sock_t)MCP_SOCK_INVALID;
 static SDL_Mutex       *mcp_sse_mutex   = NULL;
 
 // ---------------------------------------------------------------------------
+// Synchronous HTTP /call slot.
+//
+// POST /call enqueues the JSON-RPC request and blocks the HTTP worker until
+// the main thread's tool dispatch writes a response with a matching id. The
+// response is then returned in the HTTP body, no SSE handshake needed --
+// makes automated testing (curl, Python urllib) trivial.
+//
+// Only one /call may be in flight at a time; concurrent /call requests
+// serialize on mcp_sync_mutex. /message (async, SSE-routed) remains the
+// default for interactive Claude Code clients.
+// ---------------------------------------------------------------------------
+static SDL_Mutex *mcp_sync_mutex   = NULL;
+static SDL_Mutex *mcp_sync_state_mu = NULL;
+static char       mcp_sync_id[64]  = "";
+static char       mcp_sync_resp[MCP_FRAME_MAX] = "";
+static int        mcp_sync_ready    = 0;
+
+// ---------------------------------------------------------------------------
 // Background stdin reader thread (stdio mode)
 // ---------------------------------------------------------------------------
 
@@ -153,6 +174,12 @@ static int SDLCALL mcp_reader_thread(void *userdata)
     }
     return 0;
 }
+
+// Forward decls (defined further down) used by the HTTP thread to extract
+// the JSON-RPC id from /call request bodies and match it later, and to
+// dispatch /call requests synchronously on the HTTP worker.
+static void json_extract_id(const char *json, char *id_buf, int id_bufsz);
+static void mcp_dispatch(const char *line);
 
 // ---------------------------------------------------------------------------
 // Background HTTP accept thread (HTTP/SSE mode)
@@ -256,6 +283,101 @@ static int SDLCALL mcp_http_thread(void *userdata)
                 "Content-Length: 0\r\n"
                 "\r\n";
             send(conn, ok, (int)strlen(ok), 0);
+            mcp_sock_close(conn);
+        }
+        else if (strncmp(hdr, "POST /call", 10) == 0)
+        {
+            // Synchronous JSON-RPC: body in, response in same HTTP reply.
+            // The request is dispatched DIRECTLY on this HTTP thread rather
+            // than via the main-thread queue, so /call works even when the
+            // main loop is stalled (window unfocused on Windows, debug
+            // breakpoint, slow load). Trade-off: tool handlers read engine
+            // state without holding the main thread -- safe for read-only
+            // tools (get_player_state, list_entities, console_tail) and
+            // mostly-safe for Cbuf_AddText (which has its own locking).
+            // Avoid sending /call from a thread that races the main-thread
+            // gameplay logic in ways that matter.
+            //
+            // Serialized via mcp_sync_mutex -- one /call at a time -- so
+            // concurrent HTTP workers don't collide on the response slot.
+            int clen = 0;
+            const char *cl = strstr(hdr, "Content-Length: ");
+            if (!cl) cl = strstr(hdr, "content-length: ");
+            if (cl) clen = atoi(cl + 16);
+            if (clen <= 0 || clen >= MCP_LINE_MAX - 1) {
+                const char *bad =
+                    "HTTP/1.1 400 Bad Request\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
+                    "Content-Length: 0\r\n\r\n";
+                send(conn, bad, (int)strlen(bad), 0);
+                mcp_sock_close(conn);
+                continue;
+            }
+
+            char body[MCP_LINE_MAX];
+            int got = 0;
+            while (got < clen) {
+                int r = recv(conn, body + got, clen - got, 0);
+                if (r <= 0) break;
+                got += r;
+            }
+            body[got] = '\0';
+
+            SDL_LockMutex(mcp_sync_mutex);   // one /call at a time
+
+            char want_id[64];
+            json_extract_id(body, want_id, sizeof(want_id));
+
+            SDL_LockMutex(mcp_sync_state_mu);
+            strncpy(mcp_sync_id, want_id, sizeof(mcp_sync_id) - 1);
+            mcp_sync_id[sizeof(mcp_sync_id) - 1] = '\0';
+            mcp_sync_resp[0] = '\0';
+            mcp_sync_ready   = 0;
+            SDL_UnlockMutex(mcp_sync_state_mu);
+
+            // Direct synchronous dispatch on this thread. mcp_write_line
+            // will see the parked want_id and route the response into
+            // mcp_sync_resp instead of out the SSE socket.
+            mcp_dispatch(body);
+
+            int  ready;
+            char resp_local[MCP_FRAME_MAX];
+            resp_local[0] = '\0';
+            SDL_LockMutex(mcp_sync_state_mu);
+            ready = mcp_sync_ready;
+            if (ready) {
+                strncpy(resp_local, mcp_sync_resp, sizeof(resp_local) - 1);
+                resp_local[sizeof(resp_local) - 1] = '\0';
+            }
+            mcp_sync_id[0]   = '\0';
+            mcp_sync_resp[0] = '\0';
+            mcp_sync_ready   = 0;
+            SDL_UnlockMutex(mcp_sync_state_mu);
+
+            SDL_UnlockMutex(mcp_sync_mutex);
+
+            if (!ready) {
+                // wait_frames defers its response to a later MCP_Frame --
+                // not compatible with synchronous /call. Tool-side reports
+                // an error via the queue; /call returns 504 here.
+                const char *to =
+                    "HTTP/1.1 504 Gateway Timeout\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
+                    "Content-Length: 0\r\n\r\n";
+                send(conn, to, (int)strlen(to), 0);
+                mcp_sock_close(conn);
+                continue;
+            }
+
+            int body_len = (int)strlen(resp_local);
+            char hdrbuf[256];
+            int hlen = snprintf(hdrbuf, sizeof(hdrbuf),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %d\r\n\r\n", body_len);
+            send(conn, hdrbuf, hlen, 0);
+            if (body_len > 0) send(conn, resp_local, body_len, 0);
             mcp_sock_close(conn);
         }
         else
@@ -400,14 +522,36 @@ static char *json_escape_append(char *dst, const char *dend, const char *src)
 
 static void mcp_write_line(const char *line)
 {
+    // If a /call is parked waiting on this id, hand the response to the HTTP
+    // worker instead of sending it out via SSE/stdout. Eliminates the SSE
+    // handshake for synchronous test automation.
+    if (mcp_http_port > 0 && mcp_sync_state_mu) {
+        char line_id[64];
+        json_extract_id(line, line_id, sizeof(line_id));
+        SDL_LockMutex(mcp_sync_state_mu);
+        if (mcp_sync_id[0] && strcmp(mcp_sync_id, line_id) == 0 && !mcp_sync_ready) {
+            strncpy(mcp_sync_resp, line, sizeof(mcp_sync_resp) - 1);
+            mcp_sync_resp[sizeof(mcp_sync_resp) - 1] = '\0';
+            mcp_sync_ready = 1;
+            SDL_UnlockMutex(mcp_sync_state_mu);
+            return;
+        }
+        SDL_UnlockMutex(mcp_sync_state_mu);
+    }
+
     if (mcp_http_port > 0)
     {
         SDL_LockMutex(mcp_sse_mutex);
         mcp_raw_sock_t s = mcp_sse_sock;
         SDL_UnlockMutex(mcp_sse_mutex);
         if (s == (mcp_raw_sock_t)MCP_SOCK_INVALID) return;
-        char frame[MCP_LINE_MAX + 16];
+        // Bumped from MCP_LINE_MAX+16 to MCP_FRAME_MAX -- the previous frame
+        // buffer silently truncated responses larger than ~4 KB (notably
+        // list_entities). mcp_text_result already builds 8 KB payloads, so
+        // the SSE frame must accept at least that.
+        static char frame[MCP_FRAME_MAX];
         int flen = snprintf(frame, sizeof(frame), "data: %s\n\n", line);
+        if (flen > (int)sizeof(frame)) flen = (int)sizeof(frame);
         if (send(s, frame, flen, 0) < 0)
         {
             SDL_LockMutex(mcp_sse_mutex);
@@ -428,7 +572,11 @@ static void mcp_write_line(const char *line)
 
 static void mcp_send(const char *id_json, const char *result_json)
 {
-    char buf[MCP_LINE_MAX];
+    // Static so the 64 KB buffer doesn't blow the stack; mcp_send and
+    // mcp_text_result are only ever called from the dispatch thread (via
+    // mcp_dispatch) or the HTTP worker holding mcp_sync_mutex -- never
+    // re-entrantly, so the shared buffer is safe.
+    static char buf[MCP_FRAME_MAX];
     snprintf(buf, sizeof(buf),
              "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}",
              id_json, result_json);
@@ -448,7 +596,7 @@ static void mcp_error(const char *id_json, int code, const char *msg)
 // text_escaped must already have " and \ escaped.
 static void mcp_text_result(const char *id_json, const char *text_escaped)
 {
-    char buf[MCP_LINE_MAX * 2];
+    static char buf[MCP_FRAME_MAX];
     snprintf(buf, sizeof(buf),
              "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":"
              "{\"content\":[{\"type\":\"text\",\"text\":\"%s\"}]}}",
@@ -1239,7 +1387,9 @@ void MCP_Init(int port)
 
     if (port > 0)
     {
-        mcp_sse_mutex = SDL_CreateMutex();
+        mcp_sse_mutex     = SDL_CreateMutex();
+        mcp_sync_mutex    = SDL_CreateMutex();
+        mcp_sync_state_mu = SDL_CreateMutex();
 
 #ifdef _WIN32
         WSADATA wsa;
@@ -1316,7 +1466,9 @@ void MCP_Shutdown(void)
         mcp_sock_close(mcp_sse_sock);
         mcp_sse_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
     }
-    if (mcp_sse_mutex) { SDL_DestroyMutex(mcp_sse_mutex); mcp_sse_mutex = NULL; }
-    if (mcp_mutex)     { SDL_DestroyMutex(mcp_mutex);     mcp_mutex     = NULL; }
+    if (mcp_sync_state_mu) { SDL_DestroyMutex(mcp_sync_state_mu); mcp_sync_state_mu = NULL; }
+    if (mcp_sync_mutex)    { SDL_DestroyMutex(mcp_sync_mutex);    mcp_sync_mutex    = NULL; }
+    if (mcp_sse_mutex)     { SDL_DestroyMutex(mcp_sse_mutex);     mcp_sse_mutex     = NULL; }
+    if (mcp_mutex)         { SDL_DestroyMutex(mcp_mutex);         mcp_mutex         = NULL; }
     mcp_active = 0;
 }
