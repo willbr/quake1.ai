@@ -280,6 +280,15 @@ static const int K5x5[25] = {
 	 1,  4,  6,  4,  1,
 };
 
+/* Solid 5x5 used by r_decals_test to make plumbing trivially visible. */
+static const int K5x5_solid[25] = {
+	1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1,
+};
+
 typedef struct {
 	const int *k;
 	int        ksize;
@@ -378,13 +387,16 @@ static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal)
 	return best;
 }
 
-// Dev command: spawn a decal at the spot the player is looking at.
-// Usage: r_decals_test [bullet|spike|blood|scorch|lightning]
+// Dev command: paint a solid black 5x5 decal at the spot the player is looking at.
+// Usage: r_decals_test
 static void R_DecalsTest_f (void)
 {
-	vec3_t  forward, right, up, end;
-	trace_t tr;
-	decal_type_t type = DECAL_BULLET;
+	vec3_t      forward, right, up, end;
+	trace_t     tr;
+	msurface_t *surf;
+	mtexinfo_t *tex;
+	float       u, v;
+	int         lu, lv, smax, tmax;
 
 	AngleVectors (r_refdef.viewangles, forward, right, up);
 	(void)right; (void)up;
@@ -396,18 +408,28 @@ static void R_DecalsTest_f (void)
 		return;
 	}
 
-	if (Cmd_Argc() > 1) {
-		char *t = Cmd_Argv(1);
-		if      (!Q_strcasecmp(t, "bullet"))    type = DECAL_BULLET;
-		else if (!Q_strcasecmp(t, "spike"))     type = DECAL_SPIKE;
-		else if (!Q_strcasecmp(t, "blood"))     type = DECAL_BLOOD_SPLAT;
-		else if (!Q_strcasecmp(t, "scorch"))    type = DECAL_SCORCH;
-		else if (!Q_strcasecmp(t, "lightning")) type = DECAL_LIGHTNING;
+	surf = R_PointOnSurface_World (tr.endpos, NULL);
+	if (!surf) {
+		Con_Printf ("r_decals_test: no world surface at hit\n");
+		return;
 	}
 
-	R_SpawnDecal (tr.endpos, type);
-	Con_Printf ("r_decals_test: spawned type %d at %.1f %.1f %.1f\n",
-		(int)type, tr.endpos[0], tr.endpos[1], tr.endpos[2]);
+	tex = surf->texinfo;
+	u = DotProduct(tr.endpos, tex->vecs[0]) + tex->vecs[0][3];
+	v = DotProduct(tr.endpos, tex->vecs[1]) + tex->vecs[1][3];
+	lu = ((int)floor(u) - surf->texturemins[0]) >> 4;
+	lv = ((int)floor(v) - surf->texturemins[1]) >> 4;
+	smax = (surf->extents[0] >> 4) + 1;
+	tmax = (surf->extents[1] >> 4) + 1;
+	if (lu < 0 || lu >= smax || lv < 0 || lv >= tmax) {
+		Con_Printf ("r_decals_test: luxel out of bounds (%d,%d) of %dx%d\n",
+			lu, lv, smax, tmax);
+		return;
+	}
+
+	Stain_PaintKernel (surf, lu, lv, -4096, -4096, -4096, K5x5_solid, 5, 1);
+	Con_Printf ("r_decals_test: solid 5x5 black at (%d,%d) of surf %p at %.1f %.1f %.1f\n",
+		lu, lv, (void*)surf, tr.endpos[0], tr.endpos[1], tr.endpos[2]);
 }
 
 void R_SpawnDecal (vec3_t pos, decal_type_t type)
