@@ -757,6 +757,37 @@ static void tool_teleport(const char *id_json, const char *args)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: get_cvar -- read a cvar's current value and flags. This engine's
+// cvar_t has no defaultvalue field (see engine_src/cvar.h:56-64), so the
+// returned default is the empty string.
+// ---------------------------------------------------------------------------
+
+static void tool_get_cvar(const char *id_json, const char *name)
+{
+    cvar_t *v = Cvar_FindVar((char *)name);
+    if (!v)
+    {
+        mcp_error(id_json, -32602, "cvar not found");
+        return;
+    }
+
+    char raw[512];
+    snprintf(raw, sizeof(raw),
+        "{\"name\":\"%s\",\"value\":\"%s\",\"value_float\":%g,"
+        "\"archive\":%s,\"server\":%s}",
+        v->name, v->string ? v->string : "", v->value,
+        v->archive ? "true" : "false",
+        v->server  ? "true" : "false");
+
+    char escaped[1024];
+    char *d = escaped;
+    char *end = escaped + sizeof(escaped) - 1;
+    d = json_escape_append(d, end, raw);
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
 // Tool: editor_get_scene — JSON dump of the current edit_scene
 // ---------------------------------------------------------------------------
 
@@ -990,6 +1021,13 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
            "\"origin\":{\"type\":\"array\",\"items\":{\"type\":\"number\"},\"minItems\":3,\"maxItems\":3,\"description\":\"[x,y,z] world units\"}," \
            "\"angles\":{\"type\":\"array\",\"items\":{\"type\":\"number\"},\"minItems\":3,\"maxItems\":3,\"description\":\"[pitch,yaw,roll] degrees (optional)\"}}," \
          "\"required\":[\"origin\"]}}" \
+      "," \
+      "{\"name\":\"get_cvar\"," \
+       "\"description\":\"Read a cvar's current value (string and float) plus archive/server flags\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"name\":{\"type\":\"string\",\"description\":\"Cvar name\"}}," \
+         "\"required\":[\"name\"]}}" \
     "]}"
 
 // ---------------------------------------------------------------------------
@@ -1104,6 +1142,16 @@ static void mcp_dispatch(const char *line)
         {
             const char *args = strstr(line, "\"arguments\":");
             tool_teleport(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "get_cvar") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            char name[64] = {0};
+            if (args) json_str(args, "name", name, sizeof(name));
+            if (!name[0])
+                mcp_error(id_json, -32602, "missing name");
+            else
+                tool_get_cvar(id_json, name);
         }
         else
         {
