@@ -589,3 +589,23 @@ int VID_SaveScreenshotPNG(const char *path)
     free(rgb);
     return ok ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+// VID_SamplePixel -- read a single framebuffer pixel. Returns 1 on success,
+// 0 if (x,y) is out of bounds or vid.buffer is NULL. Out params receive the
+// RGB triple from d_8to24table[] and the raw 8-bit palette index.
+// ---------------------------------------------------------------------------
+int VID_SamplePixel(int x, int y, byte *r, byte *g, byte *b, byte *idx)
+{
+    if (!vid.buffer) return 0;
+    if (x < 0 || y < 0) return 0;
+    if (x >= (int)vid.width || y >= (int)vid.height) return 0;
+
+    byte i = vid.buffer[y * (int)vid.rowbytes + x];
+    unsigned c = d_8to24table[i];
+    if (r)   *r   = (byte)(c >>  0);
+    if (g)   *g   = (byte)(c >>  8);
+    if (b)   *b   = (byte)(c >> 16);
+    if (idx) *idx = i;
+    return 1;
+}
