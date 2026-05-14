@@ -341,6 +341,42 @@ static void Stain_PaintKernel (msurface_t *surf, int lu, int lv,
 // Forward decl: definition lives below.
 static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist);
 
+// Internal: project cell_world into `target`'s lightmap UV and apply one kernel
+// cell. Skips silently if the cell falls outside target's lightmap rectangle.
+static void Stain_AddCell (msurface_t *target, vec3_t cell_world,
+                            int w, int dr, int dg, int db, int knorm)
+{
+	mtexinfo_t *ttex;
+	stain_t    *st;
+	float       u, v;
+	int         tlu, tlv, tsmax, ttmax, idx, nr, ng, nb;
+
+	ttex = target->texinfo;
+	u = DotProduct(cell_world, ttex->vecs[0]) + ttex->vecs[0][3];
+	v = DotProduct(cell_world, ttex->vecs[1]) + ttex->vecs[1][3];
+	tlu = ((int)floor(u) - target->texturemins[0]) >> 4;
+	tlv = ((int)floor(v) - target->texturemins[1]) >> 4;
+	tsmax = (target->extents[0] >> 4) + 1;
+	ttmax = (target->extents[1] >> 4) + 1;
+	if (tlu < 0 || tlu >= tsmax || tlv < 0 || tlv >= ttmax) return;
+
+	st = Stain_GetOrAlloc (target);
+	if (!st) return;
+
+	idx = (tlv * st->smax + tlu) * 3;
+	nr = st->rgb[idx + 0] + (dr * w) / knorm;
+	ng = st->rgb[idx + 1] + (dg * w) / knorm;
+	nb = st->rgb[idx + 2] + (db * w) / knorm;
+	if (nr < -4096) nr = -4096; else if (nr > 4096) nr = 4096;
+	if (ng < -4096) ng = -4096; else if (ng > 4096) ng = 4096;
+	if (nb < -4096) nb = -4096; else if (nb > 4096) nb = 4096;
+	st->rgb[idx + 0] = (short)nr;
+	st->rgb[idx + 1] = (short)ng;
+	st->rgb[idx + 2] = (short)nb;
+	st->generation++;
+	st->last_touched_frame = r_framecount;
+}
+
 // Paint a kernel whose centre is at world-space point `center` and whose UV
 // basis comes from `primary`. Each cell is converted to world coordinates by
 // stepping along the primary surface's texture axes, then R_PointOnSurface_World
@@ -377,11 +413,7 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 		sy = ky - half;
 		for (kx = 0; kx < ksize; kx++) {
 			vec3_t      cell_world;
-			msurface_t *target;
-			mtexinfo_t *ttex;
-			stain_t    *st;
-			float       u, v;
-			int         tlu, tlv, tsmax, ttmax, idx, nr, ng, nb;
+			msurface_t *neighbor;
 
 			w = kernel[ky * ksize + kx];
 			if (!w) continue;
@@ -391,40 +423,18 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 			cell_world[1] = center[1] + sx * step_u[1] + sy * step_v[1];
 			cell_world[2] = center[2] + sx * step_u[2] + sy * step_v[2];
 
-			// Find whichever coplanar world surface this cell lands on.
-			// R_PointOnSurface_World's plane tolerance + UV-extent check
-			// naturally filters to faces that share primary's plane and
-			// physically contain this point.
-			// Loose plane tolerance (24 units) so BSP-split sub-faces with
-			// slightly different pl->dist still match, and small UV gaps
-			// between adjacent faces don't drop the cell.
-			target = R_PointOnSurface_World (cell_world, NULL, 24.0f);
-			if (!target) continue;
+			// Always try primary — Stain_AddCell silently skips if the cell
+			// is outside primary's lightmap rectangle.
+			Stain_AddCell (primary, cell_world, w, dr, dg, db, knorm);
 
-			ttex = target->texinfo;
-			u = DotProduct(cell_world, ttex->vecs[0]) + ttex->vecs[0][3];
-			v = DotProduct(cell_world, ttex->vecs[1]) + ttex->vecs[1][3];
-			tlu = ((int)floor(u) - target->texturemins[0]) >> 4;
-			tlv = ((int)floor(v) - target->texturemins[1]) >> 4;
-			tsmax = (target->extents[0] >> 4) + 1;
-			ttmax = (target->extents[1] >> 4) + 1;
-			if (tlu < 0 || tlu >= tsmax || tlv < 0 || tlv >= ttmax) continue;
-
-			st = Stain_GetOrAlloc (target);
-			if (!st) continue;
-
-			idx = (tlv * st->smax + tlu) * 3;
-			nr = st->rgb[idx + 0] + (dr * w) / knorm;
-			ng = st->rgb[idx + 1] + (dg * w) / knorm;
-			nb = st->rgb[idx + 2] + (db * w) / knorm;
-			if (nr < -4096) nr = -4096; else if (nr > 4096) nr = 4096;
-			if (ng < -4096) ng = -4096; else if (ng > 4096) ng = 4096;
-			if (nb < -4096) nb = -4096; else if (nb > 4096) nb = 4096;
-			st->rgb[idx + 0] = (short)nr;
-			st->rgb[idx + 1] = (short)ng;
-			st->rgb[idx + 2] = (short)nb;
-			st->generation++;
-			st->last_touched_frame = r_framecount;
+			// Also paint on any coplanar neighbor that contains this cell.
+			// Boundary cells get painted on BOTH adjacent faces' edge luxels,
+			// which eliminates the gap that would otherwise appear at BSP
+			// face splits.
+			neighbor = R_PointOnSurface_World (cell_world, NULL, 24.0f);
+			if (neighbor && neighbor != primary) {
+				Stain_AddCell (neighbor, cell_world, w, dr, dg, db, knorm);
+			}
 		}
 	}
 }
