@@ -408,77 +408,8 @@ static void R_DecalsTest_f (void)
 		(int)type, tr.endpos[0], tr.endpos[1], tr.endpos[2]);
 }
 
-// Fire a short trace from `pos` along several directions; return the closest
-// world surface hit within 8 game units. Returns NULL if none.
-// Also writes the hit point and surface normal back out.
-static msurface_t *Retrace_ForDecal (vec3_t pos, vec3_t out_hit, vec3_t out_normal)
-{
-	vec3_t dirs[7];
-	int    ndirs = 7;
-	int    i;
-	msurface_t *best;
-	float       best_len;
-	vec3_t      best_hit, best_nrm;
-	trace_t     tr;
-	vec3_t      end;
-	float       len;
-	float       elen;
-	extern server_t sv;
-
-	/* Axis-aligned probe directions */
-	dirs[1][0] =  1; dirs[1][1] =  0; dirs[1][2] =  0;
-	dirs[2][0] = -1; dirs[2][1] =  0; dirs[2][2] =  0;
-	dirs[3][0] =  0; dirs[3][1] =  1; dirs[3][2] =  0;
-	dirs[4][0] =  0; dirs[4][1] = -1; dirs[4][2] =  0;
-	dirs[5][0] =  0; dirs[5][1] =  0; dirs[5][2] =  1;
-	dirs[6][0] =  0; dirs[6][1] =  0; dirs[6][2] = -1;
-
-	/* First direction: direction from impact toward eye (the side the surface faces) */
-	VectorSubtract (r_refdef.vieworg, pos, dirs[0]);
-	elen = VectorLength (dirs[0]);
-	if (elen < 0.001f) {
-		dirs[0][0] = 1; dirs[0][1] = 0; dirs[0][2] = 0;
-	} else {
-		dirs[0][0] /= elen;
-		dirs[0][1] /= elen;
-		dirs[0][2] /= elen;
-	}
-
-	best     = NULL;
-	best_len = 8.0f;
-
-	for (i = 0; i < ndirs; i++) {
-		VectorMA (pos, 8.0f, dirs[i], end);
-		tr = SV_Move (pos, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
-		if (tr.fraction >= 1.0f || tr.allsolid) continue;
-
-		len = tr.fraction * 8.0f;
-		if (len >= best_len) continue;
-
-		/* Only stamp world geometry, not brush entities */
-		if (tr.ent != NULL && tr.ent != sv.edicts) continue;
-
-		{
-			msurface_t *s = R_PointOnSurface_World (tr.endpos, tr.plane.normal);
-			if (!s) continue;
-
-			best = s;
-			best_len = len;
-			VectorCopy (tr.endpos,       best_hit);
-			VectorCopy (tr.plane.normal, best_nrm);
-		}
-	}
-
-	if (best) {
-		if (out_hit)    VectorCopy (best_hit, out_hit);
-		if (out_normal) VectorCopy (best_nrm, out_normal);
-	}
-	return best;
-}
-
 void R_SpawnDecal (vec3_t pos, decal_type_t type)
 {
-	vec3_t      hit;
 	msurface_t *surf;
 	mtexinfo_t *tex;
 	float       u, v;
@@ -488,12 +419,16 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	if (!r_decals.value) return;
 	if (type < 0 || type >= DECAL_NUM_TYPES) return;
 
-	surf = Retrace_ForDecal (pos, hit, NULL);
+	// TE_ impact positions are server trace endpoints — already on the surface
+	// plane within float precision. R_PointOnSurface_World has a 4-unit plane
+	// tolerance which handles the slop. Retracing would just whiff in 7
+	// directions from a point that's already touching the wall.
+	surf = R_PointOnSurface_World (pos, NULL);
 	if (!surf) return;
 
 	tex = surf->texinfo;
-	u = DotProduct(hit, tex->vecs[0]) + tex->vecs[0][3];
-	v = DotProduct(hit, tex->vecs[1]) + tex->vecs[1][3];
+	u = DotProduct(pos, tex->vecs[0]) + tex->vecs[0][3];
+	v = DotProduct(pos, tex->vecs[1]) + tex->vecs[1][3];
 	lu = ((int)floor(u) - surf->texturemins[0]) >> 4;
 	lv = ((int)floor(v) - surf->texturemins[1]) >> 4;
 	smax = (surf->extents[0] >> 4) + 1;
