@@ -252,6 +252,7 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(b.path("sdlquake/engine"));
     mod.addIncludePath(b.path("sdlquake/engine/editor"));
     mod.addIncludePath(b.path("sdlquake/game"));
+    mod.addIncludePath(b.path("sdlquake/vendor/stb"));
     mod.addIncludePath(b.path(wq_dir));
 
     // ---------------------------------------------------------------------------
