@@ -244,6 +244,10 @@ pub fn build(b: *std.Build) void {
         "-DDOUBLEVEC_T",
         "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
         "-include", "sdlquake/vendor/vis/vis_namespace.h",
+        // vis.h includes cmdlib.h/mathlib.h/bspfile.h; verbatim copies of
+        // vendor/qbsp/ originals live in vendor/vis/ so clang's
+        // "directory of source" search resolves them locally (same pattern
+        // as vendor/light/).
         "-fno-strict-aliasing",
         "-fwrapv",
         "-std=gnu89",

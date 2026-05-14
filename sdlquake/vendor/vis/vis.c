@@ -888,7 +888,7 @@ int main (int argc, char **argv)
 	char		source[1024];
 	int		i;
 	double		start, end;
-		
+
 	printf ("---- vis ----\n");
 
 	for (i=1 ; i<argc ; i++)
@@ -924,40 +924,61 @@ int main (int argc, char **argv)
 		Error ("usage: vis [-threads #] [-level 0-4] [-fast] [-v] bspfile");
 
 	start = I_FloatTime ();
-	
+
 	strcpy (source, argv[i]);
 	StripExtension (source);
 	DefaultExtension (source, ".bsp");
 
 	LoadBSPFile (source);
-	
+
 	strcpy (portalfile, argv[i]);
 	StripExtension (portalfile);
 	strcat (portalfile, ".prt");
-	
+
 	LoadPortals (portalfile);
-	
+
 	uncompressed = malloc(bitbytes*portalleafs);
 	memset (uncompressed, 0, bitbytes*portalleafs);
-	
+
 //	CalcPassages ();
 
 	CalcVis ();
 
 	printf ("c_chains: %i\n",c_chains);
-	
-	visdatasize = vismap_p - dvisdata;	
+
+	visdatasize = vismap_p - dvisdata;
 	printf ("visdatasize:%i  compressed from %i\n", visdatasize, originalvismapsize);
-	
+
 	CalcAmbientSounds ();
 
-	WriteBSPFile (source);	
-	
+	WriteBSPFile (source);
+
 //	unlink (portalfile);
 
 	end = I_FloatTime ();
 	printf ("%5.1f seconds elapsed\n", end-start);
-	
+
 	return 0;
+}
+
+/* ------------------------------------------------------------------
+ * vis_lib.c reset hook. Lives in this TU so it can see the file-scope
+ * statics directly (uncompressed isn't extern-declared in vis.h).
+ * Free anything still pointing at heap memory and zero counters. */
+void vis_reset_visc(void)
+{
+    if (portals) { free(portals); portals = NULL; }
+    if (leafs)   { free(leafs);   leafs   = NULL; }
+    if (uncompressed) { free(uncompressed); uncompressed = NULL; }
+    numportals = portalleafs = 0;
+    c_portaltest = c_portalpass = c_portalcheck = 0;
+    leafon = 0;
+    vismap = vismap_p = vismap_end = NULL;
+    originalvismapsize = 0;
+    bitbytes = bitlongs = 0;
+    fastvis = verbose = false;
+    testlevel = 2;
+    totalvis = 0;
+    count_sep = 0;
 }
 

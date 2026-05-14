@@ -410,12 +410,12 @@ void BasePortalVis (void)
 	portal_t	*tp, *p;
 	float		d;
 	winding_t	*w;
-	
+
 	for (i=0, p = portals ; i<numportals*2 ; i++, p++)
 	{
 		p->mightsee = malloc (bitbytes);
 		memset (p->mightsee, 0, bitbytes);
-		
+
 		c_portalsee = 0;
 		memset (portalsee, 0, numportals*2);
 
@@ -433,8 +433,8 @@ void BasePortalVis (void)
 			}
 			if (k == w->numpoints)
 				continue;	// no points on front
-				
-			
+
+
 			w = p->winding;
 			for (k=0 ; k<w->numpoints ; k++)
 			{
@@ -446,18 +446,28 @@ void BasePortalVis (void)
 			if (k == w->numpoints)
 				continue;	// no points on front
 
-			portalsee[j] = 1;		
+			portalsee[j] = 1;
 			c_portalsee++;
-			
+
 		}
-		
+
 		c_leafsee = 0;
 		SimpleFlood (p, p->leaf);
 		p->nummightsee = c_leafsee;
 //		printf ("portal:%4i  c_leafsee:%4i \n", i, c_leafsee);
-	
+
 	}
 
+}
+
+/* vis_lib.c reset hook for this TU's file-scope statics. */
+void vis_reset_flowc(void)
+{
+    c_chains = 0;
+    c_portalskip = c_leafskip = 0;
+    c_vistest = c_mighttest = 0;
+    active = 0;
+    c_leafsee = c_portalsee = 0;
 }
 
 
