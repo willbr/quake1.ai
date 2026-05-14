@@ -664,6 +664,39 @@ static void tool_screenshot(const char *id_json, const char *args)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: sample_pixel -- read one pixel from the current framebuffer
+// ---------------------------------------------------------------------------
+
+static void tool_sample_pixel(const char *id_json, const char *args)
+{
+    int x = -1, y = -1;
+    if (!args || !json_int(args, "x", &x) || !json_int(args, "y", &y))
+    {
+        mcp_error(id_json, -32602, "missing x or y");
+        return;
+    }
+
+    byte r = 0, g = 0, b = 0, idx = 0;
+    if (!VID_SamplePixel(x, y, &r, &g, &b, &idx))
+    {
+        mcp_error(id_json, -32602, "coords out of range");
+        return;
+    }
+
+    char raw[128];
+    snprintf(raw, sizeof(raw),
+        "{\"r\":%u,\"g\":%u,\"b\":%u,\"palette_index\":%u}",
+        r, g, b, idx);
+
+    char escaped[256];
+    char *d = escaped;
+    char *end = escaped + sizeof(escaped) - 1;
+    d = json_escape_append(d, end, raw);
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
 // Tool: editor_get_scene — JSON dump of the current edit_scene
 // ---------------------------------------------------------------------------
 
@@ -881,6 +914,14 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
          "\"properties\":{" \
            "\"path\":{\"type\":\"string\",\"description\":\"Optional output path (relative or absolute)\"}}," \
          "\"required\":[]}}" \
+      "," \
+      "{\"name\":\"sample_pixel\"," \
+       "\"description\":\"Read a single pixel from the current framebuffer. Returns 8-bit RGB plus the raw 8-bit palette index\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"x\":{\"type\":\"integer\",\"description\":\"0..vid.width-1\"}," \
+           "\"y\":{\"type\":\"integer\",\"description\":\"0..vid.height-1\"}}," \
+         "\"required\":[\"x\",\"y\"]}}" \
     "]}"
 
 // ---------------------------------------------------------------------------
@@ -985,6 +1026,11 @@ static void mcp_dispatch(const char *line)
         {
             const char *args = strstr(line, "\"arguments\":");
             tool_screenshot(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "sample_pixel") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_sample_pixel(id_json, args ? args : "");
         }
         else
         {
