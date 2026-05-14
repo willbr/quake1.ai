@@ -339,7 +339,7 @@ static void Stain_PaintKernel (msurface_t *surf, int lu, int lv,
 }
 
 // Forward decl: definition lives below.
-static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal);
+static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist);
 
 // Paint a kernel whose centre is at world-space point `center` and whose UV
 // basis comes from `primary`. Each cell is converted to world coordinates by
@@ -395,7 +395,10 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 			// R_PointOnSurface_World's plane tolerance + UV-extent check
 			// naturally filters to faces that share primary's plane and
 			// physically contain this point.
-			target = R_PointOnSurface_World (cell_world, NULL);
+			// Loose plane tolerance (24 units) so BSP-split sub-faces with
+			// slightly different pl->dist still match, and small UV gaps
+			// between adjacent faces don't drop the cell.
+			target = R_PointOnSurface_World (cell_world, NULL, 24.0f);
 			if (!target) continue;
 
 			ttex = target->texinfo;
@@ -427,8 +430,8 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 }
 
 // Walk the world BSP to find the surface that point P lies on (or near).
-// Uses the surface plane and a small tolerance. Returns NULL if no match.
-static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal)
+// Uses the surface plane and a caller-supplied tolerance. Returns NULL if no match.
+static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist)
 {
 	model_t    *world;
 	msurface_t *best, *s;
@@ -441,7 +444,7 @@ static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal)
 	if (!world) return NULL;
 
 	best   = NULL;
-	best_d = 4.0f;  // max plane-distance tolerance (game units)
+	best_d = max_plane_dist;
 
 	for (i = 0; i < world->numsurfaces; i++) {
 		s  = &world->surfaces[i];
@@ -490,7 +493,7 @@ static void R_DecalsTest_f (void)
 		return;
 	}
 
-	surf = R_PointOnSurface_World (tr.endpos, NULL);
+	surf = R_PointOnSurface_World (tr.endpos, NULL, 4.0f);
 	if (!surf) {
 		Con_Printf ("r_decals_test: no world surface at hit\n");
 		return;
@@ -524,8 +527,8 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	if (type < 0 || type >= DECAL_NUM_TYPES) return;
 
 	// Bullets / spikes: pos is the server trace endpoint, already on the
-	// surface plane — R_PointOnSurface_World's 4-unit tolerance handles it.
-	surf = R_PointOnSurface_World (pos, NULL);
+	// surface plane — 4-unit tolerance handles float-precision slop.
+	surf = R_PointOnSurface_World (pos, NULL, 4.0f);
 
 	// Explosions: pos is the missile origin at detonation time, which sits
 	// ~16-32 units off any wall because the missile has a bbox. If the direct
@@ -552,7 +555,7 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 			if (tr.fraction >= 1.0f || tr.allsolid) continue;
 			len = tr.fraction * 64.0f;
 			if (len >= best_len) continue;
-			cand = R_PointOnSurface_World (tr.endpos, NULL);
+			cand = R_PointOnSurface_World (tr.endpos, NULL, 4.0f);
 			if (!cand) continue;
 			best     = cand;
 			best_len = len;
@@ -600,7 +603,7 @@ void R_SpawnBloodPool (vec3_t origin)
 	if (tr.fraction >= 1.0f) return;
 	if (tr.plane.normal[2] < 0.7f) return;  // too steep
 
-	surf = R_PointOnSurface_World (tr.endpos, tr.plane.normal);
+	surf = R_PointOnSurface_World (tr.endpos, tr.plane.normal, 4.0f);
 	if (!surf) return;
 
 	// Find an empty slot or recycle the oldest.
