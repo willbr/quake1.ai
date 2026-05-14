@@ -3,20 +3,26 @@
  *
  * Pairs with qbsp_lib.h and light_lib.h. Caller flow:
  *
- *   qbsp_compile_to_memory(...)        -- geometry + .prt on disk
- *   vis_compile_in_place(prt_path, ...)-- PVS into dvisdata global
- *   light_compile_to_memory(...)       -- lighting baked, BSP re-serialised
- *                                         (includes PVS just filled)
+ *   qbsp_compile_to_memory(...)   -- geometry + portal text in qbsp_portbuf
+ *   vis_compile_in_place(opts)    -- PVS into dvisdata global
+ *   light_compile_to_memory(...)  -- lighting baked, BSP re-serialised
+ *                                    (includes PVS just filled)
  *
  * vis_compile_in_place does NOT return a BSP buffer. It mutates qbsp's
  * shared globals (dvisdata, dleafs[].visofs, dleafs[].ambient_level)
  * in place. Light's WriteBSPFile call later re-emits everything.
  *
+ * Portal handoff is in-memory: qbsp_compile_to_memory sets
+ * qbsp_portbuf_active = 1 and appends the portal text to qbsp_portbuf;
+ * vis_compile_in_place reads via qbsp_portbuf_gets in LoadPortals's
+ * memory branch and frees on exit. The disk .prt sidecar has been
+ * removed from this pipeline.
+ *
  * v1 caller invariants (M1):
  *   - One vis_compile_in_place call per process. Globals are not reset
  *     between calls; a second call may produce wrong output or crash.
- *   - The .prt at `prt_path` must exist on disk. qbsp_compile_to_memory
- *     writes it as a side-effect at <gamedir>/maps/<mapname>.prt.
+ *   - qbsp_compile_to_memory must have been called immediately before
+ *     so qbsp_portbuf is populated. vis clears the portbuf on exit.
  *   - On failure, returns non-zero and prints via Con_Printf; the BSP
  *     globals are left in a likely-corrupt state. Caller should discard.
  */
@@ -37,14 +43,15 @@ typedef struct {
 
 /*
  * Run the PVS pass against the BSP currently sitting in qbsp's globals,
- * sourcing portal connectivity from `prt_path` on disk.
+ * sourcing portal connectivity from qbsp_portbuf (populated by the prior
+ * qbsp_compile_to_memory call). The buffer is consumed and freed.
  *
  * Returns 0 on success, non-zero on failure (error printed via Con_Printf).
  *
  * `opts` may be NULL for defaults (level=2, no fast, no verbose, sound PVS
  * enabled).
  */
-int vis_compile_in_place(const char *prt_path, const vis_options_t *opts);
+int vis_compile_in_place(const vis_options_t *opts);
 
 /*
  * Stand-alone bench/diagnostic: loads `bsp_path` + `prt_path` from disk

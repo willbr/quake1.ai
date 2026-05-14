@@ -2,6 +2,13 @@
 
 #include "vis.h"
 
+/* qbsp_lib.c hooks: when qbsp_portbuf_active is set, LoadPortals reads
+ * its portal file from qbsp_portbuf (populated by the prior qbsp compile)
+ * instead of fopening a .prt on disk. vis_compile_in_place leaves the
+ * flag set on entry and clears it on exit. */
+extern int   qbsp_portbuf_active;
+extern char *qbsp_portbuf_gets(char *dst, int len);
+
 #define	MAX_THREADS		4
 
 int			numportals;
@@ -772,27 +779,48 @@ void LoadPortals (char *name)
 	portal_t	*p;
 	leaf_t		*l;
 	char		magic[80];
-	FILE		*f;
+	FILE		*f = NULL;
 	int			numpoints;
 	winding_t	*w;
 	int			leafnums[2];
 	plane_t		plane;
-	
-	if (!strcmp(name,"-"))
-		f = stdin;
+	char		line[512];
+
+	if (qbsp_portbuf_active)
+	{
+		/* Memory path: source lines from qbsp_portbuf. The header is 3
+		 * separate lines (magic, portalleafs, numportals); each portal
+		 * is one line. */
+		if (!qbsp_portbuf_gets(line, sizeof(line)))
+			Error ("LoadPortals: empty portbuf");
+		if (sscanf (line, "%79s", magic) != 1)
+			Error ("LoadPortals: failed to read magic");
+		if (!qbsp_portbuf_gets(line, sizeof(line))
+		 || sscanf (line, "%i", &portalleafs) != 1)
+			Error ("LoadPortals: failed to read portalleafs");
+		if (!qbsp_portbuf_gets(line, sizeof(line))
+		 || sscanf (line, "%i", &numportals) != 1)
+			Error ("LoadPortals: failed to read numportals");
+	}
 	else
 	{
-		f = fopen(name, "r");
-		if (!f)
+		if (!strcmp(name,"-"))
+			f = stdin;
+		else
 		{
-			printf ("LoadPortals: couldn't read %s\n",name);
-			printf ("No vising performed.\n");
-			exit (1);
+			f = fopen(name, "r");
+			if (!f)
+			{
+				printf ("LoadPortals: couldn't read %s\n",name);
+				printf ("No vising performed.\n");
+				exit (1);
+			}
 		}
+
+		if (fscanf (f,"%79s\n%i\n%i\n",magic, &portalleafs, &numportals) != 3)
+			Error ("LoadPortals: failed to read header");
 	}
 
-	if (fscanf (f,"%79s\n%i\n%i\n",magic, &portalleafs, &numportals) != 3)
-		Error ("LoadPortals: failed to read header");
 	if (strcmp(magic,PORTALFILE))
 		Error ("LoadPortals: not a portal file");
 
@@ -801,11 +829,11 @@ void LoadPortals (char *name)
 
 	bitbytes = ((portalleafs+63)&~63)>>3;
 	bitlongs = bitbytes/sizeof(long);
-	
+
 // each file portal is split into two memory portals
 	portals = malloc(2*numportals*sizeof(portal_t));
 	memset (portals, 0, 2*numportals*sizeof(portal_t));
-	
+
 	leafs = malloc(portalleafs*sizeof(leaf_t));
 	memset (leafs, 0, portalleafs*sizeof(leaf_t));
 
@@ -813,36 +841,79 @@ void LoadPortals (char *name)
 
 	vismap = vismap_p = dvisdata;
 	vismap_end = vismap + MAX_MAP_VISIBILITY;
-		
+
 	for (i=0, p=portals ; i<numportals ; i++)
 	{
-		if (fscanf (f, "%i %i %i ", &numpoints, &leafnums[0], &leafnums[1])
-			!= 3)
-			Error ("LoadPortals: reading portal %i", i);
-		if (numpoints > MAX_POINTS_ON_WINDING)
-			Error ("LoadPortals: portal %i has too many points", i);
-		if ( (unsigned)leafnums[0] > portalleafs
-		|| (unsigned)leafnums[1] > portalleafs)
-			Error ("LoadPortals: reading portal %i", i);
-		
-		w = p->winding = NewWinding (numpoints);
-		w->original = true;
-		w->numpoints = numpoints;
-		
-		for (j=0 ; j<numpoints ; j++)
+		if (qbsp_portbuf_active)
 		{
-			double	v[3];
-			int		k;
-
-			// scanf into double, then assign to vec_t
-			if (fscanf (f, "(%lf %lf %lf ) "
-			, &v[0], &v[1], &v[2]) != 3)
+			/* One line per portal. Walk a cursor through it using
+			 * sscanf's %n (records chars consumed so far; doesn't count
+			 * toward the return value). The disk format ends each
+			 * portal with " \n"; here the \n is just trailing whitespace
+			 * sscanf will skip. */
+			int   consumed = 0;
+			char *cursor;
+			if (!qbsp_portbuf_gets(line, sizeof(line)))
+				Error ("LoadPortals: reading portal %i (no line)", i);
+			cursor = line;
+			if (sscanf (cursor, "%i %i %i %n",
+			            &numpoints, &leafnums[0], &leafnums[1], &consumed) != 3)
 				Error ("LoadPortals: reading portal %i", i);
-			for (k=0 ; k<3 ; k++)
-				w->points[j][k] = v[k];
+			cursor += consumed;
+
+			if (numpoints > MAX_POINTS_ON_WINDING)
+				Error ("LoadPortals: portal %i has too many points", i);
+			if ( (unsigned)leafnums[0] > portalleafs
+			|| (unsigned)leafnums[1] > portalleafs)
+				Error ("LoadPortals: reading portal %i", i);
+
+			w = p->winding = NewWinding (numpoints);
+			w->original = true;
+			w->numpoints = numpoints;
+
+			for (j=0 ; j<numpoints ; j++)
+			{
+				double	v[3];
+				int		k;
+				consumed = 0;
+				if (sscanf (cursor, "(%lf %lf %lf ) %n",
+				            &v[0], &v[1], &v[2], &consumed) != 3)
+					Error ("LoadPortals: reading portal %i", i);
+				cursor += consumed;
+				for (k=0 ; k<3 ; k++)
+					w->points[j][k] = v[k];
+			}
 		}
-		fscanf (f, "\n");
-		
+		else
+		{
+			if (fscanf (f, "%i %i %i ", &numpoints, &leafnums[0], &leafnums[1])
+				!= 3)
+				Error ("LoadPortals: reading portal %i", i);
+			if (numpoints > MAX_POINTS_ON_WINDING)
+				Error ("LoadPortals: portal %i has too many points", i);
+			if ( (unsigned)leafnums[0] > portalleafs
+			|| (unsigned)leafnums[1] > portalleafs)
+				Error ("LoadPortals: reading portal %i", i);
+
+			w = p->winding = NewWinding (numpoints);
+			w->original = true;
+			w->numpoints = numpoints;
+
+			for (j=0 ; j<numpoints ; j++)
+			{
+				double	v[3];
+				int		k;
+
+				// scanf into double, then assign to vec_t
+				if (fscanf (f, "(%lf %lf %lf ) "
+				, &v[0], &v[1], &v[2]) != 3)
+					Error ("LoadPortals: reading portal %i", i);
+				for (k=0 ; k<3 ; k++)
+					w->points[j][k] = v[k];
+			}
+			fscanf (f, "\n");
+		}
+
 	// calc plane
 		PlaneFromWinding (w, &plane);
 
@@ -852,28 +923,28 @@ void LoadPortals (char *name)
 			Error ("Leaf with too many portals");
 		l->portals[l->numportals] = p;
 		l->numportals++;
-		
+
 		p->winding = w;
 		VectorSubtract (vec3_origin, plane.normal, p->plane.normal);
 		p->plane.dist = -plane.dist;
 		p->leaf = leafnums[1];
 		p++;
-		
+
 	// create backwards portal
 		l = &leafs[leafnums[1]];
 		if (l->numportals == MAX_PORTALS_ON_LEAF)
 			Error ("Leaf with too many portals");
 		l->portals[l->numportals] = p;
 		l->numportals++;
-		
+
 		p->winding = w;
 		p->plane = plane;
 		p->leaf = leafnums[0];
 		p++;
 
 	}
-	
-	fclose (f);
+
+	if (f) fclose (f);
 }
 
 

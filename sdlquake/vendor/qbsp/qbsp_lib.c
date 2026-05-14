@@ -147,6 +147,67 @@ byte *qbsp_membuf_take(int *out_size)
     return p;
 }
 
+/* -------------------------------------------------------------------------
+ * Portbuf — in-memory destination for WritePortalfile, source for VIS's
+ * LoadPortals.
+ *
+ * Same idea as qbsp_membuf but for the .prt text. portals.c reads
+ * qbsp_portbuf_active to route WritePortalFile_r's per-portal fprintf
+ * lines into qbsp_portbuf instead of fopening portfilename. vis.c's
+ * LoadPortals reads via qbsp_portbuf_gets line-by-line.
+ *
+ * qbsp_compile_to_memory sets qbsp_portbuf_active = 1 and leaves it set
+ * on success; vis_compile_in_place is expected to clear it and free the
+ * buffer when it's done consuming. The error path here clears too so a
+ * failed qbsp leaves no portbuf state hanging.
+ */
+int    qbsp_portbuf_active = 0;
+char  *qbsp_portbuf         = NULL;
+int    qbsp_portbuf_size    = 0;
+int    qbsp_portbuf_pos_r   = 0;
+static int qbsp_portbuf_cap = 0;
+
+void qbsp_portbuf_reset(void)
+{
+    if (qbsp_portbuf) free(qbsp_portbuf);
+    qbsp_portbuf       = NULL;
+    qbsp_portbuf_size  = 0;
+    qbsp_portbuf_pos_r = 0;
+    qbsp_portbuf_cap   = 0;
+}
+
+void qbsp_portbuf_append(const char *src, int len)
+{
+    int need = qbsp_portbuf_size + len;
+    if (need > qbsp_portbuf_cap)
+    {
+        int cap = qbsp_portbuf_cap ? qbsp_portbuf_cap : (1 << 16);
+        while (cap < need) cap *= 2;
+        qbsp_portbuf = (char *)realloc(qbsp_portbuf, (size_t)cap);
+        if (!qbsp_portbuf) Con_Printf("qbsp_portbuf: out of memory\n");
+        qbsp_portbuf_cap = cap;
+    }
+    memcpy(qbsp_portbuf + qbsp_portbuf_size, src, (size_t)len);
+    qbsp_portbuf_size += len;
+}
+
+/* Read one line (up to and including '\n') into dst, NUL-terminated.
+ * Mirrors fgets semantics: returns NULL at EOF, dst otherwise. The trailing
+ * newline (if any) is preserved in dst — matches what the original
+ * fscanf "%lf %lf %lf ) " whitespace-skip expected. */
+char *qbsp_portbuf_gets(char *dst, int len)
+{
+    int n = 0;
+    if (qbsp_portbuf_pos_r >= qbsp_portbuf_size) return NULL;
+    while (n < len - 1 && qbsp_portbuf_pos_r < qbsp_portbuf_size) {
+        char c = qbsp_portbuf[qbsp_portbuf_pos_r++];
+        dst[n++] = c;
+        if (c == '\n') break;
+    }
+    dst[n] = '\0';
+    return dst;
+}
+
 /* Globals qbsp.c declares; we touch them from here so the namespace
  * macros aren't needed (this TU includes qbsp_namespace.h via -include
  * just like the rest of the qbsp code). */
@@ -359,21 +420,31 @@ int qbsp_compile_to_memory(const char *map_path,
     qbsp_membuf_active = 1;
     qbsp_membuf_reset();
 
+    /* Same trick for the .prt: portals.c's WritePortalfile routes through
+     * qbsp_portbuf, and vis_compile_in_place reads from it. We leave the
+     * flag set on the success path — vis is the consumer that clears.
+     * The error branch below clears explicitly. */
+    qbsp_portbuf_active = 1;
+    qbsp_portbuf_reset();
+
     /* Set the longjmp target before any qbsp call. Error() in cmdlib.c
      * checks qbsp_err_jmp and longjmps here on any abort. */
     qbsp_err_jmp    = &err_buf;
     qbsp_err_msg[0] = '\0';
     if (setjmp(err_buf) != 0) {
         Con_Printf("qbsp: %s\n", qbsp_err_msg);
-        qbsp_err_jmp       = NULL;
-        qbsp_membuf_active = 0;
+        qbsp_err_jmp        = NULL;
+        qbsp_membuf_active  = 0;
         qbsp_membuf_reset();
+        qbsp_portbuf_active = 0;
+        qbsp_portbuf_reset();
         return 1;
     }
 
     ProcessFile(sourcename, destname);
     qbsp_err_jmp       = NULL;
     qbsp_membuf_active = 0;
+    /* qbsp_portbuf_active stays 1 — vis_compile_in_place clears it. */
 
     /* Transfer ownership of the buffer to the caller (engine VFS). */
     *out_bsp  = qbsp_membuf_take(&bsp_size);

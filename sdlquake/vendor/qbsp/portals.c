@@ -1,6 +1,33 @@
 
 #include "bsp5.h"
 
+/* qbsp_lib.c hooks: when qbsp_portbuf_active is set (qbsp_compile_to_memory
+ * is the only caller that does), portbuf_printf appends to qbsp_portbuf
+ * instead of fwrite-ing to a FILE *. vis_compile_in_place then consumes
+ * the buffer via qbsp_portbuf_gets. cmdlib.h already pulled in <stdarg.h>. */
+extern int  qbsp_portbuf_active;
+extern void qbsp_portbuf_append(const char *src, int len);
+extern void qbsp_portbuf_reset(void);
+
+/* Replacement for fprintf(pf, fmt, ...) inside WritePortalFile_r /
+ * WritePortalfile. 256 bytes is plenty: the longest line WriteFloat emits
+ * is "%f " = ~12 chars. */
+static void portbuf_printf(FILE *f, const char *fmt, ...)
+{
+	char    buf[256];
+	int     n;
+	va_list ap;
+	va_start(ap, fmt);
+	n = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	if (n < 0) n = 0;
+	if (n > (int)sizeof(buf) - 1) n = (int)sizeof(buf) - 1;
+	if (qbsp_portbuf_active)
+		qbsp_portbuf_append(buf, n);
+	else
+		fwrite(buf, 1, (size_t)n, f);
+}
+
 
 node_t	outside_node;		// portals outside the world face this
 
@@ -443,14 +470,14 @@ int		num_visportals;
 void WriteFloat (FILE *f, vec_t v)
 {
 	if ( fabs(v - Q_rint(v)) < 0.001 )
-		fprintf (f,"%i ",(int)Q_rint(v));
+		portbuf_printf (f,"%i ",(int)Q_rint(v));
 	else
-		fprintf (f,"%f ",v);
+		portbuf_printf (f,"%f ",v);
 }
 
 void WritePortalFile_r (node_t *node)
 {
-	int		i;	
+	int		i;
 	portal_t	*p;
 	winding_t	*w;
 	plane_t		*pl, plane2;
@@ -461,7 +488,7 @@ void WritePortalFile_r (node_t *node)
 		WritePortalFile_r (node->children[1]);
 		return;
 	}
-	
+
 	if (node->contents == CONTENTS_SOLID)
 		return;
 
@@ -472,7 +499,7 @@ void WritePortalFile_r (node_t *node)
 		&& p->nodes[0]->contents == p->nodes[1]->contents)
 		{
 		// write out to the file
-		
+
 		// sometimes planes get turned around when they are very near
 		// the changeover point between different axis.  interpret the
 		// plane the same way vis will, and flip the side orders if needed
@@ -480,21 +507,21 @@ void WritePortalFile_r (node_t *node)
 			PlaneFromWinding (w, &plane2);
 			if ( DotProduct (pl->normal, plane2.normal) < 0.99 )
 			{	// backwards...
-				fprintf (pf,"%i %i %i ",w->numpoints, p->nodes[1]->visleafnum, p->nodes[0]->visleafnum);
+				portbuf_printf (pf,"%i %i %i ",w->numpoints, p->nodes[1]->visleafnum, p->nodes[0]->visleafnum);
 			}
 			else
-				fprintf (pf,"%i %i %i ",w->numpoints, p->nodes[0]->visleafnum, p->nodes[1]->visleafnum);
+				portbuf_printf (pf,"%i %i %i ",w->numpoints, p->nodes[0]->visleafnum, p->nodes[1]->visleafnum);
 			for (i=0 ; i<w->numpoints ; i++)
 			{
-				fprintf (pf,"(");
+				portbuf_printf (pf,"(");
 				WriteFloat (pf, w->points[i][0]);
 				WriteFloat (pf, w->points[i][1]);
 				WriteFloat (pf, w->points[i][2]);
-				fprintf (pf,") ");
+				portbuf_printf (pf,") ");
 			}
-			fprintf (pf,"\n");
+			portbuf_printf (pf,"\n");
 		}
-		
+
 		if (p->nodes[0] == node)
 			p = p->next[0];
 		else
@@ -557,20 +584,28 @@ void WritePortalfile (node_t *headnode)
 	num_visleafs = 0;
 	num_visportals = 0;
 	NumberLeafs_r (headnode);
-	
-// write the file
-	printf ("writing %s\n", portfilename);
-	pf = fopen (portfilename, "w");
-	if (!pf)
-		Error ("Error opening %s", portfilename);
-		
-	fprintf (pf, "%s\n", PORTALFILE);
-	fprintf (pf, "%i\n", num_visleafs);
-	fprintf (pf, "%i\n", num_visportals);
-	
+
+// write the file (or grow the in-memory portbuf)
+	if (qbsp_portbuf_active)
+	{
+		qbsp_portbuf_reset();
+		pf = NULL;
+	}
+	else
+	{
+		printf ("writing %s\n", portfilename);
+		pf = fopen (portfilename, "w");
+		if (!pf)
+			Error ("Error opening %s", portfilename);
+	}
+
+	portbuf_printf (pf, "%s\n", PORTALFILE);
+	portbuf_printf (pf, "%i\n", num_visleafs);
+	portbuf_printf (pf, "%i\n", num_visportals);
+
 	WritePortalFile_r (headnode);
-	
-	fclose (pf);
+
+	if (pf) fclose (pf);
 }
 
 

@@ -39,6 +39,13 @@ extern void Con_Printf(char *fmt, ...);
 extern jmp_buf *qbsp_err_jmp;
 extern char     qbsp_err_msg[1024];
 
+/* Portbuf hooks: qbsp_compile_to_memory leaves qbsp_portbuf_active = 1
+ * with the .prt text in the buffer; LoadPortals consumes it via the
+ * memory branch in vis.c; we clear and free at exit (success or failure)
+ * so the next compile starts clean. */
+extern int  qbsp_portbuf_active;
+extern void qbsp_portbuf_reset(void);
+
 /* Per-file reset helpers. The namespace header doesn't mangle these
  * names. Defined in vis.c / flow.c immediately after the global
  * declarations they reset. */
@@ -81,18 +88,18 @@ static void apply_options(const vis_options_t *opts)
     }
 }
 
-int vis_compile_in_place(const char *prt_path, const vis_options_t *opts)
+int vis_compile_in_place(const vis_options_t *opts)
 {
     jmp_buf err_buf;
     double  t0, t1, t2, t3;
     extern double I_FloatTime(void);
 
-    if (!prt_path || !prt_path[0]) {
-        Con_Printf("vis: no .prt path\n");
-        return 1;
-    }
     if (numfaces <= 0) {
         Con_Printf("vis: no BSP in memory (caller must qbsp first)\n");
+        return 1;
+    }
+    if (!qbsp_portbuf_active) {
+        Con_Printf("vis: portbuf not active (caller must qbsp first)\n");
         return 1;
     }
 
@@ -104,12 +111,16 @@ int vis_compile_in_place(const char *prt_path, const vis_options_t *opts)
     if (setjmp(err_buf) != 0) {
         Con_Printf("vis: %s\n", qbsp_err_msg);
         if (uncompressed) { free(uncompressed); uncompressed = NULL; }
-        qbsp_err_jmp = NULL;
+        qbsp_err_jmp        = NULL;
+        qbsp_portbuf_active = 0;
+        qbsp_portbuf_reset();
         return 1;
     }
 
     t0 = I_FloatTime();
-    LoadPortals((char *)prt_path);
+    /* name argument unused when portbuf is active; LoadPortals forks on
+     * qbsp_portbuf_active and reads from the buffer instead. */
+    LoadPortals(NULL);
     t1 = I_FloatTime();
 
     /* Workspace allocated by VIS's main() prior to CalcVis. Sized
@@ -118,7 +129,9 @@ int vis_compile_in_place(const char *prt_path, const vis_options_t *opts)
     if (!uncompressed) {
         Con_Printf("vis: out of memory for uncompressed buffer (%d bytes)\n",
                    bitbytes * portalleafs);
-        qbsp_err_jmp = NULL;
+        qbsp_err_jmp        = NULL;
+        qbsp_portbuf_active = 0;
+        qbsp_portbuf_reset();
         return 1;
     }
     memset(uncompressed, 0, (size_t)(bitbytes * portalleafs));
@@ -140,7 +153,9 @@ int vis_compile_in_place(const char *prt_path, const vis_options_t *opts)
 
     free(uncompressed);
     uncompressed = NULL;
-    qbsp_err_jmp = NULL;
+    qbsp_err_jmp        = NULL;
+    qbsp_portbuf_active = 0;
+    qbsp_portbuf_reset();
     return 0;
 }
 
@@ -154,6 +169,11 @@ int vis_bench(const char *bsp_path, const char *prt_path)
         Con_Printf("vis_bench: bsp_path or prt_path missing\n");
         return 1;
     }
+
+    /* Bench reads .prt from disk, NOT the portbuf. Force the disk
+     * branch in LoadPortals even if a prior qbsp_compile_to_memory
+     * left portbuf state behind. */
+    qbsp_portbuf_active = 0;
 
     vis_reset_state();
     apply_options(NULL);

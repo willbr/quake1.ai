@@ -832,8 +832,8 @@ static void Editor_Cmd_CompileFull_f(void)
 /*
  * editor_compile_export: qbsp + vis + light. The "shippable BSP" pipeline.
  * Same flow as editor_compile_full but adds vis_compile_in_place between
- * qbsp and light, sourcing portal data from the .prt qbsp wrote alongside
- * the destname.
+ * qbsp and light. Portal data is handed off in-memory via qbsp_portbuf
+ * — no .prt sidecar is written to disk.
  *
  * Args: optional [fast] (uses VIS -fast flood mode) or [level=N] (1-4,
  * default 2). e.g. `editor_compile_export fast`, `editor_compile_export
@@ -842,7 +842,6 @@ static void Editor_Cmd_CompileFull_f(void)
 static void Editor_Cmd_CompileExport_f(void)
 {
     char  map_path[256];
-    char  prt_path[256];
     char  bsp_vpath[64];
     char  lit_vpath[64];
     void *bsp_unlit = NULL;
@@ -883,8 +882,6 @@ static void Editor_Cmd_CompileExport_f(void)
 
     snprintf(map_path, sizeof(map_path),
              "%s/maps/%s.map", com_gamedir, edit_scene.mapname);
-    snprintf(prt_path, sizeof(prt_path),
-             "%s/maps/%s.prt", com_gamedir, edit_scene.mapname);
     snprintf(bsp_vpath, sizeof(bsp_vpath),
              "maps/%s.bsp", edit_scene.mapname);
     snprintf(lit_vpath, sizeof(lit_vpath),
@@ -919,7 +916,7 @@ static void Editor_Cmd_CompileExport_f(void)
                vopts.fast ? " fast" : "",
                vopts.skip_sound_pvs ? " no-sound-pvs" : "");
 
-    rc = vis_compile_in_place(prt_path, &vopts);
+    rc = vis_compile_in_place(&vopts);
     if (rc != 0) {
         Con_Printf("editor_compile_export: vis failed (rc=%d)\n", rc);
         free(bsp_unlit);
