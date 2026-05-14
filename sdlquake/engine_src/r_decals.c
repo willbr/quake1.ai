@@ -408,32 +408,57 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 		step_v[i] = tex->vecs[1][i] * (16.0f / vlen2);
 	}
 
-	half = ksize / 2;
-	for (ky = 0; ky < ksize; ky++) {
-		sy = ky - half;
-		for (kx = 0; kx < ksize; kx++) {
-			vec3_t      cell_world;
-			msurface_t *neighbor;
+	{
+		model_t  *world = cl.worldmodel;
+		mplane_t *primary_plane = primary->plane;
 
-			w = kernel[ky * ksize + kx];
-			if (!w) continue;
-			sx = kx - half;
+		half = ksize / 2;
+		for (ky = 0; ky < ksize; ky++) {
+			sy = ky - half;
+			for (kx = 0; kx < ksize; kx++) {
+				vec3_t cell_world;
+				int    si;
 
-			cell_world[0] = center[0] + sx * step_u[0] + sy * step_v[0];
-			cell_world[1] = center[1] + sx * step_u[1] + sy * step_v[1];
-			cell_world[2] = center[2] + sx * step_u[2] + sy * step_v[2];
+				w = kernel[ky * ksize + kx];
+				if (!w) continue;
+				sx = kx - half;
 
-			// Always try primary — Stain_AddCell silently skips if the cell
-			// is outside primary's lightmap rectangle.
-			Stain_AddCell (primary, cell_world, w, dr, dg, db, knorm);
+				cell_world[0] = center[0] + sx * step_u[0] + sy * step_v[0];
+				cell_world[1] = center[1] + sx * step_u[1] + sy * step_v[1];
+				cell_world[2] = center[2] + sx * step_u[2] + sy * step_v[2];
 
-			// Also paint on any coplanar neighbor that contains this cell.
-			// Boundary cells get painted on BOTH adjacent faces' edge luxels,
-			// which eliminates the gap that would otherwise appear at BSP
-			// face splits.
-			neighbor = R_PointOnSurface_World (cell_world, NULL, 24.0f);
-			if (neighbor && neighbor != primary) {
-				Stain_AddCell (neighbor, cell_world, w, dr, dg, db, knorm);
+				// Paint EVERY coplanar world face whose UV bounds contain
+				// this cell. Returning a single "best" match leaves edge
+				// luxels on one side of a BSP boundary unpainted whenever
+				// iteration order picks the wrong tie-breaker.
+				for (si = 0; si < world->numsurfaces; si++) {
+					msurface_t *s = &world->surfaces[si];
+					mplane_t   *pl = s->plane;
+					mtexinfo_t *stex;
+					float       d, ad, u, v;
+
+					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB | SURF_DRAWTILED)) continue;
+					// Same plane (allow loose 24-unit tolerance for BSP-split sub-faces)
+					d  = DotProduct(cell_world, pl->normal) - pl->dist;
+					if (s->flags & SURF_PLANEBACK) d = -d;
+					ad = d < 0 ? -d : d;
+					if (ad > 24.0f) continue;
+					// Same outward facing as primary (skip back-to-back coplanar faces)
+					if (pl != primary_plane) {
+						float nd = DotProduct(pl->normal, primary_plane->normal);
+						if (s->flags & SURF_PLANEBACK)        nd = -nd;
+						if (primary->flags & SURF_PLANEBACK)  nd = -nd;
+						if (nd < 0.5f) continue;
+					}
+					// UV bounds contain the cell
+					stex = s->texinfo;
+					u = DotProduct(cell_world, stex->vecs[0]) + stex->vecs[0][3];
+					v = DotProduct(cell_world, stex->vecs[1]) + stex->vecs[1][3];
+					if (u < s->texturemins[0] || u > s->texturemins[0] + s->extents[0]) continue;
+					if (v < s->texturemins[1] || v > s->texturemins[1] + s->extents[1]) continue;
+
+					Stain_AddCell (s, cell_world, w, dr, dg, db, knorm);
+				}
 			}
 		}
 	}
