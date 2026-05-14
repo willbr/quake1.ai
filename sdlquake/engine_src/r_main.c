@@ -126,9 +126,10 @@ cvar_t	r_coloredlight    = {"r_coloredlight",    "1", true};	// archived
 cvar_t	r_colored_dlights = {"r_colored_dlights", "1", true};	// archived
 cvar_t	r_lerpmodels      = {"r_lerpmodels",      "1", true};	// archived
 
-static float r_coloredlight_last    = -1.0f;	// forces flush on first frame
-static float r_colored_dlights_last = -1.0f;
-static float r_lightmap_last        = -1.0f;
+static float r_coloredlight_last      = -1.0f;	// forces flush on first frame
+static float r_colored_dlights_last   = -1.0f;
+static float r_lightmap_last          = -1.0f;
+static float r_decals_intensity_last  = -1.0f;
 cvar_t	r_drawentities = {"r_drawentities","1"};
 cvar_t	r_drawviewmodel = {"r_drawviewmodel","1"};
 cvar_t	r_aliasstats = {"r_polymodelstats","0"};
@@ -1194,12 +1195,14 @@ void R_RenderView (void)
 	   cached output. One-frame rebuild cost only on toggle. */
 	if (r_coloredlight.value    != r_coloredlight_last ||
 	    r_colored_dlights.value != r_colored_dlights_last ||
-	    r_lightmap.value        != r_lightmap_last)
+	    r_lightmap.value        != r_lightmap_last ||
+	    r_decals_intensity.value != r_decals_intensity_last)
 	{
 		D_FlushCaches ();
-		r_coloredlight_last    = r_coloredlight.value;
-		r_colored_dlights_last = r_colored_dlights.value;
-		r_lightmap_last        = r_lightmap.value;
+		r_coloredlight_last      = r_coloredlight.value;
+		r_colored_dlights_last   = r_colored_dlights.value;
+		r_lightmap_last          = r_lightmap.value;
+		r_decals_intensity_last  = r_decals_intensity.value;
 	}
 
 	R_RenderView_ ();
