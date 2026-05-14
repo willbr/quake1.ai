@@ -1,5 +1,9 @@
 #include "vis.h"
 
+/* Forward declaration so vis_track_malloc is known to return void* before
+ * its first use in PortalFlow / BasePortalVis (C89 implicit-int rule). */
+void *vis_track_malloc(int size);
+
 int		c_chains;
 int		c_portalskip, c_leafskip;
 int		c_vistest, c_mighttest;
@@ -346,7 +350,7 @@ void PortalFlow (portal_t *p)
 		Error ("PortalFlow: reflowed");
 	p->status = stat_working;
 	
-	p->visbits = malloc (bitbytes);
+	p->visbits = vis_track_malloc (bitbytes);
 	memset (p->visbits, 0, bitbytes);
 
 	memset (&data, 0, sizeof(data));
@@ -413,7 +417,7 @@ void BasePortalVis (void)
 
 	for (i=0, p = portals ; i<numportals*2 ; i++, p++)
 	{
-		p->mightsee = malloc (bitbytes);
+		p->mightsee = vis_track_malloc (bitbytes);
 		memset (p->mightsee, 0, bitbytes);
 
 		c_portalsee = 0;
@@ -468,6 +472,44 @@ void vis_reset_flowc(void)
     c_vistest = c_mighttest = 0;
     active = 0;
     c_leafsee = c_portalsee = 0;
+}
+
+
+/* M2: per-portal scratch allocations. id's VIS leaks these on purpose
+ * (process exit reclaims them); we walk this list in vis_reset_state.
+ * Insertion is O(1) at head; no removal needed at the per-allocation
+ * level — the list resets wholesale between compiles. */
+typedef struct vis_track_s {
+    struct vis_track_s *next;
+    void               *ptr;
+} vis_track_t;
+static vis_track_t *vis_track_head = NULL;
+
+void *vis_track_malloc(int size)
+{
+    vis_track_t *t = (vis_track_t *)malloc(sizeof(vis_track_t));
+    void *p = malloc((size_t)size);
+    if (!t || !p) {
+        if (t) free(t);
+        if (p) free(p);
+        return NULL;
+    }
+    t->next = vis_track_head;
+    t->ptr  = p;
+    vis_track_head = t;
+    return p;
+}
+
+void vis_track_free_all(void)
+{
+    vis_track_t *t = vis_track_head, *next;
+    while (t) {
+        next = t->next;
+        free(t->ptr);
+        free(t);
+        t = next;
+    }
+    vis_track_head = NULL;
 }
 
 

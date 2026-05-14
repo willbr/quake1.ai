@@ -51,6 +51,7 @@ extern void qbsp_portbuf_reset(void);
  * declarations they reset. */
 void vis_reset_visc (void);
 void vis_reset_flowc(void);
+extern void vis_track_free_all(void);
 
 /* vis.h doesn't declare these two globals even though vis.c defines them.
  * Declare them here so apply_options can write them. The namespace header
@@ -62,6 +63,7 @@ static void vis_reset_state(void)
 {
     vis_reset_visc();
     vis_reset_flowc();
+    vis_track_free_all();        /* NEW: free mightsee/visbits arrays */
 
     /* dvisdata is shared with qbsp; qbsp leaves it empty (visdatasize == 0).
      * CalcVis will fill it via LeafFlow. Clear in case a previous run left
