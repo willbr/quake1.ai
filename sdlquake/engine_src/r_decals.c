@@ -280,6 +280,16 @@ static const int K5x5[25] = {
 	 1,  4,  6,  4,  1,
 };
 
+/* Wider, flatter falloff for scorch marks — softer outer ring than K5x5 so
+   the burn reads as a fading scorch rather than a tight dot. */
+static const int K5x5_scorch[25] = {
+	1, 2, 3, 2, 1,
+	2, 4, 6, 4, 2,
+	3, 6, 9, 6, 3,
+	2, 4, 6, 4, 2,
+	1, 2, 3, 2, 1,
+};
+
 /* Single-luxel solid used by r_decals_test to show the luxel grid resolution. */
 static const int K1x1_solid[1] = { 1 };
 
@@ -294,7 +304,7 @@ static const decal_kernel_t decal_kernels[DECAL_NUM_TYPES] = {
 	/* DECAL_BULLET      */ { K1x1_solid, 1,  1, -150, -150, -150 },
 	/* DECAL_SPIKE       */ { K1x1_solid, 1,  1, -150, -150, -150 },
 	/* DECAL_BLOOD_SPLAT */ { K3x3, 3,  16, +60, -40, -40 },
-	/* DECAL_SCORCH      */ { K5x5, 5, 256, -80, -80, -80 },
+	/* DECAL_SCORCH      */ { K5x5_scorch, 5, 9, -1500, -1500, -1500 },
 	/* DECAL_LIGHTNING   */ { K3x3, 3,  16, -50, -60, -40 },
 };
 
