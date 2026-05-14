@@ -7,6 +7,7 @@ See docs/superpowers/specs/2026-05-13-decals-design.md.
 
 static void R_DecalsTest_f (void);       /* forward decl — defined later in this file */
 static void R_DecalsTestGrid_f (void);   /* forward decl — defined later in this file */
+static void R_DecalsTestPool_f (void);   /* forward decl — defined later in this file */
 
 // Cvars (registered in R_DecalsInit).
 cvar_t r_decals                    = { "r_decals",                    "1", true };
@@ -28,6 +29,16 @@ void R_DecalsInit (void)
 	Cvar_RegisterVariable (&r_decals_debug);
 	Cmd_AddCommand ("r_decals_test", R_DecalsTest_f);
 	Cmd_AddCommand ("r_decals_test_grid", R_DecalsTestGrid_f);
+	Cmd_AddCommand ("r_decals_test_pool", R_DecalsTestPool_f);
+}
+
+/* Dev: spawn a blood pool at the player's view origin (isolates the pool
+   spawn+paint chain from the QC kill chain). */
+static void R_DecalsTestPool_f (void)
+{
+	Con_Printf ("r_decals_test_pool: spawning at %.1f %.1f %.1f\n",
+		r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
+	R_SpawnBloodPool (r_refdef.vieworg);
 }
 
 // ---------------------------------------------------------------------------
