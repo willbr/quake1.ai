@@ -280,14 +280,8 @@ static const int K5x5[25] = {
 	 1,  4,  6,  4,  1,
 };
 
-/* Solid 5x5 used by r_decals_test to make plumbing trivially visible. */
-static const int K5x5_solid[25] = {
-	1, 1, 1, 1, 1,
-	1, 1, 1, 1, 1,
-	1, 1, 1, 1, 1,
-	1, 1, 1, 1, 1,
-	1, 1, 1, 1, 1,
-};
+/* Single-luxel solid used by r_decals_test to show the luxel grid resolution. */
+static const int K1x1_solid[1] = { 1 };
 
 typedef struct {
 	const int *k;
@@ -427,8 +421,8 @@ static void R_DecalsTest_f (void)
 		return;
 	}
 
-	Stain_PaintKernel (surf, lu, lv, -4096, -4096, -4096, K5x5_solid, 5, 1);
-	Con_Printf ("r_decals_test: solid 5x5 black at (%d,%d) of surf %p at %.1f %.1f %.1f\n",
+	Stain_PaintKernel (surf, lu, lv, -4096, -4096, -4096, K1x1_solid, 1, 1);
+	Con_Printf ("r_decals_test: single luxel black at (%d,%d) of surf %p at %.1f %.1f %.1f\n",
 		lu, lv, (void*)surf, tr.endpos[0], tr.endpos[1], tr.endpos[2]);
 }
 
