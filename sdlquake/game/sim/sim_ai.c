@@ -15,6 +15,9 @@ static ai_brain_t s_brains[SIM_MAX_BRAINS];
 // Forward declaration — defined at the bottom of this file.
 static void Sim_Patrol_LevelInit_(void);
 
+// Shared scratch edict for SV_MoveToGoal — see walk_toward() below.
+static edict_t *s_walkgoal;
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -27,6 +30,7 @@ void Sim_AI_Init(void) {
 void Sim_AI_LevelInit(void) {
     memset(s_brains, 0, sizeof(s_brains));
     Sim_Patrol_LevelInit_();
+    s_walkgoal = 0;     // re-allocated lazily on first walk_toward call
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +257,47 @@ static void face_point(edict_t *e, const vec3_t target) {
     eng->SV_ChangeYaw(e);
 }
 
+// Shared scratch edict used as a transient goalentity for SV_MoveToGoal.
+// Declared at file scope above (Sim_AI_LevelInit clears it; it's
+// re-allocated lazily on first use).
+static edict_t *get_walkgoal(void) {
+    if (s_walkgoal && !s_walkgoal->free) return s_walkgoal;
+    s_walkgoal = eng->ED_Alloc();
+    if (!s_walkgoal) return 0;
+    s_walkgoal->v.classname = "sim_walkgoal";
+    s_walkgoal->v.solid     = SOLID_NOT;
+    s_walkgoal->v.movetype  = MOVETYPE_NONE;
+    return s_walkgoal;
+}
+
+// Walk one tick toward a point, using SV_MoveToGoal so blocked moves
+// fall through SV_NewChaseDir's alternative-direction handling
+// (corners, doorframes, pillars). SV_WalkMove just bumps the wall and
+// returns 0 -- monsters get visibly stuck.
+static void walk_toward(edict_t *me, const vec3_t target, float dist) {
+    // Direction (2D) for ideal_yaw.
+    float dx = target[0] - me->v.origin[0];
+    float dy = target[1] - me->v.origin[1];
+    me->v.ideal_yaw = eng->VectorToYaw((vec3_t){dx, dy, 0});
+
+    edict_t *g = get_walkgoal();
+    if (!g) {
+        // Fallback if we couldn't alloc the scratch.
+        eng->SV_ChangeYaw(me);
+        eng->SV_WalkMove(me, me->v.angles[1], dist);
+        return;
+    }
+    // Reposition the scratch to the current target; swap it in as
+    // goalentity for the duration of this call; restore afterwards so
+    // vanilla AI (walk/run states) keeps its real goalentity intact.
+    vec3_t pos = { target[0], target[1], target[2] };
+    eng->SV_SetOrigin(g, pos);
+    edict_t *old_goal = me->v.goalentity;
+    me->v.goalentity  = g;
+    eng->SV_MoveToGoal(me, dist);
+    me->v.goalentity  = old_goal;
+}
+
 static void behavior_tick(ai_brain_t *b, edict_t *e) {
     switch (b->state) {
     case AI_IDLE: {
@@ -295,13 +340,11 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
             b->path_idx++;
             break;
         }
-        face_point(e, (vec3_t){ next[0], next[1], next[2] });
-        eng->SV_WalkMove(e, e->v.angles[1], 12.0f);
+        walk_toward(e, (vec3_t){ next[0], next[1], next[2] }, 12.0f);
         return;  // suppress vanilla AI walk this tick
     }
     case AI_SUSPICIOUS:
-        face_point(e, b->last_known_pos);
-        eng->SV_WalkMove(e, e->v.angles[1], 8.0f);
+        walk_toward(e, b->last_known_pos, 8.0f);
         break;
     case AI_SEARCHING: {
         // Replan when the replan timer expires. Advance the timer up front so
@@ -316,8 +359,7 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         }
         if (b->path_len == 0) {
             // No path (yet) — stand-and-sweep at last_known_pos.
-            face_point(e, b->last_known_pos);
-            eng->SV_WalkMove(e, e->v.angles[1], 8.0f);
+            walk_toward(e, b->last_known_pos, 8.0f);
             break;
         }
         if (b->path_idx >= b->path_len) {
@@ -329,8 +371,7 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         float dx = next[0] - e->v.origin[0];
         float dy = next[1] - e->v.origin[1];
         if (dx*dx + dy*dy < 32*32) { b->path_idx++; break; }
-        face_point(e, (vec3_t){ next[0], next[1], next[2] });
-        eng->SV_WalkMove(e, e->v.angles[1], 12.0f);
+        walk_toward(e, (vec3_t){ next[0], next[1], next[2] }, 12.0f);
     } break;
     case AI_COMBAT:
         // Fall through to vanilla Quake combat AI.
