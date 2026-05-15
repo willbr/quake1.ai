@@ -68,7 +68,7 @@ typedef struct
 
 #define	SIGNONS		4			// signon messages to receive before connected
 
-#define	MAX_DLIGHTS		256
+#define	MAX_DLIGHTS		512
 #define	DLIGHTBITS_WORDS	((MAX_DLIGHTS + 63) / 64)
 
 // dlightbits_t is the per-surface mask of dlights touching it. Width sets the
@@ -303,6 +303,8 @@ extern	beam_t			cl_beams[MAX_BEAMS];
 // cl_main
 //
 dlight_t *CL_AllocDlight (int key);
+void	  CL_SpawnMapLightDlights (void);
+extern int cl_static_dlights;	// count of persistent map-light dlights packed at end of cl_dlights
 void	CL_DecayLights (void);
 
 void CL_Init (void);

@@ -307,6 +307,7 @@ void CL_ParseServerInfo (void)
 // local state
 	cl_entities[0].model = cl.worldmodel = cl.model_precache[1];
 	R_NewMap ();
+	CL_SpawnMapLightDlights ();
 
 	Hunk_Check ();		// make sure nothing is hurt
 

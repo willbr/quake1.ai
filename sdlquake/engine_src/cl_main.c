@@ -41,6 +41,13 @@ cvar_t	m_yaw = {"m_yaw","0.022", true};
 cvar_t	m_forward = {"m_forward","1", true};
 cvar_t	m_side = {"m_side","0.8", true};
 
+// When r_maplights_as_dlights is set, the worldmodel's `light*` entities are
+// turned into persistent dlights at level load. radius = entity's `light` key
+// scaled by r_maplights_dlight_scale (defaults to 0.5 so the dlights act as
+// accents over the baked lightmap rather than blowing it out additively).
+cvar_t	r_maplights_as_dlights = {"r_maplights_as_dlights", "0"};
+cvar_t	r_maplights_dlight_scale = {"r_maplights_dlight_scale", "0.5"};
+
 
 client_static_t	cls;
 client_state_t	cl;
@@ -50,6 +57,7 @@ entity_t		cl_entities[MAX_EDICTS];
 entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
 lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
 dlight_t		cl_dlights[MAX_DLIGHTS];
+int				cl_static_dlights;	// number of persistent map-light dlights, packed at the END of cl_dlights
 
 int				cl_numvisedicts;
 entity_t		*cl_visedicts[MAX_VISEDICTS];
@@ -72,10 +80,11 @@ void CL_ClearState (void)
 
 	SZ_Clear (&cls.message);
 
-// clear other arrays	
+// clear other arrays
 	memset (cl_efrags, 0, sizeof(cl_efrags));
 	memset (cl_entities, 0, sizeof(cl_entities));
 	memset (cl_dlights, 0, sizeof(cl_dlights));
+	cl_static_dlights = 0;
 	memset (cl_lightstyle, 0, sizeof(cl_lightstyle));
 	memset (cl_temp_entities, 0, sizeof(cl_temp_entities));
 	memset (cl_beams, 0, sizeof(cl_beams));
@@ -318,13 +327,22 @@ CL_AllocDlight
 dlight_t *CL_AllocDlight (int key)
 {
 	int		i;
+	int		max_transient;
 	dlight_t	*dl;
+
+// Static map-light dlights live at the high end of cl_dlights[]; transient
+// allocations only touch [0, max_transient). Belt-and-braces: if a future
+// caller forgets to clear cl_static_dlights between maps, fall back to the
+// whole array rather than starving allocs.
+	max_transient = MAX_DLIGHTS - cl_static_dlights;
+	if (max_transient <= 0)
+		max_transient = MAX_DLIGHTS;
 
 // first look for an exact key match
 	if (key)
 	{
 		dl = cl_dlights;
-		for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
+		for (i=0 ; i<max_transient ; i++, dl++)
 		{
 			if (dl->key == key)
 			{
@@ -338,7 +356,7 @@ dlight_t *CL_AllocDlight (int key)
 
 // then look for anything else
 	dl = cl_dlights;
-	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
+	for (i=0 ; i<max_transient ; i++, dl++)
 	{
 		if (dl->die < cl.time)
 		{
@@ -354,6 +372,154 @@ dlight_t *CL_AllocDlight (int key)
 	dl->key = key;
 	dl->color[0] = dl->color[1] = dl->color[2] = 1.0f;
 	return dl;
+}
+
+
+/*
+===============
+CL_SpawnMapLightDlights
+
+Walk cl.worldmodel->entities and turn every `light*` classname into a
+persistent dlight, packed at the high end of cl_dlights[]. Called from
+CL_ParseServerInfo right after R_NewMap, gated on r_maplights_as_dlights.
+
+Visual note: the baked lightmap still contains these lights' contribution.
+Without further compensation, enabling this cvar makes the level brighter
+(additive over the bake). r_maplights_dlight_scale defaults to 0.5 to
+soften that — flip to 0 for a "pure bake" toggle, or 1.0 to double-count.
+===============
+*/
+static int CL_ParseMapLightColor (const char *s, vec3_t out)
+{
+	float v[3];
+	float mx;
+	int   n;
+	v[0] = v[1] = v[2] = 1;
+	out[0] = out[1] = out[2] = 1;
+	if (!s || !s[0])
+		return 0;
+	n = sscanf (s, "%f %f %f", &v[0], &v[1], &v[2]);
+	if (n < 1)
+		return 0;
+	if (n == 1) { v[1] = v[0]; v[2] = v[0]; }
+	mx = v[0]; if (v[1] > mx) mx = v[1]; if (v[2] > mx) mx = v[2];
+	if (mx > 1.5f) { v[0] /= 255; v[1] /= 255; v[2] /= 255; }
+	if (v[0] < 0) v[0] = 0; if (v[0] > 1) v[0] = 1;
+	if (v[1] < 0) v[1] = 0; if (v[1] > 1) v[1] = 1;
+	if (v[2] < 0) v[2] = 0; if (v[2] > 1) v[2] = 1;
+	out[0] = v[0]; out[1] = v[1]; out[2] = v[2];
+	return 1;
+}
+
+void CL_SpawnMapLightDlights (void)
+{
+	char  *data;
+	char   classname[64];
+	char   keyname[256];
+	char   value[1024];
+	vec3_t origin, color;
+	float  light, scale;
+	int    style;
+	int    got_origin;
+	int    slot;
+
+	cl_static_dlights = 0;
+
+	if (!r_maplights_as_dlights.value)
+		return;
+	if (!cl.worldmodel || !cl.worldmodel->entities)
+		return;
+
+	scale = r_maplights_dlight_scale.value;
+	if (scale <= 0)
+		scale = 1.0f;
+
+	slot = MAX_DLIGHTS - 1;
+	data = cl.worldmodel->entities;
+
+	while (1)
+	{
+		data = COM_Parse (data);
+		if (!data)
+			break;
+		if (com_token[0] != '{')
+			break;
+
+		classname[0] = 0;
+		origin[0] = origin[1] = origin[2] = 0;
+		color[0] = color[1] = color[2] = 1;
+		light = 300;
+		style = 0;
+		got_origin = 0;
+
+		while (1)
+		{
+			data = COM_Parse (data);
+			if (!data)
+				return;
+			if (com_token[0] == '}')
+				break;
+			strncpy (keyname, com_token, sizeof(keyname) - 1);
+			keyname[sizeof(keyname) - 1] = 0;
+
+			data = COM_Parse (data);
+			if (!data)
+				return;
+			strncpy (value, com_token, sizeof(value) - 1);
+			value[sizeof(value) - 1] = 0;
+
+			if (!strcmp (keyname, "classname"))
+			{
+				strncpy (classname, value, sizeof(classname) - 1);
+				classname[sizeof(classname) - 1] = 0;
+			}
+			else if (!strcmp (keyname, "origin"))
+			{
+				sscanf (value, "%f %f %f", &origin[0], &origin[1], &origin[2]);
+				got_origin = 1;
+			}
+			else if (!strcmp (keyname, "light") || !strcmp (keyname, "_light"))
+				light = (float)atof (value);
+			else if (!strcmp (keyname, "_color") || !strcmp (keyname, "color"))
+				CL_ParseMapLightColor (value, color);
+			else if (!strcmp (keyname, "style"))
+				style = atoi (value);
+		}
+
+		if (!got_origin)
+			continue;
+		if (strncmp (classname, "light", 5) != 0)
+			continue;
+		// skip lightstyle-animated entries (styles 1..31) — the dlight system
+		// has no equivalent of d_lightstylevalue and we'd need per-frame
+		// modulation. Style 0 ("normal") and 32 (always-on) are static.
+		if (style != 0 && style != 32)
+			continue;
+		if (light <= 0)
+			continue;
+		if (slot < 0)
+			break;
+
+		{
+			dlight_t *dl = &cl_dlights[slot];
+			memset (dl, 0, sizeof(*dl));
+			VectorCopy (origin, dl->origin);
+			dl->radius   = light * scale;
+			dl->die      = cl.time + 1e30f;
+			dl->decay    = 0;
+			dl->minlight = 0;
+			// Sentinel below any caller-supplied key (beams use -2000-N,
+			// teleport uses -1, particle/lightning use 0, entity numbers are
+			// positive). -100000000 - slot won't collide with any of those.
+			dl->key      = -100000000 - slot;
+			VectorCopy (color, dl->color);
+			cl_static_dlights++;
+			slot--;
+		}
+	}
+
+	if (cl_static_dlights > 0)
+		Con_Printf ("CL: %d map lights spawned as dlights\n", cl_static_dlights);
 }
 
 
@@ -768,6 +934,8 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_anglespeedkey);
 	Cvar_RegisterVariable (&cl_shownet);
 	Cvar_RegisterVariable (&cl_nolerp);
+	Cvar_RegisterVariable (&r_maplights_as_dlights);
+	Cvar_RegisterVariable (&r_maplights_dlight_scale);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
 	Cvar_RegisterVariable (&sensitivity);
