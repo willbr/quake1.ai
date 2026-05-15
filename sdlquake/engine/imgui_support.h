@@ -15,6 +15,14 @@ const char *ImguiSupport_CvarString(void *cv);
 void       *ImguiSupport_CvarNext(void *cv);
 void        ImguiSupport_CvarSet(const char *name, const char *value);
 
+// Numeric cvar helpers used by the Debug Render panel. CvarValue returns 0
+// for an unregistered name (matches Cvar_VariableValue). CvarSetValue formats
+// the float with %g and calls Cvar_Set. CvarExists is defensive against
+// reading sim_* cvars during a hot-reload mid-frame.
+float       ImguiSupport_CvarValue(const char *name);
+void        ImguiSupport_CvarSetValue(const char *name, float v);
+int         ImguiSupport_CvarExists(const char *name);
+
 // Entity list
 int         ImguiSupport_GetNumEdicts(void);
 void        ImguiSupport_GetEdict(int i, const char **classname,

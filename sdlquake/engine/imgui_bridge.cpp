@@ -152,6 +152,12 @@ int  IG_CollapsingHeader(const char *label, int flags)
 {
     return ImGui::CollapsingHeader(label, (ImGuiTreeNodeFlags)flags) ? 1 : 0;
 }
+int  IG_RadioButton(const char *label, int active)
+{
+    return ImGui::RadioButton(label, active != 0) ? 1 : 0;
+}
+void IG_BeginDisabled(int disabled) { ImGui::BeginDisabled(disabled != 0); }
+void IG_EndDisabled  (void)         { ImGui::EndDisabled(); }
 int  IG_IsItemActivated(void)            { return ImGui::IsItemActivated() ? 1 : 0; }
 int  IG_IsItemDeactivatedAfterEdit(void) { return ImGui::IsItemDeactivatedAfterEdit() ? 1 : 0; }
 int  IG_IsItemHovered(void)              { return ImGui::IsItemHovered() ? 1 : 0; }

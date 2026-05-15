@@ -80,6 +80,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/hotreload.c",
         "sdlquake/engine/sv_bridge.c",
         "sdlquake/engine/imgui_layer.c",
+        "sdlquake/engine/imgui_debug_panel.c",
         "sdlquake/engine/r_debugdraw.c",
         "sdlquake/engine/debug_lines.c",
         "sdlquake/engine/r_bbox.c",

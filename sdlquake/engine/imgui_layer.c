@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "imgui_bridge.h"
+#include "imgui_debug_panel.h"
 #include "imgui_layer.h"
 #include "imgui_support.h"
 
@@ -200,7 +201,9 @@ static void draw_console(void)
     static char input_buf[256];
     static int  reclaim_focus = 0;
 
-    IG_SetNextWindowSize(1260, 280, IG_Cond_Once);
+    // 930 wide leaves room at x=950 for the Debug Render panel on the same
+    // bottom row (panel runs 950..1260, parallels Entities above it).
+    IG_SetNextWindowSize(930, 280, IG_Cond_Once);
     IG_SetNextWindowPos(10, 510, IG_Cond_Once);
     if (!IG_Begin("Console", NULL, IG_WF_None)) { IG_End(); return; }
 
@@ -373,6 +376,7 @@ void ImguiLayer_Render(void)
             draw_cvars();
             draw_entities();
             draw_console();
+            DebugPanel_Draw();
         }
     }
 

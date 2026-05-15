@@ -118,6 +118,12 @@ int   IG_SliderFloat(const char *label, float *v,
                      float vmin, float vmax, const char *format);
 int   IG_ColorEdit3 (const char *label, float col[3]);
 int   IG_CollapsingHeader(const char *label, int flags);  /* flags=0 default */
+// 3-state radio rows in the Debug Render panel use IG_RadioButton; the panel
+// drives the active flag itself (returns 1 on click). BeginDisabled / EndDisabled
+// grey out r_drawpaths_what's bit checkboxes when r_drawpaths == 0.
+int   IG_RadioButton (const char *label, int active);
+void  IG_BeginDisabled(int disabled);
+void  IG_EndDisabled  (void);
 // Item state queries — used to gate per-drag history pushes (snapshot on
 // activate, push on deactivate-after-edit so each drag becomes one undo
 // step, not hundreds). IsItemHovered drives tooltip-on-thumbnail UX.

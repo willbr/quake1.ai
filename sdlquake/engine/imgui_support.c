@@ -38,6 +38,26 @@ void ImguiSupport_CvarSet(const char *name, const char *value)
     Cvar_Set((char *)name, (char *)value);
 }
 
+float ImguiSupport_CvarValue(const char *name)
+{
+    return Cvar_VariableValue((char *)name);
+}
+
+void ImguiSupport_CvarSetValue(const char *name, float v)
+{
+    char buf[32];
+    /* %g gives "0" / "1" / "0.5" instead of "0.000000" — matches what users
+     * type into the console and avoids the cvar string blowing up in width
+     * on every UI tick. */
+    snprintf(buf, sizeof(buf), "%g", v);
+    Cvar_Set((char *)name, buf);
+}
+
+int ImguiSupport_CvarExists(const char *name)
+{
+    return Cvar_FindVar((char *)name) != NULL;
+}
+
 int ImguiSupport_GetNumEdicts(void)
 {
     return sv.active ? sv.num_edicts : 0;
