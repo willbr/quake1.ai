@@ -275,6 +275,10 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
         e->v.velocity[1] += dirn[1] * vy;
         e->v.velocity[2] += vz_dir * vy * 0.5f + CV("ph_gust_lift");
 
+        // Gusted TOSS entities ricochet off walls like grenades instead of
+        // sliding. Fireballs pinball, pickups bounce a couple of times.
+        if (mt == MOVETYPE_TOSS) e->v.movetype = MOVETYPE_BOUNCE;
+
         // Knock STEP-mode monsters off the ground briefly so the push reads.
         if (e->v.flags && ((int)e->v.flags & FL_ONGROUND)) {
             e->v.flags = (float)((int)e->v.flags & ~FL_ONGROUND);
