@@ -1421,6 +1421,26 @@ void Host_Spawn_f (void)
 //
 // send some stats
 //
+#if NATIVE_GAME
+	// pr_global_struct is a zeroed stub in NATIVE_GAME mode — entity spawn
+	// bumps game_globals, not pr_global_struct, so reading from the stub
+	// here gave "kills:40/0, secrets:1/0" at the intermission.
+	MSG_WriteByte (&host_client->message, svc_updatestat);
+	MSG_WriteByte (&host_client->message, STAT_TOTALSECRETS);
+	MSG_WriteLong (&host_client->message, (int)game_globals.total_secrets);
+
+	MSG_WriteByte (&host_client->message, svc_updatestat);
+	MSG_WriteByte (&host_client->message, STAT_TOTALMONSTERS);
+	MSG_WriteLong (&host_client->message, (int)game_globals.total_monsters);
+
+	MSG_WriteByte (&host_client->message, svc_updatestat);
+	MSG_WriteByte (&host_client->message, STAT_SECRETS);
+	MSG_WriteLong (&host_client->message, (int)game_globals.found_secrets);
+
+	MSG_WriteByte (&host_client->message, svc_updatestat);
+	MSG_WriteByte (&host_client->message, STAT_MONSTERS);
+	MSG_WriteLong (&host_client->message, (int)game_globals.killed_monsters);
+#else
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_TOTALSECRETS);
 	MSG_WriteLong (&host_client->message, pr_global_struct->total_secrets);
@@ -1436,6 +1456,7 @@ void Host_Spawn_f (void)
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_MONSTERS);
 	MSG_WriteLong (&host_client->message, pr_global_struct->killed_monsters);
+#endif
 
 	
 //
