@@ -8,10 +8,17 @@
 // in IDLE state no longer just stands still.
 //
 // Implementation notes:
-// * Patrol nodes are synthesised as info_null edicts at chosen positions
-//   and registered with Sim_Patrol_RegisterArenaNode using a per-monster
-//   route_id (the monster's edict number, which is unique).
-// * Node selection is farthest-first within RETROFIT_RANGE of the monster:
+// * If the monster already has a BSP-placed path_corner chain (its
+//   v.target wired to a chain of path_corners by the level author),
+//   that chain is used directly -- no synthetic nodes are created. In
+//   vanilla Quake those chains are dead-on-arrival because of the
+//   well-known walkmonster_start_go bug (th_stand is unconditionally
+//   called after th_walk, leaving the monster frozen in stand mode);
+//   our brain reanimates them.
+// * Otherwise: patrol nodes are synthesised as info_null edicts at
+//   chosen positions and registered with Sim_Patrol_RegisterArenaNode
+//   using a per-monster route_id (the monster's edict number).
+//   Selection is farthest-first within RETROFIT_RANGE of the monster:
 //   anchor = nearest navmesh point, then greedily pick K-1 more that
 //   maximise the minimum distance to the already-chosen set. This gives
 //   a patrol that spans the available area regardless of navmesh density
@@ -34,6 +41,7 @@ extern game_globals_t *g;
 #define RETROFIT_MIN_SPACING 96.0f   // skip points within this of an already-chosen one
 #define RETROFIT_BFS_HOPS    14      // max graph hops from anchor when seeding candidates
 #define RETROFIT_MAX_NODES   8192    // matches sim_nav.c's MAX_NODES; scratch-buffer cap
+#define RETROFIT_CHAIN_MAX   32      // cap on path_corner chain length we'll follow
 
 typedef struct sim_navmesh_s sim_navmesh_t;
 typedef struct { float pos[3]; int kind; } sim_nav_point_t;
@@ -207,6 +215,7 @@ void Sim_Retrofit_Frame(void) {
     if (!mesh || mesh->point_count < RETROFIT_NODES_MIN) return;
 
     int assigned = 0;
+    int from_bsp = 0;
     for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
         if (b->patrol_route_id >= 0) continue;   // already has a route
 
@@ -217,12 +226,47 @@ void Sim_Retrofit_Frame(void) {
         }
         if (!me) continue;
 
-        int   chosen[RETROFIT_NODES_MAX];
-        int   n = score_spread_bfs(me->v.origin, mesh, chosen);
+        int route_id = b->edict_num;
+
+        // Preferred path: a BSP-wired path_corner chain via v.movetarget.
+        // walkmonster_start_go set this if the monster's `target` keyvalue
+        // resolved to a path_corner. Vanilla Quake leaves these dormant
+        // (th_stand override after th_walk -- the classic QC bug); we
+        // adopt the chain as our patrol route and the brain takes over.
+        {
+            edict_t *mt = me->v.movetarget;
+            if (mt && mt != g->world && mt->v.classname &&
+                strcmp(mt->v.classname, "path_corner") == 0)
+            {
+                int      idx   = 0;
+                edict_t *cur   = mt;
+                edict_t *first = cur;
+                while (idx < RETROFIT_CHAIN_MAX) {
+                    Sim_Patrol_RegisterArenaNode(route_id, idx++, cur);
+                    if (!cur->v.target) break;
+                    edict_t *nxt = eng->ED_Find(g->world, "targetname", cur->v.target);
+                    if (!nxt || nxt == g->world) break;
+                    if (nxt == first) break;   // closed loop
+                    if (!nxt->v.classname ||
+                        strcmp(nxt->v.classname, "path_corner") != 0) break;
+                    cur = nxt;
+                }
+                if (idx >= RETROFIT_NODES_MIN) {
+                    b->patrol_route_id = route_id;
+                    b->patrol_node_idx = 0;
+                    assigned++;
+                    from_bsp++;
+                    continue;
+                }
+            }
+        }
+
+        // Fallback: synthesise a patrol from the navmesh.
+        int chosen[RETROFIT_NODES_MAX];
+        int n = score_spread_bfs(me->v.origin, mesh, chosen);
         if (n < RETROFIT_NODES_MIN) continue;
         order_cycle(mesh->points, chosen, n);
 
-        int route_id = b->edict_num;
         for (int i = 0; i < n; i++) {
             edict_t *node = spawn_synthetic_node(mesh->points[chosen[i]].pos);
             if (!node) break;
@@ -234,9 +278,10 @@ void Sim_Retrofit_Frame(void) {
     }
 
     if (assigned > 0) {
-        char buf[80];
+        char buf[96];
         snprintf(buf, sizeof(buf),
-                 "sim_retrofit: assigned patrols to %d monsters\n", assigned);
+                 "sim_retrofit: assigned patrols to %d monsters (%d from BSP)\n",
+                 assigned, from_bsp);
         eng->Con_Print(buf);
     }
 }
