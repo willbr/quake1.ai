@@ -44,10 +44,9 @@ struct sim_navmesh_s {
     int             *adj;
 };
 
-static int s_done_for_level;
-
 void Sim_Retrofit_LevelInit(void) {
-    s_done_for_level = 0;
+    // Nothing to reset per-level: assignment is tracked on the brain itself
+    // (b->patrol_route_id), and Sim_AI_LevelInit zeroes those.
 }
 
 static int score_nearest(const float monster[3], const sim_nav_point_t *pts,
@@ -90,13 +89,14 @@ static edict_t *spawn_synthetic_node(const float pos[3]) {
 }
 
 void Sim_Retrofit_Frame(void) {
-    if (s_done_for_level) return;
+    // Run every frame: monsters call Sim_AI_RegisterMonster from their
+    // deferred *_start_go thinks (fired 0–0.5 s after spawn), so a single
+    // pass at level-load would always see an empty brain table. Walking
+    // every frame is cheap because brains with patrol_route_id >= 0 short
+    // out before the inner edict walk.
     if (!Sim_Nav_IsReady()) return;
     sim_navmesh_t *mesh = Sim_Nav_Get();
-    if (!mesh || mesh->point_count < RETROFIT_NODES_MIN) {
-        s_done_for_level = 1;
-        return;
-    }
+    if (!mesh || mesh->point_count < RETROFIT_NODES_MIN) return;
 
     int assigned = 0;
     for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
@@ -126,10 +126,10 @@ void Sim_Retrofit_Frame(void) {
         assigned++;
     }
 
-    char buf[80];
-    snprintf(buf, sizeof(buf), "sim_retrofit: assigned patrols to %d monsters\n",
-             assigned);
-    eng->Con_Print(buf);
-
-    s_done_for_level = 1;
+    if (assigned > 0) {
+        char buf[80];
+        snprintf(buf, sizeof(buf),
+                 "sim_retrofit: assigned patrols to %d monsters\n", assigned);
+        eng->Con_Print(buf);
+    }
 }
