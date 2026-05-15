@@ -225,10 +225,18 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
     // Iterate all non-world edicts; small-N for typical maps. We rely on
     // ED_Next walking the live list rather than ED_FindRadius so we catch
     // entities of every classname (monsters, gibs, dropped weapons).
+    // Horizontal projection of forward (used for a flat cone sweep).
+    float fxy_len = (float)sqrt(forward[0]*forward[0] + forward[1]*forward[1]);
+    int   flat_cone = (fxy_len > 0.001f);
+    float fxy[2] = { flat_cone ? forward[0]/fxy_len : 0.0f,
+                     flat_cone ? forward[1]/fxy_len : 0.0f };
+
     for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
         if (e == client) continue;
-        if (e->v.solid == SOLID_NOT && e->v.movetype != MOVETYPE_TOSS &&
-            e->v.movetype != MOVETYPE_BOUNCE) continue;
+        // Skip world-static / engine-pushed entities. Corpses (STEP+SOLID_NOT),
+        // gibs (BOUNCE), items (TOSS), and monsters (STEP/FLY/WALK) all pass.
+        int mt = (int)e->v.movetype;
+        if (mt == MOVETYPE_NONE || mt == MOVETYPE_PUSH) continue;
 
         vec3_t to;
         to[0] = e->v.origin[0] - eye[0];
@@ -236,9 +244,18 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
         to[2] = e->v.origin[2] - eye[2];
         float d = vlen(to);
         if (d > range || d < 1.0f) continue;
-        // Cone test.
+        // Cone test -- horizontal projection so feet-level items pass when
+        // the player aims forward. Falls back to 3D when looking ~straight
+        // up or down.
         float dirn[3] = { to[0]/d, to[1]/d, to[2]/d };
-        if (vdot(dirn, forward) < cone_cos) continue;
+        if (flat_cone) {
+            float dxy_len = (float)sqrt(dirn[0]*dirn[0] + dirn[1]*dirn[1]);
+            if (dxy_len < 0.001f) continue;
+            float dot2d = (dirn[0]*fxy[0] + dirn[1]*fxy[1]) / dxy_len;
+            if (dot2d < cone_cos) continue;
+        } else {
+            if (vdot(dirn, forward) < cone_cos) continue;
+        }
 
         // LOS check so we don't punch through walls.
         eng->SV_Traceline((float*)eye, e->v.origin, 1, client);
@@ -300,7 +317,14 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
         if (d > range) continue;
         if (d < 1.0f) continue;
         float dirn[3] = { to[0]/d, to[1]/d, to[2]/d };
-        if (vdot(dirn, forward) < cone_cos) continue;
+        if (flat_cone) {
+            float dxy_len = (float)sqrt(dirn[0]*dirn[0] + dirn[1]*dirn[1]);
+            if (dxy_len < 0.001f) continue;
+            float dot2d = (dirn[0]*fxy[0] + dirn[1]*fxy[1]) / dxy_len;
+            if (dot2d < cone_cos) continue;
+        } else {
+            if (vdot(dirn, forward) < cone_cos) continue;
+        }
 
         Light_AddOverride(le->v.origin, 192.0f, -80.0f);
 
