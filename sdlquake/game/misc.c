@@ -154,6 +154,14 @@ static void fire_touch(edict_t *self, edict_t *other) {
 
 static void fire_fly(edict_t *self);
 
+// Death effect: burst of fire-colored particles in place of silent removal.
+static void fire_die(edict_t *self) {
+    g->self = self;
+    vec3_t up = { 0.0f, 0.0f, 20.0f };
+    eng->SV_Particle(self->v.origin, up, 75, 30);
+    eng->ED_Free(self);
+}
+
 void spawn_misc_fireball(edict_t *e) {
     g->self = e;
     eng->PrecacheModel("progs/lavaball.mdl");
@@ -178,7 +186,7 @@ static void fire_fly(edict_t *self) {
     eng->SV_SetSize(fireball, zero, zero);
     eng->SV_SetOrigin(fireball, self->v.origin);
     fireball->v.nextthink = g->time + 5;
-    fireball->v.think     = SUB_Remove;
+    fireball->v.think     = fire_die;
     fireball->v.touch     = fire_touch;
 
     self->v.nextthink = g->time + (eng->Random() * 5) + 3;
