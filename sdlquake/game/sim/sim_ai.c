@@ -228,9 +228,12 @@ static void sense_tick(ai_brain_t *b, edict_t *e) {
 
     if (b->state != prev) {
         b->state_entered_time = g->time;
+        // Always reset the path on transition -- a leftover SEARCHING
+        // path leaking into IDLE would walk patrolling monsters back to
+        // last_known_pos instead of the next patrol node.
+        b->path_len = 0;
+        b->path_idx = 0;
         if (b->state == AI_SEARCHING) {
-            b->path_len = 0;
-            b->path_idx = 0;
             // Force an immediate replan on first SEARCHING tick — without
             // this, a stale future-dated path_replan_time from a previous
             // SEARCHING bout would delay the search by up to 2 s.
@@ -254,22 +257,45 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
     switch (b->state) {
     case AI_IDLE: {
         if (b->patrol_route_id < 0) break;
-        // Look up current arena-patrol node (route, idx).
         edict_t *node = Sim_Patrol_FindArenaNode(b->patrol_route_id, b->patrol_node_idx);
         if (!node) break;
-        float dx = node->v.origin[0] - e->v.origin[0];
-        float dy = node->v.origin[1] - e->v.origin[1];
-        float dz = node->v.origin[2] - e->v.origin[2];
-        float d2 = dx*dx + dy*dy + dz*dz;
-        if (d2 < 32*32) {
-            // Arrived at node — advance to next.
-            b->patrol_node_idx++;
-            // Wrap if next node not found.
-            if (!Sim_Patrol_FindArenaNode(b->patrol_route_id, b->patrol_node_idx))
-                b->patrol_node_idx = 0;
+
+        // 2D arrival: ignore Z. Floor-seated nav points and monster
+        // origins are at slightly different elevations, so 3D distance
+        // exaggerates "remaining travel" and the monster never arrives.
+        {
+            float dx = node->v.origin[0] - e->v.origin[0];
+            float dy = node->v.origin[1] - e->v.origin[1];
+            if (dx*dx + dy*dy < 48*48) {
+                b->patrol_node_idx++;
+                if (!Sim_Patrol_FindArenaNode(b->patrol_route_id, b->patrol_node_idx))
+                    b->patrol_node_idx = 0;
+                b->path_len = 0;          // force replan toward next node
+                break;
+            }
+        }
+
+        // Plan (or replan) the navmesh path to the current node.
+        if (b->path_len == 0 || b->path_idx >= b->path_len) {
+            b->path_len = Sim_Nav_PathTo(e->v.origin, node->v.origin,
+                                         b->path_pts, 32);
+            b->path_idx = 0;
+            if (b->path_len == 0) {
+                // No graph path -- stand and face the node; let vanilla
+                // AI continue. (Better than walking straight into a wall.)
+                face_point(e, node->v.origin);
+                break;
+            }
+        }
+
+        const float *next = b->path_pts[b->path_idx];
+        float wdx = next[0] - e->v.origin[0];
+        float wdy = next[1] - e->v.origin[1];
+        if (wdx*wdx + wdy*wdy < 32*32) {
+            b->path_idx++;
             break;
         }
-        face_point(e, node->v.origin);
+        face_point(e, (vec3_t){ next[0], next[1], next[2] });
         eng->SV_WalkMove(e, e->v.angles[1], 12.0f);
         return;  // suppress vanilla AI walk this tick
     }

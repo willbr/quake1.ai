@@ -32,6 +32,8 @@ extern game_globals_t *g;
 #define RETROFIT_NODES_MAX   4
 #define RETROFIT_NODES_MIN   2
 #define RETROFIT_MIN_SPACING 96.0f   // skip points within this of an already-chosen one
+#define RETROFIT_BFS_HOPS    14      // max graph hops from anchor when seeding candidates
+#define RETROFIT_MAX_NODES   8192    // matches sim_nav.c's MAX_NODES; scratch-buffer cap
 
 typedef struct sim_navmesh_s sim_navmesh_t;
 typedef struct { float pos[3]; int kind; } sim_nav_point_t;
@@ -67,40 +69,81 @@ static float d2_to_pos(const sim_nav_point_t *p, const float pos[3]) {
     return dx*dx + dy*dy + dz*dz;
 }
 
-// Farthest-first selection within RETROFIT_RANGE of the monster.
-// Returns count of points placed in chosen[] (up to RETROFIT_NODES_MAX).
-static int score_spread(const float monster[3], const sim_nav_point_t *pts,
-                        int n, int chosen[RETROFIT_NODES_MAX])
+// Farthest-first selection over a graph-connected candidate set.
+// Step 1: anchor = navmesh point nearest the monster.
+// Step 2: BFS on the navmesh adjacency from the anchor, bounded by
+//         RETROFIT_BFS_HOPS, gathering reachable points that lie within
+//         RETROFIT_RANGE of the monster. The BFS guarantees every
+//         candidate is connected to the anchor through actual navmesh
+//         edges -- so legs between them won't cross walls or gaps.
+// Step 3: farthest-first within the reached set, with a min-spacing
+//         filter to avoid duplicating near-coincident seats.
+// Returns count placed in chosen[] (up to RETROFIT_NODES_MAX).
+static int score_spread_bfs(const float monster[3], sim_navmesh_t *mesh,
+                            int chosen[RETROFIT_NODES_MAX])
 {
-    const float range2 = RETROFIT_RANGE * RETROFIT_RANGE;
+    const int   N        = mesh->point_count;
+    const float range2   = RETROFIT_RANGE * RETROFIT_RANGE;
     const float spacing2 = RETROFIT_MIN_SPACING * RETROFIT_MIN_SPACING;
+    if (N <= 0 || N > RETROFIT_MAX_NODES) return 0;
 
-    // Anchor: nearest navmesh point to the monster (within range).
+    // Anchor: nearest navmesh point (no range gate -- the monster might
+    // have spawned just outside the range but the anchor still grounds
+    // the BFS).
     int   anchor = -1;
-    float best   = range2;
-    for (int i = 0; i < n; i++) {
-        float d2 = d2_to_pos(&pts[i], monster);
+    float best   = 1e30f;
+    for (int i = 0; i < N; i++) {
+        float d2 = d2_to_pos(&mesh->points[i], monster);
         if (d2 < best) { best = d2; anchor = i; }
     }
-    if (anchor < 0) return 0;
+    if (anchor < 0 || best > range2) return 0;
+
+    // BFS scratch -- static so we don't churn the heap. Sized to the
+    // navmesh cap.
+    static unsigned char visited[RETROFIT_MAX_NODES];
+    static unsigned char hops   [RETROFIT_MAX_NODES];
+    static int           queue  [RETROFIT_MAX_NODES];
+    static int           reached[RETROFIT_MAX_NODES];
+    memset(visited, 0, N);
+
+    int qhead = 0, qtail = 0;
+    int reached_n = 0;
+    queue[qtail++]       = anchor;
+    visited[anchor]      = 1;
+    hops[anchor]         = 0;
+    reached[reached_n++] = anchor;
+
+    while (qhead < qtail) {
+        int cur = queue[qhead++];
+        if (hops[cur] >= RETROFIT_BFS_HOPS) continue;
+        int o = mesh->adj_offsets[cur];
+        int e = mesh->adj_offsets[cur + 1];
+        for (int k = o; k < e; k++) {
+            int nb = mesh->adj[k];
+            if (nb < 0 || nb >= N) continue;
+            if (visited[nb]) continue;
+            visited[nb] = 1;
+            hops[nb]    = (unsigned char)(hops[cur] + 1);
+            queue[qtail++] = nb;
+            if (d2_to_pos(&mesh->points[nb], monster) <= range2)
+                reached[reached_n++] = nb;
+        }
+    }
+
     chosen[0] = anchor;
     int count = 1;
 
-    // Greedily pick the point with the largest minimum-distance to all
-    // already-chosen points, restricted to candidates within RETROFIT_RANGE
-    // of the monster and at least RETROFIT_MIN_SPACING from every choice
-    // so we don't duplicate near-coincident navmesh seats.
     while (count < RETROFIT_NODES_MAX) {
         int   pick      = -1;
         float pick_min2 = 0.0f;
-        for (int i = 0; i < n; i++) {
-            if (d2_to_pos(&pts[i], monster) > range2) continue;
+        for (int r = 0; r < reached_n; r++) {
+            int i = reached[r];
 
             float min2 = 1e30f;
             int   skip = 0;
             for (int k = 0; k < count; k++) {
                 if (chosen[k] == i) { skip = 1; break; }
-                float d2 = d2_between(&pts[i], &pts[chosen[k]]);
+                float d2 = d2_between(&mesh->points[i], &mesh->points[chosen[k]]);
                 if (d2 < spacing2) { skip = 1; break; }
                 if (d2 < min2) min2 = d2;
             }
@@ -175,8 +218,7 @@ void Sim_Retrofit_Frame(void) {
         if (!me) continue;
 
         int   chosen[RETROFIT_NODES_MAX];
-        int   n = score_spread(me->v.origin, mesh->points, mesh->point_count,
-                               chosen);
+        int   n = score_spread_bfs(me->v.origin, mesh, chosen);
         if (n < RETROFIT_NODES_MIN) continue;
         order_cycle(mesh->points, chosen, n);
 
