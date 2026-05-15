@@ -4,7 +4,14 @@
 #include "../abilities.h"
 #include <string.h>
 
+extern engine_api_t   *eng;
 extern game_globals_t *g;
+
+int Sim_DebugZTest(const char *cvar_name) {
+    float v = eng->Cvar_VariableValue(cvar_name);
+    if (v <= 0.0f) return -1;
+    return (v < 1.5f) ? 1 : 0;   // 1 -> ztested, 2+ -> xray
+}
 
 void Sim_Init(void) {
     Stim_Init();

@@ -608,7 +608,8 @@ edict_t *Sim_Patrol_FindArenaNode(int route, int idx) {
 #define SIM_PATROL_DRAW_CULL       1536.0f
 
 void Sim_Patrol_DebugDraw(void) {
-    if (eng->Cvar_VariableValue("sim_patrol_debug") < 0.5f) return;
+    int ztest = Sim_DebugZTest("sim_patrol_debug");
+    if (ztest < 0) return;
 
     vec3_t view;
     eng->Get_ViewOrigin(view);
@@ -645,7 +646,7 @@ void Sim_Patrol_DebugDraw(void) {
                          nodes[i]->v.origin[2] + 4.0f };
             vec3_t c = { nodes[j]->v.origin[0], nodes[j]->v.origin[1],
                          nodes[j]->v.origin[2] + 4.0f };
-            eng->SV_DebugLine(a, c, 56, 0);   // dim green
+            eng->SV_DebugLine(a, c, 56, ztest);   // dim green
         }
 
         // Vertical posts at each node; current target gets a red post.
@@ -655,7 +656,7 @@ void Sim_Patrol_DebugDraw(void) {
                           nodes[i]->v.origin[2] };
             vec3_t p1 = { p0[0], p0[1], p0[2] + 40.0f };
             int color = (i == cur) ? 79 : 53;   // red / green
-            eng->SV_DebugLine(p0, p1, color, 0);
+            eng->SV_DebugLine(p0, p1, color, ztest);
         }
 
         // Monster -> current target node.
@@ -668,7 +669,7 @@ void Sim_Patrol_DebugDraw(void) {
                          me->v.origin[2] + 24.0f };
             vec3_t c = { nodes[cur]->v.origin[0], nodes[cur]->v.origin[1],
                          nodes[cur]->v.origin[2] + 24.0f };
-            eng->SV_DebugLine(a, c, 192, 0);   // yellow-ish
+            eng->SV_DebugLine(a, c, 192, ztest);   // yellow-ish
         }
     }
 }

@@ -404,7 +404,8 @@ void Wind_RegisterSource(edict_t *e, const vec3_t velocity) {
 // ---------------------------------------------------------------------------
 void Wind_DebugDraw(void) {
     if (!s_ready) return;
-    if (eng->Cvar_VariableValue("sim_wind_debug") < 0.5f) return;
+    int ztest = Sim_DebugZTest("sim_wind_debug");
+    if (ztest < 0) return;
 
     vec3_t view;
     eng->Get_ViewOrigin(view);
@@ -423,7 +424,7 @@ void Wind_DebugDraw(void) {
                 if (dx*dx + dy*dy + dz*dz > max_cull*max_cull) continue;
                 vec3_t p1 = { p0[0], p0[1], p0[2] + 16.0f };
                 int color = (d > 0.7f) ? 251 : (d > 0.4f) ? 192 : 80;
-                eng->SV_DebugLine(p0, p1, color, 0);
+                eng->SV_DebugLine(p0, p1, color, ztest);
             }
         }
     }

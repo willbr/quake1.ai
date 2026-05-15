@@ -166,4 +166,20 @@ void Sim_Init(void);                       // once on DLL init
 void Sim_LevelInit(const char *mapname);   // on each map load
 void Sim_Frame(void);                      // each game start_frame
 
+// ---------------------------------------------------------------------------
+// Debug-overlay cvar convention
+// ---------------------------------------------------------------------------
+// All sim_*_debug cvars share a tri-state encoding:
+//   0 = off
+//   1 = draw with z-test (lines occluded by world geometry)
+//   2 = draw without z-test (xray; lines visible through walls)
+// Sim_DebugZTest returns -1 (off), 0 (xray), or 1 (ztested) so the
+// caller can pass it straight as the ztest arg to SV_DebugLine. The
+// off case is `< 0`, so:
+//
+//   int z = Sim_DebugZTest("sim_patrol_debug");
+//   if (z < 0) return;
+//   eng->SV_DebugLine(a, b, color, z);
+int Sim_DebugZTest(const char *cvar_name);
+
 #endif // SIM_H
