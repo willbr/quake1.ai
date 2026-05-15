@@ -267,9 +267,13 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
         if (e->v.flags && ((int)e->v.flags & FL_MONSTER))
             vy *= CV("ph_gust_monster_scale");
 
+        // Clamp vertical contribution: ground items have dirn[z] strongly
+        // negative, which would slam them into the floor before physics
+        // can clear FL_ONGROUND. Gust is updraft, never downdraft.
+        float vz_dir = dirn[2] > 0.0f ? dirn[2] : 0.0f;
         e->v.velocity[0] += dirn[0] * vy;
         e->v.velocity[1] += dirn[1] * vy;
-        e->v.velocity[2] += dirn[2] * vy * 0.5f + CV("ph_gust_lift");
+        e->v.velocity[2] += vz_dir * vy * 0.5f + CV("ph_gust_lift");
 
         // Knock STEP-mode monsters off the ground briefly so the push reads.
         if (e->v.flags && ((int)e->v.flags & FL_ONGROUND)) {
