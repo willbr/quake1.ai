@@ -270,6 +270,29 @@ static edict_t *get_walkgoal(void) {
     return s_walkgoal;
 }
 
+// Open a func_door directly in front of the monster, if any. Defined
+// in doors.c so we can compare v.use against the static door_use /
+// fd_secret_use_fn pointers without exporting them. Returns 1 on
+// success.
+extern int Doors_TryActivate(edict_t *door, edict_t *activator);
+
+// Trace forward from `me` looking for a closed door within reach, and
+// trigger it. Called when stuck-detection trips. Vanilla Quake monsters
+// never opened doors -- this is a small immersive-sim courtesy so
+// patrol routes stay alive when the navmesh runs through a door.
+static void try_open_door_in_front(edict_t *me) {
+    const float kPi = 3.14159265f;
+    float yaw = me->v.angles[1] * (kPi / 180.0f);
+    vec3_t origin = { me->v.origin[0], me->v.origin[1],
+                      me->v.origin[2] + 20.0f };
+    vec3_t end    = { origin[0] + cosf(yaw) * 80.0f,
+                      origin[1] + sinf(yaw) * 80.0f,
+                      origin[2] };
+    eng->SV_Traceline(origin, end, /*nomonsters=*/1, /*skip=*/0);
+    if (g->trace_fraction >= 1.0f) return;
+    Doors_TryActivate(g->trace_ent, me);
+}
+
 // Walk one tick toward a point, using SV_MoveToGoal so blocked moves
 // fall through SV_NewChaseDir's alternative-direction handling
 // (corners, doorframes, pillars). SV_WalkMove just bumps the wall and
@@ -296,6 +319,39 @@ static void walk_toward(edict_t *me, const vec3_t target, float dist) {
     me->v.goalentity  = g;
     eng->SV_MoveToGoal(me, dist);
     me->v.goalentity  = old_goal;
+}
+
+// Brain-aware wrapper around walk_toward that detects stuck-against-door
+// and triggers the door. Only counts a tick as "stuck" when the monster
+// is already facing close to its target (so the rejected step wasn't
+// just the normal turn-then-step delay).
+#define STUCK_DISP2_MIN     (4.0f * 4.0f)    // < 4 units displacement = no progress
+#define STUCK_TICKS_TRIGGER 10               // ~1 s at SIM_AI_TICK_HZ = 10
+static void walk_and_track(ai_brain_t *b, edict_t *e, const vec3_t target,
+                           float dist)
+{
+    float ox = e->v.origin[0], oy = e->v.origin[1];
+    walk_toward(e, target, dist);
+    float dx = e->v.origin[0] - ox;
+    float dy = e->v.origin[1] - oy;
+
+    // Only count as stuck if we're facing roughly the right way; otherwise
+    // we're just in the turn-then-step phase and shouldn't accumulate.
+    float delta = e->v.ideal_yaw - e->v.angles[1];
+    while (delta >  180.0f) delta -= 360.0f;
+    while (delta < -180.0f) delta += 360.0f;
+    if (delta < 0) delta = -delta;
+
+    if (dx*dx + dy*dy < STUCK_DISP2_MIN && delta < 45.0f) {
+        b->stuck_ticks++;
+        if (b->stuck_ticks >= STUCK_TICKS_TRIGGER) {
+            try_open_door_in_front(e);
+            b->stuck_ticks = 0;  // give the door time to open before re-trying
+        }
+    } else if (dx*dx + dy*dy >= STUCK_DISP2_MIN) {
+        b->stuck_ticks = 0;
+    }
+    // else: still turning, leave counter unchanged.
 }
 
 static void behavior_tick(ai_brain_t *b, edict_t *e) {
@@ -340,11 +396,11 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
             b->path_idx++;
             break;
         }
-        walk_toward(e, (vec3_t){ next[0], next[1], next[2] }, 12.0f);
+        walk_and_track(b, e, (vec3_t){ next[0], next[1], next[2] }, 12.0f);
         return;  // suppress vanilla AI walk this tick
     }
     case AI_SUSPICIOUS:
-        walk_toward(e, b->last_known_pos, 8.0f);
+        walk_and_track(b, e, b->last_known_pos, 8.0f);
         break;
     case AI_SEARCHING: {
         // Replan when the replan timer expires. Advance the timer up front so
@@ -359,7 +415,7 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         }
         if (b->path_len == 0) {
             // No path (yet) — stand-and-sweep at last_known_pos.
-            walk_toward(e, b->last_known_pos, 8.0f);
+            walk_and_track(b, e, b->last_known_pos, 8.0f);
             break;
         }
         if (b->path_idx >= b->path_len) {
@@ -371,7 +427,7 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         float dx = next[0] - e->v.origin[0];
         float dy = next[1] - e->v.origin[1];
         if (dx*dx + dy*dy < 32*32) { b->path_idx++; break; }
-        walk_toward(e, (vec3_t){ next[0], next[1], next[2] }, 12.0f);
+        walk_and_track(b, e, (vec3_t){ next[0], next[1], next[2] }, 12.0f);
     } break;
     case AI_COMBAT:
         // Fall through to vanilla Quake combat AI.

@@ -71,6 +71,10 @@ typedef struct {
     int         path_len;
     int         path_idx;
     float       path_replan_time;
+    // Stuck detection: counts consecutive ticks of attempted-but-failed
+    // movement (facing the target but not displacing). Resets to 0 on
+    // any successful step or on state change.
+    int         stuck_ticks;
 } ai_brain_t;
 
 void        Sim_AI_Init(void);

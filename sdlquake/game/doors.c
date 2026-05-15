@@ -605,6 +605,28 @@ void Doors_OpenAll(void) {
     eng->Con_Print(msg);
 }
 
+// AI-callable: if `door` is a normal closed func_door, trigger it.
+// Skips secret doors, slave doors, and doors already open / opening.
+// Returns 1 if a door was actually triggered.
+int Doors_TryActivate(edict_t *door, edict_t *activator) {
+    if (!door || door == g->world) return 0;
+    if (!door->v.classname) return 0;
+    if (strcmp(door->v.classname, "door") != 0) return 0;
+    if (door->v.use == fd_secret_use_fn) return 0;        // not a normal door
+    if (door->v.use != door_use)         return 0;        // unknown use fn
+    if (door->v.owner && door->v.owner != door) return 0; // slave door
+    int st = (int)door->v.state;
+    if (st == STATE_UP || st == STATE_TOP) return 0;      // already opening / open
+
+    edict_t *prev_self = g->self, *prev_activator = g->activator;
+    g->activator = activator;
+    g->self      = door;
+    door_use(door, activator);
+    g->self      = prev_self;
+    g->activator = prev_activator;
+    return 1;
+}
+
 void Doors_OpenAllSecret(void) {
     int fired = 0;
     edict_t *prev_self = g->self, *prev_activator = g->activator;
