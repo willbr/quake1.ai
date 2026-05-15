@@ -237,6 +237,10 @@ static void sense_tick(ai_brain_t *b, edict_t *e) {
         // last_known_pos instead of the next patrol node.
         b->path_len = 0;
         b->path_idx = 0;
+        // Re-kick walk mode on next walk_and_track. Vanilla AI may have
+        // moved the monster to attack frames during COMBAT; coming back
+        // out we want the walk animation again.
+        b->walking  = 0;
         if (b->state == AI_SEARCHING) {
             // Force an immediate replan on first SEARCHING tick — without
             // this, a stale future-dated path_replan_time from a previous
@@ -330,6 +334,17 @@ static void walk_toward(edict_t *me, const vec3_t target, float dist) {
 static void walk_and_track(ai_brain_t *b, edict_t *e, const vec3_t target,
                            float dist)
 {
+    // Kick the monster's think chain into walk mode the first time we
+    // move it. The walk-frame functions advance v.frame each tick (and
+    // chain self->v.think to walk2, walk3, ...), so the walk animation
+    // cycles while our code does the actual translation. Vanilla
+    // ai_walk early-returns (see ai.c) when the brain is in
+    // IDLE+patrol / SUSPICIOUS / SEARCHING, so it doesn't double-move.
+    if (!b->walking && e->v.th_walk) {
+        e->v.th_walk(e);
+        b->walking = 1;
+    }
+
     float ox = e->v.origin[0], oy = e->v.origin[1];
     walk_toward(e, target, dist);
     float dx = e->v.origin[0] - ox;
@@ -396,11 +411,11 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
             b->path_idx++;
             break;
         }
-        walk_and_track(b, e, (vec3_t){ next[0], next[1], next[2] }, 12.0f);
+        walk_and_track(b, e, (vec3_t){ next[0], next[1], next[2] }, 6.0f);
         return;  // suppress vanilla AI walk this tick
     }
     case AI_SUSPICIOUS:
-        walk_and_track(b, e, b->last_known_pos, 8.0f);
+        walk_and_track(b, e, b->last_known_pos, 6.0f);
         break;
     case AI_SEARCHING: {
         // Replan when the replan timer expires. Advance the timer up front so
@@ -415,7 +430,7 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         }
         if (b->path_len == 0) {
             // No path (yet) — stand-and-sweep at last_known_pos.
-            walk_and_track(b, e, b->last_known_pos, 8.0f);
+            walk_and_track(b, e, b->last_known_pos, 6.0f);
             break;
         }
         if (b->path_idx >= b->path_len) {
@@ -427,7 +442,7 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         float dx = next[0] - e->v.origin[0];
         float dy = next[1] - e->v.origin[1];
         if (dx*dx + dy*dy < 32*32) { b->path_idx++; break; }
-        walk_and_track(b, e, (vec3_t){ next[0], next[1], next[2] }, 12.0f);
+        walk_and_track(b, e, (vec3_t){ next[0], next[1], next[2] }, 8.0f);
     } break;
     case AI_COMBAT:
         // Fall through to vanilla Quake combat AI.

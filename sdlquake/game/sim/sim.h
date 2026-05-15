@@ -75,6 +75,11 @@ typedef struct {
     // movement (facing the target but not displacing). Resets to 0 on
     // any successful step or on state change.
     int         stuck_ticks;
+    // 1 once we've kicked the monster's vanilla think chain into walk
+    // mode (so the walk-frame animation cycles while our code drives
+    // movement). Reset on state change so re-entering IDLE/SEARCHING
+    // re-triggers the kick if vanilla took the monster elsewhere.
+    int         walking;
 } ai_brain_t;
 
 void        Sim_AI_Init(void);
