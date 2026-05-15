@@ -722,6 +722,14 @@ void _Host_Frame (float time)
 		CL_ReadFromServer ();
 	}
 
+	// Flush any cli/stuffcmds commands that needed the client to be
+	// fully spawned (e.g. +notarget at startup, where Cmd_ForwardToServer
+	// would otherwise drop them).
+	{
+		extern void Host_ApplyPendingClientCmds (void);
+		Host_ApplyPendingClientCmds ();
+	}
+
 // update video
 	if (host_speeds.value)
 		time1 = Sys_FloatTime ();

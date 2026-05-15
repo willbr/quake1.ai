@@ -129,10 +129,32 @@ void Host_God_f (void)
 		SV_ClientPrintf ("godmode ON\n");
 }
 
+// Set when +notarget is invoked from the command line before the local
+// client has connected. Host_ApplyPendingClientCmds (called once per
+// frame from _Host_Frame) flushes this once cls.state hits ca_active.
+static int s_pending_notarget;
+
+void Host_ApplyPendingClientCmds (void)
+{
+	if (s_pending_notarget && (cls.state == ca_connected && cls.signon == SIGNONS))
+	{
+		s_pending_notarget = 0;
+		Cbuf_AddText ("notarget\n");
+	}
+}
+
 void Host_Notarget_f (void)
 {
 	if (cmd_source == src_command)
 	{
+		if (cls.state != ca_connected || cls.signon != SIGNONS)
+		{
+			// CLI / stuffcmds path: client isn't connected yet, so
+			// Cmd_ForwardToServer would print "not connected" and drop
+			// the command. Defer until the player has spawned.
+			s_pending_notarget = 1;
+			return;
+		}
 		Cmd_ForwardToServer ();
 		return;
 	}
