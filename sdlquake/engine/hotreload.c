@@ -259,9 +259,12 @@ static edict_t *engine_ed_findradius(float *origin, float radius)
 
 static edict_t *engine_ed_next(edict_t *e)
 {
+    // Iterator: NULL terminates the walk. Don't fall back to the world
+    // sentinel — every `for (e = ED_Next(world); e; e = ED_Next(e))` caller
+    // would loop forever, since world is non-NULL and ED_Next(world) = edict[1].
     edict_t *next = _NEXT_EDICT(e);
     edict_t *end  = _EDICT_NUM(svb_num_edicts());
-    return next < end ? next : svb_edicts();
+    return next < end ? next : NULL;
 }
 
 static edict_t *engine_ed_checkclient(void)

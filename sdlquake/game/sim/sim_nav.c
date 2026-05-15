@@ -484,7 +484,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
     //     above with proper kinds
     {
         edict_t *e = eng->ED_Next(g->world);
-        while (e != g->world) {
+        while (e) {
             const char *cn = e->v.classname;
             if (!cn || !cn[0])                                 goto next_e;
             if (!strcmp(cn, "navmesh_probe"))                  goto next_e;
@@ -583,7 +583,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
     int           solid_saves_n   = 0;
     {
         edict_t *it = eng->ED_Next(g->world);
-        while (it != g->world) {
+        while (it) {
             if (it != probe && it->v.solid > (float)SOLID_NOT) {
                 if (solid_saves_n >= solid_saves_cap) {
                     int nc = solid_saves_cap ? solid_saves_cap * 2 : 128;
