@@ -173,16 +173,6 @@ static void blink_trace_endpoint(edict_t *client,
         if (c == CONTENT_SKY) valid = 0;
     }
 
-    // Void-fall check: ensure there's a floor within 96 units below.
-    if (valid) {
-        vec3_t below;
-        below[0] = out_endpos[0];
-        below[1] = out_endpos[1];
-        below[2] = out_endpos[2] - 96.0f;
-        eng->SV_Traceline((float*)out_endpos, below, 1, client);
-        if (g->trace_fraction == 1.0f) valid = 0;
-    }
-
     *out_valid = valid;
 }
 
