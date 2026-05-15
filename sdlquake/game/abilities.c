@@ -35,7 +35,9 @@ static void register_cvars(void) {
     CVAR(ph_gust_range,     "384");
     CVAR(ph_gust_cone_deg,  "30");
     CVAR(ph_gust_cooldown,  "0.5");
-    CVAR(ph_gust_impulse,   "800");
+    CVAR(ph_gust_impulse,   "1600");
+    CVAR(ph_gust_monster_scale, "1.0");
+    CVAR(ph_gust_lift,      "160");
     CVAR(ph_blink_intensity,"0.3");
     CVAR(ph_gust_impact_intensity, "0.45");
     CVAR(ph_debug,          "0");
@@ -245,12 +247,12 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
 
         // Apply impulse outward from the player.
         float vy = impulse;
-        // Monsters get a smaller shove than light props.
-        if (e->v.flags && ((int)e->v.flags & FL_MONSTER)) vy *= 0.4f;
+        if (e->v.flags && ((int)e->v.flags & FL_MONSTER))
+            vy *= CV("ph_gust_monster_scale");
 
         e->v.velocity[0] += dirn[0] * vy;
         e->v.velocity[1] += dirn[1] * vy;
-        e->v.velocity[2] += dirn[2] * vy * 0.5f + 80.0f;  // small upward bias
+        e->v.velocity[2] += dirn[2] * vy * 0.5f + CV("ph_gust_lift");
 
         // Knock STEP-mode monsters off the ground briefly so the push reads.
         if (e->v.flags && ((int)e->v.flags & FL_ONGROUND)) {
