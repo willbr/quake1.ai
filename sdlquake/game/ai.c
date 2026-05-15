@@ -295,6 +295,13 @@ void ai_walk(float dist) {
     }
     g->movedist = dist;
     if (FindTarget()) return;
+    // Guard: vanilla SV_MoveToGoal -> SV_NewChaseDir dereferences
+    // goalentity unconditionally. The vanilla invariant was that
+    // walk-frame monsters always have a movetarget (their goalentity),
+    // but our retrofit puts movetarget-less monsters into walk mode --
+    // so goalentity may be NULL at this point.
+    if (!g->self->v.goalentity || g->self->v.goalentity == g->world)
+        return;
     eng->SV_MoveToGoal(g->self, dist);
 }
 
@@ -479,5 +486,8 @@ void ai_run(float dist) {
 
     if ((int)self->v.attack_state == AS_SLIDING) { ai_run_slide(); return; }
 
+    // Guard against NULL/world goalentity (see ai_walk comment).
+    if (!self->v.goalentity || self->v.goalentity == g->world)
+        return;
     eng->SV_MoveToGoal(self, dist);
 }
