@@ -20,7 +20,8 @@ static void Sim_Patrol_LevelInit_(void);
 // ---------------------------------------------------------------------------
 void Sim_AI_Init(void) {
     memset(s_brains, 0, sizeof(s_brains));
-    eng->Cvar_Register("sim_sense_debug", "0");
+    eng->Cvar_Register("sim_sense_debug",  "0");
+    eng->Cvar_Register("sim_patrol_debug", "0");
 }
 
 void Sim_AI_LevelInit(void) {
@@ -454,4 +455,82 @@ edict_t *Sim_Patrol_FindArenaNode(int route, int idx) {
             return s_arena_nodes[i].e;
     }
     return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Patrol debug overlay (sim_patrol_debug)
+// For each brain that has a route:
+//   - vertical post at every node (green by default; red at the current
+//     target node so you can see which way the monster is heading)
+//   - dim green cycle line connecting consecutive nodes
+//   - yellow arrow line from the monster's eye to the current target node
+// Distance-culled around the camera so dense maps stay legible.
+// ---------------------------------------------------------------------------
+#define SIM_PATROL_DRAW_NODES_MAX  8
+#define SIM_PATROL_DRAW_CULL       1536.0f
+
+void Sim_Patrol_DebugDraw(void) {
+    if (eng->Cvar_VariableValue("sim_patrol_debug") < 0.5f) return;
+
+    vec3_t view;
+    eng->Get_ViewOrigin(view);
+    float cull2 = SIM_PATROL_DRAW_CULL * SIM_PATROL_DRAW_CULL;
+
+    for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
+        if (b->patrol_route_id < 0) continue;
+
+        // Gather this route's nodes in idx order.
+        edict_t *nodes[SIM_PATROL_DRAW_NODES_MAX];
+        int n = 0;
+        for (int i = 0; i < SIM_PATROL_DRAW_NODES_MAX; i++) {
+            edict_t *node = Sim_Patrol_FindArenaNode(b->patrol_route_id, i);
+            if (!node) break;
+            nodes[n++] = node;
+        }
+        if (n < 2) continue;
+
+        // Cheap cull: skip the whole route if the first node is far from the
+        // camera. (Skips a few edge cases for very long routes but keeps the
+        // overlay readable.)
+        {
+            float dx = nodes[0]->v.origin[0] - view[0];
+            float dy = nodes[0]->v.origin[1] - view[1];
+            float dz = nodes[0]->v.origin[2] - view[2];
+            if (dx*dx + dy*dy + dz*dz > cull2) continue;
+        }
+
+        // Cycle lines between consecutive nodes, slightly raised so they
+        // don't z-fight floor brushes.
+        for (int i = 0; i < n; i++) {
+            int j = (i + 1) % n;
+            vec3_t a = { nodes[i]->v.origin[0], nodes[i]->v.origin[1],
+                         nodes[i]->v.origin[2] + 4.0f };
+            vec3_t c = { nodes[j]->v.origin[0], nodes[j]->v.origin[1],
+                         nodes[j]->v.origin[2] + 4.0f };
+            eng->SV_DebugLine(a, c, 56, 0);   // dim green
+        }
+
+        // Vertical posts at each node; current target gets a red post.
+        int cur = b->patrol_node_idx % n;
+        for (int i = 0; i < n; i++) {
+            vec3_t p0 = { nodes[i]->v.origin[0], nodes[i]->v.origin[1],
+                          nodes[i]->v.origin[2] };
+            vec3_t p1 = { p0[0], p0[1], p0[2] + 40.0f };
+            int color = (i == cur) ? 79 : 53;   // red / green
+            eng->SV_DebugLine(p0, p1, color, 0);
+        }
+
+        // Monster -> current target node.
+        edict_t *me = 0;
+        for (edict_t *it = eng->ED_Next(g->world); it; it = eng->ED_Next(it)) {
+            if (eng->ED_GetNum(it) == b->edict_num) { me = it; break; }
+        }
+        if (me && me->v.health > 0) {
+            vec3_t a = { me->v.origin[0], me->v.origin[1],
+                         me->v.origin[2] + 24.0f };
+            vec3_t c = { nodes[cur]->v.origin[0], nodes[cur]->v.origin[1],
+                         nodes[cur]->v.origin[2] + 24.0f };
+            eng->SV_DebugLine(a, c, 192, 0);   // yellow-ish
+        }
+    }
 }

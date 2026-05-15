@@ -92,6 +92,7 @@ void Sim_Patrol_Resolve(void);              // links targets at level start
 edict_t *Sim_Patrol_FindByTargetname(const char *name);
 void Sim_Patrol_RegisterArenaNode(int route, int idx, edict_t *e);
 edict_t *Sim_Patrol_FindArenaNode(int route, int idx);
+void Sim_Patrol_DebugDraw(void);             // sim_patrol_debug cvar
 
 // ---------------------------------------------------------------------------
 // Navmesh

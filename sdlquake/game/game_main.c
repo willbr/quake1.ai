@@ -70,6 +70,7 @@ static void game_debug_draw_overlays(void)
 {
     Sim_Nav_Frame();
     Wind_DebugDraw();
+    Sim_Patrol_DebugDraw();
 }
 
 static game_api_t s_api = {
