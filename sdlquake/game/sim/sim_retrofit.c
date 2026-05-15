@@ -11,10 +11,13 @@
 // * Patrol nodes are synthesised as info_null edicts at chosen positions
 //   and registered with Sim_Patrol_RegisterArenaNode using a per-monster
 //   route_id (the monster's edict number, which is unique).
-// * Nodes are chosen by scanning all navmesh points and keeping the 4
-//   closest that lie within RETROFIT_RANGE units. If fewer than 2 are
-//   found, the monster stays patrol-less (the M2 stand-and-sweep
-//   fallback covers the case).
+// * Node selection is farthest-first within RETROFIT_RANGE of the monster:
+//   anchor = nearest navmesh point, then greedily pick K-1 more that
+//   maximise the minimum distance to the already-chosen set. This gives
+//   a patrol that spans the available area regardless of navmesh density
+//   (the old "nearest 4" strategy degenerated to a tight cluster on dense
+//   meshes). The 4 chosen nodes are then reordered into the shortest of
+//   the 3 unique Hamilton cycles so the traversal doesn't zigzag.
 
 #include "sim.h"
 #include "../game_defs.h"
@@ -25,9 +28,10 @@
 extern engine_api_t   *eng;
 extern game_globals_t *g;
 
-#define RETROFIT_RANGE       512.0f
+#define RETROFIT_RANGE       768.0f
 #define RETROFIT_NODES_MAX   4
 #define RETROFIT_NODES_MIN   2
+#define RETROFIT_MIN_SPACING 96.0f   // skip points within this of an already-chosen one
 
 typedef struct sim_navmesh_s sim_navmesh_t;
 typedef struct { float pos[3]; int kind; } sim_nav_point_t;
@@ -49,32 +53,93 @@ void Sim_Retrofit_LevelInit(void) {
     // (b->patrol_route_id), and Sim_AI_LevelInit zeroes those.
 }
 
-static int score_nearest(const float monster[3], const sim_nav_point_t *pts,
-                         int n, int chosen[RETROFIT_NODES_MAX], float dists[RETROFIT_NODES_MAX])
+static float d2_between(const sim_nav_point_t *a, const sim_nav_point_t *b) {
+    float dx = a->pos[0] - b->pos[0];
+    float dy = a->pos[1] - b->pos[1];
+    float dz = a->pos[2] - b->pos[2];
+    return dx*dx + dy*dy + dz*dz;
+}
+
+static float d2_to_pos(const sim_nav_point_t *p, const float pos[3]) {
+    float dx = p->pos[0] - pos[0];
+    float dy = p->pos[1] - pos[1];
+    float dz = p->pos[2] - pos[2];
+    return dx*dx + dy*dy + dz*dz;
+}
+
+// Farthest-first selection within RETROFIT_RANGE of the monster.
+// Returns count of points placed in chosen[] (up to RETROFIT_NODES_MAX).
+static int score_spread(const float monster[3], const sim_nav_point_t *pts,
+                        int n, int chosen[RETROFIT_NODES_MAX])
 {
-    int count = 0;
+    const float range2 = RETROFIT_RANGE * RETROFIT_RANGE;
+    const float spacing2 = RETROFIT_MIN_SPACING * RETROFIT_MIN_SPACING;
+
+    // Anchor: nearest navmesh point to the monster (within range).
+    int   anchor = -1;
+    float best   = range2;
     for (int i = 0; i < n; i++) {
-        float dx = pts[i].pos[0] - monster[0];
-        float dy = pts[i].pos[1] - monster[1];
-        float dz = pts[i].pos[2] - monster[2];
-        float d2 = dx*dx + dy*dy + dz*dz;
-        if (d2 > RETROFIT_RANGE * RETROFIT_RANGE) continue;
-        // Insertion sort into the top-RETROFIT_NODES_MAX bucket.
-        int insert_at = count;
-        for (int k = 0; k < count; k++) {
-            if (d2 < dists[k]) { insert_at = k; break; }
+        float d2 = d2_to_pos(&pts[i], monster);
+        if (d2 < best) { best = d2; anchor = i; }
+    }
+    if (anchor < 0) return 0;
+    chosen[0] = anchor;
+    int count = 1;
+
+    // Greedily pick the point with the largest minimum-distance to all
+    // already-chosen points, restricted to candidates within RETROFIT_RANGE
+    // of the monster and at least RETROFIT_MIN_SPACING from every choice
+    // so we don't duplicate near-coincident navmesh seats.
+    while (count < RETROFIT_NODES_MAX) {
+        int   pick      = -1;
+        float pick_min2 = 0.0f;
+        for (int i = 0; i < n; i++) {
+            if (d2_to_pos(&pts[i], monster) > range2) continue;
+
+            float min2 = 1e30f;
+            int   skip = 0;
+            for (int k = 0; k < count; k++) {
+                if (chosen[k] == i) { skip = 1; break; }
+                float d2 = d2_between(&pts[i], &pts[chosen[k]]);
+                if (d2 < spacing2) { skip = 1; break; }
+                if (d2 < min2) min2 = d2;
+            }
+            if (skip) continue;
+            if (min2 > pick_min2) { pick_min2 = min2; pick = i; }
         }
-        if (insert_at >= RETROFIT_NODES_MAX) continue;
-        int last = (count < RETROFIT_NODES_MAX) ? count : RETROFIT_NODES_MAX - 1;
-        for (int k = last; k > insert_at; k--) {
-            chosen[k] = chosen[k-1];
-            dists[k]  = dists[k-1];
-        }
-        chosen[insert_at] = i;
-        dists[insert_at]  = d2;
-        if (count < RETROFIT_NODES_MAX) count++;
+        if (pick < 0) break;
+        chosen[count++] = pick;
     }
     return count;
+}
+
+// Brute-force shortest Hamilton cycle through `count` points. For count<=4
+// there are at most 3 unique cycles (fixing chosen[0] and dividing out
+// reversal). Permutes chosen[] in place.
+static void order_cycle(const sim_nav_point_t *pts, int chosen[RETROFIT_NODES_MAX],
+                        int count)
+{
+    if (count < 4) return;   // trivially the only cycle
+
+    static const int perms[3][4] = {
+        {0, 1, 2, 3},
+        {0, 1, 3, 2},
+        {0, 2, 1, 3},
+    };
+    int   best_perm = 0;
+    float best_len2 = 1e30f;
+    for (int p = 0; p < 3; p++) {
+        float total = 0.0f;
+        for (int i = 0; i < 4; i++) {
+            int a = chosen[perms[p][i]];
+            int b = chosen[perms[p][(i + 1) % 4]];
+            total += d2_between(&pts[a], &pts[b]);
+        }
+        if (total < best_len2) { best_len2 = total; best_perm = p; }
+    }
+    int reordered[4];
+    for (int i = 0; i < 4; i++) reordered[i] = chosen[perms[best_perm][i]];
+    for (int i = 0; i < 4; i++) chosen[i] = reordered[i];
 }
 
 static edict_t *spawn_synthetic_node(const float pos[3]) {
@@ -110,10 +175,10 @@ void Sim_Retrofit_Frame(void) {
         if (!me) continue;
 
         int   chosen[RETROFIT_NODES_MAX];
-        float dists[RETROFIT_NODES_MAX] = {0};
-        int   n = score_nearest(me->v.origin, mesh->points, mesh->point_count,
-                                chosen, dists);
+        int   n = score_spread(me->v.origin, mesh->points, mesh->point_count,
+                               chosen);
         if (n < RETROFIT_NODES_MIN) continue;
+        order_cycle(mesh->points, chosen, n);
 
         int route_id = b->edict_num;
         for (int i = 0; i < n; i++) {
