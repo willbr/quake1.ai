@@ -471,6 +471,22 @@ int Editor_EntityHidden(int e_idx)
 // directly, so metadata edicts (info_player_*, info_intermission)
 // still show in live view's list — they're alive engine edicts even
 // though Editor_EntityHidden filters them from render/pick.
+// Brush-list click handling: plain click replaces selection, shift
+// toggles, double-click frames the camera on the item. Same semantics
+// as the 3D viewport. SDL_GetModState reads OS keyboard state directly
+// so modifiers work regardless of which window has focus.
+static void brush_list_pick(int i, int j)
+{
+    SDL_Keymod mod = SDL_GetModState();
+    if (mod & SDL_KMOD_SHIFT) {
+        Scene_SelectionToggle(i, j);
+    } else {
+        Scene_SelectionClear();
+        Scene_SelectionAdd(i, j);
+    }
+    if (IG_IsMouseDoubleClicked(0)) Editor_FrameItem(i, j);
+}
+
 static int brush_list_visible(int e_idx)
 {
     extern cvar_t editor_view_mode;
@@ -545,37 +561,29 @@ static void draw_brush_list(void)
     }
     IG_Separator();
 
-    // Filter checkboxes — "Hide X". Inverted so unchecked = visible
-    // (the default state) reads naturally. Lay them out two per row.
+    // Filter checkboxes — "Hide X" per category. Two per row.
     {
-        int hide_trig    = s_hide_cat[EDIT_CAT_TRIGGER];
-        int hide_light   = s_hide_cat[EDIT_CAT_LIGHT];
-        int hide_spawn   = s_hide_cat[EDIT_CAT_SPAWN];
-        int hide_item    = s_hide_cat[EDIT_CAT_ITEM];
-        int hide_monster = s_hide_cat[EDIT_CAT_MONSTER];
-        int hide_func    = s_hide_cat[EDIT_CAT_FUNC];
-        int hide_sound   = s_hide_cat[EDIT_CAT_SOUND];
-        int hide_path    = s_hide_cat[EDIT_CAT_PATH];
-        int hide_misc    = s_hide_cat[EDIT_CAT_MISC];
-        int hide_info    = s_hide_cat[EDIT_CAT_INFO];
+        static const struct { int cat; const char *label; } hide_cats[] = {
+            { EDIT_CAT_TRIGGER, "triggers" },
+            { EDIT_CAT_LIGHT,   "lights"   },
+            { EDIT_CAT_SPAWN,   "spawns"   },
+            { EDIT_CAT_ITEM,    "items"    },
+            { EDIT_CAT_MONSTER, "monsters" },
+            { EDIT_CAT_FUNC,    "funcs"    },
+            { EDIT_CAT_SOUND,   "sounds"   },
+            { EDIT_CAT_PATH,    "paths"    },
+            { EDIT_CAT_MISC,    "misc"     },
+            { EDIT_CAT_INFO,    "info"     },
+        };
         IG_TextUnformatted("Hide:");
-        if (IG_Checkbox("triggers", &hide_trig))    s_hide_cat[EDIT_CAT_TRIGGER] = hide_trig;
-        IG_SameLine(0, -1);
-        if (IG_Checkbox("lights",   &hide_light))   s_hide_cat[EDIT_CAT_LIGHT]   = hide_light;
-        if (IG_Checkbox("spawns",   &hide_spawn))   s_hide_cat[EDIT_CAT_SPAWN]   = hide_spawn;
-        IG_SameLine(0, -1);
-        if (IG_Checkbox("items",    &hide_item))    s_hide_cat[EDIT_CAT_ITEM]    = hide_item;
-        if (IG_Checkbox("monsters", &hide_monster)) s_hide_cat[EDIT_CAT_MONSTER] = hide_monster;
-        IG_SameLine(0, -1);
-        if (IG_Checkbox("funcs",    &hide_func))    s_hide_cat[EDIT_CAT_FUNC]    = hide_func;
-        if (IG_Checkbox("sounds",   &hide_sound))   s_hide_cat[EDIT_CAT_SOUND]   = hide_sound;
-        IG_SameLine(0, -1);
-        if (IG_Checkbox("paths",    &hide_path))    s_hide_cat[EDIT_CAT_PATH]    = hide_path;
-        if (IG_Checkbox("misc",     &hide_misc))    s_hide_cat[EDIT_CAT_MISC]    = hide_misc;
-        IG_SameLine(0, -1);
-        if (IG_Checkbox("info",     &hide_info))    s_hide_cat[EDIT_CAT_INFO]    = hide_info;
+        for (int k = 0; k < ARRAY_LEN(hide_cats); k++) {
+            if (k & 1) IG_SameLine(0, -1);
+            int v = s_hide_cat[hide_cats[k].cat];
+            if (IG_Checkbox(hide_cats[k].label, &v))
+                s_hide_cat[hide_cats[k].cat] = v;
+        }
         // "Visible only" — orthogonal to category filters; AND'd with them.
-        if (IG_Checkbox("visible only", &s_visible_only)) { /* applied next frame */ }
+        IG_Checkbox("visible only", &s_visible_only);
     }
     IG_Separator();
 
@@ -589,27 +597,12 @@ static void draw_brush_list(void)
         IG_PushID_Int(i);
         if (Entity_IsPoint(e))
         {
-            // Point entity: header itself is the selectable. Clicking it
-            // selects (i, -1) so the gizmo anchors at its origin.
-            // Double-click frames the camera on it.
+            // Point entity: header itself is the selectable. (i, -1)
+            // anchors the gizmo at its origin.
             int sel = Scene_SelectionContains(i, -1);
             snprintf(buf, sizeof(buf), "[%d] %s##e%d", i, cls, i);
             if (IG_Selectable(buf, sel, IG_SF_AllowDoubleClick))
-            {
-                SDL_Keymod mod = SDL_GetModState();
-                int shift = (mod & SDL_KMOD_SHIFT) != 0;
-                if (shift)
-                {
-                    Scene_SelectionToggle(i, -1);
-                }
-                else
-                {
-                    Scene_SelectionClear();
-                    Scene_SelectionAdd(i, -1);
-                }
-                if (IG_IsMouseDoubleClicked(0))
-                    Editor_FrameItem(i, -1);
-            }
+                brush_list_pick(i, -1);
         }
         else
         {
@@ -624,25 +617,7 @@ static void draw_brush_list(void)
                          "  brush %d (%d planes, %d faces)##b%d_%d",
                          j, b->numplanes, b->numfaces, i, j);
                 if (IG_Selectable(buf, sel, IG_SF_AllowDoubleClick))
-                {
-                    // Match the 3D-viewport semantics: shift toggles,
-                    // plain click replaces. SDL_GetModState reads OS
-                    // keyboard state so it works regardless of which
-                    // window has focus.
-                    SDL_Keymod mod = SDL_GetModState();
-                    int shift = (mod & SDL_KMOD_SHIFT) != 0;
-                    if (shift)
-                    {
-                        Scene_SelectionToggle(i, j);
-                    }
-                    else
-                    {
-                        Scene_SelectionClear();
-                        Scene_SelectionAdd(i, j);
-                    }
-                    if (IG_IsMouseDoubleClicked(0))
-                        Editor_FrameItem(i, j);
-                }
+                    brush_list_pick(i, j);
             }
         }
         IG_PopID();
