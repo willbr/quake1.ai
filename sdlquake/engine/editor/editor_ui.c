@@ -25,6 +25,62 @@ static int s_show_spawn_dialog = 0;
 // Toolbar "Wrap..." button toggles this; consumed by draw_wrap_dialog.
 static int s_show_wrap_dialog = 0;
 
+#ifndef ARRAY_LEN
+#define ARRAY_LEN(a) ((int)(sizeof(a) / sizeof((a)[0])))
+#endif
+
+// -----------------------------------------------------------------------------
+// Tiny UI helpers — kill the toolbar's checkbox / combo repetition.
+// -----------------------------------------------------------------------------
+
+// Checkbox wired to a float cvar treated as a boolean. Sets the cvar
+// directly via Cvar_SetValue (no Cbuf round-trip).
+static void ui_cvar_checkbox(const char *label, const char *cvar_name)
+{
+    cvar_t *cv = Cvar_FindVar((char *)cvar_name);
+    int on = cv && cv->value != 0.0f;
+    if (IG_Checkbox(label, &on))
+        Cvar_SetValue((char *)cvar_name, on ? 1.0f : 0.0f);
+}
+
+// SameLine + checkbox — toolbar widgets all chain horizontally.
+static void ui_cvar_checkbox_same(const char *label, const char *cvar_name)
+{
+    IG_SameLine(0, -1);
+    ui_cvar_checkbox(label, cvar_name);
+}
+
+// Combo bound to an integer cvar with a fixed item list. Clamps the
+// cvar's value to a valid index before display.
+static void ui_cvar_combo_int(const char *label, const char *cvar_name,
+                              const char *const *items, int n, float width)
+{
+    cvar_t *cv = Cvar_FindVar((char *)cvar_name);
+    int sel = cv ? (int)cv->value : 0;
+    if (sel < 0)  sel = 0;
+    if (sel >= n) sel = n - 1;
+    if (width > 0) IG_SetNextItemWidth(width);
+    if (IG_Combo(label, &sel, items, n))
+        Cvar_SetValue((char *)cvar_name, (float)sel);
+}
+
+// Combo bound to a float cvar with a discrete preset list (e.g. grid
+// sizes). Selection mirrors current cvar value when it matches a preset
+// exactly; otherwise displays index 0 without overwriting the cvar.
+static void ui_cvar_combo_preset(const char *label, const char *cvar_name,
+                                 const char *const *items,
+                                 const float *values, int n, float width)
+{
+    cvar_t *cv  = Cvar_FindVar((char *)cvar_name);
+    float  cur  = cv ? cv->value : values[0];
+    int    sel  = 0;
+    for (int k = 0; k < n; k++)
+        if (values[k] == cur) { sel = k; break; }
+    if (width > 0) IG_SetNextItemWidth(width);
+    if (IG_Combo(label, &sel, items, n))
+        Cvar_SetValue((char *)cvar_name, values[sel]);
+}
+
 // -----------------------------------------------------------------------------
 // Toolbar
 // -----------------------------------------------------------------------------
@@ -140,34 +196,30 @@ static int world_tex_index(const char *name)
 // the top of Editor_DrawUI.
 static int s_dock_cond = IG_Cond_FirstUseEver;
 
+// Run a simple console command (no args). Wraps the Cbuf_AddText
+// boilerplate for toolbar buttons that don't need to interpolate.
+static void ui_exec(const char *cmd_with_newline) { Cbuf_AddText((char *)cmd_with_newline); }
+
+// "Label | next-button-on-same-line | ..." helper. Returns the click.
+static int ui_btn_same(const char *label)
+{
+    IG_SameLine(0, -1);
+    return IG_Button(label);
+}
+
 static void draw_toolbar(void)
 {
-    extern cvar_t editor_render_style;
-    extern cvar_t editor_camera;
-    extern cvar_t editor_grid_snap;
-    extern cvar_t editor_grid_size;
-    extern cvar_t editor_grid_absolute;
-    extern cvar_t editor_rotate_snap;
-    extern cvar_t editor_rotate_snap_size;
-    extern cvar_t editor_rotate_snap_absolute;
-    extern cvar_t editor_view_mode;
-    static const char *style_items[] = {
-        "wireframe", "flat", "flat+wire", "textured", "textured+wire"
-    };
+    // Quake physics constants drive the gameplay-named grid entries:
+    // 18 = step (max walkable), 45 = jump apex (270²/(2·800)),
+    // 56 = player bbox height (-24..32). Others are powers of two.
+    static const char *style_items[]  = { "wireframe", "flat", "flat+wire", "textured", "textured+wire" };
     static const char *camera_items[] = { "free-fly", "fps" };
     static const char *view_items[]   = { "live", "map" };
-    // Quake physics constants drive the gameplay-named entries: 18 = step
-    // (max walkable step), 45 = jump apex (270²/(2*800)), 56 = player bbox
-    // height (-24 to 32). The rest are powers of 2 for the build grid.
-    static const float grid_values[] = { 1, 4, 8, 16, 18, 32, 45, 56, 64, 128 };
-    static const char *grid_items[] = {
-        "1", "4", "8", "16 (build)", "18 (step)", "32 (door)",
-        "45 (jump)", "56 (player)", "64", "128 (room)"
-    };
-    enum { GRID_N = (int)(sizeof(grid_values) / sizeof(grid_values[0])) };
-    static const float rotate_snap_values[] = { 5, 10, 15, 22.5f, 30, 45, 90 };
-    static const char *rotate_snap_items[]  = { "5", "10", "15", "22.5", "30", "45", "90" };
-    enum { RSNAP_N = (int)(sizeof(rotate_snap_values) / sizeof(rotate_snap_values[0])) };
+    static const char *grid_items[]   = { "1", "4", "8", "16 (build)", "18 (step)", "32 (door)",
+                                          "45 (jump)", "56 (player)", "64", "128 (room)" };
+    static const float grid_values[]  = { 1, 4, 8, 16, 18, 32, 45, 56, 64, 128 };
+    static const char *rsnap_items[]  = { "5", "10", "15", "22.5", "30", "45", "90" };
+    static const float rsnap_values[] = { 5, 10, 15, 22.5f, 30, 45, 90 };
 
     float disp_w = 1280, disp_h = 720;
     IG_GetDisplaySize(&disp_w, &disp_h);
@@ -176,315 +228,104 @@ static void draw_toolbar(void)
     IG_SetNextWindowSize(disp_w - 2 * UI_PAD, (float)UI_TOOLBAR_H, s_dock_cond);
     if (!IG_Begin("Editor", NULL, IG_WF_None)) { IG_End(); return; }
 
-    if (IG_Button("Save"))         Cbuf_AddText("editor_save\n");
-    IG_SameLine(0, -1);
-    if (IG_Button("Revert edits")) Cbuf_AddText("editor_revert\n");
-    IG_SameLine(0, -1);
-    if (IG_Button("Restart map") && edit_scene.mapname[0])
+    // -- File / build ----------------------------------------------------
+    if (IG_Button("Save"))                      ui_exec("editor_save\n");
+    if (ui_btn_same("Revert edits"))            ui_exec("editor_revert\n");
+    if (ui_btn_same("Restart map") && edit_scene.mapname[0])
     {
         char buf[160];
         snprintf(buf, sizeof(buf), "map %s\n", edit_scene.mapname);
         Cbuf_AddText(buf);
     }
-    IG_SameLine(0, -1);
-    // (Add cube moved to row 2, paired with the texture picker.)
-    if (IG_Button("Group"))        Cbuf_AddText("editor_group\n");
-    IG_SameLine(0, -1);
-    if (IG_Button("Ungroup"))      Cbuf_AddText("editor_ungroup\n");
-    IG_SameLine(0, -1);
-    if (IG_Button("Delete (Del)")) Cbuf_AddText("editor_delete\n");
-    IG_SameLine(0, -1);
-    if (IG_Button("Undo"))         Cbuf_AddText("editor_undo\n");
-    IG_SameLine(0, -1);
-    if (IG_Button("Redo"))         Cbuf_AddText("editor_redo\n");
-    IG_SameLine(0, -1);
-    if (IG_Button("Close (F2)"))   Cbuf_AddText("editor\n");
-    IG_SameLine(0, -1);
-    /* qbsp-only fast iteration on geometry: the map reloads with the
-     * existing .lit (if any), so lighting stays whatever the last bake
-     * produced. */
-    if (IG_Button("Compile"))      Cbuf_AddText("editor_compile\n");
-    IG_SameLine(0, -1);
-    /* qbsp + light: re-bakes lightmaps from the current `light*` entities
-     * in the scene. Slower (single-threaded direct lighting), but the
-     * only way to see colour/intensity edits in the rendered .bsp. */
-    if (IG_Button("Compile + Light")) Cbuf_AddText("editor_compile_full\n");
-    IG_SameLine(0, -1);
-    /* Background re-bake. Needs editor_compile_full to have populated
-     * qbsp's globals at least once this session. Runs on an SDL_Thread;
-     * the result lands ~2s later via Editor_LightBake_Poll. */
+    // qbsp-only fast iteration: geometry recompiled, existing .lit reused.
+    if (ui_btn_same("Compile"))                 ui_exec("editor_compile\n");
+    // qbsp + light: re-bakes from current `light*` entities. Slower but
+    // the only way to see colour/intensity edits in the rendered .bsp.
+    if (ui_btn_same("Compile + Light"))         ui_exec("editor_compile_full\n");
+    // Background re-bake on an SDL_Thread; needs Compile+Light to have run
+    // at least once this session to populate qbsp's globals.
     {
         extern int Editor_LightBake_InProgress(void);
         int busy = Editor_LightBake_InProgress();
-        if (IG_Button(busy ? "Re-baking..." : "Refresh Lighting"))
-            if (!busy) Cbuf_AddText("editor_relight\n");
+        if (ui_btn_same(busy ? "Re-baking..." : "Refresh Lighting") && !busy)
+            ui_exec("editor_relight\n");
     }
-    IG_SameLine(0, -1);
-    if (IG_Button("Textures..."))  s_show_tex_browser = !s_show_tex_browser;
-    IG_SameLine(0, -1);
-    if (IG_Button("Add Entity..."))s_show_spawn_dialog = !s_show_spawn_dialog;
-    IG_SameLine(0, -1);
-    if (IG_Button("Wrap..."))      s_show_wrap_dialog  = !s_show_wrap_dialog;
+    if (ui_btn_same("Close (F2)"))              ui_exec("editor\n");
 
-    {
-        int style = (int)editor_render_style.value;
-        if (style < 0) style = 0;
-        if (style >= (int)(sizeof(style_items) / sizeof(style_items[0])))
-            style = (int)(sizeof(style_items) / sizeof(style_items[0])) - 1;
-        IG_SetNextItemWidth(160);
-        if (IG_Combo("render style", &style, style_items,
-                     (int)(sizeof(style_items) / sizeof(style_items[0]))))
-        {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "editor_render_style %d\n", style);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Fullbright toggle. Maps to the engine's r_fullbright cvar — zeroes
-        // the lightmap so world surfaces draw at full intensity (alias
-        // models still vertex-shaded; that's vanilla software-renderer
-        // behaviour). Cheat-protected only in multiplayer; r_misc.c forces
-        // it back to 0 if cl.maxclients > 1.
-        cvar_t *fb = Cvar_FindVar("r_fullbright");
-        int on = fb && fb->value != 0.0f;
-        if (IG_Checkbox("fullbright", &on))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "r_fullbright %d\n", on ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Trigger render mode: 0 = single red AABB per trigger volume
-        // (clean authoring view), 1 = render trigger brushes textured
-        // (face-level inspection). Independent of editor_render_style.
-        extern cvar_t editor_trigger_render;
-        int on = editor_trigger_render.value != 0.0f;
-        if (IG_Checkbox("trigger tex", &on))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_trigger_render %d\n", on ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Clip render mode: 0 = teal AABB per clip brush (clean view),
-        // 1 = textured (procedural-grid fallback since clip has no
-        // miptex). Per-brush, not per-entity — most clip brushes live
-        // in worldspawn alongside visible geometry.
-        extern cvar_t editor_clip_render;
-        int on = editor_clip_render.value != 0.0f;
-        if (IG_Checkbox("clip tex", &on))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_clip_render %d\n", on ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Per-entity facing / movedir arrow visibility. Selection always
-        // overrides — a clicked entity shows its arrow either way.
-        extern cvar_t editor_show_angles;
-        int on = editor_show_angles.value != 0.0f;
-        if (IG_Checkbox("angles", &on))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_show_angles %d\n", on ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Target / killtarget link visibility. Selection overrides per
-        // pair — a link from or to a selected ent is always drawn.
-        extern cvar_t editor_show_links;
-        int on = editor_show_links.value != 0.0f;
-        if (IG_Checkbox("links", &on))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_show_links %d\n", on ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Navmesh debug overlay. Drives sim_nav_debug, which the game
-        // DLL registers; lines only appear while the sim is ticking.
-        int on = Cvar_VariableValue("sim_nav_debug") != 0.0f;
-        if (IG_Checkbox("navmesh", &on))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "sim_nav_debug %d\n", on ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Navmesh z-test. When on, edges are occluded by world geometry
-        // (only the portion the camera can directly see). Companion to the
-        // navmesh toggle — has no effect when navmesh is off.
-        int on = Cvar_VariableValue("sim_nav_ztest") != 0.0f;
-        if (IG_Checkbox("z-test", &on))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "sim_nav_ztest %d\n", on ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Face mode: clicks set the active face on the singly-selected
-        // brush instead of replacing the brush selection. Active face
-        // gates the inspector's alignment widgets and gets a white
-        // outline overlay in the wireframe pass.
-        extern cvar_t editor_face_mode;
-        int on = editor_face_mode.value != 0.0f;
-        if (IG_Checkbox("faces", &on))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_face_mode %d\n", on ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Snap toggle. Cvar is float; treat any non-zero as on.
-        int snap = editor_grid_snap.value != 0.0f;
-        if (IG_Checkbox("snap", &snap))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_grid_snap %d\n", snap ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Absolute snap mode — snap the brush centroid to world grid lines
-        // (useful for stairs / lining brushes up across drags). Off ⇒ snap
-        // is relative to the drag-start position.
-        int abs = editor_grid_absolute.value != 0.0f;
-        if (IG_Checkbox("abs", &abs))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_grid_absolute %d\n", abs ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // Grid size dropdown. Find current size in the preset list; if it's
-        // not a preset (user set a custom value), select index 0 visually but
-        // don't overwrite the cvar unless they pick something.
-        int sel = -1, k;
-        float cur = editor_grid_size.value;
-        for (k = 0; k < GRID_N; k++)
-            if (grid_values[k] == cur) { sel = k; break; }
-        if (sel < 0) sel = 0;
-        IG_SetNextItemWidth(140);
-        if (IG_Combo("grid", &sel, grid_items, GRID_N))
-        {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "editor_grid_size %g\n", grid_values[sel]);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        int rsnap = editor_rotate_snap.value != 0.0f;
-        if (IG_Checkbox("rsnap", &rsnap))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_rotate_snap %d\n", rsnap ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        int rabs = editor_rotate_snap_absolute.value != 0.0f;
-        if (IG_Checkbox("abs##rot", &rabs))
-        {
-            char buf[40];
-            snprintf(buf, sizeof(buf), "editor_rotate_snap_absolute %d\n", rabs ? 1 : 0);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        int sel = 5, k;
-        float cur = editor_rotate_snap_size.value;
-        for (k = 0; k < RSNAP_N; k++)
-            if (rotate_snap_values[k] == cur) { sel = k; break; }
-        IG_SetNextItemWidth(60);
-        if (IG_Combo("rangle", &sel, rotate_snap_items, RSNAP_N))
-        {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "editor_rotate_snap_size %g\n", rotate_snap_values[sel]);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        int cam = (int)editor_camera.value;
-        if (cam < 0) cam = 0;
-        if (cam >= (int)(sizeof(camera_items) / sizeof(camera_items[0])))
-            cam = (int)(sizeof(camera_items) / sizeof(camera_items[0])) - 1;
-        IG_SetNextItemWidth(110);
-        if (IG_Combo("camera (Tab)", &cam, camera_items,
-                     (int)(sizeof(camera_items) / sizeof(camera_items[0]))))
-        {
-            char buf[32];
-            snprintf(buf, sizeof(buf), "editor_camera %d\n", cam);
-            Cbuf_AddText(buf);
-        }
-    }
-    IG_SameLine(0, -1);
-    {
-        // View mode: show running edicts ("live") vs .map text ("map").
-        // Eliminates double-rendering when AI has moved a monster away
-        // from its .map origin.
-        int vm = (int)editor_view_mode.value;
-        if (vm < 0) vm = 0;
-        if (vm >= (int)(sizeof(view_items) / sizeof(view_items[0])))
-            vm = (int)(sizeof(view_items) / sizeof(view_items[0])) - 1;
-        IG_SetNextItemWidth(90);
-        if (IG_Combo("view", &vm, view_items,
-                     (int)(sizeof(view_items) / sizeof(view_items[0]))))
-        {
-            char buf[32];
-            snprintf(buf, sizeof(buf), "editor_view_mode %d\n", vm);
-            Cbuf_AddText(buf);
-        }
-    }
-    // Brush palette: texture combo + Add cube. Names are pulled from
-    // world_tex_list(); selection mirrors the editor_brush_tex cvar.
+    // -- Selection / undo ------------------------------------------------
+    if (IG_Button("Undo"))                      ui_exec("editor_undo\n");
+    if (ui_btn_same("Redo"))                    ui_exec("editor_redo\n");
+    if (ui_btn_same("Delete (Del)"))            ui_exec("editor_delete\n");
+    if (ui_btn_same("Group"))                   ui_exec("editor_group\n");
+    if (ui_btn_same("Ungroup"))                 ui_exec("editor_ungroup\n");
+
+    // -- Dialogs ---------------------------------------------------------
+    if (ui_btn_same("Textures..."))             s_show_tex_browser  = !s_show_tex_browser;
+    if (ui_btn_same("Add Entity..."))           s_show_spawn_dialog = !s_show_spawn_dialog;
+    if (ui_btn_same("Wrap..."))                 s_show_wrap_dialog  = !s_show_wrap_dialog;
+
+    // -- Brush palette ---------------------------------------------------
     {
         extern cvar_t editor_brush_tex;
         int n;
         const char *const *names = world_tex_list(&n);
-        int sel = world_tex_index(editor_brush_tex.string);
-        if (sel < 0) sel = 0;
         IG_SetNextItemWidth(180);
         if (n > 0)
         {
+            int sel = world_tex_index(editor_brush_tex.string);
+            if (sel < 0) sel = 0;
             if (IG_Combo("brush tex", &sel, names, n))
                 Cvar_Set("editor_brush_tex", (char *)names[sel]);
         }
-        else
-        {
-            IG_TextUnformatted("brush tex (no map loaded)");
-        }
-        IG_SameLine(0, -1);
-        if (IG_Button("Add cube"))
-            Cbuf_AddText("editor_brush_add_cube\n");
-        IG_SameLine(0, -1);
-        if (IG_Button("Hollow"))
-            Cbuf_AddText("editor_brush_hollow\n");
+        else IG_TextUnformatted("brush tex (no map loaded)");
     }
+    if (ui_btn_same("Add cube"))                ui_exec("editor_brush_add_cube\n");
+    if (ui_btn_same("Hollow"))                  ui_exec("editor_brush_hollow\n");
+
+    // -- Render style / overlays -----------------------------------------
+    ui_cvar_combo_int("render style", "editor_render_style",
+                      style_items, ARRAY_LEN(style_items), 160);
+    // Fullbright zeroes the lightmap so world surfaces draw at full
+    // intensity. Cheat-protected in multiplayer (r_misc.c forces it
+    // back to 0 if cl.maxclients > 1).
+    ui_cvar_checkbox_same("fullbright",  "r_fullbright");
+    // Trigger / clip render mode: AABB shell vs textured face.
+    ui_cvar_checkbox_same("trigger tex", "editor_trigger_render");
+    ui_cvar_checkbox_same("clip tex",    "editor_clip_render");
+    // Per-entity facing arrow + target/killtarget link overlay.
+    ui_cvar_checkbox_same("angles",      "editor_show_angles");
+    ui_cvar_checkbox_same("links",       "editor_show_links");
+    // Navmesh debug overlay + its z-test companion (game DLL cvars,
+    // only render while the sim is ticking).
+    ui_cvar_checkbox_same("navmesh",     "sim_nav_debug");
+    ui_cvar_checkbox_same("z-test",      "sim_nav_ztest");
+    // Face mode: clicks pick a face instead of replacing the brush
+    // selection. Gates the inspector's alignment widgets.
+    ui_cvar_checkbox_same("faces",       "editor_face_mode");
+
+    // -- Snap (translate) ------------------------------------------------
+    ui_cvar_checkbox_same("snap", "editor_grid_snap");
+    ui_cvar_checkbox_same("abs",  "editor_grid_absolute");
+    IG_SameLine(0, -1);
+    ui_cvar_combo_preset("grid", "editor_grid_size",
+                         grid_items, grid_values, ARRAY_LEN(grid_items), 140);
+
+    // -- Snap (rotate) ---------------------------------------------------
+    ui_cvar_checkbox_same("rsnap",    "editor_rotate_snap");
+    ui_cvar_checkbox_same("abs##rot", "editor_rotate_snap_absolute");
+    IG_SameLine(0, -1);
+    ui_cvar_combo_preset("rangle", "editor_rotate_snap_size",
+                         rsnap_items, rsnap_values, ARRAY_LEN(rsnap_items), 60);
+
+    // -- Camera / view ---------------------------------------------------
+    IG_SameLine(0, -1);
+    ui_cvar_combo_int("camera (Tab)", "editor_camera",
+                      camera_items, ARRAY_LEN(camera_items), 110);
+    IG_SameLine(0, -1);
+    ui_cvar_combo_int("view", "editor_view_mode",
+                      view_items, ARRAY_LEN(view_items), 90);
+
+    // -- Status line -----------------------------------------------------
     {
         char buf[200];
         float fps = IG_GetFramerate();
