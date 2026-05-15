@@ -155,44 +155,44 @@ DYNAMIC LIGHTS
 R_MarkLights
 =============
 */
-void R_MarkLights (dlight_t *light, int bit, mnode_t *node)
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 {
 	mplane_t	*splitplane;
 	float		dist;
 	msurface_t	*surf;
 	int			i;
-	
+
 	if (node->contents < 0)
 		return;
 
 	splitplane = node->plane;
 	dist = DotProduct (light->origin, splitplane->normal) - splitplane->dist;
-	
+
 	if (dist > light->radius)
 	{
-		R_MarkLights (light, bit, node->children[0]);
+		R_MarkLights (light, lnum, node->children[0]);
 		return;
 	}
 	if (dist < -light->radius)
 	{
-		R_MarkLights (light, bit, node->children[1]);
+		R_MarkLights (light, lnum, node->children[1]);
 		return;
 	}
-		
+
 // mark the polygons
 	surf = cl.worldmodel->surfaces + node->firstsurface;
 	for (i=0 ; i<node->numsurfaces ; i++, surf++)
 	{
 		if (surf->dlightframe != r_dlightframecount)
 		{
-			surf->dlightbits = 0;
+			DLIGHTBITS_CLEAR(&surf->dlightbits);
 			surf->dlightframe = r_dlightframecount;
 		}
-		surf->dlightbits |= bit;
+		DLIGHTBITS_SETBIT(&surf->dlightbits, lnum);
 	}
 
-	R_MarkLights (light, bit, node->children[0]);
-	R_MarkLights (light, bit, node->children[1]);
+	R_MarkLights (light, lnum, node->children[0]);
+	R_MarkLights (light, lnum, node->children[1]);
 }
 
 
@@ -217,7 +217,7 @@ void R_PushDlights (void)
 	{
 		if (l->die < cl.time || !l->radius)
 			continue;
-		R_MarkLights ( l, 1<<i, cl.worldmodel->nodes );
+		R_MarkLights ( l, i, cl.worldmodel->nodes );
 	}
 }
 

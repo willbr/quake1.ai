@@ -105,8 +105,8 @@ typedef struct msurface_s
 {
 	int			visframe;		// should be drawn when node is crossed
 
-	int			dlightframe;
-	int			dlightbits;
+	int				dlightframe;
+	dlightbits_t	dlightbits;
 
 	mplane_t	*plane;
 	int			flags;

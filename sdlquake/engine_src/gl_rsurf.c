@@ -82,7 +82,7 @@ void R_AddDynamicLights (msurface_t *surf)
 
 	for (lnum=0 ; lnum<MAX_DLIGHTS ; lnum++)
 	{
-		if ( !(surf->dlightbits & (1<<lnum) ) )
+		if ( !DLIGHTBITS_TESTBIT(&surf->dlightbits, lnum) )
 			continue;		// not lit by this light
 
 		rad = cl_dlights[lnum].radius;
@@ -1135,7 +1135,7 @@ void R_DrawBrushModel (entity_t *e)
 				(!cl_dlights[k].radius))
 				continue;
 
-			R_MarkLights (&cl_dlights[k], 1<<k,
+			R_MarkLights (&cl_dlights[k], k,
 				clmodel->nodes + clmodel->hulls[0].firstclipnode);
 		}
 	}

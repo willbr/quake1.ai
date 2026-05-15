@@ -68,7 +68,20 @@ typedef struct
 
 #define	SIGNONS		4			// signon messages to receive before connected
 
-#define	MAX_DLIGHTS		32
+#define	MAX_DLIGHTS		256
+#define	DLIGHTBITS_WORDS	((MAX_DLIGHTS + 63) / 64)
+
+// dlightbits_t is the per-surface mask of dlights touching it. Width sets the
+// dlight cap. Bumping MAX_DLIGHTS in multiples of 64 just grows the array.
+typedef struct
+{
+	unsigned long long w[DLIGHTBITS_WORDS];
+} dlightbits_t;
+
+#define DLIGHTBITS_CLEAR(bp)       memset((bp), 0, sizeof(*(bp)))
+#define DLIGHTBITS_SETBIT(bp, n)   ((bp)->w[(unsigned)(n) >> 6] |= 1ull << ((unsigned)(n) & 63))
+#define DLIGHTBITS_TESTBIT(bp, n)  (((bp)->w[(unsigned)(n) >> 6] >> ((unsigned)(n) & 63)) & 1ull)
+
 typedef struct
 {
 	vec3_t	origin;

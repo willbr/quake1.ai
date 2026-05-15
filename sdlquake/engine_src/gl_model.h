@@ -142,8 +142,8 @@ typedef struct msurface_s
 	mtexinfo_t	*texinfo;
 	
 // lighting info
-	int			dlightframe;
-	int			dlightbits;
+	int				dlightframe;
+	dlightbits_t	dlightbits;
 
 	int			lightmaptexturenum;
 	byte		styles[MAXLIGHTMAPS];

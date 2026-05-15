@@ -78,7 +78,7 @@ void R_AddDynamicLights (void)
 
 	for (lnum=0 ; lnum<MAX_DLIGHTS ; lnum++)
 	{
-		if ( !(surf->dlightbits & (1<<lnum) ) )
+		if ( !DLIGHTBITS_TESTBIT(&surf->dlightbits, lnum) )
 			continue;		// not lit by this light
 
 		rad = cl_dlights[lnum].radius;
@@ -167,7 +167,7 @@ void R_AddDynamicLights_RGB (void)
 
 	for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
 	{
-		if (!(surf->dlightbits & (1 << lnum)))
+		if (!DLIGHTBITS_TESTBIT(&surf->dlightbits, lnum))
 			continue;
 
 		rad      = cl_dlights[lnum].radius;
