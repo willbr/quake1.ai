@@ -145,6 +145,9 @@ void spawn_light_flame_small_white(edict_t *e) {
 static void fire_touch(edict_t *self, edict_t *other) {
     g->self  = self;
     g->other = other;
+    // Gusted fireballs (movetype flipped to BOUNCE by abilities.c) ricochet
+    // off world geometry instead of being consumed on first wall contact.
+    if (other == g->world && (int)self->v.movetype == MOVETYPE_BOUNCE) return;
     T_Damage(other, self, self, 20);
     eng->ED_Free(self);
 }
