@@ -1052,6 +1052,38 @@ ang_check:
         int u = (s_drag_planar_axis + 1) % 3;
         int v = (s_drag_planar_axis + 2) % 3;
         float raw_u, raw_v, snap_u, snap_v, step_u, step_v;
+
+        // Surface snap: cursor over a BSP/brush face → snap u/v so the
+        // bbox face nearest the hit normal lies flush. Constrained-out
+        // axis (s_drag_planar_axis) unchanged. Gated on the normal
+        // having at least one meaningful in-plane component; surfaces
+        // perpendicular to the drag plane (normal almost entirely along
+        // the constrained-out axis) fall through to grid snap.
+        if (editor_snap_surface.value != 0.0f)
+        {
+            vec3_t s_hit, n, mins, maxs;
+            if (surface_hit_for_drag(sx, sy, s_hit, n)
+             && Editor_SelectionBBox(mins, maxs)
+             && (fabsf(n[u]) > 0.1f || fabsf(n[v]) > 0.1f))
+            {
+                float off    = surface_offset_along_normal(mins, maxs, n);
+                float t_u    = s_hit[u] + n[u] * off;
+                float t_v    = s_hit[v] + n[v] * off;
+                snap_u = t_u - s_drag_origin[u];
+                snap_v = t_v - s_drag_origin[v];
+                step_u = snap_u - s_drag_planar_applied[u];
+                step_v = snap_v - s_drag_planar_applied[v];
+                if (step_u == 0.0f && step_v == 0.0f) return;
+                for (i = 0; i < 3; i++) delta[i] = 0;
+                delta[u] = step_u;
+                delta[v] = step_v;
+                s_drag_planar_applied[u] = snap_u;
+                s_drag_planar_applied[v] = snap_v;
+                apply_translate_delta(delta);
+                return;
+            }
+        }
+
         if (!ray_vs_axis_plane(s_drag_planar_axis, s_drag_origin, r_org, r_dir, hit))
             return;
         raw_u  = hit[u] - s_drag_planar_hit[u];
