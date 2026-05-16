@@ -178,6 +178,14 @@ byte *COM_LoadTempFile (char *path);
 byte *COM_LoadHunkFile (char *path);
 void COM_LoadCacheFile (char *path, struct cache_user_s *cu);
 
+typedef void (*COM_FileMatch_cb_t)(const char *basename, void *userdata);
+void COM_EnumMatchingFiles (const char *subdir, const char *suffix,
+                            COM_FileMatch_cb_t cb, void *userdata);
+// Walks every searchpath (pak files + on-disk gamedir). For each entry of
+// the form "<subdir>/<basename><suffix>" (suffix includes its dot, e.g.
+// ".bsp"), invokes cb with the bare basename (suffix and "<subdir>/" both
+// stripped). Used by tab-completion. Caller dedups; this helper just yields.
+
 
 extern	struct cvar_s	registered;
 

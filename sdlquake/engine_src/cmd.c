@@ -653,6 +653,57 @@ int Cmd_CompleteAliasAll (char *partial, char **out, int max, int count)
 
 /*
 ============
+Cmd_RegisterArgCompleter / Cmd_FindArgCompleter
+
+Per-command tab-completion hook for the second argument. Storage is a
+fixed-size table walked linearly — n is tiny (one entry per command that
+opts in, currently just "map" + 3 editor commands).
+============
+*/
+#define CMD_MAX_ARG_COMPLETERS 16
+
+typedef struct
+{
+	const char		*name;
+	arg_completer_t	fn;
+} arg_completer_entry_t;
+
+static arg_completer_entry_t arg_completers[CMD_MAX_ARG_COMPLETERS];
+static int arg_completer_count;
+
+void Cmd_RegisterArgCompleter (const char *cmdname, arg_completer_t fn)
+{
+	int i;
+
+	for (i = 0 ; i < arg_completer_count ; i++)
+	{
+		if (!Q_strcmp ((char *)arg_completers[i].name, (char *)cmdname))
+		{
+			arg_completers[i].fn = fn;
+			return;
+		}
+	}
+	if (arg_completer_count >= CMD_MAX_ARG_COMPLETERS)
+	{
+		Con_Printf ("Cmd_RegisterArgCompleter: %s dropped (table full)\n", cmdname);
+		return;
+	}
+	arg_completers[arg_completer_count].name = cmdname;
+	arg_completers[arg_completer_count].fn   = fn;
+	arg_completer_count++;
+}
+
+arg_completer_t Cmd_FindArgCompleter (const char *cmdname)
+{
+	int i;
+	for (i = 0 ; i < arg_completer_count ; i++)
+		if (!Q_strcasecmp ((char *)arg_completers[i].name, (char *)cmdname))
+			return arg_completers[i].fn;
+	return NULL;
+}
+
+/*
+============
 Cmd_ExecuteString
 
 A complete command line has been parsed, so try to execute it

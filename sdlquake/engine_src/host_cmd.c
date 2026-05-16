@@ -269,9 +269,73 @@ SERVER TRANSITIONS
 
 /*
 ======================
+Host_Map_CompleteBspName
+
+Tab-completion arg provider for the "map" command. Walks com_searchpaths
+(paks + on-disk gamedir) for maps/<basename>.bsp, dedups by basename, and
+appends the matches into out[]. The match strings are stored in a static
+per-call pool — pointers stay valid for the duration of one tab-cycle.
+======================
+*/
+#define MAP_POOL_MAX	256
+#define MAP_POOL_NAMELEN 32
+
+typedef struct
+{
+	const char	*partial;
+	int			partial_len;
+	char		(*pool)[MAP_POOL_NAMELEN];
+	int			*pool_n;
+	char		**out;
+	int			out_max;
+	int			*out_count;
+} map_complete_ctx_t;
+
+static char map_complete_pool[MAP_POOL_MAX][MAP_POOL_NAMELEN];
+static int  map_complete_pool_n;
+
+static void map_complete_cb (const char *basename, void *userdata)
+{
+	map_complete_ctx_t *ctx = (map_complete_ctx_t *)userdata;
+	int i;
+
+	if (*ctx->out_count >= ctx->out_max) return;
+	if (*ctx->pool_n     >= MAP_POOL_MAX) return;
+	if (Q_strncasecmp ((char *)basename, (char *)ctx->partial, ctx->partial_len) != 0) return;
+
+	/* Dedup against previously-pushed pool entries. */
+	for (i = 0 ; i < *ctx->pool_n ; i++)
+		if (!Q_strcasecmp ((char *)basename, ctx->pool[i]))
+			return;
+
+	{
+		int len = (int)strlen (basename);
+		if (len >= MAP_POOL_NAMELEN) return;
+		memcpy (ctx->pool[*ctx->pool_n], basename, len + 1);
+	}
+	ctx->out[(*ctx->out_count)++] = ctx->pool[(*ctx->pool_n)++];
+}
+
+static int Host_Map_CompleteBspName (const char *partial, char **out, int max, int count)
+{
+	map_complete_ctx_t ctx;
+	map_complete_pool_n = 0;
+	ctx.partial      = partial;
+	ctx.partial_len  = (int)strlen (partial);
+	ctx.pool         = map_complete_pool;
+	ctx.pool_n       = &map_complete_pool_n;
+	ctx.out          = out;
+	ctx.out_max      = max;
+	ctx.out_count    = &count;
+	COM_EnumMatchingFiles ("maps", ".bsp", map_complete_cb, &ctx);
+	return count;
+}
+
+/*
+======================
 Host_Map_f
 
-handle a 
+handle a
 map <servername>
 command from the console.  Active clients are kicked off.
 ======================
@@ -2010,6 +2074,7 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("notarget", Host_Notarget_f);
 	Cmd_AddCommand ("fly", Host_Fly_f);
 	Cmd_AddCommand ("map", Host_Map_f);
+	Cmd_RegisterArgCompleter ("map", Host_Map_CompleteBspName);
 	Cmd_AddCommand ("restart", Host_Restart_f);
 	Cmd_AddCommand ("changelevel", Host_Changelevel_f);
 #ifdef QUAKE2

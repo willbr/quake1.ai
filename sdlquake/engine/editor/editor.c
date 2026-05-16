@@ -1681,6 +1681,65 @@ static void Editor_FlushPendingEntities(void)
 }
 
 // -----------------------------------------------------------------------------
+// Tab-completion arg provider: enumerates loose .map files in id1/maps/.
+// Used by editor_load / editor_save / editor_new. Pool size mirrors the
+// engine-side map completer (256 names × 32 chars).
+// -----------------------------------------------------------------------------
+#define EDITOR_MAP_POOL_MAX     256
+#define EDITOR_MAP_POOL_NAMELEN 32
+
+typedef struct
+{
+    const char  *partial;
+    int          partial_len;
+    char       (*pool)[EDITOR_MAP_POOL_NAMELEN];
+    int         *pool_n;
+    char       **out;
+    int          out_max;
+    int         *out_count;
+} editor_map_complete_ctx_t;
+
+static char editor_map_complete_pool[EDITOR_MAP_POOL_MAX][EDITOR_MAP_POOL_NAMELEN];
+static int  editor_map_complete_pool_n;
+
+static void editor_map_complete_cb(const char *basename, void *userdata)
+{
+    editor_map_complete_ctx_t *ctx = (editor_map_complete_ctx_t *)userdata;
+    int i, len;
+
+    if (*ctx->out_count >= ctx->out_max) return;
+    if (*ctx->pool_n     >= EDITOR_MAP_POOL_MAX) return;
+    if (Q_strncasecmp((char *)basename, (char *)ctx->partial, ctx->partial_len) != 0) return;
+
+    for (i = 0; i < *ctx->pool_n; i++)
+        if (!Q_strcasecmp((char *)basename, ctx->pool[i]))
+            return;
+
+    len = (int)strlen(basename);
+    if (len >= EDITOR_MAP_POOL_NAMELEN) return;
+    memcpy(ctx->pool[*ctx->pool_n], basename, len + 1);
+    ctx->out[(*ctx->out_count)++] = ctx->pool[(*ctx->pool_n)++];
+}
+
+static int Editor_CompleteMapName(const char *partial, char **out, int max, int count)
+{
+    editor_map_complete_ctx_t ctx;
+    editor_map_complete_pool_n = 0;
+    ctx.partial     = partial;
+    ctx.partial_len = (int)strlen(partial);
+    ctx.pool        = editor_map_complete_pool;
+    ctx.pool_n      = &editor_map_complete_pool_n;
+    ctx.out         = out;
+    ctx.out_max     = max;
+    ctx.out_count   = &count;
+    /* .map files are never packed; only the on-disk gamedir is interesting,
+     * but COM_EnumMatchingFiles already handles pak entries gracefully (no
+     * .map entries will be found there). */
+    COM_EnumMatchingFiles("maps", ".map", editor_map_complete_cb, &ctx);
+    return count;
+}
+
+// -----------------------------------------------------------------------------
 // Lifecycle
 // -----------------------------------------------------------------------------
 
@@ -1694,6 +1753,9 @@ void Editor_Init(void)
     Cmd_AddCommand("editor_load",   Editor_Cmd_Open_f);
     Cmd_AddCommand("editor_new",    Editor_Cmd_New_f);
     Cmd_AddCommand("editor_save",   Editor_Cmd_Save_f);
+    Cmd_RegisterArgCompleter("editor_load", Editor_CompleteMapName);
+    Cmd_RegisterArgCompleter("editor_new",  Editor_CompleteMapName);
+    Cmd_RegisterArgCompleter("editor_save", Editor_CompleteMapName);
     Cmd_AddCommand("editor_revert", Editor_Cmd_Revert_f);
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
     Cmd_AddCommand("editor_textures", Editor_Cmd_Textures_f);

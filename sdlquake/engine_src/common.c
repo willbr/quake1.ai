@@ -1713,6 +1713,107 @@ pack_t *COM_LoadPackFile (char *packfile)
 
 /*
 ================
+COM_EnumMatchingFiles
+
+For each searchpath (pak file or on-disk gamedir), enumerate entries of the
+form "<subdir>/<base><suffix>" and call cb(base, userdata). The basename is
+the middle segment with subdir/ and suffix stripped. Used by tab-completion.
+================
+*/
+typedef struct
+{
+	const char			*suffix;
+	int					suffix_len;
+	COM_FileMatch_cb_t	cb;
+	void				*userdata;
+} com_disk_enum_ctx_t;
+
+static void com_disk_enum_thunk (const char *fname, void *userdata)
+{
+	com_disk_enum_ctx_t *ctx = (com_disk_enum_ctx_t *)userdata;
+	int fname_len = Q_strlen ((char *)fname);
+	char basename[64];
+	int base_len;
+
+	if (fname_len <= ctx->suffix_len)
+		return;
+	if (Q_strcasecmp ((char *)fname + fname_len - ctx->suffix_len, (char *)ctx->suffix) != 0)
+		return;
+	base_len = fname_len - ctx->suffix_len;
+	if (base_len >= (int)sizeof(basename))
+		return;
+	memcpy (basename, fname, base_len);
+	basename[base_len] = 0;
+	ctx->cb (basename, ctx->userdata);
+}
+
+void COM_EnumMatchingFiles (const char *subdir, const char *suffix,
+                            COM_FileMatch_cb_t cb, void *userdata)
+{
+	searchpath_t	*search;
+	char			subdir_slash[64];
+	int				subdir_len, suffix_len;
+	int				i;
+
+	if (!subdir || !suffix || !cb)
+		return;
+
+	snprintf (subdir_slash, sizeof(subdir_slash), "%s/", subdir);
+	subdir_len = Q_strlen (subdir_slash);
+	suffix_len = Q_strlen ((char *)suffix);
+
+	for (search = com_searchpaths ; search ; search = search->next)
+	{
+		if (search->pack)
+		{
+			pack_t *pak = search->pack;
+			for (i = 0 ; i < pak->numfiles ; i++)
+			{
+				char *name = pak->files[i].name;
+				int   name_len = Q_strlen (name);
+				char  basename[64];
+				int   base_len;
+
+				if (name_len <= subdir_len + suffix_len) continue;
+				if (Q_strncmp (name, subdir_slash, subdir_len) != 0) continue;
+				if (Q_strcasecmp (name + name_len - suffix_len, (char *)suffix) != 0) continue;
+
+				/* Reject entries with a slash inside the basename (subdir
+				 * children). subdir is one level deep; "maps/foo/bar.bsp"
+				 * would otherwise leak in as "foo/bar". */
+				{
+					int j, has_slash = 0;
+					for (j = subdir_len ; j < name_len - suffix_len ; j++)
+					{
+						if (name[j] == '/' || name[j] == '\\') { has_slash = 1; break; }
+					}
+					if (has_slash) continue;
+				}
+
+				base_len = name_len - subdir_len - suffix_len;
+				if (base_len >= (int)sizeof(basename)) continue;
+				memcpy (basename, name + subdir_len, base_len);
+				basename[base_len] = 0;
+				cb (basename, userdata);
+			}
+		}
+		else
+		{
+			char dirpath[MAX_OSPATH];
+			com_disk_enum_ctx_t ctx;
+			ctx.suffix     = suffix;
+			ctx.suffix_len = suffix_len;
+			ctx.cb         = cb;
+			ctx.userdata   = userdata;
+			snprintf (dirpath, sizeof(dirpath), "%s/%s", search->filename, subdir);
+			Sys_EnumerateDir (dirpath, com_disk_enum_thunk, &ctx);
+		}
+	}
+}
+
+
+/*
+================
 COM_AddGameDirectory
 
 Sets com_gamedir, adds the directory to the head of the path,

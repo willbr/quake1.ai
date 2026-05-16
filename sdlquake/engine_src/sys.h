@@ -36,6 +36,12 @@ int Sys_FileWrite (int handle, void *data, int count);
 int	Sys_FileTime (char *path);
 void Sys_mkdir (char *path);
 
+typedef void (*Sys_EnumDir_cb_t)(const char *fname, void *userdata);
+void Sys_EnumerateDir (const char *path, Sys_EnumDir_cb_t cb, void *userdata);
+// List the entries in `path`. Files only; "." and ".." are skipped. Missing
+// or unreadable directories are silent (callback simply not invoked). Used
+// by tab-completion to find loose maps in id1/maps/.
+
 //
 // memory protection
 //

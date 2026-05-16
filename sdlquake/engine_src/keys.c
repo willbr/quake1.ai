@@ -174,36 +174,104 @@ static char *tab_matches[TAB_MAX_MATCHES];
 static int   tab_match_count;			/* 0 => no cycle in progress */
 static int   tab_index;					/* -1 => partial restored, 0..count-1 => match N */
 static char  tab_committed_line[LE_MAX_LINE];
+/* When prefix_len > 0, the cycle is in argument-completion mode: the
+ * editor buffer is "<prefix><arg-partial>", tab_partial holds just the
+ * arg-partial, and committed matches are written as "<prefix><match>"
+ * (no trailing space). When 0, it's the original whole-line cycle over
+ * cmd/cvar/alias names. */
+static char  tab_prefix[LE_MAX_LINE];
+static int   tab_prefix_len;
+
+/* Split the editor buffer into "<cmdname> <arg-partial>" if applicable.
+ * Sets *prefix_out (incl. trailing space[s]), *prefix_len_out, and
+ * *arg_partial_out (pointer into console_le.buf). Returns the registered
+ * arg-completer for cmdname, or NULL if the line isn't in that form. */
+static arg_completer_t Key_LookupArgCompleter (
+	const char **arg_partial_out, char *prefix_out, int prefix_max, int *prefix_len_out)
+{
+	char *buf = console_le.buf;
+	int   len = console_le.len;
+	int   i, word_end;
+	char  cmdname[64];
+	arg_completer_t fn;
+
+	/* First word ends at the first space. */
+	for (i = 0 ; i < len && buf[i] != ' ' ; i++)
+		;
+	word_end = i;
+	if (word_end == 0 || word_end >= len)
+		return NULL;		/* no space, or line is just "<word>" with no space */
+	if (word_end >= (int)sizeof(cmdname))
+		return NULL;
+	memcpy (cmdname, buf, word_end);
+	cmdname[word_end] = 0;
+
+	fn = Cmd_FindArgCompleter (cmdname);
+	if (!fn)
+		return NULL;
+
+	/* Skip any extra spaces so the prefix matches what the user typed. */
+	for (i = word_end ; i < len && buf[i] == ' ' ; i++)
+		;
+	if (i >= prefix_max)
+		return NULL;
+	memcpy (prefix_out, buf, i);
+	prefix_out[i] = 0;
+	*prefix_len_out = i;
+	*arg_partial_out = buf + i;
+	return fn;
+}
 
 static void Key_TabComplete (qboolean reverse)
 {
-	char	*partial;
-	int		partial_len;
 	qboolean cycling;
 	int		i, j;
-
-	partial = console_le.buf;
-	partial_len = console_le.len;
 
 	cycling = (tab_match_count > 0)
 		&& !Q_strcmp (console_le.buf, tab_committed_line);
 
 	if (!cycling)
 	{
-		int n, dedup_count;
+		const char		*partial;
+		int				partial_len;
+		int				n, dedup_count;
+		arg_completer_t	arg_fn;
+		char			prefix[LE_MAX_LINE];
+		int				prefix_len = 0;
 
 		tab_match_count = 0;
 		tab_partial_len = 0;
-		if (partial_len == 0)
+		tab_prefix_len  = 0;
+		tab_prefix[0]   = 0;
+		if (console_le.len == 0)
 			return;
 
-		Q_strcpy (tab_partial, partial);
-		tab_partial_len = partial_len;
+		arg_fn = Key_LookupArgCompleter (&partial, prefix, sizeof(prefix), &prefix_len);
+		if (arg_fn)
+		{
+			partial_len = Q_strlen ((char *)partial);
+			if (partial_len == 0)
+				return;					/* empty arg-partial -> no completion */
+			Q_strcpy (tab_partial, (char *)partial);
+			tab_partial_len = partial_len;
+			Q_strcpy (tab_prefix, prefix);
+			tab_prefix_len = prefix_len;
 
-		n = 0;
-		n = Cmd_CompleteCommandAll   (tab_partial, tab_matches, TAB_MAX_MATCHES, n);
-		n = Cvar_CompleteVariableAll (tab_partial, tab_matches, TAB_MAX_MATCHES, n);
-		n = Cmd_CompleteAliasAll     (tab_partial, tab_matches, TAB_MAX_MATCHES, n);
+			n = arg_fn (partial, tab_matches, TAB_MAX_MATCHES, 0);
+		}
+		else
+		{
+			partial = console_le.buf;
+			partial_len = console_le.len;
+
+			Q_strcpy (tab_partial, (char *)partial);
+			tab_partial_len = partial_len;
+
+			n = 0;
+			n = Cmd_CompleteCommandAll   ((char *)tab_partial, tab_matches, TAB_MAX_MATCHES, n);
+			n = Cvar_CompleteVariableAll ((char *)tab_partial, tab_matches, TAB_MAX_MATCHES, n);
+			n = Cmd_CompleteAliasAll     ((char *)tab_partial, tab_matches, TAB_MAX_MATCHES, n);
+		}
 
 		if (n == TAB_MAX_MATCHES)
 			Con_Printf ("tab completion: %d match limit reached, truncating\n", TAB_MAX_MATCHES);
@@ -248,7 +316,17 @@ static void Key_TabComplete (qboolean reverse)
 		}
 	}
 
-	if (tab_index == -1)
+	if (tab_prefix_len > 0)
+	{
+		/* Argument-completion mode: write "<prefix><match>" (no trailing
+		 * space), or restore "<prefix><partial>" on the wrap-to-partial
+		 * step. LE_SetText caps at LE_MAX_LINE-1 internally. */
+		char line[LE_MAX_LINE];
+		const char *suffix = (tab_index == -1) ? tab_partial : tab_matches[tab_index];
+		snprintf (line, sizeof(line), "%s%s", tab_prefix, suffix);
+		LE_SetText (&console_le, line);
+	}
+	else if (tab_index == -1)
 	{
 		LE_SetText (&console_le, tab_partial);
 	}

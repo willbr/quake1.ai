@@ -83,6 +83,45 @@ int Sys_FileTime(char *path)
 
 void Sys_mkdir(char *path) { mkdir(path, 0755); }
 
+// Bridge SDL_EnumerateDirectory to the engine's Sys_EnumDir_cb_t. SDL invokes
+// the callback once per entry (subdirs included); we filter to regular files
+// by stat'ing each one — cheap for the dirs we walk (id1/maps/).
+typedef struct
+{
+    Sys_EnumDir_cb_t cb;
+    void            *userdata;
+    const char      *root;
+} sys_enum_ctx_t;
+
+static SDL_EnumerationResult SDLCALL sys_enum_thunk(void *userdata, const char *dirname, const char *fname)
+{
+    sys_enum_ctx_t *ctx = (sys_enum_ctx_t *)userdata;
+    SDL_PathInfo info;
+    char fullpath[1024];
+
+    (void)dirname;
+    if (!fname || fname[0] == 0) return SDL_ENUM_CONTINUE;
+    if (fname[0] == '.' && (fname[1] == 0 || (fname[1] == '.' && fname[2] == 0)))
+        return SDL_ENUM_CONTINUE;
+
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", ctx->root, fname);
+    if (SDL_GetPathInfo(fullpath, &info) && info.type != SDL_PATHTYPE_FILE)
+        return SDL_ENUM_CONTINUE;
+
+    ctx->cb(fname, ctx->userdata);
+    return SDL_ENUM_CONTINUE;
+}
+
+void Sys_EnumerateDir(const char *path, Sys_EnumDir_cb_t cb, void *userdata)
+{
+    sys_enum_ctx_t ctx;
+    if (!path || !cb) return;
+    ctx.cb = cb;
+    ctx.userdata = userdata;
+    ctx.root = path;
+    SDL_EnumerateDirectory(path, sys_enum_thunk, &ctx);
+}
+
 // ---------------------------------------------------------------------------
 // System I/O
 // ---------------------------------------------------------------------------

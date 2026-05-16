@@ -96,6 +96,16 @@ int Cmd_CompleteAliasAll   (char *partial, char **out, int max, int count);
 // append every name starting with partial into out[count..max-1];
 // return the new count. Used for tab-completion cycling.
 
+typedef int (*arg_completer_t)(const char *partial, char **out, int max, int count);
+// Per-command argument tab-completion hook. Same contract as Cmd_Complete*All:
+// append matches into out[count..max-1], return new count. The match pointers
+// must stay valid for the lifetime of one tab-cycle (reused on next call).
+
+void Cmd_RegisterArgCompleter (const char *cmdname, arg_completer_t fn);
+arg_completer_t Cmd_FindArgCompleter (const char *cmdname);
+// cmdname pointer is borrowed (must be stable for program lifetime, same
+// contract as Cmd_AddCommand).
+
 int		Cmd_Argc (void);
 char	*Cmd_Argv (int arg);
 char	*Cmd_Args (void);
