@@ -96,10 +96,15 @@ extern byte light_rgb_dlightdata[];
  * here mirror light.c:13-15,24 so a never-set caller behaves identically
  * to the original argv-driven CLI. */
 static light_options_t s_persistent_opts = {
-    1.0f,  /* scaledist   */
-    0.5f,  /* scalecos    */
-    0.5f,  /* rangescale  */
-    0      /* extrasamples */
+    1.0f,  /* scaledist    */
+    0.5f,  /* scalecos     */
+    0.5f,  /* rangescale   */
+    0,     /* extrasamples */
+    0,     /* dirt_enable  */
+    1.0f,  /* dirt_gain    */
+    128.0f,/* dirt_depth   */
+    32,    /* dirt_samples */
+    0      /* dirt_debug   */
 };
 
 void light_set_persistent_options(const light_options_t *opts)
@@ -109,6 +114,11 @@ void light_set_persistent_options(const light_options_t *opts)
         s_persistent_opts.scalecos     = 0.5f;
         s_persistent_opts.rangescale   = 0.5f;
         s_persistent_opts.extrasamples = 0;
+        s_persistent_opts.dirt_enable  = 0;
+        s_persistent_opts.dirt_gain    = 1.0f;
+        s_persistent_opts.dirt_depth   = 128.0f;
+        s_persistent_opts.dirt_samples = 32;
+        s_persistent_opts.dirt_debug   = 0;
         return;
     }
     s_persistent_opts = *opts;
@@ -120,6 +130,14 @@ static void apply_persistent_opts(void)
     if (s_persistent_opts.scalecos   > 0) scalecos   = s_persistent_opts.scalecos;
     if (s_persistent_opts.rangescale > 0) rangescale = s_persistent_opts.rangescale;
     extrasamples = s_persistent_opts.extrasamples ? true : false;
+
+    dirt_enable = s_persistent_opts.dirt_enable ? true : false;
+    /* >0 guards so a struct zeroed-out by memset(0) still gets useful
+     * defaults instead of dirt_depth=0 (every ray hits at zero range). */
+    if (s_persistent_opts.dirt_gain    > 0) dirt_gain    = s_persistent_opts.dirt_gain;
+    if (s_persistent_opts.dirt_depth   > 0) dirt_depth   = s_persistent_opts.dirt_depth;
+    if (s_persistent_opts.dirt_samples > 0) dirt_samples = s_persistent_opts.dirt_samples;
+    dirt_debug = s_persistent_opts.dirt_debug ? true : false;
 }
 
 int light_compile_to_memory(light_options_t *opts,
@@ -322,6 +340,11 @@ int light_bench(const char *bsp_path)
     tL1 = I_FloatTime();
     Con_Printf("light_bench: LoadBSPFile %.3fs (faces=%d, ents=%d bytes)\n",
                tL1 - tL0, numfaces, entdatasize);
+
+    /* Honour whatever options the caller stashed via set_persistent_options
+     * so `light_bench` can profile dirt / extrasamples / rangescale tweaks
+     * end-to-end without an editor session. */
+    apply_persistent_opts();
 
     /* Clear any stale lighting in dlightdata from a prior bake.
      * light_rgb_dlightdata is `extern byte[]` here (real size lives in

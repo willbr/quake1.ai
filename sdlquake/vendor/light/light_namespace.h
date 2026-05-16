@@ -17,6 +17,11 @@
 #define scaledist            light_scaledist
 #define scalecos             light_scalecos
 #define rangescale           light_rangescale
+#define dirt_enable          light_dirt_enable
+#define dirt_gain            light_dirt_gain
+#define dirt_depth           light_dirt_depth
+#define dirt_samples         light_dirt_samples
+#define dirt_debug           light_dirt_debug
 #define filebase             light_filebase
 #define file_p               light_file_p
 #define file_end             light_file_end

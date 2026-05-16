@@ -141,6 +141,17 @@ cvar_t      editor_light_scalecos     = { "editor_light_scalecos",     "0.5" };
 cvar_t      editor_light_rangescale   = { "editor_light_rangescale",   "0.5" };
 cvar_t      editor_light_extrasamples = { "editor_light_extrasamples", "0" };
 
+/* Dirt / ambient occlusion knobs. Off by default because enabling it
+ * multiplies bake time by roughly dirt_samples / 3 (each lightmap
+ * sample gains N extra TestLine probes). dirt_debug overrides the
+ * lightmap with the AO mask in grey -- handy for tuning gain/depth
+ * without lighting clutter, but you'll want it off for the final bake. */
+cvar_t      editor_light_dirt          = { "editor_light_dirt",          "0"   };
+cvar_t      editor_light_dirt_gain     = { "editor_light_dirt_gain",     "1.0" };
+cvar_t      editor_light_dirt_depth    = { "editor_light_dirt_depth",    "128" };
+cvar_t      editor_light_dirt_samples  = { "editor_light_dirt_samples",  "32"  };
+cvar_t      editor_light_dirt_debug    = { "editor_light_dirt_debug",    "0"   };
+
 /* Pull current slider values out of cvars into a light_options_t. The
  * resulting struct is the source of truth for the next bake -- callers
  * pass it to light_compile_to_memory (which also stashes it for the
@@ -151,6 +162,12 @@ static void editor_light_opts_from_cvars(light_options_t *out)
     out->scalecos     = editor_light_scalecos.value;
     out->rangescale   = editor_light_rangescale.value;
     out->extrasamples = editor_light_extrasamples.value != 0.0f ? 1 : 0;
+
+    out->dirt_enable  = editor_light_dirt.value       != 0.0f ? 1 : 0;
+    out->dirt_gain    = editor_light_dirt_gain.value;
+    out->dirt_depth   = editor_light_dirt_depth.value;
+    out->dirt_samples = (int)editor_light_dirt_samples.value;
+    out->dirt_debug   = editor_light_dirt_debug.value != 0.0f ? 1 : 0;
 }
 
 static int     s_lookmode      = 0;
@@ -1022,6 +1039,14 @@ static void Editor_Cmd_LightBench_f(void)
     }
     name = Cmd_Argv(1);
     snprintf(path, sizeof(path), "%s/maps/%s.bsp", com_gamedir, name);
+    /* Push current cvar values into the persistent slot so light_bench
+     * profiles whatever the user has dialled in -- dirt, extrasamples,
+     * rangescale all apply. */
+    {
+        light_options_t lopts;
+        editor_light_opts_from_cvars(&lopts);
+        light_set_persistent_options(&lopts);
+    }
     light_bench(path);
 }
 
@@ -1640,6 +1665,11 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_light_scalecos);
     Cvar_RegisterVariable(&editor_light_rangescale);
     Cvar_RegisterVariable(&editor_light_extrasamples);
+    Cvar_RegisterVariable(&editor_light_dirt);
+    Cvar_RegisterVariable(&editor_light_dirt_gain);
+    Cvar_RegisterVariable(&editor_light_dirt_depth);
+    Cvar_RegisterVariable(&editor_light_dirt_samples);
+    Cvar_RegisterVariable(&editor_light_dirt_debug);
 
     {
         extern void Editor_RegisterCvars(void);

@@ -322,6 +322,123 @@ void CalcPoints (lightinfo_t *l)
 /*
 ===============================================================================
 
+DIRT / AMBIENT OCCLUSION
+
+Per-sample hemispherical ray cast. After all direct lights are summed
+into l->lightmaps[] / l->lightmaps_rgb[], we compute one occlusion
+value per sample by firing dirt_samples rays in cosine-weighted
+directions around the surface normal and counting how many hit
+geometry within dirt_depth units. The resulting [0..1] AO factor
+multiplies each per-style sample in the emit loop.
+
+Sample directions are a Hammersley sequence rebuilt whenever the
+dirt_samples cvar changes. They live in surface-local +Z space and
+get rotated into world space via an orthonormal basis built from
+the face normal.
+
+Off by default; opt in via worldspawn/editor cvars.
+
+===============================================================================
+*/
+
+#ifndef MAX_DIRT_SAMPLES
+#define MAX_DIRT_SAMPLES 128
+#endif
+
+static vec3_t s_dirt_dirs[MAX_DIRT_SAMPLES];
+static int    s_dirt_dirs_count = 0;
+
+/* Build a cosine-weighted hemisphere sample set in local +Z space using
+ * Hammersley (i/N, Van-der-Corput-base-2). N is clamped to
+ * [1, MAX_DIRT_SAMPLES]. Rebuilt only when dirt_samples changes -- the
+ * sequence is deterministic so identical inputs produce identical bakes. */
+static void dirt_rebuild_dirs(int n)
+{
+	int i;
+	if (n < 1) n = 1;
+	if (n > MAX_DIRT_SAMPLES) n = MAX_DIRT_SAMPLES;
+	for (i = 0; i < n; i++) {
+		unsigned bits;
+		double u, v, r, phi;
+		u = ((double)i + 0.5) / (double)n;
+		bits = (unsigned)i;
+		bits = (bits << 16) | (bits >> 16);
+		bits = ((bits & 0x55555555u) << 1) | ((bits & 0xAAAAAAAAu) >> 1);
+		bits = ((bits & 0x33333333u) << 2) | ((bits & 0xCCCCCCCCu) >> 2);
+		bits = ((bits & 0x0F0F0F0Fu) << 4) | ((bits & 0xF0F0F0F0u) >> 4);
+		bits = ((bits & 0x00FF00FFu) << 8) | ((bits & 0xFF00FF00u) >> 8);
+		v = (double)bits * 2.3283064365386963e-10;
+		r = sqrt(u);
+		phi = 2.0 * Q_PI * v;
+		s_dirt_dirs[i][0] = (float)(r * cos(phi));
+		s_dirt_dirs[i][1] = (float)(r * sin(phi));
+		s_dirt_dirs[i][2] = (float)sqrt(1.0 - u);
+	}
+	s_dirt_dirs_count = n;
+}
+
+/* Compute one AO term per surfpt for the given face. out[c] = 1.0 means
+ * fully open sky; 0.0 means fully enclosed. dirt_gain attenuates: a
+ * fully-occluded sample with gain=1 lands at 0, with gain=0.5 at 0.5. */
+static void dirt_compute_face(lightinfo_t *l, vec_t out[SINGLEMAP])
+{
+	vec3_t T, B, N;
+	int    c, j, n;
+	float  gain  = dirt_gain;
+	float  depth = dirt_depth;
+
+	if (s_dirt_dirs_count != dirt_samples)
+		dirt_rebuild_dirs(dirt_samples);
+	n = s_dirt_dirs_count;
+
+	VectorCopy(l->facenormal, N);
+	/* Pick a seed tangent not parallel to N. Gram-Schmidt strips the
+	 * N component; cross gives the bitangent. */
+	if (fabs(N[2]) < 0.9f) {
+		T[0] = 0; T[1] = 0; T[2] = 1;
+	} else {
+		T[0] = 1; T[1] = 0; T[2] = 0;
+	}
+	{
+		float d = DotProduct(T, N);
+		VectorMA(T, -d, N, T);
+		VectorNormalize(T);
+	}
+	CrossProduct(N, T, B);
+
+	for (c = 0; c < l->numsurfpt; c++) {
+		vec_t  *p = l->surfpt[c];
+		vec3_t  start, dir, end;
+		int     hits = 0;
+		float   occ, ao;
+
+		/* Lift the start point a hair off the surface so the very
+		 * first trace step doesn't intersect the face itself. */
+		start[0] = p[0] + N[0];
+		start[1] = p[1] + N[1];
+		start[2] = p[2] + N[2];
+
+		for (j = 0; j < n; j++) {
+			dir[0] = s_dirt_dirs[j][0]*T[0] + s_dirt_dirs[j][1]*B[0] + s_dirt_dirs[j][2]*N[0];
+			dir[1] = s_dirt_dirs[j][0]*T[1] + s_dirt_dirs[j][1]*B[1] + s_dirt_dirs[j][2]*N[1];
+			dir[2] = s_dirt_dirs[j][0]*T[2] + s_dirt_dirs[j][1]*B[2] + s_dirt_dirs[j][2]*N[2];
+			end[0] = start[0] + dir[0] * depth;
+			end[1] = start[1] + dir[1] * depth;
+			end[2] = start[2] + dir[2] * depth;
+			if (!TestLine(start, end))
+				hits++;
+		}
+		occ = (float)hits / (float)n;
+		ao  = 1.0f - gain * occ;
+		if (ao < 0) ao = 0;
+		if (ao > 1) ao = 1;
+		out[c] = ao;
+	}
+}
+
+/*
+===============================================================================
+
 FACE LIGHTING
 
 ===============================================================================
@@ -572,6 +689,32 @@ void LightFace (int surfnum)
 
 	FixMinlight (&l);
 
+	/* Per-sample AO term (1=open, 0=enclosed). Computed once per face
+	 * before the emit loop so each lightstyle reuses the same mask --
+	 * AO depends on geometry only, not on lights. dirt_debug forces
+	 * the emit loop to write 255*ao as grey, useful for visualising
+	 * the mask without any light entities in the scene. */
+	vec_t dirt_per_sample[SINGLEMAP];
+	if (dirt_enable) {
+		dirt_compute_face(&l, dirt_per_sample);
+
+		if (dirt_debug && l.numlightstyles == 0) {
+			/* Need at least style 0 to have anywhere to write the
+			 * mask. Same dance as FixMinlight when style 0 is absent. */
+			if (l.numlightstyles < MAXLIGHTMAPS) {
+				int j, sz = (l.texsize[1]+1)*(l.texsize[0]+1);
+				for (j = 0; j < sz; j++) {
+					l.lightmaps[0][j] = 1;
+					l.lightmaps_rgb[0][j][0] = 1;
+					l.lightmaps_rgb[0][j][1] = 1;
+					l.lightmaps_rgb[0][j][2] = 1;
+				}
+				l.lightstyles[0] = 0;
+				l.numlightstyles = 1;
+			}
+		}
+	}
+
 	if (!l.numlightstyles)
 	{	// no light hitting it
 		return;
@@ -627,10 +770,43 @@ void LightFace (int surfnum)
 					total_rgb[2] = light_rgb[c][2];
 				}
 
-				total *= rangescale;	// scale before clamping
-				total_rgb[0] *= rangescale;
-				total_rgb[1] *= rangescale;
-				total_rgb[2] *= rangescale;
+				/* AO: box-filter the dirt mask the same way the light
+				 * values are filtered, then either multiply (normal
+				 * mode) or replace (debug mode) the sample. dirt_term
+				 * stays at 1.0 when AO is disabled so the *= becomes a
+				 * no-op. */
+				vec_t dirt_term = 1.0f;
+				if (dirt_enable) {
+					if (extrasamples) {
+						dirt_term = (dirt_per_sample[t*2*w+s*2]
+						           + dirt_per_sample[t*2*w+s*2+1]
+						           + dirt_per_sample[(t*2+1)*w+s*2]
+						           + dirt_per_sample[(t*2+1)*w+s*2+1]) * 0.25f;
+					} else {
+						dirt_term = dirt_per_sample[c];
+					}
+					if (dirt_debug) {
+						/* Replace the lightmap with the AO mask as
+						 * grey. Visualises the term independent of
+						 * any light entities in the scene. */
+						total = dirt_term * 255.0f;
+						total_rgb[0] = total;
+						total_rgb[1] = total;
+						total_rgb[2] = total;
+					} else {
+						total        *= dirt_term;
+						total_rgb[0] *= dirt_term;
+						total_rgb[1] *= dirt_term;
+						total_rgb[2] *= dirt_term;
+					}
+				}
+
+				if (!dirt_debug) {
+					total *= rangescale;	// scale before clamping
+					total_rgb[0] *= rangescale;
+					total_rgb[1] *= rangescale;
+					total_rgb[2] *= rangescale;
+				}
 
 				if (total > 255) total = 255;
 				if (total < 0) total = 0;

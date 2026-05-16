@@ -21,6 +21,14 @@ extern	float		scaledist;
 extern	float		scalecos;
 extern	float		rangescale;
 
+/* Dirt / ambient-occlusion globals -- mirror the light_options_t fields
+ * of the same name. Read in LightFace's emit loop. */
+extern	qboolean	dirt_enable;
+extern	float		dirt_gain;
+extern	float		dirt_depth;
+extern	int		dirt_samples;
+extern	qboolean	dirt_debug;
+
 extern	int		c_culldistplane, c_proper;
 
 byte *GetFileSpace (int size);

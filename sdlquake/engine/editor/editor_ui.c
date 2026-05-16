@@ -1686,7 +1686,38 @@ static void draw_light_opts_window(void)
     }
 
     IG_Separator();
+    IG_TextUnformatted("Ambient occlusion (dirt). ~Nx slowdown where N=samples.");
+    {
+        cvar_t *cv;
+        float v;
+
+        ui_cvar_checkbox("dirt enable", "editor_light_dirt");
+
+        cv = Cvar_FindVar("editor_light_dirt_gain");
+        v = cv ? cv->value : 1.0f;
+        IG_SetNextItemWidth(220);
+        if (IG_SliderFloat("dirt gain (attenuation)", &v, 0.0f, 1.0f, "%.2f"))
+            Cvar_SetValue("editor_light_dirt_gain", v);
+
+        cv = Cvar_FindVar("editor_light_dirt_depth");
+        v = cv ? cv->value : 128.0f;
+        IG_SetNextItemWidth(220);
+        if (IG_SliderFloat("dirt depth (units)", &v, 8.0f, 1024.0f, "%.0f"))
+            Cvar_SetValue("editor_light_dirt_depth", v);
+
+        cv = Cvar_FindVar("editor_light_dirt_samples");
+        v = cv ? cv->value : 32.0f;
+        IG_SetNextItemWidth(220);
+        if (IG_SliderFloat("dirt samples (rays/sample)", &v, 1.0f, 128.0f, "%.0f"))
+            Cvar_SetValue("editor_light_dirt_samples", v);
+
+        ui_cvar_checkbox("dirt debug (write AO mask as grey)",
+                         "editor_light_dirt_debug");
+    }
+
+    IG_Separator();
     IG_TextUnformatted("Defaults: scaledist 1.0  scalecos 0.5  rangescale 0.5");
+    IG_TextUnformatted("          dirt off  gain 1.0  depth 128  samples 32");
     IG_TextUnformatted("Worldspawn key:  _minlight <value>  sets a brightness floor.");
 
     if (IG_Button("Reset to defaults"))
@@ -1695,6 +1726,11 @@ static void draw_light_opts_window(void)
         Cvar_SetValue("editor_light_scalecos",   0.5f);
         Cvar_SetValue("editor_light_rangescale", 0.5f);
         Cvar_SetValue("editor_light_extrasamples", 0.0f);
+        Cvar_SetValue("editor_light_dirt",         0.0f);
+        Cvar_SetValue("editor_light_dirt_gain",    1.0f);
+        Cvar_SetValue("editor_light_dirt_depth",   128.0f);
+        Cvar_SetValue("editor_light_dirt_samples", 32.0f);
+        Cvar_SetValue("editor_light_dirt_debug",   0.0f);
     }
 
     IG_End();
