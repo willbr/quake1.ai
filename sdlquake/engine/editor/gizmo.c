@@ -1089,6 +1089,29 @@ ang_check:
     }
     else
     {
+        // Surface snap: cursor over a BSP/brush face → snap so the
+        // selection's bbox face nearest the hit normal lies flush with
+        // the surface, projected onto the dragged axis. Other axes
+        // untouched. Bypasses grid snap on this axis — surface contact
+        // is the user-visible behaviour and grid would lift it off.
+        if (editor_snap_surface.value != 0.0f)
+        {
+            vec3_t hit, n, mins, maxs;
+            if (surface_hit_for_drag(sx, sy, hit, n)
+             && Editor_SelectionBBox(mins, maxs))
+            {
+                float off    = surface_offset_along_normal(mins, maxs, n);
+                float target = hit[s_drag_axis] + n[s_drag_axis] * off;
+                float abs_off = target - s_drag_origin[s_drag_axis];
+                step = abs_off - s_drag_applied;
+                if (step == 0.0f) return;
+                for (i = 0; i < 3; i++) delta[i] = 0;
+                delta[s_drag_axis] = step;
+                s_drag_applied = abs_off;
+                apply_translate_delta(delta);
+                return;
+            }
+        }
         snapped_offset = compute_snapped_offset(raw_offset, s_drag_origin[s_drag_axis]);
         step = snapped_offset - s_drag_applied;
         if (step == 0.0f) return;
