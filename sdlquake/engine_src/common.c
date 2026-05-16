@@ -1549,6 +1549,7 @@ byte *COM_LoadFile (char *path, int usehunk)
 		if (Editor_VFS_Find(path, &vbytes, &vsize))
 		{
 			len = vsize;
+			com_filesize = vsize;	// disk path sets this via COM_FindFile; mirror that here so callers (e.g. Mod_LoadLITFile) see a correct size.
 			COM_FileBase (path, base);
 			if      (usehunk == 1) buf = Hunk_AllocName (len+1, base);
 			else if (usehunk == 2) buf = Hunk_TempAlloc (len+1);

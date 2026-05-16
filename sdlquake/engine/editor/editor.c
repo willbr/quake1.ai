@@ -574,6 +574,14 @@ static int write_wad2_from_worldmodel(const char *out_path)
     texture_t **all_tex  = NULL;
     int        all_count = 0, all_cap = 0;
 
+    /* Ensure the cross-map texture pool is populated; without this,
+     * editor_load + editor_compile_export only synthesises textures
+     * present in the current worldmodel, so any map referencing
+     * textures unknown to that worldmodel produces a BSP that the
+     * software renderer rejects (Bad surface extents / D_SCAlloc).
+     * Editor_TexPool_Init is idempotent (guarded by s_texpool_inited). */
+    Editor_TexPool_Init();
+
     /* Build a unified, deduplicated texture list: worldmodel first, then
      * any pool textures not already present. This lets qbsp resolve any
      * texture the user picks from the browser, even if it hasn't been
