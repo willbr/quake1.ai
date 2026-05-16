@@ -1113,6 +1113,32 @@ ang_check:
             s_drag_plane_idx = -1;
             return;
         }
+
+        // Surface snap: cursor over a BSP/brush face whose normal is
+        // roughly aligned with the dragged face's normal → snap the
+        // face's plane.dist so the face lies on the hit surface plane.
+        // The 0.95 dot gate (~18°) prevents accidental snaps to
+        // perpendicular walls (which don't share a sensible "plane.dist
+        // along this face's normal" with the dragged face).
+        if (editor_snap_surface.value != 0.0f)
+        {
+            vec3_t hit, n;
+            if (surface_hit_for_drag(sx, sy, hit, n))
+            {
+                float align = fabsf(DotProduct(n, s_drag_dir));
+                if (align > 0.95f)
+                {
+                    float target_dist  = DotProduct(hit, s_drag_dir);
+                    float abs_off      = target_dist - s_drag_start_dist;
+                    step = abs_off - s_drag_applied;
+                    if (step == 0.0f) return;
+                    s_drag_applied = abs_off;
+                    Brush_TranslateFace(b, s_drag_plane_idx, step);
+                    return;
+                }
+            }
+        }
+
         snapped_offset = compute_snapped_offset(raw_offset, s_drag_start_dist);
         step = snapped_offset - s_drag_applied;
         if (step == 0.0f) return;
