@@ -1,7 +1,7 @@
 # Editor Snap-to-BSP-Surface — Design Spec
 
 **Date:** 2026-05-16
-**Status:** Draft
+**Status:** Shipped
 
 ---
 
