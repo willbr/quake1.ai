@@ -312,6 +312,7 @@ static void draw_toolbar(void)
     IG_SameLine(0, -1);
     ui_cvar_combo_preset("grid", "editor_grid_size",
                          grid_items, grid_values, ARRAY_LEN(grid_items), 140);
+    ui_cvar_checkbox_same("surface", "editor_snap_surface");
 
     // -- Snap (rotate) ---------------------------------------------------
     ui_cvar_checkbox_same("rsnap",    "editor_rotate_snap");

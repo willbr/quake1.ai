@@ -79,6 +79,11 @@ cvar_t      editor_camera = { "editor_camera", "0" };
 cvar_t      editor_grid_snap     = { "editor_grid_snap", "1" };
 cvar_t      editor_grid_size     = { "editor_grid_size", "16" };
 cvar_t      editor_grid_absolute = { "editor_grid_absolute", "1" };
+// Snap-to-BSP-surface. When 1, translate drags whose cursor ray hits a
+// BSP/brush face snap the selection so its bbox face nearest the surface
+// normal lies flush on that surface. Overrides grid snap on constrained
+// axes; falls through to grid snap when the cursor misses everything.
+cvar_t      editor_snap_surface   = { "editor_snap_surface", "1" };
 cvar_t      editor_rotate_snap          = { "editor_rotate_snap", "1" };
 cvar_t      editor_rotate_snap_size     = { "editor_rotate_snap_size", "45" };
 cvar_t      editor_rotate_snap_absolute = { "editor_rotate_snap_absolute", "1" };
@@ -1782,6 +1787,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_grid_snap);
     Cvar_RegisterVariable(&editor_grid_size);
     Cvar_RegisterVariable(&editor_grid_absolute);
+    Cvar_RegisterVariable(&editor_snap_surface);
     Cvar_RegisterVariable(&editor_rotate_snap);
     Cvar_RegisterVariable(&editor_rotate_snap_size);
     Cvar_RegisterVariable(&editor_rotate_snap_absolute);
