@@ -537,11 +537,16 @@ static void GrenadeTouch(edict_t *self, edict_t *other) {
 
 static void W_FireGrenade(void) {
     edict_t *self = g->self;
-    int test_gib = (int)eng->Cvar_VariableValue("g_test_gibgrenades");
+    static const char *gibmdl[3] = {
+        "progs/gib1.mdl", "progs/gib2.mdl", "progs/gib3.mdl"
+    };
+    // Test cvar value is the gib count per shot (0 = off, normal grenade).
+    int test_gib_count = (int)eng->Cvar_VariableValue("g_test_gibgrenades");
+    if (test_gib_count < 0)  test_gib_count = 0;
+    if (test_gib_count > 32) test_gib_count = 32;
 
     emit_weapon_sound(self, 0.8f);
-    if (test_gib) {
-        // Infinite ammo — top up so next shot's W_CheckNoAmmo passes too.
+    if (test_gib_count > 0) {
         self->v.ammo_rockets = 100;
         self->v.currentammo  = 100;
     } else {
@@ -549,50 +554,67 @@ static void W_FireGrenade(void) {
     }
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/grenade.wav", 1, ATTN_NORM);
     self->v.punchangle[0] = -2;
-
-    edict_t *missile    = eng->ED_Alloc();
-    missile->v.owner    = self;
-    missile->v.movetype = MOVETYPE_BOUNCE;
-    missile->v.classname = test_gib ? "blood_gib" : "grenade";
-
     eng->MakeVectors(self->v.v_angle);
 
+    // Base velocity matches stock W_FireGrenade.
+    vec3_t base_vel;
     if (self->v.v_angle[0]) {
         float c3 = crandom(), c4 = crandom();
-        missile->v.velocity[0] = g->v_forward[0]*600 + g->v_up[0]*200 + c3*g->v_right[0]*10 + c4*g->v_up[0]*10;
-        missile->v.velocity[1] = g->v_forward[1]*600 + g->v_up[1]*200 + c3*g->v_right[1]*10 + c4*g->v_up[1]*10;
-        missile->v.velocity[2] = g->v_forward[2]*600 + g->v_up[2]*200 + c3*g->v_right[2]*10 + c4*g->v_up[2]*10;
+        base_vel[0] = g->v_forward[0]*600 + g->v_up[0]*200 + c3*g->v_right[0]*10 + c4*g->v_up[0]*10;
+        base_vel[1] = g->v_forward[1]*600 + g->v_up[1]*200 + c3*g->v_right[1]*10 + c4*g->v_up[1]*10;
+        base_vel[2] = g->v_forward[2]*600 + g->v_up[2]*200 + c3*g->v_right[2]*10 + c4*g->v_up[2]*10;
     } else {
-        eng->SV_Aim(self, 10000, missile->v.velocity);
-        missile->v.velocity[0] *= 600; missile->v.velocity[1] *= 600; missile->v.velocity[2] *= 600;
-        missile->v.velocity[2] = 200;
+        eng->SV_Aim(self, 10000, base_vel);
+        base_vel[0] *= 600; base_vel[1] *= 600; base_vel[2] *= 600;
+        base_vel[2] = 200;
     }
 
-    missile->v.avelocity[0] = missile->v.avelocity[1] = missile->v.avelocity[2] = 300;
-    eng->VectorToAngles(missile->v.velocity, missile->v.angles);
+    int n = (test_gib_count > 0) ? test_gib_count : 1;
+    for (int i = 0; i < n; i++) {
+        edict_t *missile     = eng->ED_Alloc();
+        missile->v.owner     = self;
+        missile->v.movetype  = MOVETYPE_BOUNCE;
+        missile->v.classname = (test_gib_count > 0) ? "blood_gib" : "grenade";
 
-    if (test_gib) {
-        // Bouncing gib: no explosion, no touch (SOLID_NOT skips SV_Impact),
-        // disappears after 10-20 s like a real ThrowGib.
-        static const char *gibmdl[3] = {
-            "progs/gib1.mdl", "progs/gib2.mdl", "progs/gib3.mdl"
-        };
-        missile->v.solid           = SOLID_NOT;
-        missile->v.touch           = NULL;
-        missile->v.think           = SUB_Remove;
-        missile->v.nextthink       = g->time + 10.0f + eng->Random()*10.0f;
-        missile->v.decal_on_bounce = 1.0f;
-        eng->SV_SetModel(missile, gibmdl[(int)(eng->Random()*3.0f) % 3]);
-    } else {
-        missile->v.solid     = SOLID_BBOX;
-        missile->v.touch     = GrenadeTouch;
-        missile->v.think     = GrenadeExplode;
-        missile->v.nextthink = g->time + 2.5f;
-        eng->SV_SetModel(missile, "progs/grenade.mdl");
+        // Multi-gib spread: first gib gets the base velocity, others fan
+        // ~30 deg perpendicular to forward with random vertical kick so
+        // they don't pile up on identical trajectories.
+        if (i == 0 || test_gib_count == 0) {
+            missile->v.velocity[0] = base_vel[0];
+            missile->v.velocity[1] = base_vel[1];
+            missile->v.velocity[2] = base_vel[2];
+        } else {
+            float sx = crandom() * 200.0f;   // sideways
+            float sz = crandom() * 150.0f;   // vertical kick
+            missile->v.velocity[0] = base_vel[0] + g->v_right[0]*sx;
+            missile->v.velocity[1] = base_vel[1] + g->v_right[1]*sx;
+            missile->v.velocity[2] = base_vel[2] + sz;
+        }
+        missile->v.avelocity[0] = 600.0f * crandom();
+        missile->v.avelocity[1] = 600.0f * crandom();
+        missile->v.avelocity[2] = 600.0f * crandom();
+        eng->VectorToAngles(missile->v.velocity, missile->v.angles);
+
+        if (test_gib_count > 0) {
+            // Bouncing gib: no explosion, no touch (SOLID_NOT skips
+            // SV_Impact), disappears after 10-20 s like a real ThrowGib.
+            missile->v.solid           = SOLID_NOT;
+            missile->v.touch           = NULL;
+            missile->v.think           = SUB_Remove;
+            missile->v.nextthink       = g->time + 10.0f + eng->Random()*10.0f;
+            missile->v.decal_on_bounce = 1.0f;
+            eng->SV_SetModel(missile, gibmdl[(int)(eng->Random()*3.0f) % 3]);
+        } else {
+            missile->v.solid     = SOLID_BBOX;
+            missile->v.touch     = GrenadeTouch;
+            missile->v.think     = GrenadeExplode;
+            missile->v.nextthink = g->time + 2.5f;
+            eng->SV_SetModel(missile, "progs/grenade.mdl");
+        }
+        vec3_t gzero = {0,0,0};
+        eng->SV_SetSize(missile, gzero, gzero);
+        eng->SV_SetOrigin(missile, self->v.origin);
     }
-    vec3_t gzero = {0,0,0};
-    eng->SV_SetSize(missile, gzero, gzero);
-    eng->SV_SetOrigin(missile, self->v.origin);
 }
 
 // ---------------------------------------------------------------------------
@@ -799,6 +821,21 @@ static int W_CheckNoAmmo(void) {
 // ---------------------------------------------------------------------------
 static void W_Attack(void) {
     edict_t *self = g->self;
+
+    // Test cvar: when >0, force the grenade launcher (grant if missing,
+    // make it the active weapon, refill rockets) before any ammo gating
+    // so a single `g_test_gibgrenades N` console set is enough to start
+    // spamming gib-grenades regardless of current loadout.
+    int test_gib_count = (int)eng->Cvar_VariableValue("g_test_gibgrenades");
+    if (test_gib_count > 0) {
+        int items = (int)self->v.items;
+        items |= IT_GRENADE_LAUNCHER;
+        self->v.items   = (float)items;
+        self->v.weapon  = IT_GRENADE_LAUNCHER;
+        self->v.weapon2 = 0;                 // clear Phase 6 selector
+        self->v.ammo_rockets = 100;
+        W_SetCurrentAmmo();                  // refresh weaponmodel/currentammo
+    }
 
     // Phase 6: route through the parallel dispatch when a Phase 6 weapon is
     // active. The Phase 6 fire functions handle their own ammo + sound + anim.
