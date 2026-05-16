@@ -65,8 +65,9 @@ so game-side code can do `if (ent == g->world)` cleanly.
 - Any of the fixed-size globals (`parm[16]`) changes size.
 
 The loader (`HotReload_Init` in `engine/hotreload.c`) rejects DLLs whose
-`game_api->version` doesn't match. Currently at **18** (bumped from 16 → 17
-for `button3`/`button4` in entvars; 17 → 18 for `engine_api->Sample_Lightmap`).
+`game_api->version` doesn't match. Currently at **19** (bumped from 16 → 17
+for `button3`/`button4` in entvars; 17 → 18 for `engine_api->Sample_Lightmap`;
+18 → 19 for `engine_api->Lightmap_AddDelta` + `Lightmap_ClearOwner`).
 
 ## edict_t
 

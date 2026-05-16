@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 18
+#define GAME_API_VERSION 19
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -182,6 +182,15 @@ typedef struct engine_api_s {
     // Sample the lightmap at a world-space point (Phase 8 / M5).
     // Returns 0..255; 0 if no lightmap is available.
     int   (*Sample_Lightmap)(vec3_t pos);
+
+    // Lightmap delta system (cached preview + gust extinguish).
+    // Applies a per-texel additive contribution into the live rgb
+    // lightmap; owner: 1=editor preview, 2=gameplay (gust).
+    // ClearOwner drops every override matching the tag and rebuilds
+    // the live buffer from baked + Σ(surviving overrides).
+    void  (*Lightmap_AddDelta)(const vec3_t pos, float radius,
+                               const vec3_t color, int owner);
+    void  (*Lightmap_ClearOwner)(int owner);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

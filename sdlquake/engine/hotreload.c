@@ -35,6 +35,13 @@ typedef struct { float origin[3], angles[3]; int modelindex, frame, colormap, sk
 #include "game_types.h"
 #endif
 
+// r_livelight.c entries, exposed to the DLL via engine_api_t. Forward-declare
+// here rather than including r_livelight.h to keep hotreload.c free of the
+// engine_src include path / quakedef.h chain.
+extern void Lightmap_AddDelta(const vec3_t pos, float radius,
+                              const vec3_t color, int owner);
+extern void Lightmap_ClearOwner(int owner);
+
 // Paths relative to the working directory (project root when using zig build run).
 #define GAME_DLL_SRC  "zig-out/bin/game.dll"
 #define GAME_DLL_LOAD "zig-out/bin/game_loaded.dll"
@@ -958,6 +965,8 @@ static engine_api_t engine_funcs = {
     engine_sv_tracemove,
     engine_spawn_blood_pool,
     engine_sample_lightmap,
+    Lightmap_AddDelta,
+    Lightmap_ClearOwner,
 };
 
 // ---------------------------------------------------------------------------
