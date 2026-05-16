@@ -18,7 +18,11 @@ extern game_globals_t *g;
 #define LIGHT_THRESHOLD     128.0f
 #define LIGHT_TIER_LIT      1.0f
 #define LIGHT_TIER_SHADOWED 0.5f
-#define MAX_OVERRIDES       64
+/* Sized to fit every light entity in any Quake map we care about
+ * (start.bsp has 267, jam maps go higher; editor uses 1024 in
+ * MAX_LIGHT_CANDIDATES for the same reason). Lifted from 64 so the
+ * player can extinguish every torch in a map. */
+#define MAX_OVERRIDES       1024
 
 typedef struct {
     vec3_t pos;
@@ -36,6 +40,12 @@ void Light_Init(void) {
 
 void Light_LevelInit(void) {
     s_override_count = 0;
+    /* Engine-side gust overrides are also cleared on level change via
+     * Lightmap_ClearAll in CL_ClearState; this is a belt-and-braces
+     * for the case where Light_LevelInit fires after re-entering a
+     * map via 'changelevel' without a full CL_ClearState. */
+    if (eng->Lightmap_ClearOwner)
+        eng->Lightmap_ClearOwner(2 /* GAMEPLAY */);
 }
 
 void Light_AddOverride(const vec3_t pos, float radius, float delta) {
@@ -46,6 +56,17 @@ void Light_AddOverride(const vec3_t pos, float radius, float delta) {
     o->pos[2] = pos[2];
     o->radius = radius;
     o->delta  = delta;
+
+    /* Mirror the override into the renderer's live lightmap so the
+     * player visually sees the room dim (not just the AI sense filter).
+     * `delta` here is a signed scalar luminance; broadcast across RGB.
+     * Approximation matches the AI side: no shadow occlusion, so walls
+     * behind the torch will dim too. The bake remains authoritative
+     * for "correct" results. */
+    if (eng->Lightmap_AddDelta) {
+        vec3_t color = { delta, delta, delta };
+        eng->Lightmap_AddDelta(pos, radius, color, 2 /* GAMEPLAY */);
+    }
 }
 
 float Light_TierAt(const vec3_t pos) {
