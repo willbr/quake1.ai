@@ -409,8 +409,8 @@ static void dirt_compute_face(lightinfo_t *l, vec_t out[SINGLEMAP])
 	for (c = 0; c < l->numsurfpt; c++) {
 		vec_t  *p = l->surfpt[c];
 		vec3_t  start, dir, end;
-		int     hits = 0;
-		float   occ, ao;
+		float   occ_accum = 0.0f;
+		float   ao;
 
 		/* Lift the start point a hair off the surface so the very
 		 * first trace step doesn't intersect the face itself. */
@@ -419,17 +419,27 @@ static void dirt_compute_face(lightinfo_t *l, vec_t out[SINGLEMAP])
 		start[2] = p[2] + N[2];
 
 		for (j = 0; j < n; j++) {
+			float dist;
 			dir[0] = s_dirt_dirs[j][0]*T[0] + s_dirt_dirs[j][1]*B[0] + s_dirt_dirs[j][2]*N[0];
 			dir[1] = s_dirt_dirs[j][0]*T[1] + s_dirt_dirs[j][1]*B[1] + s_dirt_dirs[j][2]*N[1];
 			dir[2] = s_dirt_dirs[j][0]*T[2] + s_dirt_dirs[j][1]*B[2] + s_dirt_dirs[j][2]*N[2];
 			end[0] = start[0] + dir[0] * depth;
 			end[1] = start[1] + dir[1] * depth;
 			end[2] = start[2] + dir[2] * depth;
-			if (!TestLine(start, end))
-				hits++;
+			/* Distance-weighted contribution: a close hit fully
+			 * occludes (weight 1), a hit near `depth` barely
+			 * occludes (weight near 0). Without this, tight
+			 * indoor maps with walls at any distance < depth
+			 * register every ray as a full hit and the AO term
+			 * collapses to gain everywhere -- not "corners dark"
+			 * but "everything dark". The linear falloff is what
+			 * keeps open vs. cramped geometry distinguishable. */
+			dist = CastRay(start, end);
+			if (dist > 0 && dist < depth) {
+				occ_accum += 1.0f - (dist / depth);
+			}
 		}
-		occ = (float)hits / (float)n;
-		ao  = 1.0f - gain * occ;
+		ao = 1.0f - gain * (occ_accum / (float)n);
 		if (ao < 0) ao = 0;
 		if (ao > 1) ao = 1;
 		out[c] = ao;

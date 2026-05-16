@@ -1717,7 +1717,7 @@ static void draw_light_opts_window(void)
 
     IG_Separator();
     IG_TextUnformatted("Defaults: scaledist 1.0  scalecos 0.5  rangescale 0.5");
-    IG_TextUnformatted("          dirt off  gain 1.0  depth 128  samples 32");
+    IG_TextUnformatted("          dirt off  gain 0.5  depth 384  samples 32");
     IG_TextUnformatted("Worldspawn key:  _minlight <value>  sets a brightness floor.");
 
     /* light_apply re-bakes the running map's BSP from disk and paints
@@ -1733,7 +1733,7 @@ static void draw_light_opts_window(void)
         Cvar_SetValue("editor_light_rangescale", 0.5f);
         Cvar_SetValue("editor_light_extrasamples", 0.0f);
         Cvar_SetValue("editor_light_dirt",         0.0f);
-        Cvar_SetValue("editor_light_dirt_gain",    1.0f);
+        Cvar_SetValue("editor_light_dirt_gain",    0.5f);
         Cvar_SetValue("editor_light_dirt_depth",   384.0f);
         Cvar_SetValue("editor_light_dirt_samples", 32.0f);
         Cvar_SetValue("editor_light_dirt_debug",   0.0f);

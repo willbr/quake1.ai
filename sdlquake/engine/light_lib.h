@@ -35,7 +35,7 @@ typedef struct {
      * shadow rays. dirt_debug overrides the lightmap with the raw AO
      * term in grey so the mask is visible without light entities. */
     int   dirt_enable;   /* 0 = off (default), 1 = on */
-    float dirt_gain;     /* default 1.0  -- amount AO attenuates (0..1) */
+    float dirt_gain;     /* default 0.5  -- amount AO attenuates (0..1) */
     float dirt_depth;    /* default 384  -- ray length, world units */
     int   dirt_samples;  /* default 32   -- rays per sample (clamped 1..128) */
     int   dirt_debug;    /* 0 = normal, 1 = write AO mask as grey */

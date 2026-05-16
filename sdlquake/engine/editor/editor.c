@@ -147,7 +147,7 @@ cvar_t      editor_light_extrasamples = { "editor_light_extrasamples", "0" };
  * lightmap with the AO mask in grey -- handy for tuning gain/depth
  * without lighting clutter, but you'll want it off for the final bake. */
 cvar_t      editor_light_dirt          = { "editor_light_dirt",          "0"   };
-cvar_t      editor_light_dirt_gain     = { "editor_light_dirt_gain",     "1.0" };
+cvar_t      editor_light_dirt_gain     = { "editor_light_dirt_gain",     "0.5" };
 cvar_t      editor_light_dirt_depth    = { "editor_light_dirt_depth",    "384" };
 cvar_t      editor_light_dirt_samples  = { "editor_light_dirt_samples",  "32"  };
 cvar_t      editor_light_dirt_debug    = { "editor_light_dirt_debug",    "0"   };
@@ -1068,21 +1068,63 @@ static void Editor_Cmd_LightBench_f(void)
  */
 static void Editor_Cmd_LightApply_f(void)
 {
-    char path[1024];
+    char  bsp_path[1024];
+    char  tmp_path[1024] = {0};
+    int   used_tmp = 0;
     light_options_t lopts;
+    FILE *f;
 
     if (!cl.worldmodel || !cl.worldmodel->name[0]) {
         Con_Printf("light_apply: no map loaded\n");
         return;
     }
 
-    snprintf(path, sizeof(path), "%s/%s",
+    snprintf(bsp_path, sizeof(bsp_path), "%s/%s",
              com_gamedir, cl.worldmodel->name);
+
+    /* light_relight_loaded_bsp uses vanilla fopen, which misses
+     * PAK-embedded maps (stock id1 e1m1 etc.). When the disk path
+     * isn't there, extract bytes via COM_LoadFile (which walks
+     * registered PAKs) and stage them as a temp file the library
+     * can open. Cleaned up after the bake. */
+    f = fopen(bsp_path, "rb");
+    if (f) {
+        fclose(f);
+    } else {
+        extern byte *COM_LoadFile(char *path, int usehunk);
+        byte *bsp = COM_LoadFile(cl.worldmodel->name, 2);  /* Hunk_TempAlloc */
+        int   len;
+        if (!bsp) {
+            Con_Printf("light_apply: can't locate %s on disk or in any pak\n",
+                       cl.worldmodel->name);
+            return;
+        }
+        len = com_filesize;
+        snprintf(tmp_path, sizeof(tmp_path),
+                 "%s/maps/_light_apply.tmp.bsp", com_gamedir);
+        f = fopen(tmp_path, "wb");
+        if (!f) {
+            Con_Printf("light_apply: can't open temp %s for write\n", tmp_path);
+            return;
+        }
+        if ((int)fwrite(bsp, 1, len, f) != len) {
+            fclose(f);
+            remove(tmp_path);
+            Con_Printf("light_apply: temp write short (%d bytes)\n", len);
+            return;
+        }
+        fclose(f);
+        Q_strcpy(bsp_path, tmp_path);
+        used_tmp = 1;
+    }
 
     editor_light_opts_from_cvars(&lopts);
     light_set_persistent_options(&lopts);
 
-    Editor_LightBake_ApplyFromDisk(path);
+    Editor_LightBake_ApplyFromDisk(bsp_path);
+
+    if (used_tmp)
+        remove(tmp_path);
 }
 
 static void Editor_Cmd_Relight_f(void)
