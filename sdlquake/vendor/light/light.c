@@ -16,7 +16,7 @@ float		rangescale = 0.5;
 
 qboolean	dirt_enable = false;
 float		dirt_gain   = 1.0f;
-float		dirt_depth  = 128.0f;
+float		dirt_depth  = 384.0f;
 int		dirt_samples = 32;
 qboolean	dirt_debug  = false;
 
@@ -177,7 +177,7 @@ void light_reset_lightc (void)
 	rangescale   = 0.5f;
 	dirt_enable  = false;
 	dirt_gain    = 1.0f;
-	dirt_depth   = 128.0f;
+	dirt_depth   = 384.0f;
 	dirt_samples = 32;
 	dirt_debug   = false;
 	filebase     = (byte *)0;

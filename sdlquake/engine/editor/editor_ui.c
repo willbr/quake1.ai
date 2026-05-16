@@ -1734,7 +1734,7 @@ static void draw_light_opts_window(void)
         Cvar_SetValue("editor_light_extrasamples", 0.0f);
         Cvar_SetValue("editor_light_dirt",         0.0f);
         Cvar_SetValue("editor_light_dirt_gain",    1.0f);
-        Cvar_SetValue("editor_light_dirt_depth",   128.0f);
+        Cvar_SetValue("editor_light_dirt_depth",   384.0f);
         Cvar_SetValue("editor_light_dirt_samples", 32.0f);
         Cvar_SetValue("editor_light_dirt_debug",   0.0f);
     }

@@ -148,7 +148,7 @@ cvar_t      editor_light_extrasamples = { "editor_light_extrasamples", "0" };
  * without lighting clutter, but you'll want it off for the final bake. */
 cvar_t      editor_light_dirt          = { "editor_light_dirt",          "0"   };
 cvar_t      editor_light_dirt_gain     = { "editor_light_dirt_gain",     "1.0" };
-cvar_t      editor_light_dirt_depth    = { "editor_light_dirt_depth",    "128" };
+cvar_t      editor_light_dirt_depth    = { "editor_light_dirt_depth",    "384" };
 cvar_t      editor_light_dirt_samples  = { "editor_light_dirt_samples",  "32"  };
 cvar_t      editor_light_dirt_debug    = { "editor_light_dirt_debug",    "0"   };
 

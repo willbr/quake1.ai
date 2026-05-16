@@ -102,7 +102,7 @@ static light_options_t s_persistent_opts = {
     0,     /* extrasamples */
     0,     /* dirt_enable  */
     1.0f,  /* dirt_gain    */
-    128.0f,/* dirt_depth   */
+    384.0f,/* dirt_depth   */
     32,    /* dirt_samples */
     0      /* dirt_debug   */
 };
@@ -116,7 +116,7 @@ void light_set_persistent_options(const light_options_t *opts)
         s_persistent_opts.extrasamples = 0;
         s_persistent_opts.dirt_enable  = 0;
         s_persistent_opts.dirt_gain    = 1.0f;
-        s_persistent_opts.dirt_depth   = 128.0f;
+        s_persistent_opts.dirt_depth   = 384.0f;
         s_persistent_opts.dirt_samples = 32;
         s_persistent_opts.dirt_debug   = 0;
         return;
