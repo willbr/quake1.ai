@@ -366,6 +366,12 @@ typedef struct model_s
 	byte		*visdata;
 	byte		*lightdata;
 	byte		*rgblightdata;	// parallel to lightdata, NULL if no .lit loaded
+	byte		*live_rgblightdata;	// engine-mutable copy of rgblightdata;
+									// surf->rgb_samples points here. Init
+									// from rgblightdata at load; mutated by
+									// r_livelight.c overrides (paint_light_preview,
+									// Light_AddOverride / Gust). NULL when
+									// rgblightdata is NULL.
 	char		*entities;
 
 //

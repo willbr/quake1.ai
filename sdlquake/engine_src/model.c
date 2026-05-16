@@ -28,6 +28,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 model_t	*loadmodel;
 char	loadname[32];	// for hunk tags
 
+// Size in bytes of loadmodel->rgblightdata for the most recently loaded brush
+// model. Exposed (extern) for r_livelight.c so Lightmap_RestoreBaked can
+// memcpy the baked baseline back into live_rgblightdata without re-walking
+// every surface.
+int loadmodel_rgblightdata_size = 0;
+
 void Mod_LoadSpriteModel (model_t *mod, void *buffer);
 void Mod_LoadBrushModel (model_t *mod, void *buffer);
 void Mod_LoadAliasModel (model_t *mod, void *buffer);
@@ -517,6 +523,8 @@ Mod_LoadLITFile (int mono_size)
 	byte   *raw;
 
 	loadmodel->rgblightdata = NULL;
+	loadmodel->live_rgblightdata = NULL;
+	loadmodel_rgblightdata_size = 0;
 
 	if (mono_size <= 0)
 		return;
@@ -547,6 +555,14 @@ Mod_LoadLITFile (int mono_size)
 	}
 
 	loadmodel->rgblightdata = raw + 8;
+	loadmodel_rgblightdata_size = mono_size * 3;
+
+	/* Engine-side mutable copy. surf->rgb_samples points here so the
+	 * delta system in r_livelight.c can write per-event without
+	 * disturbing the baked rgblightdata which stays canonical for
+	 * "restore baseline" rebuilds. */
+	loadmodel->live_rgblightdata = Hunk_AllocName(mono_size * 3, "livelit");
+	memcpy(loadmodel->live_rgblightdata, loadmodel->rgblightdata, mono_size * 3);
 }
 
 /*
@@ -560,6 +576,8 @@ void Mod_LoadLighting (lump_t *l)
 	{
 		loadmodel->lightdata = NULL;
 		loadmodel->rgblightdata = NULL;
+		loadmodel->live_rgblightdata = NULL;
+		loadmodel_rgblightdata_size = 0;
 		return;
 	}
 	loadmodel->lightdata = Hunk_AllocName ( l->filelen, loadname);
@@ -862,8 +880,11 @@ void Mod_LoadFaces (lump_t *l)
 			out->rgb_samples = NULL;
 		} else {
 			out->samples = loadmodel->lightdata + i;
-			out->rgb_samples = loadmodel->rgblightdata
-				? loadmodel->rgblightdata + i * 3
+			// Point at the engine-mutable live buffer so the delta
+			// system (r_livelight.c) can edit per-event without
+			// disturbing the baked baseline in rgblightdata.
+			out->rgb_samples = loadmodel->live_rgblightdata
+				? loadmodel->live_rgblightdata + i * 3
 				: NULL;
 		}
 		
