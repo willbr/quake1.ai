@@ -63,6 +63,7 @@ extern cvar_t	r_fullbright;
 extern cvar_t	r_coloredlight;
 extern cvar_t	r_lerpmodels;
 extern cvar_t	r_colored_dlights;
+extern cvar_t	r_dynamic;
 extern cvar_t	r_drawentities;
 extern cvar_t	r_aliasstats;
 extern cvar_t	r_dspeeds;

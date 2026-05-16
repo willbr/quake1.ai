@@ -119,6 +119,15 @@ void R_PushDlights (void)
 
 	r_dlightframecount = r_framecount + 1;	// because the count hasn't
 											//  advanced yet for this frame
+
+	/* r_dynamic 0 -> skip the dlight pass entirely: no surface ever
+	 * gets its dlightframe stamped this frame, so R_AddDynamicLights
+	 * in r_surf.c sees zero contributors. Editor uses this to compare
+	 * the baked lightmap against the live-lit view without dlights
+	 * (muzzle flashes, paint_light_preview etc.) muddying the picture. */
+	if (!r_dynamic.value)
+		return;
+
 	l = cl_dlights;
 
 	for (i=0 ; i<MAX_DLIGHTS ; i++, l++)
