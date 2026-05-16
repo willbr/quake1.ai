@@ -1716,6 +1716,22 @@ static void draw_light_opts_window(void)
     }
 
     IG_Separator();
+    /* Render preview toggles. These don't affect what gets baked --
+     * they only change how the engine paints the current lightmap on
+     * screen, so flipping them costs nothing (no relight needed). */
+    IG_TextUnformatted("Render preview (no re-bake needed):");
+    ui_cvar_checkbox("r_lightmap        (show lightmap only, no textures)",
+                     "r_lightmap");
+    ui_cvar_checkbox("r_dynamic         (muzzle flashes / explosions / etc.)",
+                     "r_dynamic");
+    ui_cvar_checkbox("r_coloredlight    (RGB lightmap from .lit)",
+                     "r_coloredlight");
+    ui_cvar_checkbox("r_colored_dlights (RGB dynamic lights)",
+                     "r_colored_dlights");
+    ui_cvar_checkbox("paint_light_preview (editor: light entities as dlights)",
+                     "paint_light_preview");
+
+    IG_Separator();
     IG_TextUnformatted("Defaults: scaledist 1.0  scalecos 0.5  rangescale 0.5");
     IG_TextUnformatted("          dirt off  gain 0.5  depth 384  samples 32");
     IG_TextUnformatted("Worldspawn key:  _minlight <value>  sets a brightness floor.");
