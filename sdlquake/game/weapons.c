@@ -80,12 +80,17 @@ static void W_Attack(void);
 // ---------------------------------------------------------------------------
 // W_Precache -- called from worldspawn (world.c weak stub → replaced here)
 // ---------------------------------------------------------------------------
-void W_Precache(void) {
-    // Test cvar: when set, the grenade launcher fires bouncing gibs (with
-    // decal_on_bounce = 1) instead of grenades and skips ammo decrement.
-    // Lets you spam blood decals at walls/floors without monster kills.
+// Registers weapon-related cvars at engine startup (called from game_init
+// in game_main.c). Putting them here instead of in W_Precache means they
+// are available from the console before any map has loaded.
+void Weapons_RegisterCvars(void) {
+    // Test cvar: when >0, the grenade launcher auto-equips and fires N
+    // bouncing gibs (with decal_on_bounce = 1) per shot instead of grenades,
+    // with infinite ammo. Lets you spam blood decals without monster kills.
     eng->Cvar_Register("g_test_gibgrenades", "0");
+}
 
+void W_Precache(void) {
     eng->PrecacheSound("weapons/r_exp3.wav");
     eng->PrecacheSound("weapons/rocket1i.wav");
     eng->PrecacheSound("weapons/sgun1.wav");

@@ -21,12 +21,15 @@ static void game_entity_touch(edict_t *e, edict_t *other) {
     if (e->v.touch) e->v.touch(e, other);
 }
 
+extern void Weapons_RegisterCvars(void);
+
 static void game_init(engine_api_t *engine, game_globals_t *globals)
 {
     eng = engine;
     g   = globals;
     Sim_Init();
     Abilities_Init();
+    Weapons_RegisterCvars();
 }
 
 static void game_shutdown(void) { }
