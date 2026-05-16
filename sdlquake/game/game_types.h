@@ -126,7 +126,11 @@ typedef struct entvars_s {
     float   items2;
     float   weapon2;
     float   ammo_bullets;
-    float   _phase6_pad;
+    // Game sets to 1.0 on gibs/heads/blood-flesh projectiles. Engine
+    // SV_Physics_Toss reads it: each bounce spawns a blood splat (floor)
+    // or wall drip plus a few red particles, throttled at 0.05s per edict.
+    // Replaces the prior _phase6_pad slot (same offset, same size).
+    float   decal_on_bounce;
 } entvars_t;
 
 // ---------------------------------------------------------------------------

@@ -81,6 +81,11 @@ static void W_Attack(void);
 // W_Precache -- called from worldspawn (world.c weak stub → replaced here)
 // ---------------------------------------------------------------------------
 void W_Precache(void) {
+    // Test cvar: when set, the grenade launcher fires bouncing gibs (with
+    // decal_on_bounce = 1) instead of grenades and skips ammo decrement.
+    // Lets you spam blood decals at walls/floors without monster kills.
+    eng->Cvar_Register("g_test_gibgrenades", "0");
+
     eng->PrecacheSound("weapons/r_exp3.wav");
     eng->PrecacheSound("weapons/rocket1i.wav");
     eng->PrecacheSound("weapons/sgun1.wav");
@@ -532,16 +537,23 @@ static void GrenadeTouch(edict_t *self, edict_t *other) {
 
 static void W_FireGrenade(void) {
     edict_t *self = g->self;
+    int test_gib = (int)eng->Cvar_VariableValue("g_test_gibgrenades");
+
     emit_weapon_sound(self, 0.8f);
-    self->v.currentammo = self->v.ammo_rockets = self->v.ammo_rockets - 1;
+    if (test_gib) {
+        // Infinite ammo — top up so next shot's W_CheckNoAmmo passes too.
+        self->v.ammo_rockets = 100;
+        self->v.currentammo  = 100;
+    } else {
+        self->v.currentammo = self->v.ammo_rockets = self->v.ammo_rockets - 1;
+    }
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/grenade.wav", 1, ATTN_NORM);
     self->v.punchangle[0] = -2;
 
     edict_t *missile    = eng->ED_Alloc();
     missile->v.owner    = self;
     missile->v.movetype = MOVETYPE_BOUNCE;
-    missile->v.solid    = SOLID_BBOX;
-    missile->v.classname = "grenade";
+    missile->v.classname = test_gib ? "blood_gib" : "grenade";
 
     eng->MakeVectors(self->v.v_angle);
 
@@ -559,11 +571,25 @@ static void W_FireGrenade(void) {
     missile->v.avelocity[0] = missile->v.avelocity[1] = missile->v.avelocity[2] = 300;
     eng->VectorToAngles(missile->v.velocity, missile->v.angles);
 
-    missile->v.touch     = GrenadeTouch;
-    missile->v.nextthink = g->time + 2.5f;
-    missile->v.think     = GrenadeExplode;
-
-    eng->SV_SetModel(missile, "progs/grenade.mdl");
+    if (test_gib) {
+        // Bouncing gib: no explosion, no touch (SOLID_NOT skips SV_Impact),
+        // disappears after 10-20 s like a real ThrowGib.
+        static const char *gibmdl[3] = {
+            "progs/gib1.mdl", "progs/gib2.mdl", "progs/gib3.mdl"
+        };
+        missile->v.solid           = SOLID_NOT;
+        missile->v.touch           = NULL;
+        missile->v.think           = SUB_Remove;
+        missile->v.nextthink       = g->time + 10.0f + eng->Random()*10.0f;
+        missile->v.decal_on_bounce = 1.0f;
+        eng->SV_SetModel(missile, gibmdl[(int)(eng->Random()*3.0f) % 3]);
+    } else {
+        missile->v.solid     = SOLID_BBOX;
+        missile->v.touch     = GrenadeTouch;
+        missile->v.think     = GrenadeExplode;
+        missile->v.nextthink = g->time + 2.5f;
+        eng->SV_SetModel(missile, "progs/grenade.mdl");
+    }
     vec3_t gzero = {0,0,0};
     eng->SV_SetSize(missile, gzero, gzero);
     eng->SV_SetOrigin(missile, self->v.origin);

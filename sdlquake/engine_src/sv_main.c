@@ -1121,7 +1121,14 @@ void SV_SpawnServer (char *server)
 		current_skill = 3;
 
 	Cvar_SetValue ("skill", (float)current_skill);
-	
+
+	// Clear the per-edict bounce-decal cooldowns so the first gibs of the
+	// new map aren't blocked by leftover timestamps from the previous one.
+	{
+		extern void SV_BounceDecal_Reset (void);
+		SV_BounceDecal_Reset ();
+	}
+
 //
 // set up the new server
 //

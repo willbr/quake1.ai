@@ -222,6 +222,7 @@ static void ZombieFireGrenade(vec3_t st) {
     missile->v.touch        = ZombieGrenadeTouch;
     missile->v.nextthink    = g->time + 2.5f;
     missile->v.think        = SUB_Remove;
+    missile->v.decal_on_bounce = 1.0f;
     eng->SV_SetModel(missile, "progs/zom_gib.mdl");
     vec3_t z = {0,0,0};
     eng->SV_SetSize(missile, z, z);

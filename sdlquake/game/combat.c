@@ -281,6 +281,7 @@ void ThrowGib(const char *gibname, float dm) {
     n->v.nextthink = g->time + 10.0f + eng->Random()*10.0f;
     n->v.frame     = 0;
     n->v.flags     = 0;
+    n->v.decal_on_bounce = 1.0f;
 }
 
 void ThrowHead(const char *gibname, float dm) {
@@ -300,4 +301,5 @@ void ThrowHead(const char *gibname, float dm) {
     self->v.avelocity[0] = 0;
     self->v.avelocity[1] = (eng->Random()*2.0f - 1.0f) * 600.0f;
     self->v.avelocity[2] = 0;
+    self->v.decal_on_bounce = 1.0f;
 }

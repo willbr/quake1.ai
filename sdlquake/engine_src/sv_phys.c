@@ -21,6 +21,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "hotreload.h"
+#include "r_local.h"
+
+// Per-edict next-allowed time for spawning a blood decal on bounce. Indexed
+// by NUM_FOR_EDICT(ent). Reset to all-zero on map load via
+// SV_BounceDecal_Reset (called from SV_SpawnServer).
+static double sv_bounce_decal_next[MAX_EDICTS];
+
+void SV_BounceDecal_Reset (void)
+{
+	memset (sv_bounce_decal_next, 0, sizeof(sv_bounce_decal_next));
+}
 
 /*
 
@@ -1404,6 +1415,25 @@ void SV_Physics_Toss (edict_t *ent)
 		backoff = 1;
 
 	ClipVelocity (ent->v.velocity, trace.plane.normal, ent->v.velocity, backoff);
+
+// Bounce-decal hook: any bouncing entity tagged with decal_on_bounce stamps a
+// blood splat (floor) or wall drip (vertical) plus a few red particles on
+// each collision, throttled to 0.05s per edict.
+	if (ent->v.decal_on_bounce && r_decals.value && r_decals_gibbounce.value)
+	{
+		int idx = NUM_FOR_EDICT (ent);
+		if (idx > 0 && idx < MAX_EDICTS && sv.time >= sv_bounce_decal_next[idx])
+		{
+			if (trace.plane.normal[2] > 0.7f) {
+				R_SpawnDecal (trace.endpos, DECAL_BLOOD_SPLAT);
+			} else if (!R_SpawnBloodDrip (trace.endpos, trace.plane.normal)) {
+				// Degenerate projection (ceiling or near-horizontal) — fall back.
+				R_SpawnDecal (trace.endpos, DECAL_BLOOD_SPLAT);
+			}
+			R_RunParticleEffect (trace.endpos, trace.plane.normal, 73, 3);
+			sv_bounce_decal_next[idx] = sv.time + 0.05;
+		}
+	}
 
 // stop if on ground
 	if (trace.plane.normal[2] > 0.7)

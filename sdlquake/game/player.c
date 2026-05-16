@@ -511,6 +511,7 @@ static void ThrowGib(const char *gibname, float dm)
     gib->v.nextthink  = g->time + 10.0f + eng->Random() * 10.0f;
     gib->v.frame      = 0;
     gib->v.flags      = 0;
+    gib->v.decal_on_bounce = 1.0f;
 }
 
 static void ThrowHead(const char *gibname, float dm)
@@ -531,6 +532,7 @@ static void ThrowHead(const char *gibname, float dm)
     g->self->v.avelocity[0] = 0;
     g->self->v.avelocity[1] = crandom() * 600.0f;
     g->self->v.avelocity[2] = 0;
+    g->self->v.decal_on_bounce = 1.0f;
 }
 
 static void DeathSound(void)

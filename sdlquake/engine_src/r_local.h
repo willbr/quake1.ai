@@ -381,6 +381,10 @@ extern cvar_t r_decals_intensity;
 extern cvar_t r_decals_bloodpool;
 extern cvar_t r_decals_bloodpool_radius;
 extern cvar_t r_decals_bloodpool_growtime;
+extern cvar_t r_decals_gibbounce;
+extern cvar_t r_decals_blooddrip;
+extern cvar_t r_decals_blooddrip_length;
+extern cvar_t r_decals_blooddrip_growtime;
 extern cvar_t r_decals_debug;
 
 void R_DecalsInit (void);          // called once from R_Init (registers cvars + commands)
@@ -388,5 +392,9 @@ void R_DecalsClear (void);         // called from R_NewMap (zero stain pool, res
 void R_DecalsFrame (void);         // called per-frame from R_RenderView (advances bloodpools)
 void R_SpawnDecal (vec3_t pos, decal_type_t type);
 void R_SpawnBloodPool (vec3_t origin);
+// Streak that grows downward along a wall over time. Returns false on
+// ceilings or surfaces where the down-projection is degenerate; caller
+// should fall back to a splat decal in that case.
+int  R_SpawnBloodDrip (vec3_t origin, vec3_t normal);
 
 #endif

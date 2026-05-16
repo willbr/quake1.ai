@@ -875,6 +875,7 @@ static const native_field_t s_nfields[] = {
 	NF_FLOAT(cnt), NF_FLOAT(count), NF_FLOAT(sounds), NF_FLOAT(volume),
 	NF_FLOAT(distance), NF_FLOAT(waitmin), NF_FLOAT(waitmax),
 	NF_FLOAT(dmgtime), NF_FLOAT(healamount), NF_FLOAT(healtype), NF_FLOAT(hit_z),
+	NF_FLOAT(decal_on_bounce),
 	{NULL, 0, FT_FLOAT}
 };
 

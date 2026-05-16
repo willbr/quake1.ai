@@ -8,6 +8,10 @@ See docs/superpowers/specs/2026-05-13-decals-design.md.
 static void R_DecalsTest_f (void);       /* forward decl — defined later in this file */
 static void R_DecalsTestGrid_f (void);   /* forward decl — defined later in this file */
 static void R_DecalsTestPool_f (void);   /* forward decl — defined later in this file */
+/* Forward decl: defined later. The drip tick in R_DecalsFrame paints
+   via this, so it appears before its definition. */
+static void Stain_AddCell (msurface_t *target, vec3_t cell_world,
+                            int w, int dr, int dg, int db, int knorm);
 
 // Cvars (registered in R_DecalsInit).
 cvar_t r_decals                    = { "r_decals",                    "1", true };
@@ -16,6 +20,10 @@ cvar_t r_decals_intensity          = { "r_decals_intensity",          "1.0", tru
 cvar_t r_decals_bloodpool          = { "r_decals_bloodpool",          "1", true };
 cvar_t r_decals_bloodpool_radius   = { "r_decals_bloodpool_radius",   "24", true };
 cvar_t r_decals_bloodpool_growtime = { "r_decals_bloodpool_growtime", "3.0", true };
+cvar_t r_decals_gibbounce          = { "r_decals_gibbounce",          "1", true };
+cvar_t r_decals_blooddrip          = { "r_decals_blooddrip",          "1", true };
+cvar_t r_decals_blooddrip_length   = { "r_decals_blooddrip_length",   "48", true };
+cvar_t r_decals_blooddrip_growtime = { "r_decals_blooddrip_growtime", "1.5", true };
 cvar_t r_decals_debug              = { "r_decals_debug",              "0", false };
 
 void R_DecalsInit (void)
@@ -26,6 +34,10 @@ void R_DecalsInit (void)
 	Cvar_RegisterVariable (&r_decals_bloodpool);
 	Cvar_RegisterVariable (&r_decals_bloodpool_radius);
 	Cvar_RegisterVariable (&r_decals_bloodpool_growtime);
+	Cvar_RegisterVariable (&r_decals_gibbounce);
+	Cvar_RegisterVariable (&r_decals_blooddrip);
+	Cvar_RegisterVariable (&r_decals_blooddrip_length);
+	Cvar_RegisterVariable (&r_decals_blooddrip_growtime);
 	Cvar_RegisterVariable (&r_decals_debug);
 	Cmd_AddCommand ("r_decals_test", R_DecalsTest_f);
 	Cmd_AddCommand ("r_decals_test_grid", R_DecalsTestGrid_f);
@@ -176,6 +188,27 @@ typedef struct {
 
 static bloodpool_t r_bloodpools[MAX_ACTIVE_BLOODPOOLS];
 
+// ---------------------------------------------------------------------------
+// Blood drips — vertical streaks that grow downward along a wall over time.
+// Fired by R_SpawnBloodDrip from SV_Physics_Toss when a gib bounces off a
+// non-floor surface.
+// ---------------------------------------------------------------------------
+
+#define MAX_ACTIVE_BLOODDRIPS 32
+
+typedef struct {
+	vec3_t       origin;          // wall impact point
+	vec3_t       down_dir;        // unit vector along wall, pointing down in world
+	vec3_t       right_dir;       // unit vector along wall, perpendicular to down (for streak width)
+	msurface_t  *surf;            // target wall surface (for surface validity check)
+	float        spawn_time;
+	float        length_max;      // game units
+	float        length_painted;
+	qboolean     alive;
+} blooddrip_t;
+
+static blooddrip_t r_blooddrips[MAX_ACTIVE_BLOODDRIPS];
+
 void R_DecalsClear (void)
 {
 	int i, cap;
@@ -198,6 +231,7 @@ void R_DecalsClear (void)
 	}
 
 	memset (r_bloodpools, 0, sizeof(r_bloodpools));
+	memset (r_blooddrips, 0, sizeof(r_blooddrips));
 }
 
 // Per-frame growth tick for active blood pools.
@@ -287,6 +321,70 @@ void R_DecalsFrame (void)
 		st->last_touched_frame = r_framecount;
 		bp->radius_painted = target;
 		if (t >= 1.0f) bp->alive = false;
+	}
+
+	// Drip tick — extend each active drip downward along the wall.
+	{
+		float        drip_dur, drip_t, drip_target;
+		float        step_len, dx_off;
+		int          si;
+		vec3_t       cell;
+		blooddrip_t *bd;
+
+		drip_dur = r_decals_blooddrip_growtime.value;
+		if (drip_dur <= 0.001f) drip_dur = 0.001f;
+
+		for (i = 0; i < MAX_ACTIVE_BLOODDRIPS; i++) {
+			bd = &r_blooddrips[i];
+			if (!bd->alive) continue;
+
+			drip_t = (cl.time - bd->spawn_time) / drip_dur;
+			if (drip_t < 0.0f) drip_t = 0.0f;
+			if (drip_t > 1.0f) drip_t = 1.0f;
+			drip_target = bd->length_max * drip_t;
+			if (drip_target <= bd->length_painted) {
+				if (drip_t >= 1.0f) bd->alive = false;
+				continue;
+			}
+
+			if (!bd->surf) { bd->alive = false; continue; }
+
+			// Paint each crossed 16-unit luxel boundary exactly once.
+			// length_painted advances continuously per frame (sub-luxel);
+			// we paint the integer luxel range we've newly crossed since
+			// last frame. Without this quantization a 60fps tick would
+			// paint the same luxel ~30 times per drip and saturate the
+			// lightmap to flat red.
+			{
+				int from_luxel = (int)(bd->length_painted / 16.0f);
+				int to_luxel   = (int)(drip_target          / 16.0f);
+				int k;
+				for (k = from_luxel + 1; k <= to_luxel; k++) {
+					step_len = (float)k * 16.0f;
+					for (si = -1; si <= 1; si++) {
+						dx_off = (float)si * 16.0f;
+						cell[0] = bd->origin[0]
+						        + step_len * bd->down_dir[0]
+						        + dx_off   * bd->right_dir[0];
+						cell[1] = bd->origin[1]
+						        + step_len * bd->down_dir[1]
+						        + dx_off   * bd->right_dir[1];
+						cell[2] = bd->origin[2]
+						        + step_len * bd->down_dir[2]
+						        + dx_off   * bd->right_dir[2];
+						// Per-luxel delta. Drip streak should be visible
+						// but not over-saturate — many bounces stack.
+						if (si == 0) {
+							Stain_AddCell (bd->surf, cell, 1, +60, -40, -40, 1);
+						} else {
+							Stain_AddCell (bd->surf, cell, 1, +30, -20, -20, 1);
+						}
+					}
+				}
+			}
+			bd->length_painted = drip_target;
+			if (drip_t >= 1.0f) bd->alive = false;
+		}
 	}
 }
 
@@ -799,4 +897,78 @@ void R_SpawnBloodPool (vec3_t origin)
 	bp->radius_max     = r_decals_bloodpool_radius.value;
 	bp->radius_painted = 0.0f;
 	bp->alive          = true;
+}
+
+// Spawn a wall-drip. Returns 1 on success (caller may skip splat fallback),
+// 0 if the surface is too horizontal for a meaningful drip (ceiling) — caller
+// should fall back to R_SpawnDecal(pos, DECAL_BLOOD_SPLAT).
+int R_SpawnBloodDrip (vec3_t origin, vec3_t normal)
+{
+	msurface_t  *surf;
+	vec3_t       down_world = { 0.0f, 0.0f, -1.0f };
+	vec3_t       down_proj, right;
+	float        dn, dlen, rlen;
+	int          i, slot, oldest_slot;
+	float        oldest_time;
+	blooddrip_t *bd;
+	extern server_t sv;
+
+	if (!r_decals.value || !r_decals_blooddrip.value) return 0;
+	if (!sv.active) return 0;
+
+	// Project world-down onto the wall plane: down_proj = down - (down·n) * n.
+	dn = -normal[2];   // down·n = (0,0,-1)·n = -n[2]
+	down_proj[0] = down_world[0] - dn * normal[0];
+	down_proj[1] = down_world[1] - dn * normal[1];
+	down_proj[2] = down_world[2] - dn * normal[2];
+	dlen = sqrt (down_proj[0]*down_proj[0] + down_proj[1]*down_proj[1] + down_proj[2]*down_proj[2]);
+	// Below ~0.3 the surface is nearly horizontal (floor or ceiling) — no drip.
+	if (dlen < 0.3f) return 0;
+	down_proj[0] /= dlen; down_proj[1] /= dlen; down_proj[2] /= dlen;
+
+	// right = down_proj × normal (any consistent orthogonal in the wall plane).
+	right[0] = down_proj[1]*normal[2] - down_proj[2]*normal[1];
+	right[1] = down_proj[2]*normal[0] - down_proj[0]*normal[2];
+	right[2] = down_proj[0]*normal[1] - down_proj[1]*normal[0];
+	rlen = sqrt (right[0]*right[0] + right[1]*right[1] + right[2]*right[2]);
+	if (rlen < 0.01f) return 0;
+	right[0] /= rlen; right[1] /= rlen; right[2] /= rlen;
+
+	surf = R_PointOnSurface_World (origin, normal, 4.0f);
+	if (!surf) return 0;
+
+	// LRU-pick a slot.
+	slot        = -1;
+	oldest_time = 1e9f;
+	oldest_slot = 0;
+	for (i = 0; i < MAX_ACTIVE_BLOODDRIPS; i++) {
+		if (!r_blooddrips[i].alive) { slot = i; break; }
+		if (r_blooddrips[i].spawn_time < oldest_time) {
+			oldest_time = r_blooddrips[i].spawn_time;
+			oldest_slot = i;
+		}
+	}
+	if (slot < 0) {
+		bd = &r_blooddrips[oldest_slot];
+		bd->alive          = false;
+		bd->length_painted = bd->length_max;
+		slot               = oldest_slot;
+	}
+
+	bd = &r_blooddrips[slot];
+	bd->origin[0]    = origin[0];
+	bd->origin[1]    = origin[1];
+	bd->origin[2]    = origin[2];
+	bd->down_dir[0]  = down_proj[0];
+	bd->down_dir[1]  = down_proj[1];
+	bd->down_dir[2]  = down_proj[2];
+	bd->right_dir[0] = right[0];
+	bd->right_dir[1] = right[1];
+	bd->right_dir[2] = right[2];
+	bd->surf         = surf;
+	bd->spawn_time   = cl.time;
+	bd->length_max   = r_decals_blooddrip_length.value;
+	bd->length_painted = 0.0f;
+	bd->alive        = true;
+	return 1;
 }

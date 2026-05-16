@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 19
+#define GAME_API_VERSION 20
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
