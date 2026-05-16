@@ -570,8 +570,8 @@ int Editor_EntityAnchor(const edit_entity_t *e, vec3_t out)
     return 0;
 }
 
-static void point_entity_bbox(const edit_entity_t *e,
-                              vec3_t out_mins, vec3_t out_maxs)
+void Editor_PointEntityBBox(const edit_entity_t *e,
+                            vec3_t out_mins, vec3_t out_maxs)
 {
     extern cvar_t editor_view_mode;
     int view_live = (int)editor_view_mode.value == 0;
@@ -906,7 +906,7 @@ void Editor_PushPreviewEntities(void)
 
 // Union bbox of every selected brush + point entity. Returns 1 if at least
 // one valid item contributed.
-static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
+int Editor_SelectionBBox(vec3_t out_mins, vec3_t out_maxs)
 {
     int i, n = 0, e_idx, b_idx, k;
     vec3_t pmin, pmax;
@@ -930,7 +930,7 @@ static int selection_bbox(vec3_t out_mins, vec3_t out_maxs)
             // edict's absmin/absmax.
             vec3_t anchor;
             if (!Editor_EntityAnchor(e, anchor)) continue;
-            point_entity_bbox(e, pmin, pmax);
+            Editor_PointEntityBBox(e, pmin, pmax);
             mn = pmin; mx = pmax;
         }
         else
@@ -1444,7 +1444,7 @@ void Editor_RenderScene(void)
             if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
             has_model = classname_to_model(cls) != NULL;
             if (!is_sel && has_model) continue;
-            point_entity_bbox(e, pmin, pmax);
+            Editor_PointEntityBBox(e, pmin, pmax);
             color = is_sel ? EDIT_COLOR_SELECTED : category_color(e);
             draw_aabb_ex(pmin, pmax, color, is_sel);
         }
@@ -1456,7 +1456,7 @@ void Editor_RenderScene(void)
     if (multi && Editor_IsOpen())
     {
         vec3_t bmin, bmax;
-        if (selection_bbox(bmin, bmax))
+        if (Editor_SelectionBBox(bmin, bmax))
             draw_aabb_over(bmin, bmax, EDIT_COLOR_SELECTED);
     }
 
@@ -1767,7 +1767,7 @@ int Editor_EntityInView(int e_idx)
     // Get world-space bbox.
     if (Entity_IsPoint(e))
     {
-        point_entity_bbox(e, pmin, pmax);
+        Editor_PointEntityBBox(e, pmin, pmax);
     }
     else
     {
@@ -2032,7 +2032,7 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush,
             vec3_t pmin, pmax;
             float t;
             int k;
-            point_entity_bbox(e, pmin, pmax);
+            Editor_PointEntityBBox(e, pmin, pmax);
             // Ensure a minimum pick volume so thin/oriented entities
             // (e.g. rockets flying toward the camera) remain clickable
             // even though the visual box correctly collapses to a small

@@ -87,6 +87,19 @@ int  Editor_RaycastForPlacement(float sx, float sy,
 // SV_MakeStatic'd entities to their cl_static_entities[] counterpart.
 const char *Editor_ClassnameToModel(const char *classname);
 
+// render_wire.c — bbox helpers. PointEntityBBox resolves a single point
+// entity's world-space bbox using the same precedence as the wire-bbox
+// draw (live model bbox > absmin/absmax > class table fallback). Public
+// so gizmo.c can use it for surface-snap offset math.
+void Editor_PointEntityBBox(const struct edit_entity_s *e,
+                            vec3_t out_mins, vec3_t out_maxs);
+
+// render_wire.c — combined world-space bbox of all selected items
+// (brushes via b->mins/maxs, point entities via Editor_PointEntityBBox).
+// Returns 1 if at least one item contributed; 0 means empty selection or
+// no resolvable bbox (e.g. only empty func_groups).
+int  Editor_SelectionBBox(vec3_t out_mins, vec3_t out_maxs);
+
 // render_flat.c
 void Editor_FlatDrawBrush(const struct edit_brush_s *b);
 
