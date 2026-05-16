@@ -112,7 +112,27 @@ static void apply_to_surface(msurface_t *surf,
 	local[0] -= surf->texturemins[0];
 	local[1] -= surf->texturemins[1];
 
-	lm = surf->rgb_samples;
+	/* Pick the static lightmap chunk to write into. surf->rgb_samples
+	 * is the first chunk; the chunks are concatenated by style index,
+	 * each `size = smax*tmax` texels. R_BuildLightMap_RGB scales
+	 * chunk[m] by lightadj[m] = d_lightstylevalue[styles[m]] — for
+	 * animated styles (1..11) this flickers per frame. Writing the
+	 * preview into chunk 0 blindly causes "blank bands" wherever the
+	 * surface's first style is animated and currently dim. Static
+	 * styles are 0 ("normal", always 264) and 32 ("always on", also
+	 * constant). Find the first one; skip the surface if none exists. */
+	{
+		int chunk = -1;
+		int m;
+		for (m = 0; m < MAXLIGHTMAPS && surf->styles[m] != 255; m++) {
+			if (surf->styles[m] == 0 || surf->styles[m] == 32) {
+				chunk = m;
+				break;
+			}
+		}
+		if (chunk < 0) return;
+		lm = surf->rgb_samples + chunk * smax * tmax * 3;
+	}
 	for (t = 0; t < tmax; t++) {
 		td = (int)(local[1] - t*16);
 		if (td < 0) td = -td;
