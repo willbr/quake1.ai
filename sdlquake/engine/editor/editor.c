@@ -1999,6 +1999,8 @@ void Editor_RefreshDlights(void)
         light_cand_t *c;
         vec3_t color = { 1, 1, 1 };
         float intensity = 300;
+        int   style    = 0;
+        int   has_targetname = 0;
         vec3_t origin;
         float dx, dy, dz;
         int j;
@@ -2014,8 +2016,31 @@ void Editor_RefreshDlights(void)
                 parse_color_value(e->kv[j].value, color);
             else if (!strcmp(e->kv[j].key, "light"))
                 intensity = (float)atof(e->kv[j].value);
+            else if (!strcmp(e->kv[j].key, "style"))
+                style = atoi(e->kv[j].value);
+            else if (!strcmp(e->kv[j].key, "targetname")
+                     && e->kv[j].value[0])
+                has_targetname = 1;
         }
         if (intensity <= 0) intensity = 300;
+
+        /* Match the bake's "on at level start" subset so the preview
+         * doesn't light up switches/secret-room reveals that the player
+         * hasn't triggered yet (e1m1's nailgun secret, button-wired
+         * lamps, etc.).
+         *
+         *   targetname  → wired to a trigger; QC assigns a runtime
+         *                 lightstyle channel that's off at spawn.
+         *   style 1..11 → animated channels; the bake already carries
+         *                 their contribution and modulates it via
+         *                 d_lightstylevalue. Adding a constant dlight
+         *                 on top would over-brighten them and ignore
+         *                 the animation.
+         *
+         * Style 0 ("normal") and 32 ("always on") are static; mirrors
+         * CL_SpawnMapLightDlights' rule. */
+        if (has_targetname)            continue;
+        if (style != 0 && style != 32) continue;
 
         c = &s_light_cands[n_cands++];
         VectorCopy(origin, c->origin);
