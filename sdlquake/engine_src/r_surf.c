@@ -199,7 +199,10 @@ void R_AddDynamicLights_RGB (void)
 				{
 					unsigned add = (unsigned)((rad - dist) * 256);
 					int      idx = (t*smax + s) * 3;
-					if (r_colored_dlights.value) {
+					/* paint_light_preview implies coloured dlights — the
+					 * whole point of the preview is showing _color edits. */
+					extern cvar_t paint_light_preview;
+					if (r_colored_dlights.value || paint_light_preview.value) {
 						blocklights_rgb[idx + 0] += (unsigned)(add * cl_dlights[lnum].color[0]);
 						blocklights_rgb[idx + 1] += (unsigned)(add * cl_dlights[lnum].color[1]);
 						blocklights_rgb[idx + 2] += (unsigned)(add * cl_dlights[lnum].color[2]);
@@ -517,9 +520,14 @@ void R_DrawSurface (void)
 	void			(*pblockdrawer)(void);
 	texture_t		*mt;
 
+	/* paint_light_preview forces the RGB lightmap path so an archived
+	 * r_coloredlight 0 in config.cfg can't strand the editor preview in
+	 * the mono path (which drops dlight chroma entirely). Still gated on
+	 * rgb_samples — without .lit data there's no RGB lightmap to write into. */
+	extern cvar_t paint_light_preview;
 	qboolean use_rgb =
 		r_pixbytes == 1 &&
-		r_coloredlight.value &&
+		(r_coloredlight.value || paint_light_preview.value) &&
 		!r_fullbright.value &&
 		r_drawsurf.surf->rgb_samples != NULL;
 

@@ -124,9 +124,16 @@ void R_PushDlights (void)
 	 * gets its dlightframe stamped this frame, so R_AddDynamicLights
 	 * in r_surf.c sees zero contributors. Editor uses this to compare
 	 * the baked lightmap against the live-lit view without dlights
-	 * (muzzle flashes, paint_light_preview etc.) muddying the picture. */
-	if (!r_dynamic.value)
-		return;
+	 * (muzzle flashes, paint_light_preview etc.) muddying the picture.
+	 *
+	 * paint_light_preview overrides r_dynamic: the editor's preview pump
+	 * IS the user's intent, so a stale r_dynamic 0 in config.cfg must not
+	 * silently swallow it. */
+	{
+		extern cvar_t paint_light_preview;
+		if (!r_dynamic.value && !paint_light_preview.value)
+			return;
+	}
 
 	l = cl_dlights;
 
