@@ -249,9 +249,10 @@ static void Key_TabComplete (qboolean reverse)
 		arg_fn = Key_LookupArgCompleter (&partial, prefix, sizeof(prefix), &prefix_len);
 		if (arg_fn)
 		{
+			/* Empty arg-partial is fine: the completer treats partial_len==0
+			 * as "match everything" (Q_strncasecmp returns 0 for n==0). That
+			 * lets `map <Tab>` cycle through every map. */
 			partial_len = Q_strlen ((char *)partial);
-			if (partial_len == 0)
-				return;					/* empty arg-partial -> no completion */
 			Q_strcpy (tab_partial, (char *)partial);
 			tab_partial_len = partial_len;
 			Q_strcpy (tab_prefix, prefix);
