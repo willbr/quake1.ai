@@ -260,14 +260,13 @@ static void apply_snapshot(void)
      * worker's own buffer — the old behaviour, which means the override
      * system is dormant until the next map load. */
     {
-        extern int loadmodel_rgblightdata_size;
         int new_size = s_snap.mono_size * 3;
         int use_live = mod->live_rgblightdata &&
-                       loadmodel_rgblightdata_size >= new_size;
+                       mod->live_rgblightdata_size >= new_size;
         if (use_live) {
             memcpy(mod->live_rgblightdata, s_live_rgblightdata,
                    (size_t)new_size);
-            loadmodel_rgblightdata_size = new_size;
+            mod->live_rgblightdata_size = new_size;
         }
 
         max_faces = mod->numsurfaces < s_snap.face_count

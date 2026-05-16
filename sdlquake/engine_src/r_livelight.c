@@ -31,8 +31,6 @@
 #include "quakedef.h"
 #include "r_livelight.h"
 
-extern int loadmodel_rgblightdata_size;
-
 typedef struct {
 	vec3_t pos;
 	float  radius;
@@ -218,9 +216,9 @@ static void restore_baseline(void)
 	int         i;
 
 	if (!m || !m->live_rgblightdata || !m->rgblightdata) return;
-	if (loadmodel_rgblightdata_size > 0)
+	if (m->live_rgblightdata_size > 0)
 		memcpy(m->live_rgblightdata, m->rgblightdata,
-		       loadmodel_rgblightdata_size);
+		       m->live_rgblightdata_size);
 
 	surf = m->surfaces;
 	for (i = 0; i < m->numsurfaces; i++, surf++) {
@@ -237,11 +235,11 @@ void Lightmap_BaselineChanged(void)
 	msurface_t *surf;
 	int         i;
 	if (!m || !m->live_rgblightdata || !m->rgblightdata) return;
-	if (loadmodel_rgblightdata_size <= 0) return;
+	if (m->live_rgblightdata_size <= 0) return;
 
 	/* Refresh live = baseline. */
 	memcpy(m->live_rgblightdata, m->rgblightdata,
-	       loadmodel_rgblightdata_size);
+	       m->live_rgblightdata_size);
 
 	/* Replay every outstanding override on top. */
 	for (i = 0; i < s_override_count; i++) {

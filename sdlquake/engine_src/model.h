@@ -372,6 +372,10 @@ typedef struct model_s
 									// r_livelight.c overrides (paint_light_preview,
 									// Light_AddOverride / Gust). NULL when
 									// rgblightdata is NULL.
+	int			live_rgblightdata_size;	// bytes; matches the rgb data size.
+										// Per-model (NOT global) so subsequent
+										// b_*.bsp loads without a .lit can't
+										// stomp the worldmodel's value.
 	char		*entities;
 
 //
