@@ -90,6 +90,38 @@ static void light_reset_state(void)
 
 extern byte light_rgb_dlightdata[];
 
+/* Persistent bake options. Both light_compile_to_memory (when called with
+ * NULL opts) and light_relight_in_place reapply these after light_reset_state
+ * wipes the per-bake globals back to compile-time defaults. The defaults
+ * here mirror light.c:13-15,24 so a never-set caller behaves identically
+ * to the original argv-driven CLI. */
+static light_options_t s_persistent_opts = {
+    1.0f,  /* scaledist   */
+    0.5f,  /* scalecos    */
+    0.5f,  /* rangescale  */
+    0      /* extrasamples */
+};
+
+void light_set_persistent_options(const light_options_t *opts)
+{
+    if (!opts) {
+        s_persistent_opts.scaledist    = 1.0f;
+        s_persistent_opts.scalecos     = 0.5f;
+        s_persistent_opts.rangescale   = 0.5f;
+        s_persistent_opts.extrasamples = 0;
+        return;
+    }
+    s_persistent_opts = *opts;
+}
+
+static void apply_persistent_opts(void)
+{
+    if (s_persistent_opts.scaledist  > 0) scaledist  = s_persistent_opts.scaledist;
+    if (s_persistent_opts.scalecos   > 0) scalecos   = s_persistent_opts.scalecos;
+    if (s_persistent_opts.rangescale > 0) rangescale = s_persistent_opts.rangescale;
+    extrasamples = s_persistent_opts.extrasamples ? true : false;
+}
+
 int light_compile_to_memory(light_options_t *opts,
                             void **out_bsp, int *out_size,
                             void **out_lit, int *out_lit_size)
@@ -113,12 +145,13 @@ int light_compile_to_memory(light_options_t *opts,
 
     light_reset_state();
 
+    /* Per-call opts override the persistent ones for this bake AND
+     * promote into the persistent slot so subsequent live-bakes stay in
+     * sync with the editor's last explicit "Compile + Light" settings. */
     if (opts) {
-        if (opts->scaledist  > 0) scaledist  = opts->scaledist;
-        if (opts->scalecos   > 0) scalecos   = opts->scalecos;
-        if (opts->rangescale > 0) rangescale = opts->rangescale;
-        extrasamples = opts->extrasamples ? true : false;
+        s_persistent_opts = *opts;
     }
+    apply_persistent_opts();
 
     /* Hand error recovery back to qbsp_lib.c's shared longjmp. Any
      * Error() inside the ported sources unwinds back here. */
@@ -214,6 +247,7 @@ int light_relight_in_place(void)
     if (numfaces <= 0) return 1;
 
     light_reset_state();
+    apply_persistent_opts();
 
     /* Clear destination buffers so an aborted face doesn't leave stale
      * bytes from a prior bake. light_rgb_dlightdata is `extern byte[]`

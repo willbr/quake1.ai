@@ -131,6 +131,28 @@ cvar_t      paint_light_preview  = { "paint_light_preview", "1" };
 // approximation rather than the wireframe markers.
 cvar_t      editor_light_gizmos  = { "editor_light_gizmos", "1" };
 
+/* Bake knobs surfaced through the "Light..." popup in editor_ui.c. These
+ * feed light_options_t via editor_light_opts_from_cvars below and apply
+ * to both the explicit Compile+Light command and the SDL_Thread live
+ * bake. Defaults mirror light.c's compile-time defaults so a user who
+ * never opens the popup gets vanilla id-LIGHT behaviour. */
+cvar_t      editor_light_scaledist    = { "editor_light_scaledist",    "1.0" };
+cvar_t      editor_light_scalecos     = { "editor_light_scalecos",     "0.5" };
+cvar_t      editor_light_rangescale   = { "editor_light_rangescale",   "0.5" };
+cvar_t      editor_light_extrasamples = { "editor_light_extrasamples", "0" };
+
+/* Pull current slider values out of cvars into a light_options_t. The
+ * resulting struct is the source of truth for the next bake -- callers
+ * pass it to light_compile_to_memory (which also stashes it for the
+ * live-bake path via light_set_persistent_options). */
+static void editor_light_opts_from_cvars(light_options_t *out)
+{
+    out->scaledist    = editor_light_scaledist.value;
+    out->scalecos     = editor_light_scalecos.value;
+    out->rangescale   = editor_light_rangescale.value;
+    out->extrasamples = editor_light_extrasamples.value != 0.0f ? 1 : 0;
+}
+
 static int     s_lookmode      = 0;
 static int     s_camera_inited = 0;
 static vec3_t  s_cam_origin;
@@ -797,9 +819,13 @@ static void Editor_Cmd_CompileFull_f(void)
     Con_Printf("editor_compile_full: qbsp produced %d bytes; running light...\n",
                unlit_size);
 
-    rc = light_compile_to_memory(NULL,
-                                 &bsp_lit, &lit_bsp_size,
-                                 &lit_bytes, &lit_bytes_size);
+    {
+        light_options_t lopts;
+        editor_light_opts_from_cvars(&lopts);
+        rc = light_compile_to_memory(&lopts,
+                                     &bsp_lit, &lit_bsp_size,
+                                     &lit_bytes, &lit_bytes_size);
+    }
     /* The unlit buffer is dead either way -- light's reset clobbers the
      * membuf state and we have a freshly serialised copy. */
     free(bsp_unlit);
@@ -924,9 +950,13 @@ static void Editor_Cmd_CompileExport_f(void)
     }
     Con_Printf("editor_compile_export: vis complete; running light...\n");
 
-    rc = light_compile_to_memory(NULL,
-                                 &bsp_lit, &lit_bsp_size,
-                                 &lit_bytes, &lit_bytes_size);
+    {
+        light_options_t lopts;
+        editor_light_opts_from_cvars(&lopts);
+        rc = light_compile_to_memory(&lopts,
+                                     &bsp_lit, &lit_bsp_size,
+                                     &lit_bytes, &lit_bytes_size);
+    }
     free(bsp_unlit);
     bsp_unlit = NULL;
     if (rc != 0 || !bsp_lit) {
@@ -1005,7 +1035,18 @@ static void Editor_Cmd_LightBench_f(void)
  */
 static void Editor_Cmd_Relight_f(void)
 {
-    int rc = Editor_LightBake_Trigger();
+    int rc;
+    /* Push the latest slider values into the persistent slot so the
+     * worker thread's light_relight_in_place picks them up after its
+     * reset wipes the bake-globals. Without this the live bake would
+     * always run with id-LIGHT defaults regardless of what the user
+     * had dialled into the Light... popup. */
+    {
+        light_options_t lopts;
+        editor_light_opts_from_cvars(&lopts);
+        light_set_persistent_options(&lopts);
+    }
+    rc = Editor_LightBake_Trigger();
     if (rc == 0)
         Con_Printf("editor_relight: bake queued (background)\n");
     else if (rc == 1)
@@ -1595,6 +1636,10 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_brush_hollow_thickness);
     Cvar_RegisterVariable(&paint_light_preview);
     Cvar_RegisterVariable(&editor_light_gizmos);
+    Cvar_RegisterVariable(&editor_light_scaledist);
+    Cvar_RegisterVariable(&editor_light_scalecos);
+    Cvar_RegisterVariable(&editor_light_rangescale);
+    Cvar_RegisterVariable(&editor_light_extrasamples);
 
     {
         extern void Editor_RegisterCvars(void);

@@ -224,6 +224,32 @@ void LoadEntities (void)
 	printf ("%d entities read\n", num_entities);
 
 	MatchTargets ();
+
+	/* Worldspawn `_minlight` sets a global brightness floor: every face
+	 * gets at least this much light. Wires the dormant minlights[] path in
+	 * LightFace (ltface.c). Per-face minlight (via _minlight on brush
+	 * entities or texture-name prefixes) is not implemented; this is the
+	 * scalar-worldspawn variant that covers the common "no pitch-black
+	 * crevices" use case. */
+	{
+		int i;
+		float worldminlight = 0;
+		for (i = 0; i < num_entities; i++)
+		{
+			if (!strcmp(entities[i].classname, "worldspawn"))
+			{
+				worldminlight = FloatForKey(&entities[i], "_minlight");
+				break;
+			}
+		}
+		if (worldminlight > 0)
+		{
+			for (i = 0; i < numfaces; i++)
+				minlights[i] = worldminlight;
+			printf ("worldspawn _minlight = %g applied to %d faces\n",
+			        worldminlight, numfaces);
+		}
+	}
 }
 
 char 	*ValueForKey (entity_t *ent, char *key)

@@ -24,6 +24,8 @@ static int s_show_tex_browser = 0;
 static int s_show_spawn_dialog = 0;
 // Toolbar "Wrap..." button toggles this; consumed by draw_wrap_dialog.
 static int s_show_wrap_dialog = 0;
+// Toolbar "Light..." button toggles this; consumed by draw_light_opts_window.
+static int s_show_light_opts = 0;
 
 #ifndef ARRAY_LEN
 #define ARRAY_LEN(a) ((int)(sizeof(a) / sizeof((a)[0])))
@@ -250,6 +252,7 @@ static void draw_toolbar(void)
         if (ui_btn_same(busy ? "Re-baking..." : "Refresh Lighting") && !busy)
             ui_exec("editor_relight\n");
     }
+    if (ui_btn_same("Light..."))                s_show_light_opts = !s_show_light_opts;
     if (ui_btn_same("Close (F2)"))              ui_exec("editor\n");
 
     // -- Selection / undo ------------------------------------------------
@@ -1632,6 +1635,71 @@ static void draw_light_inspector_panel(edit_entity_t *e)
     IG_Separator();
 }
 
+// Floating popup for the light bake's tunables. Hidden by default; shown
+// while s_show_light_opts is set. All four widgets are bound to cvars so
+// the values survive across map loads and editor open/close cycles. The
+// changes flow into the next bake via editor_light_opts_from_cvars on
+// the C side -- this window is pure UI.
+//
+// We deliberately don't trigger an automatic relight when a slider
+// moves; the user clicks "Refresh Lighting" when they want to see the
+// result. Auto-rebaking on every drag tick would queue dozens of
+// SDL_Thread workers in a fraction of a second.
+static void draw_light_opts_window(void)
+{
+    if (!s_show_light_opts) return;
+
+    IG_SetNextWindowSize(360, 0, IG_Cond_FirstUseEver);
+    if (!IG_Begin("Light bake options", &s_show_light_opts, IG_WF_None))
+    {
+        IG_End();
+        return;
+    }
+
+    IG_TextUnformatted("Bake knobs (apply on next Compile+Light / Refresh Lighting):");
+    IG_Separator();
+
+    {
+        cvar_t *cv;
+        float v;
+
+        cv = Cvar_FindVar("editor_light_scaledist");
+        v = cv ? cv->value : 1.0f;
+        IG_SetNextItemWidth(220);
+        if (IG_SliderFloat("scaledist", &v, 0.1f, 4.0f, "%.2f"))
+            Cvar_SetValue("editor_light_scaledist", v);
+
+        cv = Cvar_FindVar("editor_light_scalecos");
+        v = cv ? cv->value : 0.5f;
+        IG_SetNextItemWidth(220);
+        if (IG_SliderFloat("scalecos", &v, 0.0f, 1.0f, "%.2f"))
+            Cvar_SetValue("editor_light_scalecos", v);
+
+        cv = Cvar_FindVar("editor_light_rangescale");
+        v = cv ? cv->value : 0.5f;
+        IG_SetNextItemWidth(220);
+        if (IG_SliderFloat("rangescale", &v, 0.05f, 4.0f, "%.2f"))
+            Cvar_SetValue("editor_light_rangescale", v);
+
+        ui_cvar_checkbox("extrasamples (2x2 supersample, slow)",
+                         "editor_light_extrasamples");
+    }
+
+    IG_Separator();
+    IG_TextUnformatted("Defaults: scaledist 1.0  scalecos 0.5  rangescale 0.5");
+    IG_TextUnformatted("Worldspawn key:  _minlight <value>  sets a brightness floor.");
+
+    if (IG_Button("Reset to defaults"))
+    {
+        Cvar_SetValue("editor_light_scaledist",  1.0f);
+        Cvar_SetValue("editor_light_scalecos",   0.5f);
+        Cvar_SetValue("editor_light_rangescale", 0.5f);
+        Cvar_SetValue("editor_light_extrasamples", 0.0f);
+    }
+
+    IG_End();
+}
+
 static void draw_inspector(void)
 {
     edit_entity_t *e;
@@ -1917,4 +1985,5 @@ void Editor_DrawUI(void)
     draw_texture_browser();
     draw_spawn_dialog();
     draw_wrap_dialog();
+    draw_light_opts_window();
 }

@@ -30,6 +30,16 @@ typedef struct {
 } light_options_t;
 
 /*
+ * Set the persistent bake options used by subsequent compiles AND live
+ * relights. NULL restores defaults. Without this, the live-bake path
+ * (light_relight_in_place) always runs with hard-coded defaults because
+ * its reset_state wipes the scale globals back to {1.0, 0.5, 0.5, off}.
+ * Call this once when the editor's slider values change; the next bake
+ * — whichever entry point fires it — picks them up.
+ */
+void light_set_persistent_options(const light_options_t *opts);
+
+/*
  * Bake lighting onto the BSP currently sitting in qbsp's globals.
  * Returns 0 on success, non-zero on failure (error printed via Con_Printf).
  *
