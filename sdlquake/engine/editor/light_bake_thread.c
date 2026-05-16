@@ -253,43 +253,67 @@ static void apply_snapshot(void)
     mod->rgblightdata = s_live_rgblightdata;
     s_live_lit = 1;
 
-    /* Engine surfaces should be 1:1 with the BSP face array LIGHT just
-     * baked. Mismatched counts mean the user loaded a different map
-     * since the last compile -- abort the update rather than read past
-     * either buffer. */
-    max_faces = mod->numsurfaces < s_snap.face_count
-              ? mod->numsurfaces : s_snap.face_count;
-    if (mod->numsurfaces != s_snap.face_count)
+    /* If the engine's per-map mutable buffer exists and fits the new
+     * bake, route surf->rgb_samples through it so the r_livelight
+     * delta system (paint_light_preview, Gust overrides) keeps working
+     * after a re-bake. Otherwise fall back to pointing at the bake
+     * worker's own buffer — the old behaviour, which means the override
+     * system is dormant until the next map load. */
     {
-        Con_Printf("light bake: surface count drift (engine=%d, bake=%d); "
-                   "applying first %d faces only\n",
-                   mod->numsurfaces, s_snap.face_count, max_faces);
-    }
-
-    surf = mod->surfaces;
-    for (i = 0; i < max_faces; i++, surf++)
-    {
-        int ofs = s_snap.lightofs[i];
-        if (ofs < 0 || ofs >= s_snap.mono_size)
-        {
-            surf->samples     = NULL;
-            surf->rgb_samples = NULL;
+        extern int loadmodel_rgblightdata_size;
+        int new_size = s_snap.mono_size * 3;
+        int use_live = mod->live_rgblightdata &&
+                       loadmodel_rgblightdata_size >= new_size;
+        if (use_live) {
+            memcpy(mod->live_rgblightdata, s_live_rgblightdata,
+                   (size_t)new_size);
+            loadmodel_rgblightdata_size = new_size;
         }
-        else
-        {
-            surf->samples     = s_live_lightdata    + ofs;
-            surf->rgb_samples = s_live_rgblightdata + ofs * 3;
-        }
-        /* Force the surface cache to rebuild on the next frame so the
-         * new lightmap actually paints. Same precedent the dlight
-         * injection path uses (cf. r_surf.c). */
-        surf->dlightframe = r_framecount;
-    }
 
-    /* Same cache-staleness fix as Editor_LightBake_ApplyFromDisk: a
-     * dlightframe bump alone leaves visible surfaces serving stale
-     * cached pixels until something else invalidates them. */
-    D_FlushCaches();
+        max_faces = mod->numsurfaces < s_snap.face_count
+                  ? mod->numsurfaces : s_snap.face_count;
+        if (mod->numsurfaces != s_snap.face_count)
+        {
+            Con_Printf("light bake: surface count drift (engine=%d, bake=%d); "
+                       "applying first %d faces only\n",
+                       mod->numsurfaces, s_snap.face_count, max_faces);
+        }
+
+        surf = mod->surfaces;
+        for (i = 0; i < max_faces; i++, surf++)
+        {
+            int ofs = s_snap.lightofs[i];
+            if (ofs < 0 || ofs >= s_snap.mono_size)
+            {
+                surf->samples     = NULL;
+                surf->rgb_samples = NULL;
+            }
+            else
+            {
+                surf->samples     = s_live_lightdata    + ofs;
+                surf->rgb_samples = use_live
+                    ? mod->live_rgblightdata + ofs * 3
+                    : s_live_rgblightdata    + ofs * 3;
+            }
+            /* Force the surface cache to rebuild on the next frame so
+             * the new lightmap actually paints. Same precedent the
+             * dlight injection path uses (cf. r_surf.c). */
+            surf->dlightframe = r_framecount;
+        }
+
+        /* Same cache-staleness fix as Editor_LightBake_ApplyFromDisk: a
+         * dlightframe bump alone leaves visible surfaces serving stale
+         * cached pixels until something else invalidates them. */
+        D_FlushCaches();
+
+        if (use_live) {
+            /* Re-apply every outstanding override on top of the fresh
+             * baseline (paint_light_preview entries + any Gust gameplay
+             * overrides survive the bake). */
+            extern void Lightmap_BaselineChanged(void);
+            Lightmap_BaselineChanged();
+        }
+    }
 
     Con_Printf("light bake: applied (%d faces, %d bytes mono / %d bytes lit)\n",
                s_snap.face_count, s_snap.mono_size, s_snap.mono_size * 3);

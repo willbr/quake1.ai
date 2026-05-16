@@ -211,6 +211,35 @@ static void restore_baseline(void)
 	}
 }
 
+void Lightmap_BaselineChanged(void)
+{
+	model_t    *m = cl.worldmodel;
+	msurface_t *surf;
+	int         i;
+	if (!m || !m->live_rgblightdata || !m->rgblightdata) return;
+	if (loadmodel_rgblightdata_size <= 0) return;
+
+	/* Refresh live = baseline. */
+	memcpy(m->live_rgblightdata, m->rgblightdata,
+	       loadmodel_rgblightdata_size);
+
+	/* Replay every outstanding override on top. */
+	for (i = 0; i < s_override_count; i++) {
+		livelight_override_t *o = &s_overrides[i];
+		apply_recursive(m->nodes, o->pos, o->radius, o->color, +1);
+	}
+
+	/* Bump dlightframe on every surface so the cache rebuilds. */
+	surf = m->surfaces;
+	for (i = 0; i < m->numsurfaces; i++, surf++) {
+		if (surf->dlightframe != r_framecount) {
+			DLIGHTBITS_CLEAR(&surf->dlightbits);
+			surf->dlightframe = r_framecount;
+		}
+	}
+	D_FlushCaches();
+}
+
 void Lightmap_ClearOwner(int owner)
 {
 	int i, w;

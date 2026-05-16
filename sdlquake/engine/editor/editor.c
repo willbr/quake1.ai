@@ -1915,6 +1915,19 @@ void Editor_CycleCameraMode(void)
  */
 static int s_light_pref_origin_idx = -1;
 
+/* Editor light-preview dirty flag. Flipped on: preview toggle, s_open
+ * change, any kv edit on a `light*` entity, post-bake completion.
+ * Editor_RefreshDlights below reads + clears it; on clean frames it
+ * returns in O(1). */
+static int s_preview_dirty = 0;
+static float s_paint_light_preview_prev = 0;
+static int   s_open_prev = 0;
+
+void Editor_LightPreview_MarkDirty(void)
+{
+    s_preview_dirty = 1;
+}
+
 static int parse_color_value(const char *s, vec3_t out)
 {
     double v[3] = { 1, 1, 1 };
@@ -1957,52 +1970,60 @@ static int light_cand_cmp(const void *a, const void *b)
     return 0;
 }
 
-/* Called from V_RenderView immediately before R_PushDlights, so the marker
- * (R_PushDlights) and the consumer (R_AddDynamicLights_RGB) see identical
- * cl_dlights[]. Running it later (e.g. from R_RenderView_) leaves R_PushDlights
- * one frame behind on slot assignments — camera motion shifts the distance
- * sort, slot N refers to different lights frame-to-frame, and surfaces
- * marked with N's bits get coloured by some other light → visible flicker. */
+/* Dirty-driven RGB-lightmap preview pump. Replaces the per-frame
+ * dlight stuffing that previously ran here — paint_light_preview
+ * entries now write into the engine's live_rgblightdata via
+ * Lightmap_AddDelta (owner=EDITOR), so on clean frames this is O(1).
+ *
+ * Called from V_RenderView every frame; the dirty flag governs work.
+ *
+ * Dirty triggers (handled below + via Editor_LightPreview_MarkDirty):
+ *   - paint_light_preview cvar value changed
+ *   - s_open transition (editor opened/closed)
+ *   - Entity_SetKV touched a `light*` entity (edit_scene.c hook)
+ *   - Editor_LightBake_Poll applied a fresh bake (light_bake_thread.c)
+ */
 void Editor_RefreshDlights(void)
 {
-    int i, n_cands = 0;
-    int n_filled;
-    extern dlight_t cl_dlights[MAX_DLIGHTS];
-    extern vec3_t   r_origin;     /* current view origin (set by R_SetupFrame) */
-    vec3_t cam;
+    extern void Lightmap_AddDelta(const vec3_t pos, float radius,
+                                  const vec3_t color, int owner);
+    extern void Lightmap_ClearOwner(int owner);
+    int i;
 
-    /* V_RenderView calls this every frame, including when the editor is
-     * closed — bail before touching cl_dlights so muzzle flashes,
-     * explosions, etc. survive normal gameplay. */
-    if (!s_open) return;
-
-    /* Mark all dlight slots dead so a stale entry from a prior frame
-     * doesn't keep illuminating after the user removes a light or
-     * disables preview mid-session. Game-driven transients are already
-     * frozen here — gameplay sim is paused while the editor is open. */
-    for (i = 0; i < MAX_DLIGHTS; i++)
-    {
-        cl_dlights[i].radius = 0;
-        cl_dlights[i].die    = -1;
+    /* Poll for triggers that we can't get callbacks for. */
+    if (paint_light_preview.value != s_paint_light_preview_prev) {
+        s_paint_light_preview_prev = paint_light_preview.value;
+        s_preview_dirty = 1;
+    }
+    if (s_open != s_open_prev) {
+        s_open_prev = s_open;
+        s_preview_dirty = 1;
     }
 
-    if (paint_light_preview.value == 0) return;
+    if (!s_preview_dirty) return;
+    s_preview_dirty = 0;
 
-    VectorCopy(r_origin, cam);
+    /* Drop every editor-owned override; gameplay/Gust overrides survive. */
+    Lightmap_ClearOwner(1 /* LIGHTMAP_OWNER_EDITOR */);
 
-    /* Pass 1: gather every `light*` entity into the candidate buffer
-     * with its dist-squared to the camera. */
-    for (i = 0; i < edit_scene.numentities && n_cands < MAX_LIGHT_CANDIDATES; i++)
+    /* Editor closed or preview off → leave the live buffer == baked. */
+    if (!s_open || paint_light_preview.value == 0) {
+        (void)s_light_pref_origin_idx;  /* suppress -Wunused */
+        return;
+    }
+
+    /* Apply every eligible light entity as one Lightmap_AddDelta.
+     * No distance sort / K-truncation: MAX_OVERRIDES (1024) is sized
+     * to fit every map's light count, so all of them paint. */
+    for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
         const char *cls;
-        light_cand_t *c;
         vec3_t color = { 1, 1, 1 };
         float intensity = 300;
         int   style    = 0;
         int   has_targetname = 0;
         vec3_t origin;
-        float dx, dy, dz;
         int j;
 
         if (e->classname_idx < 0 || e->classname_idx >= e->numkv) continue;
@@ -2024,56 +2045,16 @@ void Editor_RefreshDlights(void)
         }
         if (intensity <= 0) intensity = 300;
 
-        /* Match the bake's "on at level start" subset so the preview
-         * doesn't light up switches/secret-room reveals that the player
-         * hasn't triggered yet (e1m1's nailgun secret, button-wired
-         * lamps, etc.).
-         *
-         *   targetname  → wired to a trigger; QC assigns a runtime
-         *                 lightstyle channel that's off at spawn.
-         *   style 1..11 → animated channels; the bake already carries
-         *                 their contribution and modulates it via
-         *                 d_lightstylevalue. Adding a constant dlight
-         *                 on top would over-brighten them and ignore
-         *                 the animation.
-         *
-         * Style 0 ("normal") and 32 ("always on") are static; mirrors
-         * CL_SpawnMapLightDlights' rule. */
+        /* Match the bake's "on at level start" subset (same rule as
+         * the old pump): skip trigger-wired and animated-style lights. */
         if (has_targetname)            continue;
         if (style != 0 && style != 32) continue;
 
-        c = &s_light_cands[n_cands++];
-        VectorCopy(origin, c->origin);
-        VectorCopy(color,  c->color);
-        c->intensity = intensity;
-        dx = origin[0] - cam[0];
-        dy = origin[1] - cam[1];
-        dz = origin[2] - cam[2];
-        c->dist_sq = dx*dx + dy*dy + dz*dz;
+        Lightmap_AddDelta(origin, intensity, color,
+                          1 /* LIGHTMAP_OWNER_EDITOR */);
     }
 
-    /* Pass 2: sort by distance, take the nearest MAX_DLIGHTS, write them
-     * into cl_dlights. This is what makes the preview legible in dense
-     * maps -- start.bsp's 267 lights would otherwise have only the
-     * arbitrary first 32 visible. */
-    qsort(s_light_cands, (size_t)n_cands, sizeof(light_cand_t), light_cand_cmp);
-
-    n_filled = n_cands < MAX_DLIGHTS ? n_cands : MAX_DLIGHTS;
-    for (i = 0; i < n_filled; i++)
-    {
-        dlight_t *dl = &cl_dlights[i];
-        light_cand_t *c = &s_light_cands[i];
-        VectorCopy(c->origin, dl->origin);
-        dl->radius   = c->intensity;
-        dl->die      = cl.time + 1e9;
-        dl->decay    = 0;
-        dl->minlight = 0;
-        dl->key      = 0;
-        VectorCopy(c->color, dl->color);
-    }
-
-    /* Suppress -Wunused. */
-    (void)s_light_pref_origin_idx;
+    (void)s_light_pref_origin_idx;  /* suppress -Wunused */
 }
 
 void Editor_PreRender(void)

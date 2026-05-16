@@ -44,4 +44,10 @@ void Lightmap_AddDelta(const vec3_t pos, float radius,
  * + Σ(surviving overrides). D_FlushCaches at end. */
 void Lightmap_ClearOwner(int owner);
 
+/* Called by the editor live-bake worker (Editor_LightBake_Poll) after
+ * it overwrites model.rgblightdata with a fresh bake. Refreshes
+ * live_rgblightdata from the new baseline and re-applies every
+ * outstanding override on top. */
+void Lightmap_BaselineChanged(void);
+
 #endif

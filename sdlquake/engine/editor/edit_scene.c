@@ -670,12 +670,22 @@ void Entity_TranslateOrigin(edit_entity_t *e, const vec3_t delta)
 
 void Entity_SetKV(edit_entity_t *e, const char *key, const char *value)
 {
+    extern void Editor_LightPreview_MarkDirty(void);
     int idx;
     if (!e || !key || !key[0]) return;
     idx = kv_find(e, key);
     if (idx < 0) idx = kv_append(e, key);
     Q_strncpy(e->kv[idx].value, value ? value : "", EDIT_VAL_LEN - 1);
     e->kv[idx].value[EDIT_VAL_LEN - 1] = '\0';
+
+    /* If this entity is a `light*` (or the kv being set is the
+     * classname assigning one), the cached editor preview is stale.
+     * Cheap to over-fire — clean preview rebuild is fast. */
+    if (e->classname_idx >= 0 && e->classname_idx < e->numkv) {
+        const char *cls = e->kv[e->classname_idx].value;
+        if (cls && !strncmp(cls, "light", 5))
+            Editor_LightPreview_MarkDirty();
+    }
 }
 
 int Entity_RemoveKV(edit_entity_t *e, const char *key)
