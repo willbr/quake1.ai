@@ -304,3 +304,77 @@ void Editor_LightBake_Poll(void)
     SDL_SetAtomicInt(&s_result_ready, 0);
     SDL_SetAtomicInt(&s_in_progress, 0);
 }
+
+int Editor_LightBake_ApplyFromDisk(const char *bsp_path)
+{
+    int rc;
+    int mono_size = 0, face_count = 0;
+    int max_faces;
+    int *lightofs;
+    int i;
+    model_t  *mod = cl.worldmodel;
+    msurface_t *surf;
+
+    if (!mod) {
+        Con_Printf("light_apply: no cl.worldmodel\n");
+        return -1;
+    }
+    if (!s_live_lightdata || !s_live_rgblightdata) {
+        Con_Printf("light_apply: live buffer not initialised\n");
+        return -1;
+    }
+
+    rc = light_relight_loaded_bsp(bsp_path);
+    if (rc != 0) return rc;
+
+    lightofs = (int *)malloc(sizeof(int) * MAX_MAP_FACES);
+    if (!lightofs) {
+        Con_Printf("light_apply: oom\n");
+        return -1;
+    }
+
+    rc = light_snapshot_result(s_live_lightdata, LIVE_LIGHTING_MAX,
+                               s_live_rgblightdata,
+                               lightofs, MAX_MAP_FACES,
+                               &mono_size, &face_count);
+    if (rc != 0) {
+        free(lightofs);
+        Con_Printf("light_apply: snapshot overflow\n");
+        return rc;
+    }
+
+    mod->lightdata    = s_live_lightdata;
+    mod->rgblightdata = s_live_rgblightdata;
+    s_live_lit = 1;
+
+    /* Engine surfaces should be 1:1 with the BSP face array. A drift
+     * means the loaded .bsp on disk doesn't match cl.worldmodel -- not
+     * fatal, but we should only repoint what overlaps. */
+    max_faces = mod->numsurfaces < face_count
+              ? mod->numsurfaces : face_count;
+    if (mod->numsurfaces != face_count)
+    {
+        Con_Printf("light_apply: surface count drift (engine=%d, bake=%d); "
+                   "applying first %d faces only\n",
+                   mod->numsurfaces, face_count, max_faces);
+    }
+
+    surf = mod->surfaces;
+    for (i = 0; i < max_faces; i++, surf++)
+    {
+        int ofs = lightofs[i];
+        if (ofs < 0 || ofs >= mono_size) {
+            surf->samples     = NULL;
+            surf->rgb_samples = NULL;
+        } else {
+            surf->samples     = s_live_lightdata    + ofs;
+            surf->rgb_samples = s_live_rgblightdata + ofs * 3;
+        }
+        surf->dlightframe = r_framecount;
+    }
+
+    free(lightofs);
+    Con_Printf("light_apply: applied (%d faces, %d bytes mono / %d bytes lit)\n",
+               face_count, mono_size, mono_size * 3);
+    return 0;
+}

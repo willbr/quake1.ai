@@ -1720,6 +1720,12 @@ static void draw_light_opts_window(void)
     IG_TextUnformatted("          dirt off  gain 1.0  depth 128  samples 32");
     IG_TextUnformatted("Worldspawn key:  _minlight <value>  sets a brightness floor.");
 
+    /* light_apply re-bakes the running map's BSP from disk and paints
+     * the result onto cl.worldmodel; works on stock id1 maps without
+     * needing an editor scene. */
+    if (IG_Button("Apply now (re-bake current map)"))
+        ui_exec("light_apply\n");
+    IG_SameLine(0, -1);
     if (IG_Button("Reset to defaults"))
     {
         Cvar_SetValue("editor_light_scaledist",  1.0f);

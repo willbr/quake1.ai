@@ -313,6 +313,41 @@ int light_snapshot_result(unsigned char *out_mono, int mono_cap,
  * cmdlib/bspfile path, then run the bake without touching qbsp's
  * globals. Discards the result. Wired to the `light_bench <name>`
  * console command. */
+int light_relight_loaded_bsp(const char *bsp_path)
+{
+    jmp_buf err_buf;
+
+    if (!bsp_path || !bsp_path[0]) return 1;
+
+    light_reset_state();
+
+    qbsp_err_jmp    = &err_buf;
+    qbsp_err_msg[0] = '\0';
+    if (setjmp(err_buf) != 0) {
+        Con_Printf("light_relight_loaded_bsp: %s\n", qbsp_err_msg);
+        qbsp_err_jmp = NULL;
+        return 1;
+    }
+
+    LoadBSPFile((char *)bsp_path);
+
+    /* Reapply persistent opts AFTER load (which may have changed
+     * dirt_samples via reset) and BEFORE LightWorld so the bake uses
+     * the editor's current slider values. */
+    apply_persistent_opts();
+
+    lightdatasize = 0;
+    memset(dlightdata, 0, sizeof(dlightdata));
+    memset(light_rgb_dlightdata, 0, MAX_MAP_LIGHTING * 3);
+
+    LoadEntities();
+    MakeTnodes(&dmodels[0]);
+    LightWorld();
+
+    qbsp_err_jmp = NULL;
+    return 0;
+}
+
 int light_bench(const char *bsp_path)
 {
     extern double I_FloatTime(void);

@@ -79,6 +79,16 @@ int light_compile_to_memory(light_options_t *opts,
 int light_bench(const char *bsp_path);
 
 /*
+ * In-place bake against a .bsp on disk: same loading + LightWorld path
+ * as light_bench, but does NOT discard. Leaves the freshly baked
+ * dlightdata + light_rgb_dlightdata + dface[].lightofs in LIGHT's
+ * globals so the caller can copy them out via light_snapshot_result.
+ * Honours the current persistent options (dirt, extrasamples, etc.).
+ * Returns 0 on success.
+ */
+int light_relight_loaded_bsp(const char *bsp_path);
+
+/*
  * Set the entity-data lump (dentdata) directly from a caller-provided
  * string. The string is COM_Parse-style: `{ "key" "value" ... }` blocks
  * separated by whitespace. Used by the live-bake path so editor edits

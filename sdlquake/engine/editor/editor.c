@@ -1058,6 +1058,33 @@ static void Editor_Cmd_LightBench_f(void)
  * SDL_Thread; the result lands via Editor_LightBake_Poll which runs
  * every editor frame.
  */
+/*
+ * light_apply: re-bake lighting against the running map's .bsp on disk
+ * and paint the result onto cl.worldmodel. Bypasses qbsp + the brush-
+ * decompile gap that editor_compile_full hits on stock maps; just use
+ * the BSP that's already loaded as the geometry source. Pairs with the
+ * Light... popup so you can toggle AO / change rangescale and instantly
+ * see the result, without needing the editor scene to be populated.
+ */
+static void Editor_Cmd_LightApply_f(void)
+{
+    char path[1024];
+    light_options_t lopts;
+
+    if (!cl.worldmodel || !cl.worldmodel->name[0]) {
+        Con_Printf("light_apply: no map loaded\n");
+        return;
+    }
+
+    snprintf(path, sizeof(path), "%s/%s",
+             com_gamedir, cl.worldmodel->name);
+
+    editor_light_opts_from_cvars(&lopts);
+    light_set_persistent_options(&lopts);
+
+    Editor_LightBake_ApplyFromDisk(path);
+}
+
 static void Editor_Cmd_Relight_f(void)
 {
     int rc;
@@ -1642,6 +1669,7 @@ void Editor_Init(void)
     Cmd_AddCommand("vis_bench",             Editor_Cmd_VisBench_f);
     Cmd_AddCommand("light_bench", Editor_Cmd_LightBench_f);
     Cmd_AddCommand("editor_relight", Editor_Cmd_Relight_f);
+    Cmd_AddCommand("light_apply",    Editor_Cmd_LightApply_f);
 
     History_Init();
     Editor_LightBake_Init();

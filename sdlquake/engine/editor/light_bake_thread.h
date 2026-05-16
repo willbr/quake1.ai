@@ -46,6 +46,19 @@ int  Editor_LightBake_Trigger(void);
  */
 void Editor_LightBake_Poll(void);
 
+/*
+ * Synchronous bake-and-apply against a .bsp on disk, no editor session
+ * required. Loads bsp_path into LIGHT's globals (LoadBSPFile), runs
+ * LightWorld using the current persistent options, snapshots the result
+ * into the live side buffer, and repoints cl.worldmodel + surfaces so
+ * the rendered scene picks up the new lightmap on the next frame.
+ *
+ * This is the "I just want to see my lighting changes on the running
+ * map" path; it bypasses qbsp + the brush-decompile-from-BSP gap that
+ * editor_compile_full hits. Returns 0 on success.
+ */
+int  Editor_LightBake_ApplyFromDisk(const char *bsp_path);
+
 #ifdef __cplusplus
 }
 #endif
