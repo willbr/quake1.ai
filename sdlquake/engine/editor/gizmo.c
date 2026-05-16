@@ -1098,7 +1098,8 @@ ang_check:
         {
             vec3_t hit, n, mins, maxs;
             if (surface_hit_for_drag(sx, sy, hit, n)
-             && Editor_SelectionBBox(mins, maxs))
+             && Editor_SelectionBBox(mins, maxs)
+             && fabsf(n[s_drag_axis]) > 0.1f)
             {
                 float off    = surface_offset_along_normal(mins, maxs, n);
                 float target = hit[s_drag_axis] + n[s_drag_axis] * off;
