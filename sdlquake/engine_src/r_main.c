@@ -276,6 +276,11 @@ void R_Init (void)
 	Cmd_AddCommand ("r_lit_info", R_LitInfo_f);
 
 	R_DecalsInit ();
+
+	{
+		extern void Lightmap_Init(void);
+		Lightmap_Init();
+	}
 }
 
 /*
