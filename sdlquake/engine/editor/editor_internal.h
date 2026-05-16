@@ -82,6 +82,19 @@ int  Editor_PickAt       (float sx, float sy, int *out_ent, int *out_brush,
 // where the user is looking.
 int  Editor_RaycastForPlacement(float sx, float sy,
                                 vec3_t out_hit, vec3_t out_normal);
+// A (entity, brush) pair to exclude from the editor-brush face pass of
+// the surface raycast. Used by the gizmo snap path so a brush being
+// dragged doesn't snap to its own faces.
+typedef struct {
+    int e_idx;
+    int b_idx;
+} editor_skip_pair_t;
+// Same trace as Editor_RaycastForPlacement, but skips any editor brush
+// matching one of `skip[0..n_skip)`. World-BSP hits aren't filtered
+// (you can't drag world BSP).
+int  Editor_RaycastForPlacement_Ex(float sx, float sy,
+                                   const editor_skip_pair_t *skip, int n_skip,
+                                   vec3_t out_hit, vec3_t out_normal);
 // Map a classname to its alias model path (if known). Returns NULL for
 // classes without a registered model. map_io.c uses this when binding
 // SV_MakeStatic'd entities to their cl_static_entities[] counterpart.

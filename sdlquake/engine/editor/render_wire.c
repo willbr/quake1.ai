@@ -2147,6 +2147,15 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush,
 int Editor_RaycastForPlacement(float sx, float sy,
                                vec3_t out_hit, vec3_t out_normal)
 {
+    return Editor_RaycastForPlacement_Ex(sx, sy, NULL, 0, out_hit, out_normal);
+}
+
+// Same trace, but skips any editor brush listed in `skip`. n_skip == 0
+// (or skip == NULL) is identical to Editor_RaycastForPlacement.
+int Editor_RaycastForPlacement_Ex(float sx, float sy,
+                                  const editor_skip_pair_t *skip, int n_skip,
+                                  vec3_t out_hit, vec3_t out_normal)
+{
     extern qboolean SV_RecursiveHullCheck (hull_t *, int, float, float,
                                            vec3_t, vec3_t, trace_t *);
     const float TRACE_DIST = 10000.0f;
@@ -2154,7 +2163,7 @@ int Editor_RaycastForPlacement(float sx, float sy,
     int    have_hit = 0;
     float  best_t = 1e30f;
     vec3_t best_n = { 0, 0, 1 };
-    int    i, j, k;
+    int    i, j, k, s;
 
     Editor_ScreenToRay(sx, sy, origin, dir);
 
@@ -2186,6 +2195,8 @@ int Editor_RaycastForPlacement(float sx, float sy,
 
     // Editor brushes: find the nearest face hit. Skip hidden categories so
     // the user doesn't drop an entity onto a filtered-out trigger volume.
+    // Also skip any pair listed in `skip` (gizmo snap excludes the dragged
+    // selection so a brush doesn't snap to itself).
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
@@ -2194,7 +2205,13 @@ int Editor_RaycastForPlacement(float sx, float sy,
         for (j = 0; j < e->numbrushes; j++)
         {
             edit_brush_t *b = &e->brushes[j];
+            int skipped = 0;
             if (!b->valid) continue;
+            for (s = 0; s < n_skip; s++)
+            {
+                if (skip[s].e_idx == i && skip[s].b_idx == j) { skipped = 1; break; }
+            }
+            if (skipped) continue;
             for (k = 0; k < b->numfaces; k++)
             {
                 edit_face_t *f = &b->faces[k];
