@@ -137,7 +137,8 @@ void Sys_Error(char *error, ...)
     vsnprintf(text, sizeof(text), error, argptr);
     va_end(argptr);
     fprintf(stderr, "Quake Error: %s\n", text);
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Quake Error", text, NULL);
+    if (!mcp_active && !sys_headless)
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Quake Error", text, NULL);
     Host_Shutdown();
     SDL_Quit();
     exit(1);
