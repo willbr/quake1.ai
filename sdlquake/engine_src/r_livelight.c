@@ -142,7 +142,21 @@ static void apply_to_surface(msurface_t *surf,
 			if (sd < 0) sd = -sd;
 			d = (sd > td) ? (float)sd + (td>>1) : (float)td + (sd>>1);
 			if (d >= minlight) continue;
-			add = (rad - d);
+			/* `(rad - d)` is the natural Quake dlight falloff up
+			 * to ~rad (300+ for default lights). Writing it raw
+			 * into byte rgb_samples saturates at 255 and creates
+			 * sharp transitions where the saturation boundary
+			 * meets unsaturated neighbours. The downstream block
+			 * writer's unsigned bilinear-interp then underflows
+			 * past 0 on those steep descents → visible BLACK
+			 * BANDS in r_lightmap mode with preview ON.
+			 *
+			 * Scale by 1/4 so a single light's per-channel byte
+			 * delta tops out around ~rad/4 ≈ 75 — keeps enough
+			 * headroom under 255 that the interpolation between
+			 * adjacent texels stays positive across the whole
+			 * 16-pixel block. */
+			add = (rad - d) * 0.25f;
 			for (ch = 0; ch < 3; ch++) {
 				int v = (int)lm[idx + ch] + sign * (int)(add * color[ch]);
 				if (v < 0)   v = 0;
