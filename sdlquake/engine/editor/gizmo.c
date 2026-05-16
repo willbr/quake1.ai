@@ -98,12 +98,15 @@ static float surface_offset_along_normal(const vec3_t mins, const vec3_t maxs,
 static int surface_hit_for_drag(float sx, float sy,
                                 vec3_t out_hit, vec3_t out_normal)
 {
-    enum { MAX_SKIP = 64 };
-    edit_skip_pair_t skip[MAX_SKIP];
+    int n_sel = Scene_NumSelected();
     int n_skip = 0;
-    int n = Scene_NumSelected();
-    int i, e_idx, b_idx;
-    for (i = 0; i < n && n_skip < MAX_SKIP; i++)
+    int i, e_idx, b_idx, hit;
+    edit_skip_pair_t *skip;
+    if (n_sel <= 0)
+        return Editor_RaycastForPlacement_Ex(sx, sy, NULL, 0,
+                                             out_hit, out_normal);
+    skip = (edit_skip_pair_t *)malloc(n_sel * sizeof(*skip));
+    for (i = 0; i < n_sel; i++)
     {
         if (!Scene_GetSelected(i, &e_idx, &b_idx)) continue;
         if (b_idx < 0) continue;            // entity ref — no brush face to skip
@@ -111,8 +114,10 @@ static int surface_hit_for_drag(float sx, float sy,
         skip[n_skip].b_idx = b_idx;
         n_skip++;
     }
-    return Editor_RaycastForPlacement_Ex(sx, sy, skip, n_skip,
-                                         out_hit, out_normal);
+    hit = Editor_RaycastForPlacement_Ex(sx, sy, skip, n_skip,
+                                        out_hit, out_normal);
+    free(skip);
+    return hit;
 }
 
 // -----------------------------------------------------------------------------
