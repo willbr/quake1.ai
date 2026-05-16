@@ -88,12 +88,12 @@ int  Editor_RaycastForPlacement(float sx, float sy,
 typedef struct {
     int e_idx;
     int b_idx;
-} editor_skip_pair_t;
+} edit_skip_pair_t;
 // Same trace as Editor_RaycastForPlacement, but skips any editor brush
 // matching one of `skip[0..n_skip)`. World-BSP hits aren't filtered
 // (you can't drag world BSP).
 int  Editor_RaycastForPlacement_Ex(float sx, float sy,
-                                   const editor_skip_pair_t *skip, int n_skip,
+                                   const edit_skip_pair_t *skip, int n_skip,
                                    vec3_t out_hit, vec3_t out_normal);
 // Map a classname to its alias model path (if known). Returns NULL for
 // classes without a registered model. map_io.c uses this when binding

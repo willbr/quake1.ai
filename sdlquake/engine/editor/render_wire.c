@@ -2153,7 +2153,7 @@ int Editor_RaycastForPlacement(float sx, float sy,
 // Same trace, but skips any editor brush listed in `skip`. n_skip == 0
 // (or skip == NULL) is identical to Editor_RaycastForPlacement.
 int Editor_RaycastForPlacement_Ex(float sx, float sy,
-                                  const editor_skip_pair_t *skip, int n_skip,
+                                  const edit_skip_pair_t *skip, int n_skip,
                                   vec3_t out_hit, vec3_t out_normal)
 {
     extern qboolean SV_RecursiveHullCheck (hull_t *, int, float, float,
