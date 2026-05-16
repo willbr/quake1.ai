@@ -286,6 +286,11 @@ static void apply_snapshot(void)
         surf->dlightframe = r_framecount;
     }
 
+    /* Same cache-staleness fix as Editor_LightBake_ApplyFromDisk: a
+     * dlightframe bump alone leaves visible surfaces serving stale
+     * cached pixels until something else invalidates them. */
+    D_FlushCaches();
+
     Con_Printf("light bake: applied (%d faces, %d bytes mono / %d bytes lit)\n",
                s_snap.face_count, s_snap.mono_size, s_snap.mono_size * 3);
 
@@ -372,6 +377,20 @@ int Editor_LightBake_ApplyFromDisk(const char *bsp_path)
         }
         surf->dlightframe = r_framecount;
     }
+
+    /* light_apply runs during console processing, before R_RenderView
+     * bumps r_framecount, so setting dlightframe = r_framecount lands
+     * one behind: the next frame's cache check sees
+     * `dlightframe (X) != r_framecount (X+1)` AND cache->dlight is
+     * still 0 from the previous render, so D_CacheSurface returns the
+     * stale cached pixels instead of re-rendering. The visible
+     * symptom is "AO doesn't appear until I walk around" (new
+     * surfaces entering the frustum allocate fresh caches). Flushing
+     * the entire surface cache nulls every cachespots[*] so the next
+     * D_CacheSurface call always falls through to D_SCAlloc +
+     * R_DrawSurface, which reads our freshly-repointed surf->samples.
+     * Same precedent as host.c:503 on map load. */
+    D_FlushCaches();
 
     free(lightofs);
     Con_Printf("light_apply: applied (%d faces, %d bytes mono / %d bytes lit)\n",
