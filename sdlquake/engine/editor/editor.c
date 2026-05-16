@@ -122,7 +122,7 @@ cvar_t      editor_brush_hollow_thickness = { "editor_brush_hollow_thickness", "
 // running Compile + Light. Approximation is additive only — it cannot
 // reduce or replace the existing baked lightmap; the full bake remains
 // authoritative for any final result.
-cvar_t      paint_light_preview  = { "paint_light_preview", "1" };
+cvar_t      paint_light_preview  = { "paint_light_preview", "0" };
 
 // Light-gizmo verbosity in the editor viewport. 0 = none, 1 = selected
 // light only (default; Quake maps frequently carry 100+ light entities
