@@ -1957,7 +1957,13 @@ static int light_cand_cmp(const void *a, const void *b)
     return 0;
 }
 
-static void editor_refresh_light_preview(void)
+/* Called from V_RenderView immediately before R_PushDlights, so the marker
+ * (R_PushDlights) and the consumer (R_AddDynamicLights_RGB) see identical
+ * cl_dlights[]. Running it later (e.g. from R_RenderView_) leaves R_PushDlights
+ * one frame behind on slot assignments — camera motion shifts the distance
+ * sort, slot N refers to different lights frame-to-frame, and surfaces
+ * marked with N's bits get coloured by some other light → visible flicker. */
+void Editor_RefreshDlights(void)
 {
     int i, n_cands = 0;
     int n_filled;
@@ -1965,9 +1971,15 @@ static void editor_refresh_light_preview(void)
     extern vec3_t   r_origin;     /* current view origin (set by R_SetupFrame) */
     vec3_t cam;
 
+    /* V_RenderView calls this every frame, including when the editor is
+     * closed — bail before touching cl_dlights so muzzle flashes,
+     * explosions, etc. survive normal gameplay. */
+    if (!s_open) return;
+
     /* Mark all dlight slots dead so a stale entry from a prior frame
-     * doesn't keep illuminating after the user disables preview or
-     * removes a light. */
+     * doesn't keep illuminating after the user removes a light or
+     * disables preview mid-session. Game-driven transients are already
+     * frozen here — gameplay sim is paused while the editor is open. */
     for (i = 0; i < MAX_DLIGHTS; i++)
     {
         cl_dlights[i].radius = 0;
@@ -2051,7 +2063,11 @@ void Editor_PreRender(void)
      * + dlightframe bumped so the cache rebuilds on this frame. */
     Editor_LightBake_Poll();
 
-    editor_refresh_light_preview();
+    /* Note: the dlight preview pump (Editor_RefreshDlights) intentionally
+     * runs earlier — V_RenderView fires it before R_PushDlights so the
+     * marking pass and the colour-application pass agree on slot indices.
+     * Calling it here would re-introduce the 1-frame flicker on camera
+     * motion. */
 
     // View-mode change: a selection from the previous mode may now refer
     // to a hidden entry (a transient that's about to be filtered out, or

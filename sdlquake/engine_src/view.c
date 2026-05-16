@@ -1067,6 +1067,16 @@ void V_RenderView (void)
 			V_CalcRefdef ();
 	}
 
+	/* Editor live-preview pump: refresh cl_dlights from edit_scene before
+	 * R_PushDlights marks surfaces. Both passes must see the same slot
+	 * assignments — otherwise camera-motion-induced sort shifts make
+	 * surface dlightbits refer to a different light than R_AddDynamicLights
+	 * reads, producing visible flicker. No-op when the editor is closed. */
+	{
+		extern void Editor_RefreshDlights(void);
+		Editor_RefreshDlights();
+	}
+
 	R_PushDlights ();
 
 	if (lcd_x.value)
