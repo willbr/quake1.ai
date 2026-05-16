@@ -49,6 +49,7 @@ extern cvar_t   editor_grid_absolute;
 extern cvar_t   editor_rotate_snap;
 extern cvar_t   editor_rotate_snap_size;
 extern cvar_t   editor_rotate_snap_absolute;
+extern cvar_t   editor_snap_surface;
 
 static float snap_to_grid(float v)
 {
@@ -56,6 +57,62 @@ static float snap_to_grid(float v)
     float g = editor_grid_size.value;
     if (g <= 0.0f) return v;
     return floorf(v / g + 0.5f) * g;
+}
+
+// Signed distance from the selection bbox centroid to the bbox face whose
+// outward normal is most opposite to `n`. For axial n=(0,0,1) and an
+// axis-aligned bbox, this is just (maxs[2]-mins[2])*0.5. For oblique n,
+// project all 8 corners onto -n and take the max — that's the corner
+// sticking out the most against the surface. Used as the offset to add
+// along `n` after a surface hit so the bbox face lands flush on the
+// surface rather than the centroid landing on it.
+static float surface_offset_along_normal(const vec3_t mins, const vec3_t maxs,
+                                         const vec3_t n)
+{
+    vec3_t centroid;
+    float best = -1e30f;
+    int c, k;
+    for (k = 0; k < 3; k++) centroid[k] = (mins[k] + maxs[k]) * 0.5f;
+    for (c = 0; c < 8; c++)
+    {
+        vec3_t corner;
+        float  proj;
+        corner[0] = (c & 1) ? maxs[0] : mins[0];
+        corner[1] = (c & 2) ? maxs[1] : mins[1];
+        corner[2] = (c & 4) ? maxs[2] : mins[2];
+        // -dot(corner - centroid, n) — how far the corner sticks out
+        // OPPOSITE to n (toward the surface that has outward-normal n).
+        proj = -((corner[0] - centroid[0]) * n[0]
+               + (corner[1] - centroid[1]) * n[1]
+               + (corner[2] - centroid[2]) * n[2]);
+        if (proj > best) best = proj;
+    }
+    return best;
+}
+
+// Cursor-ray surface trace for the active drag. Same as
+// Editor_RaycastForPlacement but excludes every currently-selected brush
+// (and the brushes of every selected entity) so a brush being moved
+// doesn't snap onto its own faces. Point-entity selections add no skip
+// entries — they have no faces to skip in the trace.
+static int surface_hit_for_drag(float sx, float sy,
+                                vec3_t out_hit, vec3_t out_normal)
+{
+    enum { MAX_SKIP = 64 };
+    edit_skip_pair_t skip[MAX_SKIP];
+    int n_skip = 0;
+    int n = Scene_NumSelected();
+    int i, e_idx, b_idx;
+    for (i = 0; i < n && n_skip < MAX_SKIP; i++)
+    {
+        if (!Scene_GetSelected(i, &e_idx, &b_idx)) continue;
+        if (b_idx < 0) continue;            // entity ref — no brush face to skip
+        skip[n_skip].e_idx = e_idx;
+        skip[n_skip].b_idx = b_idx;
+        n_skip++;
+    }
+    return Editor_RaycastForPlacement_Ex(sx, sy, skip, n_skip,
+                                         out_hit, out_normal);
 }
 
 // -----------------------------------------------------------------------------
