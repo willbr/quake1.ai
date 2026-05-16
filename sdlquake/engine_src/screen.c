@@ -408,6 +408,10 @@ void SCR_Init (void)
 // register our commands
 //
 	Cmd_AddCommand ("screenshot",SCR_ScreenShot_f);
+	{
+		extern void SCR_ScreenShotPNG_f(void);
+		Cmd_AddCommand ("screenshot_png", SCR_ScreenShotPNG_f);
+	}
 	Cmd_AddCommand ("sizeup",SCR_SizeUp_f);
 	Cmd_AddCommand ("sizedown",SCR_SizeDown_f);
 
@@ -782,7 +786,43 @@ void SCR_ScreenShot_f (void)
 									//  for linear writes all the time
 
 	Con_Printf ("Wrote %s\n", pcxname);
-} 
+}
+
+/*
+==================
+SCR_ScreenShotPNG_f
+
+Like SCR_ScreenShot_f but writes PNG via VID_SaveScreenshotPNG
+(platform/vid_sdl.c). Used by recreate-the-bug investigation cycles —
+result is viewable with any image tool without PCX conversion.
+Saves to com_gamedir/quakeNN.png with auto-incrementing index.
+==================
+*/
+void SCR_ScreenShotPNG_f (void)
+{
+	extern int VID_SaveScreenshotPNG(const char *path);
+	int  i;
+	char pngname[80];
+	char checkname[MAX_OSPATH];
+
+	strcpy(pngname, "quake00.png");
+	for (i = 0; i <= 99; i++) {
+		pngname[5] = i/10 + '0';
+		pngname[6] = i%10 + '0';
+		sprintf(checkname, "%s/%s", com_gamedir, pngname);
+		if (Sys_FileTime(checkname) == -1) break;
+	}
+	if (i == 100) {
+		Con_Printf("SCR_ScreenShotPNG_f: couldn't create a PNG file\n");
+		return;
+	}
+	D_EnableBackBufferAccess();
+	if (VID_SaveScreenshotPNG(checkname))
+		Con_Printf("Wrote %s\n", checkname);
+	else
+		Con_Printf("SCR_ScreenShotPNG_f: VID_SaveScreenshotPNG failed\n");
+	D_DisableBackBufferAccess();
+}
 
 
 //=============================================================================
