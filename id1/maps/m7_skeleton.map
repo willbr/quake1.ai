@@ -1,16 +1,6 @@
-// Phase 8 / M7 -- bespoke level skeleton.
-//
-// One 1024x512x256 room with internal partitions, exercising every Phase 8
-// system at least once. Polish + multi-room layout is for a future pass.
-//
-// Compile via the editor: zig build run -- +map m7_skeleton then
-//     editor_open ; editor_compile_export
-// (or hand-compile through qbsp + vis + light if running standalone).
-
 {
 "classname" "worldspawn"
 "wad" "gfx/base.wad"
-// Floor
 {
 ( 512 256 16 ) ( 512 256 0 ) ( 512 -256 0 ) floor0_1 0 0 0 1 1
 ( -512 -256 16 ) ( -512 -256 0 ) ( -512 256 0 ) floor0_1 0 0 0 1 1
@@ -19,7 +9,6 @@
 ( 512 256 16 ) ( 512 -256 16 ) ( -512 -256 16 ) floor0_1 0 0 0 1 1
 ( -512 256 0 ) ( -512 -256 0 ) ( 512 -256 0 ) floor0_1 0 0 0 1 1
 }
-// Ceiling
 {
 ( 512 256 256 ) ( 512 256 240 ) ( 512 -256 240 ) sky1 0 0 0 1 1
 ( -512 -256 256 ) ( -512 -256 240 ) ( -512 256 240 ) sky1 0 0 0 1 1
@@ -28,7 +17,6 @@
 ( 512 256 256 ) ( 512 -256 256 ) ( -512 -256 256 ) sky1 0 0 0 1 1
 ( -512 256 240 ) ( -512 -256 240 ) ( 512 -256 240 ) sky1 0 0 0 1 1
 }
-// North wall
 {
 ( 512 256 256 ) ( 512 256 16 ) ( 512 240 16 ) wbrick1_5 0 0 0 1 1
 ( -512 240 256 ) ( -512 240 16 ) ( -512 256 16 ) wbrick1_5 0 0 0 1 1
@@ -37,7 +25,6 @@
 ( 512 256 256 ) ( 512 240 256 ) ( -512 240 256 ) wbrick1_5 0 0 0 1 1
 ( -512 256 16 ) ( -512 240 16 ) ( 512 240 16 ) wbrick1_5 0 0 0 1 1
 }
-// South wall
 {
 ( 512 -240 256 ) ( 512 -240 16 ) ( 512 -256 16 ) wbrick1_5 0 0 0 1 1
 ( -512 -256 256 ) ( -512 -256 16 ) ( -512 -240 16 ) wbrick1_5 0 0 0 1 1
@@ -46,7 +33,6 @@
 ( 512 -240 256 ) ( 512 -256 256 ) ( -512 -256 256 ) wbrick1_5 0 0 0 1 1
 ( -512 -240 16 ) ( -512 -256 16 ) ( 512 -256 16 ) wbrick1_5 0 0 0 1 1
 }
-// East wall
 {
 ( 512 256 256 ) ( 512 256 16 ) ( 512 -256 16 ) wbrick1_5 0 0 0 1 1
 ( 496 -256 256 ) ( 496 -256 16 ) ( 496 256 16 ) wbrick1_5 0 0 0 1 1
@@ -55,7 +41,6 @@
 ( 512 256 256 ) ( 512 -256 256 ) ( 496 -256 256 ) wbrick1_5 0 0 0 1 1
 ( 496 256 16 ) ( 496 -256 16 ) ( 512 -256 16 ) wbrick1_5 0 0 0 1 1
 }
-// West wall
 {
 ( -496 256 256 ) ( -496 256 16 ) ( -496 -256 16 ) wbrick1_5 0 0 0 1 1
 ( -512 -256 256 ) ( -512 -256 16 ) ( -512 256 16 ) wbrick1_5 0 0 0 1 1
@@ -64,8 +49,6 @@
 ( -496 256 256 ) ( -496 -256 256 ) ( -512 -256 256 ) wbrick1_5 0 0 0 1 1
 ( -512 256 16 ) ( -512 -256 16 ) ( -496 -256 16 ) wbrick1_5 0 0 0 1 1
 }
-// Internal partition wall at x=0 (creates 2 rooms; leaves a 128-wide
-// gap centred on y=0 for the corridor)
 {
 ( 8 256 256 ) ( 8 256 16 ) ( 8 64 16 ) wbrick1_5 0 0 0 1 1
 ( -8 64 256 ) ( -8 64 16 ) ( -8 256 16 ) wbrick1_5 0 0 0 1 1
@@ -83,15 +66,11 @@
 ( -8 -64 16 ) ( -8 -256 16 ) ( 8 -256 16 ) wbrick1_5 0 0 0 1 1
 }
 }
-
-// ---- Player start (west room) ----
 {
 "classname" "info_player_start"
 "origin" "-256 0 32"
 "angle" "0"
 }
-
-// ---- Slipgate (east room, exit) ----
 {
 "classname" "trigger_changelevel"
 "map" "e1m1"
@@ -104,8 +83,6 @@
 ( 320 64 16 ) ( 320 -64 16 ) ( 384 -64 16 ) trigger 0 0 0 1 1
 }
 }
-
-// ---- Lights ----
 {
 "classname" "light"
 "origin" "-256 -200 200"
@@ -121,39 +98,32 @@
 "origin" "256 -200 80"
 "light" "180"
 }
-
-// ---- Enemies (sense filter + retrofit auto-patrols pick these up) ----
 {
 "classname" "monster_army"
-"origin" "-128 128 32"
+"origin" "-160 144 48"
 "angle" "270"
 }
 {
 "classname" "monster_army"
-"origin" "128 0 32"
+"origin" "128 0 48"
 "angle" "180"
 }
 {
 "classname" "monster_army"
-"origin" "256 128 32"
+"origin" "256 128 48"
 "angle" "180"
 }
 {
 "classname" "monster_ogre"
-"origin" "320 -128 32"
+"origin" "320 -128 48"
 "angle" "180"
 }
-
-// ---- Phase 8 testbed entities ----
-// Persistent smoke source in the central corridor -- AI loses LOS
-// through it once smoke density crosses 0.4 in a cell.
 {
 "classname" "misc_smokegrenade"
 "origin" "0 0 32"
-"dmg"    "0.5"
+"dmg" "0.5"
 "distance" "128"
 }
-// Wind source pushing east -- the smoke billows toward the east room.
 {
 "classname" "info_wind_source"
 "origin" "0 0 64"
