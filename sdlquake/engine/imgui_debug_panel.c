@@ -153,13 +153,13 @@ static void draw_hud_section(void)
 // Public entry point - called once per frame from imgui_layer.c.
 // ---------------------------------------------------------------------------
 
-void DebugPanel_Draw(void)
+void DebugPanel_Draw(int x, int y, int w, int h)
 {
-    // Sits below Entities (which is at 950,10 size 310x490). The Console
-    // shrinks to width 930 so this panel can take the right-hand column of
-    // the bottom row without overlap.
-    IG_SetNextWindowSize(310, 280, IG_Cond_Once);
-    IG_SetNextWindowPos (950, 510, IG_Cond_Once);
+    // Rect comes from imgui_layer.c's responsive grid so the panel resizes
+    // with the window. Cond_Always means a user drag snaps back — this is a
+    // dev overlay, not a user-facing UI.
+    IG_SetNextWindowPos ((float)x, (float)y, IG_Cond_Always);
+    IG_SetNextWindowSize((float)w, (float)h, IG_Cond_Always);
     if (!IG_Begin("Debug Render", NULL, IG_WF_None)) { IG_End(); return; }
 
     draw_ai_section();

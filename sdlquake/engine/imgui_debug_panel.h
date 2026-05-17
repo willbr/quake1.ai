@@ -8,7 +8,9 @@
 extern "C" {
 #endif
 
-void DebugPanel_Draw(void);
+// Caller passes the panel rect (computed by imgui_layer.c from the current
+// display size) so the panel tracks window resizes.
+void DebugPanel_Draw(int x, int y, int w, int h);
 
 #ifdef __cplusplus
 }

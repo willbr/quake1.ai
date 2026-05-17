@@ -20,6 +20,74 @@ static int           s_inited   = 0;
 int imgui_ai_panel_open = 1;
 
 // ---------------------------------------------------------------------------
+// Responsive layout
+//
+// Recomputed each frame from the current display size so the F12 overlay
+// tracks window resizes. Panels apply their rect with IG_Cond_Always, which
+// means a user drag snaps back next frame — fine for a dev overlay.
+//
+//        col1 (Perf+AI)    col2 (Cvars)        col3 (Entities/DebugRender)
+//        +----------+      +------------+      +-----------+
+//        |   Perf   |      |            |      |           |
+//        +----------+      |   Cvars    |      | Entities  |
+//        |          |      |            |      |           |
+//        |   AI     |      |            |      |           |
+//        +----------+      +------------+      +-----------+
+//        |        Console (left+middle)        | Debug Rdr |
+//        +-------------------------------------+-----------+
+// ---------------------------------------------------------------------------
+
+typedef struct { int x, y, w, h; } rect_t;
+static rect_t s_perf, s_ai, s_cvars, s_entities, s_console, s_debug;
+
+static void compute_layout(void)
+{
+    float fw, fh;
+    IG_GetDisplaySize(&fw, &fh);
+    int W = (int)fw, H = (int)fh;
+    if (W < 800) W = 800;
+    if (H < 600) H = 600;
+
+    const int M      = 10;
+    const int PERF_W = 180, PERF_H = 60;
+
+    int col3_w = W * 22 / 100; if (col3_w < 280) col3_w = 280;
+    int col1_w = W * 27 / 100; if (col1_w < 360) col1_w = 360;
+    int col2_min = 240;
+    if (col1_w + col3_w + col2_min + M*4 > W) {
+        // Window narrow enough to overflow — shrink left/right proportionally.
+        int over = col1_w + col3_w + col2_min + M*4 - W;
+        int half = over / 2;
+        col1_w -= half;        if (col1_w < 240) col1_w = 240;
+        col3_w -= over - half; if (col3_w < 240) col3_w = 240;
+    }
+    int col2_w = W - col1_w - col3_w - M*4;
+    if (col2_w < col2_min) col2_w = col2_min;
+
+    int bottom_h = H * 28 / 100; if (bottom_h < 220) bottom_h = 220;
+    int top_y    = M + PERF_H + M;
+    int top_h    = H - top_y - bottom_h - M*2;
+    if (top_h < 200) top_h = 200;
+    int top_full_h = top_y + top_h - M;
+
+    s_perf.x = M; s_perf.y = M; s_perf.w = PERF_W; s_perf.h = PERF_H;
+    s_ai.x   = M; s_ai.y   = top_y; s_ai.w = col1_w; s_ai.h = top_h;
+
+    s_cvars.x    = M*2 + col1_w;   s_cvars.y    = M;
+    s_cvars.w    = col2_w;         s_cvars.h    = top_full_h;
+
+    s_entities.x = W - M - col3_w; s_entities.y = M;
+    s_entities.w = col3_w;         s_entities.h = top_full_h;
+
+    int bottom_y = top_y + top_h + M;
+    s_console.x  = M;              s_console.y  = bottom_y;
+    s_console.w  = W - col3_w - M*3; s_console.h = bottom_h;
+
+    s_debug.x    = W - M - col3_w; s_debug.y    = bottom_y;
+    s_debug.w    = col3_w;         s_debug.h    = bottom_h;
+}
+
+// ---------------------------------------------------------------------------
 // Panels
 // ---------------------------------------------------------------------------
 
@@ -27,8 +95,8 @@ static void draw_perf(void)
 {
     char buf[64];
     float fps = IG_GetFramerate();
-    IG_SetNextWindowPos(10, 10, IG_Cond_Always);
-    IG_SetNextWindowSize(180, 60, IG_Cond_Always);
+    IG_SetNextWindowPos ((float)s_perf.x, (float)s_perf.y, IG_Cond_Always);
+    IG_SetNextWindowSize((float)s_perf.w, (float)s_perf.h, IG_Cond_Always);
     IG_Begin("Perf", NULL,
         IG_WF_NoTitleBar | IG_WF_NoResize | IG_WF_NoMove |
         IG_WF_NoCollapse  | IG_WF_NoSavedSettings);
@@ -51,8 +119,8 @@ static const char *ai_state_name(int s) {
 static void draw_ai(void)
 {
     if (!imgui_ai_panel_open) return;
-    IG_SetNextWindowSize(420, 420, IG_Cond_Once);
-    IG_SetNextWindowPos(10, 80, IG_Cond_Once);
+    IG_SetNextWindowPos ((float)s_ai.x, (float)s_ai.y, IG_Cond_Always);
+    IG_SetNextWindowSize((float)s_ai.w, (float)s_ai.h, IG_Cond_Always);
     if (!IG_Begin("AI", &imgui_ai_panel_open, IG_WF_None)) { IG_End(); return; }
 
     int n = ImguiSupport_AI_Count();
@@ -137,8 +205,8 @@ static void draw_cvars(void)
     char value_buf[128];
     char id_buf[144];
 
-    IG_SetNextWindowSize(500, 490, IG_Cond_Once);
-    IG_SetNextWindowPos(440, 10, IG_Cond_Once);
+    IG_SetNextWindowPos ((float)s_cvars.x, (float)s_cvars.y, IG_Cond_Always);
+    IG_SetNextWindowSize((float)s_cvars.w, (float)s_cvars.h, IG_Cond_Always);
     if (!IG_Begin("Cvars", NULL, IG_WF_None)) { IG_End(); return; }
 
     IG_SetNextItemWidth(200);
@@ -201,10 +269,8 @@ static void draw_console(void)
     static char input_buf[256];
     static int  reclaim_focus = 0;
 
-    // 930 wide leaves room at x=950 for the Debug Render panel on the same
-    // bottom row (panel runs 950..1260, parallels Entities above it).
-    IG_SetNextWindowSize(930, 280, IG_Cond_Once);
-    IG_SetNextWindowPos(10, 510, IG_Cond_Once);
+    IG_SetNextWindowPos ((float)s_console.x, (float)s_console.y, IG_Cond_Always);
+    IG_SetNextWindowSize((float)s_console.w, (float)s_console.h, IG_Cond_Always);
     if (!IG_Begin("Console", NULL, IG_WF_None)) { IG_End(); return; }
 
     /* Checkbox pinned above the scroll region. */
@@ -255,8 +321,8 @@ static void draw_entities(void)
     char buf[64];
     int n = ImguiSupport_GetNumEdicts();
 
-    IG_SetNextWindowSize(310, 490, IG_Cond_Once);
-    IG_SetNextWindowPos(950, 10, IG_Cond_Once);
+    IG_SetNextWindowPos ((float)s_entities.x, (float)s_entities.y, IG_Cond_Always);
+    IG_SetNextWindowSize((float)s_entities.w, (float)s_entities.h, IG_Cond_Always);
     if (!IG_Begin("Entities", NULL, IG_WF_None)) { IG_End(); return; }
 
     snprintf(buf, sizeof(buf), "%d edicts", n);
@@ -371,12 +437,13 @@ void ImguiLayer_Render(void)
         }
         else
         {
+            compute_layout();
             draw_perf();
             draw_ai();
             draw_cvars();
             draw_entities();
             draw_console();
-            DebugPanel_Draw();
+            DebugPanel_Draw(s_debug.x, s_debug.y, s_debug.w, s_debug.h);
         }
     }
 
