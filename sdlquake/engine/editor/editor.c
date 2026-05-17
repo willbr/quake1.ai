@@ -349,6 +349,16 @@ static void Editor_Cmd_Open_f(void)
     }
     Con_Printf("editor: loaded %d entities from %s\n",
                edit_scene.numentities, path);
+
+    /* Unload the current BSP so the user isn't editing foo.map while the
+     * engine renders start.bsp underneath them. Auto-compile the just-
+     * loaded scene so the viewport lands on the map being authored —
+     * mirrors the not-found fallback above and editor_new's flow. The
+     * Cbuf defers editor_compile by one frame so CL_Disconnect_f's
+     * state changes settle first. */
+    cls.demonum = -1;
+    CL_Disconnect_f();
+    Cbuf_AddText("editor_compile\n");
 }
 
 static void Editor_Cmd_Save_f(void)
@@ -734,6 +744,23 @@ static void Editor_Cmd_Compile_f(void)
     {
         Con_Printf("editor_compile: no map loaded\n");
         return;
+    }
+
+    /* qbsp on a brushless scene emits a 0-node BSP that Mod_LoadNodes
+     * walks off the end of, taking the engine down. Refuse early so a
+     * stub .map (entities only, no geometry) doesn't crash the loader
+     * — common when editor_load lands on a freshly-authored skeleton. */
+    {
+        int total_brushes = 0;
+        int i;
+        for (i = 0; i < edit_scene.numentities; i++)
+            total_brushes += edit_scene.entities[i].numbrushes;
+        if (total_brushes == 0)
+        {
+            Con_Printf("editor_compile: scene has no brushes; "
+                       "add geometry before compiling\n");
+            return;
+        }
     }
 
     snprintf(map_path,  sizeof(map_path),
