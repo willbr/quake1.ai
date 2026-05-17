@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Requires Zig (tested on 0.14.1 and 0.16) and original Quake data files (`pak0.pak`, `pak1.pak`) in `id1/`. SDL3 is vendored per-OS — no system install needed.
+Requires Zig (tested on 0.14.1 and 0.16). The shareware `id1/pak0.pak` is committed (freely redistributable); registered `pak1.pak` (e2m*/e3m*/e4m*) is not, drop your own copy alongside if you have one. SDL3 is vendored per-OS — no system install needed. Phase 6 Doom/Wolf3D guns extract automatically from committed reference WADs (`ref/doom-data/DOOM1.WAD`, `ref/wolf3d-data/VSWAP.WL1`) on first build; outputs are gitignored and regenerated as needed (`rm id1/progs/v_doom*.spr` to force re-extraction).
 
 Supported hosts: **Windows x64** (vendored `SDL3.dll` + `.lib` under `sdlquake/vendor/SDL3-3.4.8/lib/x64/`) and **macOS arm64** (vendored `libSDL3.0.dylib` under `…/lib/macos/`). Linux is untested but the build paths in `build.zig` fall through to system SDL3 via `linkSystemLibrary`.
 

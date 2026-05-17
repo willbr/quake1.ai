@@ -77,9 +77,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    std.debug.print("extracting Phase 6 assets...\n", .{});
     try manifest.extractAll(io, arena);
-    std.debug.print("extract: ok\n", .{});
 }
 
 fn testPalette(io: Io, allocator: std.mem.Allocator) !void {

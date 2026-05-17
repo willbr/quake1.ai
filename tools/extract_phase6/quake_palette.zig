@@ -33,7 +33,7 @@ pub fn loadPalette(io: Io, allocator: Allocator) !Palette {
     } else |_| {}
 
     // 2. Read out of id1/PAK0.PAK.
-    const pak = try Dir.cwd().openFile(io, "id1/PAK0.PAK", .{});
+    const pak = try Dir.cwd().openFile(io, "id1/pak0.pak", .{});
     defer pak.close(io);
 
     var hdr: [PAK_HEADER_SIZE]u8 = undefined;

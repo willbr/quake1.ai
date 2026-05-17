@@ -319,7 +319,30 @@ fn blitPixels(
 // Driver
 // ---------------------------------------------------------------------------
 
+/// Stat every output file the extractor would produce. Returns true iff
+/// they all already exist on disk — extractor inputs (DOOM1.WAD, VSWAP.WL1,
+/// pak0.pak) are committed reference data that doesn't change in practice,
+/// so existence alone is a sufficient freshness check. `rm` any output to
+/// force re-extraction.
+fn allOutputsExist(io: Io) bool {
+    for (wolf_sprite_sets) |s| if (!pathExists(io, s.out_path)) return false;
+    for (wolf_sound_sets)  |s| if (!pathExists(io, s.out_path)) return false;
+    for (doom_sprite_sets) |s| if (!pathExists(io, s.out_path)) return false;
+    for (doom_sound_sets)  |s| if (!pathExists(io, s.out_path)) return false;
+    if (!pathExists(io, "id1/gfx/palette_doom.lmp")) return false;
+    return true;
+}
+
+fn pathExists(io: Io, path: []const u8) bool {
+    if (Dir.cwd().openFile(io, path, .{})) |f| {
+        f.close(io);
+        return true;
+    } else |_| return false;
+}
+
 pub fn extractAll(io: Io, allocator: Allocator) !void {
+    if (allOutputsExist(io)) return;
+    std.debug.print("extracting Phase 6 assets...\n", .{});
     const quake_pal = try palette_mod.loadPalette(io, allocator);
 
     // ----- Wolf sources -----

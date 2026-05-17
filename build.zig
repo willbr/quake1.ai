@@ -497,8 +497,20 @@ pub fn build(b: *std.Build) void {
         .name        = "extract_phase6",
         .root_module = extract_mod,
     });
+    // User-facing `zig build extract [-- args]` — preserves the dump/test
+    // sub-modes (-test_palette etc.).
     const extract_run = b.addRunArtifact(extract_exe);
     extract_run.setCwd(b.path(""));
     if (b.args) |args| extract_run.addArgs(args);
     b.step("extract", "Extract Wolf3D + Doom1 weapon assets into id1/").dependOn(&extract_run.step);
+
+    // Auto-extract on every `zig build` — the extractor stat-skips when all
+    // outputs are present (see manifest.allOutputsExist), so the steady-state
+    // cost is one process launch. Inputs (DOOM1.WAD, VSWAP.WL1, pak0.pak)
+    // are committed reference data; `rm id1/progs/v_doom*.spr` to force a
+    // re-extract. No args passed here so the no-args extract-everything path
+    // is taken regardless of what's after `--` on the build command.
+    const extract_auto = b.addRunArtifact(extract_exe);
+    extract_auto.setCwd(b.path(""));
+    b.getInstallStep().dependOn(&extract_auto.step);
 }
