@@ -779,15 +779,41 @@ static int mcp_next_screenshot_index(void)
 
 static void tool_screenshot(const char *id_json, const char *args)
 {
-    char path[512] = {0};
-    if (args) json_str(args, "path", path, sizeof(path));
+    char input[512] = {0};
+    if (args) json_str(args, "path", input, sizeof(input));
 
-    if (!path[0])
+    char path[512] = {0};
+    mcp_mkdir("screenshots");   /* ignore errors -- may already exist */
+
+    if (!input[0])
     {
-        mcp_mkdir("screenshots");   /* ignore errors -- may already exist */
         int n = mcp_next_screenshot_index();
         if (n == 0) { mcp_error(id_json, -32603, "screenshot dir full"); return; }
         snprintf(path, sizeof(path), "screenshots/shot_%04d.png", n);
+    }
+    else
+    {
+        /* Constrain every caller-supplied path to live inside screenshots/.
+           Strip directory components (any '/' or '\\' on Windows) so neither
+           absolute paths, drive letters, nor '..' traversals can escape. */
+        const char *base = input;
+        for (const char *p = input; *p; p++) {
+            if (*p == '/' || *p == '\\') base = p + 1;
+        }
+        if (!base[0] || base[0] == '.') {
+            mcp_error(id_json, -32602, "invalid screenshot filename");
+            return;
+        }
+        for (const char *p = base; *p; p++) {
+            unsigned char c = (unsigned char)*p;
+            int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                     (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+            if (!ok) {
+                mcp_error(id_json, -32602, "invalid screenshot filename");
+                return;
+            }
+        }
+        snprintf(path, sizeof(path), "screenshots/%s", base);
     }
 
     if (!VID_SaveScreenshotPNG(path))
