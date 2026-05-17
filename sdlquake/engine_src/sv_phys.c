@@ -1424,11 +1424,14 @@ void SV_Physics_Toss (edict_t *ent)
 		int idx = NUM_FOR_EDICT (ent);
 		if (idx > 0 && idx < MAX_EDICTS && sv.time >= sv_bounce_decal_next[idx])
 		{
-			if (trace.plane.normal[2] > 0.7f) {
-				R_SpawnDecal (trace.endpos, DECAL_BLOOD_SPLAT);
-			} else if (!R_SpawnBloodDrip (trace.endpos, trace.plane.normal)) {
-				// Degenerate projection (ceiling or near-horizontal) — fall back.
-				R_SpawnDecal (trace.endpos, DECAL_BLOOD_SPLAT);
+			// Immediate splat at impact point on every bounce — gives instant
+			// visual feedback. On walls we additionally start a drip that
+			// grows out of the splat over ~1.5s; the drip's first painted
+			// luxel is ~16 units down, so without the splat there's a
+			// half-second gap where nothing appears.
+			R_SpawnDecal (trace.endpos, DECAL_BLOOD_SPLAT);
+			if (trace.plane.normal[2] <= 0.7f) {
+				R_SpawnBloodDrip (trace.endpos, trace.plane.normal);
 			}
 			R_RunParticleEffect (trace.endpos, trace.plane.normal, 73, 3);
 			sv_bounce_decal_next[idx] = sv.time + 0.05;

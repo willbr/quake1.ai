@@ -299,18 +299,19 @@ void R_DecalsFrame (void)
 				dsq = gx*gx + gy*gy;
 				if (dsq < r_inner_sq || dsq > r_outer_sq) continue;
 				idx = (v * smax + u) * 3;
-				// Blood guarantees a red tint regardless of previous stains:
-				// floor R at +200 (positive boost), ceiling G/B at −100 (dim).
-				// Pure accumulation would let a prior scorch's negative R
-				// dominate and turn the pool black.
-				nr  = st->rgb[idx + 0] + 200;
-				if (nr < 200)   nr = 200;
-				if (nr > 4096)  nr = 4096;
-				ng  = st->rgb[idx + 1] - 100;
-				if (ng > -100)  ng = -100;
+				// Blood guarantees a dark-red tint regardless of previous stains:
+				// R darkened slightly, G/B suppressed hard. Each channel is
+				// clamped to never read brighter than its blood-tint ceiling,
+				// so prior bright stains (e.g. a fresh splat) are pushed down
+				// into the same dark-red pool colour rather than blending out.
+				nr  = st->rgb[idx + 0] - 50;
+				if (nr > -50)   nr = -50;
+				if (nr < -4096) nr = -4096;
+				ng  = st->rgb[idx + 1] - 250;
+				if (ng > -250)  ng = -250;
 				if (ng < -4096) ng = -4096;
-				nb  = st->rgb[idx + 2] - 100;
-				if (nb > -100)  nb = -100;
+				nb  = st->rgb[idx + 2] - 250;
+				if (nb > -250)  nb = -250;
 				if (nb < -4096) nb = -4096;
 				st->rgb[idx + 0] = (short)nr;
 				st->rgb[idx + 1] = (short)ng;
@@ -356,10 +357,22 @@ void R_DecalsFrame (void)
 			// paint the same luxel ~30 times per drip and saturate the
 			// lightmap to flat red.
 			{
-				int from_luxel = (int)(bd->length_painted / 16.0f);
-				int to_luxel   = (int)(drip_target          / 16.0f);
-				int k;
+				int   from_luxel = (int)(bd->length_painted / 16.0f);
+				int   to_luxel   = (int)(drip_target          / 16.0f);
+				int   max_luxel  = (int)(bd->length_max       / 16.0f);
+				int   k;
+				if (max_luxel < 1) max_luxel = 1;
 				for (k = from_luxel + 1; k <= to_luxel; k++) {
+					// Linear fade with distance from impact so the splat
+					// at the bounce point reads as the most intense element
+					// and the streak tapers off.
+					float fall = 1.0f - (float)(k - 1) / (float)max_luxel;
+					int   dr_c = (int)(-40.0f  * fall);
+					int   dg_c = (int)(-100.0f * fall);
+					int   db_c = (int)(-100.0f * fall);
+					int   dr_s = (int)(-20.0f  * fall);
+					int   dg_s = (int)(-50.0f  * fall);
+					int   db_s = (int)(-50.0f  * fall);
 					step_len = (float)k * 16.0f;
 					for (si = -1; si <= 1; si++) {
 						dx_off = (float)si * 16.0f;
@@ -372,12 +385,10 @@ void R_DecalsFrame (void)
 						cell[2] = bd->origin[2]
 						        + step_len * bd->down_dir[2]
 						        + dx_off   * bd->right_dir[2];
-						// Per-luxel delta. Drip streak should be visible
-						// but not over-saturate — many bounces stack.
 						if (si == 0) {
-							Stain_AddCell (bd->surf, cell, 1, +60, -40, -40, 1);
+							Stain_AddCell (bd->surf, cell, 1, dr_c, dg_c, db_c, 1);
 						} else {
-							Stain_AddCell (bd->surf, cell, 1, +30, -20, -20, 1);
+							Stain_AddCell (bd->surf, cell, 1, dr_s, dg_s, db_s, 1);
 						}
 					}
 				}
@@ -416,7 +427,7 @@ typedef struct {
 static const decal_kernel_t decal_kernels[DECAL_NUM_TYPES] = {
 	/* DECAL_BULLET      */ { K1x1_solid, 1,  1, -150, -150, -150 },
 	/* DECAL_SPIKE       */ { K1x1_solid, 1,  1, -150, -150, -150 },
-	/* DECAL_BLOOD_SPLAT */ { K3x3, 3,  16, +60, -40, -40 },
+	/* DECAL_BLOOD_SPLAT */ { K3x3, 3,  16, -200, -500, -500 },
 	/* DECAL_SCORCH      */ { K5x5, 5, 36, -200, -200, -200 },
 	/* DECAL_LIGHTNING   */ { K3x3, 3,  16, -50, -60, -40 },
 };
