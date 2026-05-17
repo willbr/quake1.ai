@@ -2,17 +2,24 @@
 
 ## Next
 
-* light options
-    * dirt debug
-    * ambient occlusion
-    * phong shading
-    * shadows
-    * radiosity
+* tearing in screenshots, does it need a temp buffer?
+* extract pak file and remove it
+* unit test player ai so it can complete all levels
+* rename --mcp to mcp-stdio
+* add a cvar to enable mcp while running
+* replace quake error message box with a stderr message
+* more enimies, multiply every enemy
+* add images to my docs
+* increase decal resolution
 
 * 3 clicks to add a cluck, draw the plane then add height
+convert palette to a png
+remove old pcx code
+remove other old code, directx
 
 ## Rendering & visuals
 
+* flashlight, shadows
 * bump mapping
 * atmospheric distance fog + vibrant palette (Star Fox 64, Zelda)
 * texture filtering
@@ -90,6 +97,9 @@
 
 ## Editor & live workflow
 
+* entity browser with previews
+* prefab browser with previews
+* non destructing operations, e.g. clone a group that auto updates
 * remove on-disk files: .h1, .h2, .pts, hull files, leak point files
 * live `.map` editing
 * live entity editing
