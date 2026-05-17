@@ -25,6 +25,7 @@ id1/maps/*.pts
 id1/maps/test.bsp
 id1/maps/start.bsp
 id1/maps/start.map
+id1/maps/m7_skeleton.bsp
 
 # Coloured-lighting sidecars (output of editor_compile_full / external
 # light compilers; pair with a .bsp and regenerate per bake).

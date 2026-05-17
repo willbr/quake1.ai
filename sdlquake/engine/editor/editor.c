@@ -1146,6 +1146,50 @@ static void Editor_Cmd_CompileExport_f(void)
         return;
     }
 
+    /* Write the compiled BSP (and .lit) to disk so a future cold launch
+     * (e.g. `+map <name>`) can find it via the normal filesystem lookup —
+     * the VFS only survives the current engine session. */
+    {
+        char  disk_path[1024];
+        FILE *f;
+
+        Sys_mkdir(va("%s/maps", com_gamedir));
+
+        snprintf(disk_path, sizeof(disk_path),
+                 "%s/maps/%s.bsp", com_gamedir, edit_scene.mapname);
+        f = fopen(disk_path, "wb");
+        if (!f) {
+            Con_Printf("editor_compile_export: can't open %s for write\n",
+                       disk_path);
+        } else if ((int)fwrite(bsp_lit, 1, lit_bsp_size, f) != lit_bsp_size) {
+            fclose(f);
+            Con_Printf("editor_compile_export: short write to %s\n", disk_path);
+        } else {
+            fclose(f);
+            Con_Printf("editor_compile_export: wrote %s (%d bytes)\n",
+                       disk_path, lit_bsp_size);
+        }
+
+        if (lit_bytes && lit_bytes_size > 0) {
+            snprintf(disk_path, sizeof(disk_path),
+                     "%s/maps/%s.lit", com_gamedir, edit_scene.mapname);
+            f = fopen(disk_path, "wb");
+            if (!f) {
+                Con_Printf("editor_compile_export: can't open %s for write\n",
+                           disk_path);
+            } else if ((int)fwrite(lit_bytes, 1, lit_bytes_size, f)
+                       != lit_bytes_size) {
+                fclose(f);
+                Con_Printf("editor_compile_export: short write to %s\n",
+                           disk_path);
+            } else {
+                fclose(f);
+                Con_Printf("editor_compile_export: wrote %s (%d bytes)\n",
+                           disk_path, lit_bytes_size);
+            }
+        }
+    }
+
     Editor_VFS_Register(bsp_vpath, bsp_lit, lit_bsp_size);
     Con_Printf("editor_compile_export: %s = %d bytes (lit + vis'd BSP)\n",
                bsp_vpath, lit_bsp_size);
