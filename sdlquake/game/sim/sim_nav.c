@@ -32,7 +32,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <direct.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#ifdef _WIN32
+#  include <direct.h>
+#  define sim_mkdir(p) _mkdir(p)
+#else
+#  define sim_mkdir(p) mkdir((p), 0755)
+#endif
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -1022,8 +1029,8 @@ void Sim_Nav_LevelInit(const char *mapname) {
     }
     build_adjacency(s_mesh);
 
-    _mkdir("id1\\cache");
-    _mkdir("id1\\cache\\navmesh");
+    sim_mkdir("id1/cache");
+    sim_mkdir("id1/cache/navmesh");
     save_mesh(nav_path, s_mesh);
 
     push_to_imgui(s_mesh);

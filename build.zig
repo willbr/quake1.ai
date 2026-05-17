@@ -5,6 +5,10 @@ pub fn build(b: *std.Build) void {
     const optimize    = b.standardOptimizeOption(.{});
     const native_game = b.option(bool, "native_game", "Route game logic through game.dll instead of VM") orelse true;
 
+    const os_tag = target.result.os.tag;
+    const is_windows = os_tag == .windows;
+    const is_macos   = os_tag == .macos;
+
     // Engine files are K&R/C89 era; gnu89 + fcommon matches original MSVC tentative-definition behaviour.
     const engine_c_flags: []const []const u8 = &.{
         "-DSDLQUAKE",
@@ -149,11 +153,20 @@ pub fn build(b: *std.Build) void {
     // engine. Same C dialect quirks as the engine source — gnu89 + fcommon +
     // no UB sanitizer. Suppresses the firehose of warnings 30-year-old C
     // emits with -w.
-    const qbsp_c_flags: []const []const u8 = &.{
+    // qbsp/light/vis are 1996-era utils that key #include <direct.h> off WIN32.
+    // POSIX builds use <unistd.h> via the cmdlib code paths already present.
+    const qbsp_c_flags: []const []const u8 = if (is_windows) &.{
         "-DWIN32",                 // gates the cmdlib.c <direct.h> path
-        "-DDOUBLEVEC_T",           // mathlib.h prefers double precision; matches qbsp's own build
-        // Forced include: prefixes qbsp's mathlib/cmdlib/main symbols with
-        // qbsp_ so they don't collide with the engine's same-named globals.
+        "-DDOUBLEVEC_T",
+        "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+        "-fno-strict-aliasing",
+        "-fwrapv",
+        "-std=gnu89",
+        "-fcommon",
+        "-w",
+        "-fno-sanitize=undefined",
+    } else &.{
+        "-DDOUBLEVEC_T",
         "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
         "-fno-strict-aliasing",
         "-fwrapv",
@@ -209,8 +222,18 @@ pub fn build(b: *std.Build) void {
     // search resolves them locally. The .c implementations live in
     // vendor/qbsp/ and are linked into the binary once; light's TUs
     // reference them via the matching header declarations.
-    const light_c_flags: []const []const u8 = &.{
+    const light_c_flags: []const []const u8 = if (is_windows) &.{
         "-DWIN32",
+        "-DDOUBLEVEC_T",
+        "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+        "-include", "sdlquake/vendor/light/light_namespace.h",
+        "-fno-strict-aliasing",
+        "-fwrapv",
+        "-std=gnu89",
+        "-fcommon",
+        "-w",
+        "-fno-sanitize=undefined",
+    } else &.{
         "-DDOUBLEVEC_T",
         "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
         "-include", "sdlquake/vendor/light/light_namespace.h",
@@ -240,15 +263,21 @@ pub fn build(b: *std.Build) void {
     // re-serialise the final BSP. VIS's same-named types and globals
     // (winding_t / plane_t / portal_t / leaf_t / numportals / portals / ...)
     // collide with qbsp's; vis_namespace.h prefixes them.
-    const vis_c_flags: []const []const u8 = &.{
+    const vis_c_flags: []const []const u8 = if (is_windows) &.{
         "-DWIN32",
         "-DDOUBLEVEC_T",
         "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
         "-include", "sdlquake/vendor/vis/vis_namespace.h",
-        // vis.h includes cmdlib.h/mathlib.h/bspfile.h; verbatim copies of
-        // vendor/qbsp/ originals live in vendor/vis/ so clang's
-        // "directory of source" search resolves them locally (same pattern
-        // as vendor/light/).
+        "-fno-strict-aliasing",
+        "-fwrapv",
+        "-std=gnu89",
+        "-fcommon",
+        "-w",
+        "-fno-sanitize=undefined",
+    } else &.{
+        "-DDOUBLEVEC_T",
+        "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+        "-include", "sdlquake/vendor/vis/vis_namespace.h",
         "-fno-strict-aliasing",
         "-fwrapv",
         "-std=gnu89",
@@ -292,13 +321,28 @@ pub fn build(b: *std.Build) void {
 
     // ---------------------------------------------------------------------------
     // Vendored SDL3 (sdlquake/vendor/SDL3-3.4.8)
+    // Per-OS lib dir: lib/x64 (Windows .lib + .dll), lib/macos (.dylib).
     // ---------------------------------------------------------------------------
     const sdl3_dir = "sdlquake/vendor/SDL3-3.4.8";
     mod.addIncludePath(b.path(sdl3_dir ++ "/include"));
-    mod.addLibraryPath(b.path(sdl3_dir ++ "/lib/x64"));
-    mod.linkSystemLibrary("SDL3", .{});
-    mod.linkSystemLibrary("ws2_32", .{});  // Winsock for net_dgrm.c (inet_ntoa/inet_addr)
-    mod.linkSystemLibrary("dbghelp", .{}); // SymInitialize / StackWalk64 for sys_crash.c
+    if (is_windows) {
+        mod.addLibraryPath(b.path(sdl3_dir ++ "/lib/x64"));
+        mod.linkSystemLibrary("SDL3", .{});
+        mod.linkSystemLibrary("ws2_32", .{});   // Winsock for net_dgrm.c
+        mod.linkSystemLibrary("dbghelp", .{});  // dbghelp for sys_crash.c
+    } else if (is_macos) {
+        mod.addLibraryPath(b.path(sdl3_dir ++ "/lib/macos"));
+        // search_strategy = .no_fallback so zig doesn't also probe Homebrew
+        // (/opt/homebrew/lib) and silently pick the system SDL3 install,
+        // baking that absolute path into the binary's LC_LOAD_DYLIB.
+        // The vendored libSDL3.0.dylib has its install_name set to
+        // @rpath/libSDL3.0.dylib; the executable adds @executable_path
+        // as an rpath below so the dylib is found next to the binary.
+        mod.linkSystemLibrary("SDL3", .{ .search_strategy = .no_fallback });
+    } else {
+        // Linux / other POSIX: rely on system SDL3 (pkg-config style).
+        mod.linkSystemLibrary("SDL3", .{});
+    }
 
     // ---------------------------------------------------------------------------
     // Game DLL (hot-reloadable)
@@ -373,8 +417,19 @@ pub fn build(b: *std.Build) void {
         .linkage     = .dynamic,
     });
 
-    // Install game.dll alongside quake.exe (part of the default build).
-    const game_install = b.addInstallArtifact(game_lib, .{});
+    // Install the game shared library alongside the engine binary.
+    // On Windows zig writes `game.dll` to bin/. On macOS the default would be
+    // `libgame.dylib` under lib/ -- but hotreload.c expects `game.<ext>` in
+    // bin/, so we install it explicitly there with the bare name.
+    const game_install = if (is_windows)
+        b.addInstallArtifact(game_lib, .{})
+    else blk: {
+        const game_ext: []const u8 = if (is_macos) ".dylib" else ".so";
+        break :blk b.addInstallArtifact(game_lib, .{
+            .dest_dir    = .{ .override = .bin },
+            .dest_sub_path = b.fmt("game{s}", .{game_ext}),
+        });
+    };
     b.getInstallStep().dependOn(&game_install.step);
 
     // `zig build game` rebuilds only the game DLL — fast hot-reload iteration.
@@ -388,10 +443,34 @@ pub fn build(b: *std.Build) void {
         .name        = "quake",
         .root_module = mod,
     });
-    b.installArtifact(exe);
+    if (is_macos) {
+        // Find the vendored libSDL3.0.dylib via the binary's own folder.
+        exe.root_module.addRPath(.{ .cwd_relative = "@executable_path" });
+    }
+    const exe_install = b.addInstallArtifact(exe, .{});
+    b.getInstallStep().dependOn(&exe_install.step);
 
-    // Install SDL3.dll next to the executable so it can be found at runtime.
-    b.installBinFile(sdl3_dir ++ "/lib/x64/SDL3.dll", "SDL3.dll");
+    // Install the SDL3 shared library next to the executable.
+    if (is_windows) {
+        b.installBinFile(sdl3_dir ++ "/lib/x64/SDL3.dll", "SDL3.dll");
+    } else if (is_macos) {
+        b.installBinFile(sdl3_dir ++ "/lib/macos/libSDL3.0.dylib", "libSDL3.0.dylib");
+
+        // Zig's macOS linking unconditionally adds /opt/homebrew/lib to the
+        // dyld search path, so the resulting binary records an absolute
+        // dependency on whichever libSDL3.0.dylib Homebrew has installed
+        // (or fails entirely if none is present). Rewrite that LC_LOAD_DYLIB
+        // entry to the @rpath-relative form that our vendored dylib uses, so
+        // the binary resolves the dylib alongside itself.
+        const fixup = b.addSystemCommand(&.{
+            "install_name_tool", "-change",
+            "/opt/homebrew/opt/sdl3/lib/libSDL3.0.dylib",
+            "@rpath/libSDL3.0.dylib",
+            b.getInstallPath(.bin, "quake"),
+        });
+        fixup.step.dependOn(&exe_install.step);
+        b.getInstallStep().dependOn(&fixup.step);
+    }
 
     // ---------------------------------------------------------------------------
     // Run step: zig build run -- [quake args]

@@ -43,8 +43,15 @@ extern void Lightmap_AddDelta(const vec3_t pos, float radius,
 extern void Lightmap_ClearOwner(int owner);
 
 // Paths relative to the working directory (project root when using zig build run).
-#define GAME_DLL_SRC  "zig-out/bin/game.dll"
-#define GAME_DLL_LOAD "zig-out/bin/game_loaded.dll"
+#if defined(_WIN32)
+#  define GAME_DLL_EXT ".dll"
+#elif defined(__APPLE__)
+#  define GAME_DLL_EXT ".dylib"
+#else
+#  define GAME_DLL_EXT ".so"
+#endif
+#define GAME_DLL_SRC  "zig-out/bin/game"        GAME_DLL_EXT
+#define GAME_DLL_LOAD "zig-out/bin/game_loaded" GAME_DLL_EXT
 
 // ---------------------------------------------------------------------------
 // Game-DLL cvar registration shim.

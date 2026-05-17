@@ -543,9 +543,13 @@ int  VID_ForceUnlockedAndReturnState(void) { return 0; }
 void VID_ForceLockState(int lk)            { (void)lk; }
 void VID_SetDefaultMode(void)              {}
 
-// These are called by quakedef.h macros on _WIN32 without WINDED
+// On Windows quakedef.h declares VID_Lock/UnlockBuffer as real functions;
+// on POSIX they're empty macros, so defining them here would expand to
+// `void  (void) {}`.
+#if defined(_WIN32) && !defined(WINDED)
 void VID_LockBuffer(void)   {}
 void VID_UnlockBuffer(void) {}
+#endif
 
 SDL_Window   *VID_GetWindow  (void) { return sdl_window;   }
 SDL_Renderer *VID_GetRenderer(void) { return sdl_renderer; }

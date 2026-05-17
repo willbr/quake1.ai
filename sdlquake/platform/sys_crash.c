@@ -215,6 +215,64 @@ void Sys_InstallCrashHandler(void)
 
 #else  // !_WIN32
 
-void Sys_InstallCrashHandler(void) {}
+// POSIX fallback: install signal handlers for fatal faults and dump a
+// backtrace via execinfo. Not symbolicated as well as dbghelp on Windows,
+// but enough to identify where Quake fell over without attaching a debugger.
+
+#include <execinfo.h>
+#include <signal.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+static const char *posix_signal_name(int sig)
+{
+    switch (sig) {
+    case SIGSEGV: return "SIGSEGV";
+    case SIGBUS:  return "SIGBUS";
+    case SIGFPE:  return "SIGFPE";
+    case SIGILL:  return "SIGILL";
+    case SIGABRT: return "SIGABRT";
+    default:      return "UNKNOWN";
+    }
+}
+
+static void posix_crash_handler(int sig, siginfo_t *info, void *uctx)
+{
+    (void)uctx;
+    void  *frames[64];
+    int    n = backtrace(frames, 64);
+
+    // Use only async-signal-safe writes for the header; backtrace_symbols_fd
+    // is documented async-signal-safe on macOS and glibc.
+    char hdr[128];
+    int  hlen = snprintf(hdr, sizeof(hdr),
+                         "\n=== Unhandled signal: %s (%d) at %p ===\n",
+                         posix_signal_name(sig), sig,
+                         info ? info->si_addr : NULL);
+    if (hlen > 0) write(STDERR_FILENO, hdr, (size_t)hlen);
+
+    backtrace_symbols_fd(frames, n, STDERR_FILENO);
+
+    // Restore the default handler and re-raise so the OS can drop a
+    // core file / let any debugger catch the signal naturally.
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void Sys_InstallCrashHandler(void)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = posix_crash_handler;
+    sa.sa_flags     = SA_SIGINFO | SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS,  &sa, NULL);
+    sigaction(SIGFPE,  &sa, NULL);
+    sigaction(SIGILL,  &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+}
 
 #endif

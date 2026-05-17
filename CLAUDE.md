@@ -4,12 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Requires Zig 0.16 and original Quake data files (`pak0.pak`, `pak1.pak`) in `id1/`. SDL3 is vendored — no system SDL3 needed.
+Requires Zig (tested on 0.14.1 and 0.16) and original Quake data files (`pak0.pak`, `pak1.pak`) in `id1/`. SDL3 is vendored per-OS — no system install needed.
+
+Supported hosts: **Windows x64** (vendored `SDL3.dll` + `.lib` under `sdlquake/vendor/SDL3-3.4.8/lib/x64/`) and **macOS arm64** (vendored `libSDL3.0.dylib` under `…/lib/macos/`). Linux is untested but the build paths in `build.zig` fall through to system SDL3 via `linkSystemLibrary`.
 
 ```sh
 zig build run
 zig build run -- +map e1m1
 ```
+
+On macOS, `build.zig` runs `install_name_tool` on the executable after install to rewrite its Homebrew-derived `LC_LOAD_DYLIB` entry to `@rpath/libSDL3.0.dylib`; the binary's `@executable_path` rpath then finds the vendored dylib alongside it. No `DYLD_LIBRARY_PATH` needed.
 
 No test suite exists yet. Build success and visual/audio correctness in-game are the verification methods.
 
@@ -21,7 +25,7 @@ This project is a port of the original WinQuake (1996 software renderer) from Wi
 
 - `sdlquake/engine_src/` — forked WinQuake engine source. We own and edit this. Compare against `ref/Quake-master/WinQuake/` for the pristine upstream baseline.
 - `sdlquake/platform/` — SDL3 platform layer.
-- `sdlquake/vendor/SDL3-3.4.8/` — vendored SDL3 headers + pre-built `.dll`/`.lib` for x64 Windows.
+- `sdlquake/vendor/SDL3-3.4.8/` — vendored SDL3 headers + pre-built shared libraries per OS (`lib/x64/SDL3.dll`+`SDL3.lib` for Windows, `lib/macos/libSDL3.0.dylib` for Apple Silicon). The macOS dylib's install_name is set to `@rpath/libSDL3.0.dylib`.
 - `sdlquake/mcp/` — MCP server (Phase 2, complete).
 - `sdlquake/engine/` — engine-side hot-reload + ImGui glue (Phase 3 / 4).
 - `sdlquake/game/` — hot-reloadable game DLL source (Phase 3).
