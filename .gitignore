@@ -1,7 +1,6 @@
 .zig-cache/
 zig-out/
 quake.db
-id1/pak*.pak
 id1/config.cfg
 id1/history.txt
 id1/cache/
