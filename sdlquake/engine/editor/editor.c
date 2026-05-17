@@ -278,6 +278,99 @@ static void scaffold_build_test_room(const char *mapname)
                "%d entities)\n", mapname, edit_scene.numentities);
 }
 
+// Augment a brushless scene with a hollow "void placeholder" room sized
+// around all the .map's entity origins. Without this, editor_load on a
+// stub .map (entities only, no geometry) would leave the engine with a
+// 0-node BSP — qbsp emits one, Mod_LoadNodes crashes on it, or (with
+// the brushless guard in editor_compile) the user lands on a fullscreen
+// console with no way to author. The placeholder turns into normal
+// worldspawn brushes; saving the .map writes them out and the user can
+// delete or replace them once real geometry exists.
+static void inject_void_placeholder(void)
+{
+    vec3_t mn = {  1e9f,  1e9f,  1e9f };
+    vec3_t mx = { -1e9f, -1e9f, -1e9f };
+    int    i, k;
+    int    any = 0;
+    int    new_brush_idx;
+
+    for (i = 0; i < edit_scene.numentities; i++)
+    {
+        vec3_t o;
+        if (!Entity_GetOrigin(&edit_scene.entities[i], o)) continue;
+        for (k = 0; k < 3; k++) {
+            if (o[k] < mn[k]) mn[k] = o[k];
+            if (o[k] > mx[k]) mx[k] = o[k];
+        }
+        any = 1;
+    }
+    if (!any)
+    {
+        mn[0] = -512; mn[1] = -512; mn[2] = -256;
+        mx[0] =  512; mx[1] =  512; mx[2] =  256;
+    }
+    else
+    {
+        /* Inflate so origins aren't flush with walls, and floor any axis
+         * to at least 1024 units of room so the player has somewhere
+         * to stand. */
+        for (k = 0; k < 3; k++) {
+            mn[k] -= 256;
+            mx[k] += 256;
+            if (mx[k] - mn[k] < 1024) {
+                float c = 0.5f * (mn[k] + mx[k]);
+                mn[k] = c - 512;
+                mx[k] = c + 512;
+            }
+        }
+    }
+
+    Scene_AddCubeBrush(mn, mx, "wbrick1_5");
+    new_brush_idx = edit_scene.numentities > 0
+        ? edit_scene.entities[0].numbrushes - 1
+        : 0;
+    Scene_HollowBrush(0 /*worldspawn*/, new_brush_idx, 16);
+
+    /* qbsp's WriteMiptex skips emission without a "wad" key — set
+     * defensively so the synthesized base.wad lookup always closes. */
+    if (edit_scene.numentities > 0)
+        Entity_SetKV(&edit_scene.entities[0], "wad", "gfx/base.wad");
+
+    Scene_SelectionClear();
+}
+
+// Strip "model" "*N" keys from brush entities that have no brushes of
+// their own. A decompiled-from-BSP stub keeps these refs on every
+// func_door / func_button / ..., but if the entity carries no brushes
+// then qbsp emits no submodel for it, and the engine fatals at signon
+// with `SV_ModelIndex: model *N not precached`. Stripping turns the
+// entity into a detached point ent — the user re-authors the geometry
+// and re-wraps the entity around new brushes later.
+static void strip_stale_brushmodel_refs(void)
+{
+    int stripped = 0;
+    int i;
+    for (i = 1; i < edit_scene.numentities; i++)   // skip worldspawn
+    {
+        edit_entity_t *e = &edit_scene.entities[i];
+        int kv_idx;
+        if (e->numbrushes > 0) continue;            // has real geometry
+        for (kv_idx = 0; kv_idx < e->numkv; kv_idx++)
+        {
+            if (strcmp(e->kv[kv_idx].key, "model") == 0
+             && e->kv[kv_idx].value[0] == '*')
+            {
+                Entity_RemoveKV(e, "model");
+                stripped++;
+                break;
+            }
+        }
+    }
+    if (stripped > 0)
+        Con_Printf("editor_load: stripped %d stale brushmodel refs "
+                   "from brushless entities\n", stripped);
+}
+
 static void Editor_Cmd_New_f(void)
 {
     const char *name = (Cmd_Argc() >= 2) ? Cmd_Argv(1) : "test";
@@ -349,6 +442,37 @@ static void Editor_Cmd_Open_f(void)
     }
     Con_Printf("editor: loaded %d entities from %s\n",
                edit_scene.numentities, path);
+
+    /* Stub .map handling, in two passes:
+     *
+     * 1. Strip `model "*N"` refs from brush entities that carry no
+     *    brushes — a decompiled-from-BSP stub has these stale on every
+     *    func_door / func_button / ... and the engine fatals at signon
+     *    on the first unprecached submodel. Runs even when the scene
+     *    has brushes elsewhere (e.g. a previous load already injected
+     *    a placeholder and auto-saved it, but the brush entities still
+     *    point at submodels qbsp won't emit).
+     *
+     * 2. If worldspawn ends up with zero brushes too, inject a hollow
+     *    placeholder room sized around the loaded entity origins so the
+     *    engine has any geometry to compile and the editor has a canvas
+     *    to render against. The placeholder is regular worldspawn data;
+     *    saving the .map persists it and the user can delete or replace
+     *    it once they've authored real geometry. */
+    strip_stale_brushmodel_refs();
+    {
+        int total_brushes = 0;
+        int i;
+        for (i = 0; i < edit_scene.numentities; i++)
+            total_brushes += edit_scene.entities[i].numbrushes;
+        if (total_brushes == 0)
+        {
+            inject_void_placeholder();
+            Con_Printf("editor_load: scene had no brushes; "
+                       "added a hollow placeholder room "
+                       "(delete or replace it after authoring real geometry)\n");
+        }
+    }
 
     /* Unload the current BSP so the user isn't editing foo.map while the
      * engine renders start.bsp underneath them. Auto-compile the just-

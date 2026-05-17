@@ -319,6 +319,28 @@ static void engine_sv_setmodel(edict_t *e, const char *m)
 {
     int i;
     float mins[3], maxs[3];
+
+    /* Tolerate NULL / empty model. Happens when a brush entity loaded
+     * from a stub .map has had its stale "model" "*N" ref stripped
+     * (see editor_load's strip pass — the submodel doesn't exist yet,
+     * so trying to setmodel(NULL) used to crash here in strcmp). The
+     * spawn function already set movetype=PUSH / solid=BSP before
+     * calling SV_SetModel; without an actual brushmodel, the next
+     * SV_Physics_Pusher tick would fatal with "MOVETYPE_PUSH with a
+     * non bsp model". Downgrade both to NONE/NOT so the entity sits
+     * as an inert detached marker until the user re-authors brushes
+     * and re-wraps it. */
+    if (!m || !m[0]) {
+        e->v.model      = m;
+        e->v.modelindex = 0;
+        e->v.movetype   = 0;  /* MOVETYPE_NONE */
+        e->v.solid      = 0;  /* SOLID_NOT */
+        e->v.mins[0] = e->v.mins[1] = e->v.mins[2] = 0;
+        e->v.maxs[0] = e->v.maxs[1] = e->v.maxs[2] = 0;
+        e->v.size[0] = e->v.size[1] = e->v.size[2] = 0;
+        return;
+    }
+
     for (i = 0; svb_model_precache(i); i++) {
         if (!strcmp(svb_model_precache(i), m)) break;
     }
