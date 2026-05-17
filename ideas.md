@@ -2,6 +2,7 @@
 
 ## Next
 
+* compile SDL ourselfs on mac and windows
 * tearing in screenshots, does it need a temp buffer?
 * extract pak file and remove it
 * unit test player ai so it can complete all levels
