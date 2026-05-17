@@ -28,7 +28,10 @@ struct qsockaddr
 
 #define	NET_NAMELEN			64
 
-#define NET_MAXMESSAGE		8192
+// SDLQuake: bumped from 8192 to match the larger MAX_DATAGRAM (32000) +
+// MAX_MSGLEN (64000) so per-connection send/receive buffers can hold a
+// full datagram. Single-player loopback only.
+#define NET_MAXMESSAGE		65536
 #define NET_HEADERSIZE		(2 * sizeof(unsigned int))
 #define NET_DATAGRAMSIZE	(MAX_DATAGRAM + NET_HEADERSIZE)
 

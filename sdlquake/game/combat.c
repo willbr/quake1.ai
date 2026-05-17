@@ -261,6 +261,100 @@ static void VelocityForDamage(float dm, vec3_t out) {
     out[0] *= scale; out[1] *= scale; out[2] *= scale;
 }
 
+// ---------------------------------------------------------------------------
+// Persistent gibs: long lifetime, despawn only when out of player sight, with
+// an LRU ring as a safety net so sustained spam can't exhaust MAX_EDICTS.
+//
+// Cap is conservative because MAX_EDICTS (600) is shared with monsters,
+// items, projectiles, and Phase 8 sim entities. Reserving ~256 for gibs
+// leaves the rest of the world room to function under heavy spam.
+//
+// Trade-off: a gib won't disappear in front of the player, but at the cap
+// (MAX_LIVE_GIBS) the oldest gib is force-freed regardless of visibility.
+// The player is rarely staring at the literal oldest gib, so visible pops
+// are rare in practice.
+// ---------------------------------------------------------------------------
+
+#define MAX_LIVE_GIBS 256
+
+static edict_t *gib_ring[MAX_LIVE_GIBS];
+static int      gib_ring_head;   // index of the oldest stored gib
+static int      gib_ring_count;  // number of stored gibs (always <= MAX_LIVE_GIBS)
+
+// Returns 1 if the gib's origin has a clean line-of-sight to the player and
+// the player is roughly facing it (front 180° hemisphere). Conservative — a
+// "yes" defers despawn; a "no" allows it.
+static int gib_visible_to_player(edict_t *gib) {
+    edict_t *client = eng->ED_CheckClient();
+    if (!client || client->free) return 0;
+
+    vec3_t eye = {
+        client->v.origin[0] + client->v.view_ofs[0],
+        client->v.origin[1] + client->v.view_ofs[1],
+        client->v.origin[2] + client->v.view_ofs[2],
+    };
+    vec3_t target = {
+        gib->v.origin[0], gib->v.origin[1], gib->v.origin[2],
+    };
+    eng->SV_Traceline(eye, target, 1, gib);
+    if (g->trace_fraction < 1.0f) return 0;  // wall between player and gib
+
+    // Front hemisphere — use v_angle (where the player is aiming) since that
+    // drives the rendered viewport, not v.angles (body yaw).
+    eng->MakeVectors(client->v.v_angle);
+    vec3_t raw = {
+        gib->v.origin[0] - client->v.origin[0],
+        gib->v.origin[1] - client->v.origin[1],
+        gib->v.origin[2] - client->v.origin[2],
+    };
+    vec3_t to_gib;
+    eng->VectorNormalize(raw, to_gib);
+    float dot = to_gib[0]*g->v_forward[0]
+              + to_gib[1]*g->v_forward[1]
+              + to_gib[2]*g->v_forward[2];
+    return (dot > 0.0f);
+}
+
+// Think entry — set as v.think on each gib. Defers if the player can see it,
+// otherwise frees the edict.
+static void Gib_TimedRemove(edict_t *self) {
+    g->self = self;
+    if (gib_visible_to_player(self)) {
+        // Recheck soon — short enough that turning to face a settled gib
+        // catches it before it pops.
+        self->v.nextthink = g->time + 1.0f + eng->Random();
+        return;
+    }
+    eng->ED_Free(self);
+}
+
+// LRU sweep: drop entries from the ring head until we land on a gib pointer
+// that still looks like a live gib, then force-free it. Slots whose edicts
+// were freed (auto-removal) or repurposed are silently skipped.
+static void gib_ring_force_oldest_free(void) {
+    while (gib_ring_count > 0) {
+        edict_t *oldest = gib_ring[gib_ring_head];
+        gib_ring[gib_ring_head] = 0;
+        gib_ring_head = (gib_ring_head + 1) % MAX_LIVE_GIBS;
+        gib_ring_count--;
+        if (!oldest || oldest->free)                       continue;
+        if (oldest->v.decal_on_bounce != 1.0f)             continue;
+        if ((int)oldest->v.movetype != MOVETYPE_BOUNCE)    continue;
+        eng->ED_Free(oldest);
+        return;
+    }
+}
+
+static void gib_ring_add(edict_t *new_gib) {
+    if (gib_ring_count == MAX_LIVE_GIBS) {
+        // Ring full — force the oldest out so the new gib has headroom.
+        gib_ring_force_oldest_free();
+    }
+    int tail = (gib_ring_head + gib_ring_count) % MAX_LIVE_GIBS;
+    gib_ring[tail] = new_gib;
+    gib_ring_count++;
+}
+
 void ThrowGib(const char *gibname, float dm) {
     edict_t *self = g->self;
     edict_t *n = eng->ED_Alloc();
@@ -276,12 +370,17 @@ void ThrowGib(const char *gibname, float dm) {
     n->v.avelocity[0] = eng->Random()*600.0f;
     n->v.avelocity[1] = eng->Random()*600.0f;
     n->v.avelocity[2] = eng->Random()*600.0f;
-    n->v.think     = SUB_Remove;
+    n->v.think     = Gib_TimedRemove;
     n->v.ltime     = g->time;
-    n->v.nextthink = g->time + 10.0f + eng->Random()*10.0f;
+    // Long initial wait; Gib_TimedRemove keeps deferring if visible. First
+    // visibility check fires somewhere between 10–11 min — by then the
+    // player has almost certainly looked away at least once.
+    n->v.nextthink = g->time + 600.0f + eng->Random()*60.0f;
     n->v.frame     = 0;
     n->v.flags     = 0;
     n->v.decal_on_bounce = 1.0f;
+
+    gib_ring_add(n);
 }
 
 void ThrowHead(const char *gibname, float dm) {

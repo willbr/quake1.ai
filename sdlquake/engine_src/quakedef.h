@@ -98,8 +98,11 @@ void	VID_UnlockBuffer (void);
 
 #define	ON_EPSILON		0.1			// point on plane side epsilon
 
-#define	MAX_MSGLEN		8000		// max length of a reliable message
-#define	MAX_DATAGRAM	1024		// max length of unreliable message
+#define	MAX_MSGLEN		64000		// max length of a reliable message
+// SDLQuake: bumped from the original 1024 so dense entity scenes (e.g.
+// many gibs in PVS at once from g_test_gibgrenades) don't overflow the
+// per-frame datagram. Single-player only — loopback has no MTU.
+#define	MAX_DATAGRAM	32000		// max length of unreliable message
 
 //
 // per-level limits
