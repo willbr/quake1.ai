@@ -137,6 +137,14 @@ typedef struct edit_scene_s {
     // Round-trip filename. Set by Scene_Load. Empty until a .map has loaded.
     char            filename[256];  // absolute path on disk
     char            mapname[64];    // bare name, used for "map <name>" restart
+
+    // Last sv.spawn_serial editor_check_map_change observed. Different from
+    // sv.spawn_serial means SV_SpawnServer ran since we last refreshed, so
+    // every cached live_ent / live_static is potentially dangling (Hunk
+    // re-allocated sv.edicts and the new num_edicts is smaller than what
+    // some pointers were captured against). Mismatch forces a full reset
+    // even when sv.name matches edit_scene.mapname.
+    int             sv_spawn_serial_seen;
 } edit_scene_t;
 
 extern edit_scene_t edit_scene;

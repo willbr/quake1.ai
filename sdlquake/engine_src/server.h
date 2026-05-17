@@ -69,6 +69,13 @@ typedef struct
 
 	sizebuf_t	signon;
 	byte		signon_buf[8192];
+
+	// Monotonic serial that increments every SV_SpawnServer. Used by the
+	// in-engine editor to detect same-map respawns — sv.edicts is freed +
+	// re-allocated each spawn, and Hunk_AllocName usually returns the same
+	// base address after Host_ClearMemory, so a pointer-identity check on
+	// edit_scene's cached live_ent values isn't sufficient.
+	int			spawn_serial;
 } server_t;
 
 

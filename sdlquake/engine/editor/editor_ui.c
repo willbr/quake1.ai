@@ -459,12 +459,23 @@ int Editor_EntityHidden(int e_idx)
     {
         extern cvar_t editor_view_mode;
         int view_live = (int)editor_view_mode.value == 0;
-        if (view_live && e->live_ent && !e->live_ent->free)
+        if (view_live && e->live_ent)
         {
-            int en = NUM_FOR_EDICT(e->live_ent);
-            int engine_renders =
-                (en > 0 && en < cl.num_entities && cl_entities[en].model);
-            if (!engine_renders) return 1;
+            // Bounds-check before NUM_FOR_EDICT: a same-map respawn can
+            // leave live_ent pointing past the new (smaller) num_edicts
+            // even if the spawn-serial gate in editor_check_map_change
+            // hasn't yet swept this frame.
+            if (!Editor_LiveEntInRange(e->live_ent))
+            {
+                e->live_ent = NULL;
+            }
+            else if (!e->live_ent->free)
+            {
+                int en = NUM_FOR_EDICT(e->live_ent);
+                int engine_renders =
+                    (en > 0 && en < cl.num_entities && cl_entities[en].model);
+                if (!engine_renders) return 1;
+            }
         }
     }
     return 0;

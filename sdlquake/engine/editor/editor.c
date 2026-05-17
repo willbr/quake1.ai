@@ -1531,9 +1531,19 @@ static void Editor_PopulateFromServer(void);
 // and rebuild the whole scene from the new world.
 static void editor_check_map_change(void)
 {
+    int respawned;
     if (!sv.active) return;
-    if (strcmp(edit_scene.mapname, sv.name) == 0
-        && edit_scene.numentities > 0) return;       // same map, scene live
+
+    // Same name AND same server instance → scene is current, nothing to do.
+    // The serial check catches "restart" / "map <current>" — sv.edicts has
+    // been freed + re-allocated (likely at the same hunk base, so naive
+    // pointer-identity checks miss it) and num_edicts shrank back to
+    // maxclients+1 before regrowing. Any live_ent captured by the previous
+    // instance now dangles into the new allocation.
+    respawned = (edit_scene.sv_spawn_serial_seen != sv.spawn_serial);
+    if (!respawned
+        && strcmp(edit_scene.mapname, sv.name) == 0
+        && edit_scene.numentities > 0) return;
 
     if (edit_scene.filename[0])
     {
@@ -1550,15 +1560,18 @@ static void editor_check_map_change(void)
             edit_scene.entities[i].live_ent    = NULL;
             edit_scene.entities[i].live_static = NULL;
         }
-        Con_Printf("editor: engine map changed to %s; "
+        Con_Printf("editor: engine map %s%s; "
                    "cleared selection + live links "
                    "(authoring target stays %s)\n",
+                   respawned ? "respawned " : "changed to ",
                    sv.name, edit_scene.mapname[0] ? edit_scene.mapname : "(none)");
+        edit_scene.sv_spawn_serial_seen = sv.spawn_serial;
         return;
     }
 
     // Server-populated mode (or empty scene): rebuild from the live edicts.
     Editor_PopulateFromServer();
+    edit_scene.sv_spawn_serial_seen = sv.spawn_serial;
 }
 
 static void Editor_PopulateFromServer(void)

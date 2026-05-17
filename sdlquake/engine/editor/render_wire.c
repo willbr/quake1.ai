@@ -850,8 +850,18 @@ void Editor_PushPreviewEntities(void)
         //   map:  show what the .map text says. Push a preview at the .map
         //         origin and scrub the engine's cl_visedicts entry for
         //         this entity so the live model doesn't double-draw.
-        if (e->live_ent && !e->live_ent->free)
+        if (e->live_ent)
         {
+            // Bounds-check before NUM_FOR_EDICT: a same-map respawn can
+            // leave live_ent pointing past the new (smaller) num_edicts
+            // even if the spawn-serial gate in editor_check_map_change
+            // hasn't yet swept this frame.
+            if (!Editor_LiveEntInRange(e->live_ent))
+            {
+                e->live_ent = NULL;
+            }
+            else if (!e->live_ent->free)
+            {
             int en = NUM_FOR_EDICT(e->live_ent);
             int engine_renders =
                 (en > 0 && en < cl.num_entities && cl_entities[en].model);
@@ -869,7 +879,8 @@ void Editor_PushPreviewEntities(void)
                 }
                 // fall through to push preview at .map origin
             }
-        }
+            }   // end of `else if (!e->live_ent->free)`
+        }       // end of `if (e->live_ent)`
         // SV_MakeStatic'd ents (torches) don't move so .map == efrag
         // position; the efrag chain draws them in both modes, no preview
         // needed and we'd have to walk the chain to scrub them anyway.

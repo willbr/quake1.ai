@@ -238,4 +238,19 @@ int  Editor_EntityInView  (int e_idx);
 // exists (e.g. an empty func_group with no brushes / no kv / no edict).
 int  Editor_EntityAnchor  (const struct edit_entity_s *e, vec3_t out);
 
+// True iff `e` aliases a live slot in the current sv.edicts allocation —
+// in [sv.edicts, sv.edicts + sv.num_edicts * pr_edict_size), aligned to
+// pr_edict_size. Defense-in-depth before NUM_FOR_EDICT(e->live_ent) when
+// the spawn-serial reset path in editor.c hasn't yet caught a respawn.
+// Caller must have included quakedef.h (server.h + progs.h).
+static inline int Editor_LiveEntInRange(const edict_t *e)
+{
+    ptrdiff_t off;
+    if (!e || !sv.active || !sv.edicts || pr_edict_size <= 0) return 0;
+    off = (const byte *)e - (const byte *)sv.edicts;
+    if (off < 0) return 0;
+    if (off % pr_edict_size != 0) return 0;
+    return (int)(off / pr_edict_size) < sv.num_edicts;
+}
+
 #endif // EDITOR_INTERNAL_H

@@ -937,7 +937,7 @@ SV_ModelIndex
 int SV_ModelIndex (char *name)
 {
 	int		i;
-	
+
 	if (!name || !name[0])
 		return 0;
 
@@ -1135,6 +1135,13 @@ void SV_SpawnServer (char *server)
 	Host_ClearMemory ();
 
 	memset (&sv, 0, sizeof(sv));
+
+	// Monotonic respawn counter — must outlive the memset above so the
+	// editor can tell "same map reloaded" apart from "no change".
+	{
+		static int s_spawn_serial = 0;
+		sv.spawn_serial = ++s_spawn_serial;
+	}
 
 	strcpy (sv.name, server);
 #ifdef QUAKE2
