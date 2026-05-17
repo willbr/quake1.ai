@@ -8,6 +8,7 @@
 #include <string.h>
 
 extern game_globals_t *g;
+extern engine_api_t   *eng;
 
 typedef struct { const char *classname; void (*fn)(edict_t *); } spawn_entry_t;
 
@@ -51,16 +52,22 @@ static void spawn_info_wind_source(edict_t *e) {
 
 // misc_smokegrenade -- M4 testing prop. A persistent smoke emitter at this
 // entity's origin. "amount" key sets per-tick injection (default 0.4),
-// "radius" sets affected cells (default 96).
+// "radius" sets affected cells (default 96). Visible as a grenade model
+// puffing grey particles upward so mappers can locate the source.
 static void smokegrenade_think(edict_t *self) {
     float amount = self->v.dmg > 0 ? self->v.dmg : 0.4f;
     float radius = self->v.distance > 0 ? self->v.distance : 96.0f;
     Wind_AddSmoke(self->v.origin, amount * 0.1f, radius);
+    vec3_t puff_org = { self->v.origin[0], self->v.origin[1], self->v.origin[2] + 16.0f };
+    vec3_t puff_dir = { 0.0f, 0.0f, 30.0f };
+    eng->SV_Particle(puff_org, puff_dir, 8, 6);
     self->v.nextthink = g->time + 0.1f;
 }
 static void spawn_misc_smokegrenade(edict_t *e) {
+    eng->PrecacheModel("progs/grenade.mdl");
     e->v.solid     = SOLID_NOT;
     e->v.movetype  = MOVETYPE_NONE;
+    eng->SV_SetModel(e, "progs/grenade.mdl");
     e->v.think     = smokegrenade_think;
     e->v.nextthink = g->time + 0.5f;
 }
