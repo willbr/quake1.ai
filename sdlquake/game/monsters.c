@@ -56,7 +56,12 @@ static void walkmonster_start_go(edict_t *self) {
     Sim_AI_RegisterMonster(self);
     g->self = self;
     self->v.origin[2] += 1;  // nudge off floor
-    eng->SV_DropToFloor(self);
+    if (!eng->SV_DropToFloor(self)) {
+        // allsolid: origin starts in a brush, so origin is left buried.
+        eng->Con_DPrintf("walkmonster droptofloor failed at: ");
+        eng->Con_DPrintf(eng->VToS(self->v.origin));
+        eng->Con_DPrintf("\n");
+    }
 
     if (!eng->SV_WalkMove(self, 0, 0)) {
         eng->Con_DPrintf("walkmonster in wall at: ");
