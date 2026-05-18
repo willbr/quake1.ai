@@ -1382,10 +1382,56 @@ void SV_Physics_Toss (edict_t *ent)
 
 	SV_CheckVelocity (ent);
 
-// add gravity
-	if (ent->v.movetype != MOVETYPE_FLY
-	&& ent->v.movetype != MOVETYPE_FLYMISSILE)
-		SV_AddGravity (ent);
+// add gravity — except gibs (decal_on_bounce) in liquid get buoyancy + drag
+// so they drift up to the surface and settle there. Gate on watertype (not
+// waterlevel) — SV_CheckWaterTransition, used by toss entities, only ever
+// sets waterlevel to 1 or a negative content code, never the 2/3 used for
+// sized actors. At the surface (air directly above origin) we pin vertical
+// velocity to zero so they stop rising and bob in place.
+	{
+		int in_liquid = (ent->v.decal_on_bounce
+			&& (int)ent->v.watertype <= CONTENTS_WATER
+			&& (int)ent->v.watertype >= CONTENTS_LAVA);
+		int at_surface = 0;
+		if (in_liquid)
+		{
+			vec3_t above;
+			above[0] = ent->v.origin[0];
+			above[1] = ent->v.origin[1];
+			above[2] = ent->v.origin[2] + 1.0f;
+			if (SV_PointContents (above) > CONTENTS_WATER)
+				at_surface = 1;
+		}
+		if (ent->v.movetype != MOVETYPE_FLY
+		&& ent->v.movetype != MOVETYPE_FLYMISSILE
+		&& !in_liquid)
+			SV_AddGravity (ent);
+		if (in_liquid)
+		{
+			float drag;
+			if (at_surface)
+			{
+				// At the waterline — kill any vertical motion so the gib
+				// settles flat on the surface instead of poking through.
+				if (ent->v.velocity[2] > 0)
+					ent->v.velocity[2] = 0;
+			}
+			else
+			{
+				// Submerged — gentle upward buoyancy. Terminal rise ~12 u/s
+				// at drag=5 keeps approach to the surface visibly slow.
+				ent->v.velocity[2] += 60.0f * host_frametime;
+			}
+			drag = 1.0f - 5.0f * host_frametime;
+			if (drag < 0) drag = 0;
+			ent->v.velocity[0] *= drag;
+			ent->v.velocity[1] *= drag;
+			ent->v.velocity[2] *= drag;
+			ent->v.avelocity[0] *= drag;
+			ent->v.avelocity[1] *= drag;
+			ent->v.avelocity[2] *= drag;
+		}
+	}
 #endif
 
 // move angles
