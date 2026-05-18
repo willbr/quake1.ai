@@ -2,9 +2,15 @@
 
 ## Next
 
-* compile SDL ourselfs on mac and windows
+* dust motes
+* gibs should bob on water
+* blood should pool on water
+* mipmaps?
+* particles with different sizes, and dithering
+* particles should react to gust and wind
+* procedual animation, tomb raider style models made of parts
+* compile SDL ourselves on mac and windows
 * tearing in screenshots, does it need a temp buffer?
-* extract pak file and remove it
 * unit test player ai so it can complete all levels
 * rename --mcp to mcp-stdio
 * add a cvar to enable mcp while running

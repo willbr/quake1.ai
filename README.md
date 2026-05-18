@@ -13,11 +13,11 @@ WinQuake (1996 software renderer) ported to SDL3 + Zig, with a hot-reloading gam
 | 5 | done | QuakeC → C (progs ported to hot-reloadable game.dll) |
 | 6 | done | Wolf3D + Doom1 guns (sprites, sounds, fire rates) |
 | 7 | done | In-game 3D map editor |
-| 8 | planned | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust) |
+| 8 | M3–M6 done, M7 stub | Immersive-sim systems (stimulus bus, FSM AI + navmesh, Blink + Gust, wind/smoke, light tier) |
 
 ## Build
 
-Requires Zig 0.16 and `id1/pak0.pak` + `id1/pak1.pak`. SDL3 is vendored.
+Requires Zig (0.14.1 or 0.16). Shareware `id1/` assets are committed; drop in a `pak1.pak` for the registered episodes. SDL3 is vendored for **Windows x64** and **macOS arm64** — no system install needed.
 
 ```sh
 zig build run -- +map e1m1                  # build and run

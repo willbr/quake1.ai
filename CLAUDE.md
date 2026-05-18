@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Requires Zig (tested on 0.14.1 and 0.16). The shareware `id1/pak0.pak` is committed (freely redistributable); registered `pak1.pak` (e2m*/e3m*/e4m*) is not, drop your own copy alongside if you have one. SDL3 is vendored per-OS — no system install needed. Phase 6 Doom/Wolf3D guns extract automatically from committed reference WADs (`ref/doom-data/DOOM1.WAD`, `ref/wolf3d-data/VSWAP.WL1`) on first build; outputs are gitignored and regenerated as needed (`rm id1/progs/v_doom*.spr` to force re-extraction).
+Requires Zig (tested on 0.14.1 and 0.16). Shareware assets are committed loose under `id1/` (extracted from the freely-redistributable `pak0.pak`); registered episodes 2–4 are not — if you have a `pak1.pak`, drop it alongside and the engine will pick it up. We extract rather than ship a pak because Quake's filesystem prefers paks over loose files, which silently shadows local customizations in `id1/default.cfg`, `id1/quake.rc`, etc. SDL3 is vendored per-OS — no system install needed. Phase 6 Doom/Wolf3D guns extract automatically from committed reference WADs (`ref/doom-data/DOOM1.WAD`, `ref/wolf3d-data/VSWAP.WL1`) on first build; outputs are gitignored and regenerated as needed (`rm id1/progs/v_doom*.spr` to force re-extraction).
 
 Supported hosts: **Windows x64** (vendored `SDL3.dll` + `.lib` under `sdlquake/vendor/SDL3-3.4.8/lib/x64/`) and **macOS arm64** (vendored `libSDL3.0.dylib` under `…/lib/macos/`). Linux is untested but the build paths in `build.zig` fall through to system SDL3 via `linkSystemLibrary`.
 
@@ -62,7 +62,13 @@ Fixed 320×200 resolution. Each frame: Quake's software renderer writes 8-bit pa
 
 ### MCP server (Phase 2)
 
-`sdlquake/mcp/mcp_server.c` — stdio JSON-RPC 2.0. A background thread reads stdin line-by-line and pushes to a mutex-protected queue. The main loop calls `MCP_Frame()` each frame to drain and respond. All game-state access on the main thread. Enabled with `--mcp` flag. Tools: `get_player_state`, `list_entities`, `set_cvar`. See `.mcp.json` for Claude Code integration.
+`sdlquake/mcp/mcp_server.c` — JSON-RPC 2.0. A background thread reads requests and pushes to a mutex-protected queue; the main loop calls `MCP_Frame()` each frame to drain and respond, so all game-state access stays on the main thread.
+
+Two transports:
+- `--mcp` — stdio (Claude Code spawns the process; see `.mcp.json`).
+- `--mcp-http <port>` — HTTP/SSE on `localhost:<port>` (attach Claude Code to an already-running game session).
+
+Tools include `get_player_state`, `list_entities`, `set_cvar`, `console_exec`, and `screenshot` (writes sandboxed to `screenshots/`). `scripts/mcp_call.py` is a one-shot CLI against the HTTP transport.
 
 ### Hot-reload game DLL (Phase 3)
 
@@ -101,7 +107,7 @@ zig build game                           # rebuild only game.dll (fast hot-reloa
 - M1+M2+M2.5 plan: `docs/superpowers/plans/2026-05-04-immersive-sim-m1-m2-ai-substrate.md`
 - M7 design + skeleton: `docs/superpowers/plans/2026-05-14-phase8-m7-bespoke-level.md` and `id1/maps/m7_skeleton.map`
 - All sim code lives in `sdlquake/game/sim/` inside the hot-reloadable `game.dll` (Approach 1 from the spec).
-- `engine_api_t` ABI bumps in Phase 8: 16 → 17 (M3 added `button3`/`button4` in `entvars_t`), 17 → 18 (M5 added `Sample_Lightmap`), 18 → 19 (cached-lightmap-deltas: added `Lightmap_AddDelta` + `Lightmap_ClearOwner`).
+- `engine_api_t` ABI bumps in Phase 8: 16 → 17 (M3 added `button3`/`button4` in `entvars_t`), 17 → 18 (M5 added `Sample_Lightmap`), 18 → 19 (cached-lightmap-deltas: added `Lightmap_AddDelta` + `Lightmap_ClearOwner`), 19 → 20 (decals: `entvars_t._phase6_pad` replaced by `decal_on_bounce` flag), 20 → 21 (M4 visible-smoke: added `SV_Smoke`). Current `GAME_API_VERSION` is 21.
 
 ### Phase 8 milestones (2026-05-14)
 
@@ -115,6 +121,34 @@ zig build game                           # rebuild only game.dll (fast hot-reloa
 | M5 | ✅ | `sim_light.c`: `engine_api->Sample_Lightmap` (reuses `R_LightPoint`), `Light_TierAt` thresholds at 128, Gust extinguishes flammable lights via DLL-side override table. |
 | M6 | ✅ | `sim_retrofit.c`: id1 maps auto-get patrol routes from nearby navmesh points at level init. |
 | M7 | 🚧 skeleton | `id1/maps/m7_skeleton.map` exercises every Phase 8 system in one room; three-area layout + playtest is deferred content work. |
+
+### Sim module map (`sdlquake/game/sim/`)
+
+All Phase 8 sim systems live inside the hot-reloadable `game.dll` and share `sim.h`:
+
+- `sim_main.c` — frame entry: `Sim_Frame` orders stimulus → AI → wind → light each tick.
+- `sim_arena.c` — bump arena for per-tick allocations (paths, candidate lists); cleared each frame.
+- `sim_stimulus.c` — M1 stimulus bus (sound/sight/damage events).
+- `sim_ai.c` — M2/M2.5 FSM brains, path-following SEARCHING.
+- `sim_nav.c` — navmesh bake from BSP, A* pathfinder, in-game debug overlay (`sim_nav_debug` cvar).
+- `sim_wind.c` — M4 voxel wind grid + smoke advection; `Wind_PathOcclusion` feeds AI LOS.
+- `sim_light.c` — M5 light-tier sampling via `engine_api->Sample_Lightmap`; Gust-extinguishable lights table.
+- `sim_retrofit.c` — M6 patrol-route auto-wiring for id1 maps.
+
+### Editor module map (`sdlquake/engine/editor/`, Phase 7)
+
+The in-game 3D editor is engine-side (not in `game.dll`) so it can touch `cl.worldmodel`, BSP loaders, and the framebuffer directly:
+
+- `editor.c` / `editor.h` — public entry points, mode toggle, frame tick.
+- `editor_ui.c`, `editor_classlist.c` — ImGui panels (inspector, entity browser).
+- `edit_scene.c` — in-memory editable scene; the live brush/entity graph the editor mutates.
+- `edit_history.c` — undo/redo stack.
+- `edit_texcache.c` — texture-name pool shared by brush faces.
+- `gizmo.c` — translate/resize gizmos with surface-snap support.
+- `collide.c` — picking + ray casts against the live scene.
+- `render_wire.c`, `render_flat.c`, `render_tex.c` — three overlay render modes.
+- `brush_compile.c`, `map_io.c` — `.map` ↔ in-memory scene; `editor_compile_export` writes `.bsp` + `.lit`.
+- `light_bake_thread.c` — async progressive light baking on a worker thread.
 
 ## Reference data
 
