@@ -165,9 +165,10 @@ static void VID_ApplyScale(int scale)
         new_w, new_h);
     if (!sdl_texture)
         Sys_Error("SDL_CreateTexture failed: %s", SDL_GetError());
+    SDL_SetTextureScaleMode(sdl_texture, SDL_SCALEMODE_NEAREST);
 
     SDL_SetRenderLogicalPresentation(sdl_renderer, new_w, new_h,
-        SDL_LOGICAL_PRESENTATION_LETTERBOX);
+        SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
 
     vid_render_w = new_w;
     vid_render_h = new_h;
@@ -399,7 +400,7 @@ void VID_Init(unsigned char *palette)
 
         SDL_SetRenderLogicalPresentation(sdl_renderer,
             vid_render_w, vid_render_h,
-            SDL_LOGICAL_PRESENTATION_LETTERBOX);
+            SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
         SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
 
         sdl_texture = SDL_CreateTexture(sdl_renderer,
@@ -408,6 +409,7 @@ void VID_Init(unsigned char *palette)
             vid_render_w, vid_render_h);
         if (!sdl_texture)
             Sys_Error("SDL_CreateTexture failed: %s", SDL_GetError());
+        SDL_SetTextureScaleMode(sdl_texture, SDL_SCALEMODE_NEAREST);
     }
 
     // Fill in viddef

@@ -1031,7 +1031,7 @@ void Sbar_Draw (void)
 	if (sb_lines && vid.width > 320) 
 		Draw_TileClear (0, vid.height - sb_lines, vid.width, sb_lines);
 
-	if (sb_lines > 24)
+	if (sb_lines > 24 * Sbar_Scale())
 	{
 		Sbar_DrawInventory ();
 		if (cl.maxclients != 1)
