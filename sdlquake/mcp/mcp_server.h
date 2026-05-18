@@ -12,4 +12,11 @@ void MCP_Init(int port);
 void MCP_Frame(void);
 void MCP_Shutdown(void);
 
+// Register the mcp_http_port cvar with the engine. Call after Host_Init.
+void MCP_RegisterCvars(void);
+
+// Override the mcp_http_port cvar's default before registration; used by the
+// startup `--mcp-http <port>` flag so flag and runtime-cvar paths converge.
+void MCP_SetHttpPortDefault(int port);
+
 #endif

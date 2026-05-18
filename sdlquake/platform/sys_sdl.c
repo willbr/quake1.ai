@@ -235,7 +235,8 @@ static void print_usage(void)
         "\n"
         "Platform options:\n"
         "  --mcp                Run MCP server on stdio (logs go to stderr)\n"
-        "  --mcp-http <port>    Run MCP server over HTTP/SSE on localhost:PORT\n"
+        "  --mcp-http <port>    Set the `mcp_http_port` cvar default; HTTP/SSE\n"
+        "                       server starts at first frame on localhost:PORT\n"
         "  --hot-reload         Poll game.dll for changes and reload at runtime\n"
         "  --list-cvars         Print all registered cvars and their values, then exit\n"
         "  -dedicated           Run as dedicated server (no video/audio)\n"
@@ -322,11 +323,15 @@ int main(int argc, char **argv)
     if (list_cvars)
         sys_headless = true;
 
+    // --mcp-http <port> just seeds the mcp_http_port cvar's default; the HTTP
+    // listener is started lazily from MCP_Frame once Host_Init has registered
+    // the cvar. --mcp (stdio) still needs to bind stdin pre-Host_Init so
+    // engine printf output is routed away from the response stream.
     if (!list_cvars)
     {
         int mcp_http_idx = COM_CheckParm("--mcp-http");
         if (mcp_http_idx && mcp_http_idx + 1 < com_argc)
-            MCP_Init(atoi(com_argv[mcp_http_idx + 1]));
+            MCP_SetHttpPortDefault(atoi(com_argv[mcp_http_idx + 1]));
         else if (COM_CheckParm("--mcp"))
             MCP_Init(0);
     }
@@ -345,6 +350,7 @@ int main(int argc, char **argv)
 
     Sys_Printf("Host_Init\n");
     Host_Init(&parms);
+    MCP_RegisterCvars();
     HotReload_Init();
     if (list_cvars)
         dump_cvars_and_exit();
@@ -358,8 +364,7 @@ int main(int argc, char **argv)
         double dt = newtime - oldtime;
         Host_Frame(dt);
         HotReload_Frame((float)dt);
-        if (mcp_active)
-            MCP_Frame();
+        MCP_Frame();   // unconditional: drives the mcp_http_port lazy-start
         oldtime = newtime;
     }
 

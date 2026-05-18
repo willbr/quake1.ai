@@ -138,6 +138,20 @@ static mcp_raw_sock_t   mcp_listen_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
 static mcp_raw_sock_t   mcp_sse_sock    = (mcp_raw_sock_t)MCP_SOCK_INVALID;
 static SDL_Mutex       *mcp_sse_mutex   = NULL;
 
+// `mcp_http_port` cvar — runtime control over the HTTP listener. Setting it
+// non-zero brings the listener up on that port (lazy, from MCP_Frame). The
+// default string lives in a mutable buffer so MCP_SetHttpPortDefault can
+// pre-seed it from the --mcp-http flag before Cvar_RegisterVariable copies
+// it onto the zone heap. Set-once-never-restart: once the listener is up,
+// changing the cvar prints a warning and reverts it. Teardown / port-swap
+// at runtime would need extra plumbing to drain in-flight HTTP workers --
+// see overnight.md.
+static char    mcp_http_port_default[16] = "0";
+static cvar_t  mcp_http_port_cvar = { "mcp_http_port", mcp_http_port_default };
+static int     mcp_http_started_port = 0;  // 0 = never started
+
+static int mcp_start_http(int port);  // forward decl
+
 // ---------------------------------------------------------------------------
 // Synchronous HTTP /call slot.
 //
@@ -1404,47 +1418,68 @@ static void mcp_dispatch(const char *line)
 // Public API
 // ---------------------------------------------------------------------------
 
+void MCP_SetHttpPortDefault(int port)
+{
+    if (port < 0 || port > 65535) return;
+    SDL_snprintf(mcp_http_port_default, sizeof(mcp_http_port_default), "%d", port);
+}
+
+void MCP_RegisterCvars(void)
+{
+    Cvar_RegisterVariable(&mcp_http_port_cvar);
+}
+
+// Bring up the HTTP/SSE listener on `port`. Returns 1 on success, 0 on failure.
+// Caller is responsible for setting mcp_active / picking an init mode.
+static int mcp_start_http(int port)
+{
+    mcp_http_port = port;
+    mcp_sse_mutex     = SDL_CreateMutex();
+    mcp_sync_mutex    = SDL_CreateMutex();
+    mcp_sync_state_mu = SDL_CreateMutex();
+
+#ifdef _WIN32
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
+    mcp_listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (mcp_listen_sock == (mcp_raw_sock_t)MCP_SOCK_INVALID)
+    {
+        Con_Printf("mcp: socket() failed\n");
+        return 0;
+    }
+
+    int reuse = 1;
+    setsockopt(mcp_listen_sock, SOL_SOCKET, SO_REUSEADDR,
+               (const char *)&reuse, sizeof(reuse));
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family      = AF_INET;
+    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sa.sin_port        = htons((unsigned short)port);
+    if (bind(mcp_listen_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0
+        || listen(mcp_listen_sock, 8) < 0)
+    {
+        mcp_sock_close(mcp_listen_sock);
+        mcp_listen_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
+        Con_Printf("mcp: failed to bind port %d\n", port);
+        return 0;
+    }
+
+    mcp_thread = SDL_CreateThread(mcp_http_thread, "mcp_http", NULL);
+    Con_Printf("mcp: HTTP/SSE server on http://localhost:%d/sse\n", port);
+    return 1;
+}
+
 // port == 0 → stdio transport; port > 0 → HTTP/SSE transport
 void MCP_Init(int port)
 {
-    mcp_active    = 1;
-    mcp_http_port = port;
-    mcp_mutex     = SDL_CreateMutex();
+    mcp_active = 1;
+    if (!mcp_mutex) mcp_mutex = SDL_CreateMutex();
 
     if (port > 0)
     {
-        mcp_sse_mutex     = SDL_CreateMutex();
-        mcp_sync_mutex    = SDL_CreateMutex();
-        mcp_sync_state_mu = SDL_CreateMutex();
-
-#ifdef _WIN32
-        WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
-#endif
-        mcp_listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (mcp_listen_sock != (mcp_raw_sock_t)MCP_SOCK_INVALID)
-        {
-            int reuse = 1;
-            setsockopt(mcp_listen_sock, SOL_SOCKET, SO_REUSEADDR,
-                       (const char *)&reuse, sizeof(reuse));
-            struct sockaddr_in sa;
-            memset(&sa, 0, sizeof(sa));
-            sa.sin_family      = AF_INET;
-            sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            sa.sin_port        = htons((unsigned short)port);
-            if (bind(mcp_listen_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0
-                || listen(mcp_listen_sock, 8) < 0)
-            {
-                mcp_sock_close(mcp_listen_sock);
-                mcp_listen_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
-                Con_Printf("mcp: failed to bind port %d\n", port);
-            }
-            else
-            {
-                mcp_thread = SDL_CreateThread(mcp_http_thread, "mcp_http", NULL);
-                Con_Printf("mcp: HTTP/SSE server on http://localhost:%d/sse\n", port);
-            }
-        }
+        if (mcp_start_http(port)) mcp_http_started_port = port;
     }
     else
     {
@@ -1454,6 +1489,40 @@ void MCP_Init(int port)
 
 void MCP_Frame(void)
 {
+    // Drive mcp_http_port cvar: lazy-start the HTTP listener when set, refuse
+    // restart once running. Stdio mode (--mcp) bypasses the cvar entirely.
+    {
+        int desired = (int)mcp_http_port_cvar.value;
+        if (mcp_http_started_port == 0)
+        {
+            if (desired > 0 && desired <= 65535)
+            {
+                if (mcp_active && mcp_http_port == 0)
+                {
+                    Con_Printf("mcp: stdio transport active; mcp_http_port ignored\n");
+                    Cvar_Set("mcp_http_port", "0");
+                }
+                else
+                {
+                    mcp_active = 1;
+                    if (!mcp_mutex) mcp_mutex = SDL_CreateMutex();
+                    if (mcp_start_http(desired)) mcp_http_started_port = desired;
+                }
+            }
+        }
+        else if (desired != mcp_http_started_port)
+        {
+            char keep[16];
+            SDL_snprintf(keep, sizeof(keep), "%d", mcp_http_started_port);
+            Con_Printf("mcp: HTTP server already on port %d; runtime restart "
+                       "not supported, reverting mcp_http_port to %s\n",
+                       mcp_http_started_port, keep);
+            Cvar_Set("mcp_http_port", keep);
+        }
+    }
+
+    if (!mcp_active) return;
+
     mcp_slot_t slot;
     while (mcp_dequeue(&slot))
         mcp_dispatch(slot.line);
