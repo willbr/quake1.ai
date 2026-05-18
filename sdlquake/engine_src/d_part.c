@@ -205,3 +205,63 @@ void D_DrawParticle (particle_t *pparticle)
 
 #endif	// !id386
 
+
+/*
+==============
+D_DrawSmokeParticle
+
+Sized + dithered variant for pt_smoke. Pixel size is the depth-derived value
+multiplied by particle->ramp (per-particle size scale, set by R_AddSmokePuff).
+When ramp > 2.0 the particle is checker-dithered, so big halo puffs look soft
+while small cores stay solid -- approximates an alpha falloff in palette space.
+==============
+*/
+void D_DrawSmokeParticle (particle_t *pparticle)
+{
+	vec3_t	local, transformed;
+	float	zi;
+	byte	*pdest;
+	short	*pz;
+	int		izi, pix, u, v, row, i, rows, dither;
+
+	VectorSubtract (pparticle->org, r_origin, local);
+	transformed[0] = DotProduct(local, r_pright);
+	transformed[1] = DotProduct(local, r_pup);
+	transformed[2] = DotProduct(local, r_ppn);
+	if (transformed[2] < PARTICLE_Z_CLIP)
+		return;
+
+	zi = 1.0 / transformed[2];
+	u = (int)(xcenter + zi * transformed[0] + 0.5);
+	v = (int)(ycenter - zi * transformed[1] + 0.5);
+	if (v > d_vrectbottom_particle || u > d_vrectright_particle ||
+	    v < d_vrecty || u < d_vrectx)
+		return;
+
+	izi = (int)(zi * 0x8000);
+	pix = (izi >> d_pix_shift);
+	pix = (int)(pix * pparticle->ramp);
+	if (pix < d_pix_min) pix = d_pix_min;
+	if (pix > d_pix_max * 4) pix = d_pix_max * 4;	// allow bigger than normal cap
+
+	dither = (pparticle->ramp > 2.0f);
+
+	pz    = d_pzbuffer    + (d_zwidth * v) + u;
+	pdest = d_viewbuffer  + d_scantable[v] + u;
+
+	rows = pix << d_y_aspect_shift;
+	for (row = 0; row < rows; row++, pz += d_zwidth, pdest += screenwidth)
+	{
+		for (i = 0; i < pix; i++)
+		{
+			if (dither && (((i ^ row) & 1) == 0))
+				continue;
+			if (pz[i] <= izi)
+			{
+				pz[i] = izi;
+				pdest[i] = (byte)pparticle->color;
+			}
+		}
+	}
+}
+

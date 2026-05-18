@@ -21,8 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 
-#define MAX_PARTICLES			2048	// default max # of particles at one
-										//  time
+#define MAX_PARTICLES			8192	// default max # of particles at one
+										//  time (raised for sim_wind smoke)
 #define ABSOLUTE_MIN_PARTICLES	512		// no fewer than this no matter what's
 										//  on the command line
 
@@ -393,6 +393,46 @@ void R_BlobExplosion (vec3_t org)
 
 /*
 ===============
+R_AddSmokePuff
+
+Smoke-specific particle spawn: pt_static (no gravity), long lifetime,
+caller-controlled drift velocity with minimal random jitter. Used by the
+sim_wind smoke field; bypasses the svc_particle protocol because the wire
+format clamps direction to ±8 units and lifetime to ≤0.4s, both of which
+are wrong for drifting smoke.
+===============
+*/
+void R_AddSmokePuff (vec3_t org, vec3_t dir, int color, int count)
+{
+	int			i, j;
+	particle_t	*p;
+
+	for (i=0 ; i<count ; i++)
+	{
+		if (!free_particles)
+			return;
+		p = free_particles;
+		free_particles = p->next;
+		p->next = active_particles;
+		active_particles = p;
+
+		p->die = cl.time + 1.5 + (rand() & 31) * 0.04;	// 1.5–2.8s
+		p->color = color;
+		p->type = pt_smoke;
+		// ramp is the per-particle size scale (1.0 small, ~3.5 big halo).
+		// Skewed toward bigger so most puffs are noticeable; the dither
+		// kicks in at >2.0 so the halos read as soft alpha falloff.
+		p->ramp = 1.0f + (rand() & 31) * (2.5f / 31.0f);
+		for (j=0 ; j<3 ; j++)
+		{
+			p->org[j] = org[j] + ((rand() & 7) - 4);	// ±4 unit jitter
+			p->vel[j] = dir[j] + ((rand() & 15) - 8);	// dir + ±8 noise
+		}
+	}
+}
+
+/*
+===============
 R_RunParticleEffect
 
 ===============
@@ -732,7 +772,10 @@ void R_DrawParticles (void)
 		glTexCoord2f (0,1);
 		glVertex3f (p->org[0] + right[0]*scale, p->org[1] + right[1]*scale, p->org[2] + right[2]*scale);
 #else
-		D_DrawParticle (p);
+		if (p->type == pt_smoke)
+			D_DrawSmokeParticle (p);
+		else
+			D_DrawParticle (p);
 #endif
 		p->org[0] += p->vel[0]*frametime;
 		p->org[1] += p->vel[1]*frametime;
@@ -741,6 +784,7 @@ void R_DrawParticles (void)
 		switch (p->type)
 		{
 		case pt_static:
+		case pt_smoke:
 			break;
 		case pt_fire:
 			p->ramp += time1;

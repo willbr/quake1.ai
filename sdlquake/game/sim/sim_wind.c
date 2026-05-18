@@ -20,6 +20,7 @@
 #include "sim.h"
 #include "../game_defs.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern engine_api_t   *eng;
@@ -233,6 +234,37 @@ static void emit_smoke_stims(void) {
     }
 }
 
+// Spawn light-grey particles in cells with non-trivial smoke density so the
+// field is visible to the player. Called every frame (not every tick), with
+// jittered spawn positions across the cell volume so the fog reads as a
+// volume rather than a grid of dots.
+static float rand_unit(void) {
+    return ((float)rand() / (float)RAND_MAX) - 0.5f;
+}
+static void emit_smoke_particles(void) {
+    int total = s_dim_x * s_dim_y * s_dim_z;
+    for (int i = 0; i < total; i++) {
+        float d = s_cells[i].smoke;
+        if (d < 0.05f) continue;
+        int z = i / (s_dim_x * s_dim_y);
+        int r = i - z * s_dim_x * s_dim_y;
+        int y = r / s_dim_x;
+        int x = r - y * s_dim_x;
+        int bursts = 2 + (int)(d * 6.0f);   // 2..8 bursts/cell/frame
+        for (int b = 0; b < bursts; b++) {
+            vec3_t pos = {
+                s_origin[0] + (x + 0.5f) * s_cell_size + rand_unit() * s_cell_size,
+                s_origin[1] + (y + 0.5f) * s_cell_size + rand_unit() * s_cell_size,
+                s_origin[2] + (z + 0.5f) * s_cell_size + rand_unit() * s_cell_size,
+            };
+            vec3_t drift = { rand_unit() * 8.0f,
+                             rand_unit() * 8.0f,
+                             8.0f + rand_unit() * 4.0f };
+            eng->SV_Smoke(pos, drift, 8, 3);
+        }
+    }
+}
+
 static void wind_tick(float dt) {
     int total = s_dim_x * s_dim_y * s_dim_z;
 
@@ -280,6 +312,7 @@ static void wind_tick(float dt) {
 
 void Wind_Frame(void) {
     if (!s_ready) return;
+    emit_smoke_particles();
     if (g->time < s_next_tick_time) return;
     float dt = 1.0f / SIM_WIND_TICK_HZ;
     wind_tick(dt);

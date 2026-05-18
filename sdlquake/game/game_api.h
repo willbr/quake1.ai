@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 20
+#define GAME_API_VERSION 21
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -191,6 +191,12 @@ typedef struct engine_api_s {
     void  (*Lightmap_AddDelta)(const vec3_t pos, float radius,
                                const vec3_t color, int owner);
     void  (*Lightmap_ClearOwner)(int owner);
+
+    // Smoke particle puff — like SV_Particle but uses pt_static (no gravity),
+    // long lifetime (~1.5–2.8s), and a tame velocity (caller's dir + ±8 noise).
+    // Bypasses the svc_particle wire format, which would otherwise clamp dir
+    // to ±8 units and lifetime to ≤0.4s. Single-player only.
+    void  (*SV_Smoke)(vec3_t origin, vec3_t dir, float color, float count);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

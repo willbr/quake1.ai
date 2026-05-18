@@ -159,6 +159,7 @@ void MSG_WriteString(sizebuf_t *sb, char *s);
 void     SV_BroadcastPrintf(const char *fmt, ...);
 void     SV_StartSound(edict_t *entity, int channel, char *sample, int volume, float attenuation);
 void     SV_StartParticle(float *org, float *dir, int color, int count);
+void     R_AddSmokePuff(float *org, float *dir, int color, int count);
 void     SV_LinkEdict(edict_t *ent, qboolean touch_triggers);
 void     SV_UnlinkEdict(edict_t *ent);
 void     SV_MakeStatic(edict_t *ent);
@@ -769,6 +770,11 @@ static void engine_sv_particle(float *org, float *dir, float color, float count)
     SV_StartParticle(org, dir, (int)color, (int)count);
 }
 
+static void engine_sv_smoke(float *org, float *dir, float color, float count)
+{
+    R_AddSmokePuff(org, dir, (int)color, (int)count);
+}
+
 static void engine_sv_makestatic(edict_t *e)
 {
     sizebuf_t *signon = svb_signon();
@@ -996,6 +1002,7 @@ static engine_api_t engine_funcs = {
     engine_sample_lightmap,
     Lightmap_AddDelta,
     Lightmap_ClearOwner,
+    engine_sv_smoke,
 };
 
 // ---------------------------------------------------------------------------

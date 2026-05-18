@@ -32,7 +32,8 @@ typedef struct
 } emitpoint_t;
 
 typedef enum {
-	pt_static, pt_grav, pt_slowgrav, pt_fire, pt_explode, pt_explode2, pt_blob, pt_blob2
+	pt_static, pt_grav, pt_slowgrav, pt_fire, pt_explode, pt_explode2, pt_blob, pt_blob2,
+	pt_smoke	// pt_static behaviour, but D_DrawSmokeParticle scales size by ramp and dithers
 } ptype_t;
 
 // !!! if this is changed, it must be changed in d_ifacea.h too !!!
@@ -149,6 +150,7 @@ void D_EndDirectRect (int x, int y, int width, int height);
 void D_PolysetDraw (void);
 void D_PolysetDrawFinalVerts (finalvert_t *fv, int numverts);
 void D_DrawParticle (particle_t *pparticle);
+void D_DrawSmokeParticle (particle_t *pparticle);
 void D_DrawPoly (void);
 void D_DrawSprite (void);
 void D_DrawSurfaces (void);
