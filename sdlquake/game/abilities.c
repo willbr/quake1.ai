@@ -31,7 +31,7 @@ static void register_cvars(void) {
     CVAR(ph_regen,          "25");
     CVAR(ph_blink_cost,     "25");
     CVAR(ph_gust_cost,      "15");
-    CVAR(ph_blink_range,    "320");
+    CVAR(ph_blink_range,    "768");
     CVAR(ph_gust_range,     "384");
     CVAR(ph_gust_cone_deg,  "30");
     CVAR(ph_gust_cooldown,  "0.5");
@@ -185,13 +185,13 @@ static void blink_reticle_particles(const vec3_t pos, int valid) {
 }
 
 static void blink_commit(edict_t *client, const vec3_t endpoint) {
-    // Snap player. SV_SetOrigin re-links collision; SV_DropToFloor settles.
+    // Snap player. SV_SetOrigin re-links collision; mid-air endpoints are
+    // allowed — gravity takes over after the teleport.
     vec3_t src;
     src[0] = client->v.origin[0];
     src[1] = client->v.origin[1];
     src[2] = client->v.origin[2];
     eng->SV_SetOrigin(client, (float*)endpoint);
-    eng->SV_DropToFloor(client);
 
     // Drain velocity so the post-blink state isn't a flailing tumble.
     client->v.velocity[0] = 0;
@@ -209,8 +209,13 @@ static void blink_commit(edict_t *client, const vec3_t endpoint) {
     emit_sound_stim(src,      intensity, n);
     emit_sound_stim(endpoint, intensity, n);
 
-    // Snap view forward to v_forward so the player doesn't get whiplash.
-    client->v.fixangle = 1.0f;
+    // Snap view forward, preserving yaw but zeroing pitch + roll. fixangle
+    // transmits v.angles as the new client viewangles, so leaving roll stale
+    // would lock the camera tilted until the next teleport.
+    client->v.angles[0] = 0.0f;
+    client->v.angles[1] = client->v.v_angle[1];
+    client->v.angles[2] = 0.0f;
+    client->v.fixangle  = 1.0f;
 }
 
 // ---------------------------------------------------------------------------
