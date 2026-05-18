@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_local.h"
+#include "r_fog.h"
 
 //define	PASSAGES
 
@@ -281,6 +282,8 @@ void R_Init (void)
 		extern void Lightmap_Init(void);
 		Lightmap_Init();
 	}
+
+	R_Fog_Init ();
 }
 
 /*
@@ -293,6 +296,7 @@ void R_NewMap (void)
 	int		i;
 
 	R_DecalsClear ();
+	R_Fog_NewMap ();
 
 // clear out efrags in case the level hasn't been reloaded
 // FIXME: is this one short?
@@ -1067,6 +1071,7 @@ void R_RenderView_ (void)
 
 	R_SetupFrame ();
 	R_DecalsFrame ();
+	R_Fog_Update ();
 
 #ifdef PASSAGES
 SetVisibilityByPassages ();

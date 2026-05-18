@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "d_local.h"
+#include "r_fog.h"
 
 #define SKY_SPAN_SHIFT	5
 #define SKY_SPAN_MAX	(1 << SKY_SPAN_SHIFT)
@@ -68,9 +69,20 @@ void D_DrawSkyScans8 (espan_t *pspan)
 	unsigned char	*pdest;
 	fixed16_t		s, t, snext, tnext, sstep, tstep;
 	int				spancountminus1;
+	// When fog is active, sky_fog points at the fog LUT row for an "effective
+	// sky depth" -- treat sky as if at ~2048 quake units away. Tints the
+	// scrolling sky pattern by fog color proportional to density, blends with
+	// depth-fogged walls instead of slamming to a flat patch.
+	unsigned char	*sky_fog;
 
 	sstep = 0;	// keep compiler happy
 	tstep = 0;	// ditto
+	// Sky is treated as if at ~200 quake units away rather than infinity.
+	// Caps the per-pixel fog factor so the scrolling sky pattern stays
+	// readable: at density 0.005, fog_factor ≈ 1-exp(-1) ≈ 0.63 (row 40 of
+	// 63), so ~37% of the original sky color shows through. At density 0.02,
+	// fog_factor saturates to row 62 and the sky looks nearly flat.
+	sky_fog = r_fog_active ? R_Fog_RowFromZi (1.0f / 200.0f) : NULL;
 
 	do
 	{
@@ -120,13 +132,26 @@ void D_DrawSkyScans8 (espan_t *pspan)
 				}
 			}
 
-			do
+			if (sky_fog)
 			{
-				*pdest++ = r_skysource[((t & R_SKY_TMASK) >> 8) +
-						((s & R_SKY_SMASK) >> 16)];
-				s += sstep;
-				t += tstep;
-			} while (--spancount > 0);
+				do
+				{
+					*pdest++ = sky_fog[r_skysource[((t & R_SKY_TMASK) >> 8) +
+							((s & R_SKY_SMASK) >> 16)]];
+					s += sstep;
+					t += tstep;
+				} while (--spancount > 0);
+			}
+			else
+			{
+				do
+				{
+					*pdest++ = r_skysource[((t & R_SKY_TMASK) >> 8) +
+							((s & R_SKY_SMASK) >> 16)];
+					s += sstep;
+					t += tstep;
+				} while (--spancount > 0);
+			}
 
 			s = snext;
 			t = tnext;

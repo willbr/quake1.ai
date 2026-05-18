@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "d_local.h"
+#include "r_fog.h"
 
 // TODO: put in span spilling to shrink list size
 // !!! if this is changed, it must be changed in d_polysa.s too !!!
@@ -164,10 +165,19 @@ void D_PolysetDrawFinalVerts (finalvert_t *fv, int numverts)
 			if (z >= *zbuf)
 			{
 				int		pix;
-				
+
 				*zbuf = z;
 				pix = skintable[fv->v[3]>>16][fv->v[2]>>16];
 				pix = ((byte *)acolormap)[pix + (fv->v[4] & 0xFF00) ];
+				if (r_fog_active) {
+					unsigned char *fog_lo, *fog_hi, *row;
+					int thresh4, bidx;
+					R_Fog_GetRows ((float)fv->v[5] * (1.0f / 2147483648.0f),
+					               &fog_lo, &fog_hi, &thresh4);
+					bidx = ((fv->v[1] & 1) << 1) | (fv->v[0] & 1);
+					row  = (r_fog_bayer2x2[bidx] < thresh4) ? fog_hi : fog_lo;
+					pix  = row[pix];
+				}
 				d_viewbuffer[d_scantable[fv->v[1]] + fv->v[0]] = pix;
 			}
 		}
@@ -374,9 +384,18 @@ split:
 	if (z >= *zbuf)
 	{
 		int		pix;
-		
+
 		*zbuf = z;
 		pix = d_pcolormap[skintable[new[3]>>16][new[2]>>16]];
+		if (r_fog_active) {
+			unsigned char *fog_lo, *fog_hi, *row;
+			int thresh4, bidx;
+			R_Fog_GetRows ((float)new[5] * (1.0f / 2147483648.0f),
+			               &fog_lo, &fog_hi, &thresh4);
+			bidx = ((new[1] & 1) << 1) | (new[0] & 1);
+			row  = (r_fog_bayer2x2[bidx] < thresh4) ? fog_hi : fog_lo;
+			pix  = row[pix];
+		}
 		d_viewbuffer[d_scantable[new[1]] + new[0]] = pix;
 	}
 
@@ -620,6 +639,9 @@ void D_PolysetDrawSpans8 (spanpackage_t *pspanpackage)
 	int		llight;
 	int		lzi;
 	short	*lpz;
+	/* fog/dither state */
+	unsigned char *fog_lo, *fog_hi;
+	int		fog_thresh4, fog_yrow, fog_x;
 
 	do
 	{
@@ -646,14 +668,34 @@ void D_PolysetDrawSpans8 (spanpackage_t *pspanpackage)
 			llight = pspanpackage->light;
 			lzi = pspanpackage->zi;
 
+			/* Per-scanline fog rows for Bayer 2x2 dither across the span. */
+			/* lzi == zi * 2^31; convert back so R_Fog_GetRows sees float 1/z. */
+			if (r_fog_active) {
+				int linear;
+				R_Fog_GetRows ((float)lzi * (1.0f / 2147483648.0f),
+				               &fog_lo, &fog_hi, &fog_thresh4);
+				/* pspanpackage->pdest is the screen pixel pointer; recover x,y */
+				linear   = (int)(lpdest - (unsigned char *)d_viewbuffer);
+				fog_x    = linear % screenwidth;
+				fog_yrow = ((linear / screenwidth) & 1) << 1;
+			}
+
 			do
 			{
 				if ((lzi >> 16) >= *lpz)
 				{
-					*lpdest = ((byte *)acolormap)[*lptex + (llight & 0xFF00)];
+					unsigned char pix = ((byte *)acolormap)[*lptex + (llight & 0xFF00)];
+					if (r_fog_active) {
+						unsigned char *fog =
+							(r_fog_bayer2x2[fog_yrow | (fog_x & 1)] < fog_thresh4)
+								? fog_hi : fog_lo;
+						pix = fog[pix];
+					}
+					*lpdest = pix;
 // gel mapping					*lpdest = gelmap[*lpdest];
 					*lpz = lzi >> 16;
 				}
+				if (r_fog_active) fog_x++;
 				lpdest++;
 				lzi += r_zistepx;
 				lpz++;

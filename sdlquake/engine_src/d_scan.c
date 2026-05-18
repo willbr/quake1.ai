@@ -24,11 +24,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "d_local.h"
+#include "r_fog.h"
 
 unsigned char	*r_turb_pbase, *r_turb_pdest;
 fixed16_t		r_turb_s, r_turb_t, r_turb_sstep, r_turb_tstep;
 int				*r_turb_turb;
 int				r_turb_spancount;
+
+/* Per-water-span fog dither state, set in Turbulent8 before calling the inner. */
+unsigned char	*r_turb_fog_lo, *r_turb_fog_hi;
+int				r_turb_fog_thresh4;
 
 void D_DrawTurbulent8Span (void);
 
@@ -101,14 +106,36 @@ void D_DrawTurbulent8Span (void)
 {
 	int		sturb, tturb;
 
-	do
+	if (r_fog_active && r_turb_fog_lo && r_turb_fog_hi)
 	{
-		sturb = ((r_turb_s + r_turb_turb[(r_turb_t>>16)&(CYCLE-1)])>>16)&63;
-		tturb = ((r_turb_t + r_turb_turb[(r_turb_s>>16)&(CYCLE-1)])>>16)&63;
-		*r_turb_pdest++ = *(r_turb_pbase + (tturb<<6) + sturb);
-		r_turb_s += r_turb_sstep;
-		r_turb_t += r_turb_tstep;
-	} while (--r_turb_spancount > 0);
+		int x_orig    = (int)(r_turb_pdest - (unsigned char *)d_viewbuffer) % screenwidth;
+		int y_linear  = (int)(r_turb_pdest - (unsigned char *)d_viewbuffer) / screenwidth;
+		int yrow      = (y_linear & 1) << 1;
+		int x         = x_orig;
+		do
+		{
+			unsigned char *fog =
+				(r_fog_bayer2x2[yrow | (x & 1)] < r_turb_fog_thresh4)
+					? r_turb_fog_hi : r_turb_fog_lo;
+			sturb = ((r_turb_s + r_turb_turb[(r_turb_t>>16)&(CYCLE-1)])>>16)&63;
+			tturb = ((r_turb_t + r_turb_turb[(r_turb_s>>16)&(CYCLE-1)])>>16)&63;
+			*r_turb_pdest++ = fog[*(r_turb_pbase + (tturb<<6) + sturb)];
+			r_turb_s += r_turb_sstep;
+			r_turb_t += r_turb_tstep;
+			x++;
+		} while (--r_turb_spancount > 0);
+	}
+	else
+	{
+		do
+		{
+			sturb = ((r_turb_s + r_turb_turb[(r_turb_t>>16)&(CYCLE-1)])>>16)&63;
+			tturb = ((r_turb_t + r_turb_turb[(r_turb_s>>16)&(CYCLE-1)])>>16)&63;
+			*r_turb_pdest++ = *(r_turb_pbase + (tturb<<6) + sturb);
+			r_turb_s += r_turb_sstep;
+			r_turb_t += r_turb_tstep;
+		} while (--r_turb_spancount > 0);
+	}
 }
 
 #endif	// !id386
@@ -235,6 +262,10 @@ void Turbulent8 (espan_t *pspan)
 
 			r_turb_s = r_turb_s & ((CYCLE<<16)-1);
 			r_turb_t = r_turb_t & ((CYCLE<<16)-1);
+
+			if (r_fog_active)
+				R_Fog_GetRows (zi, &r_turb_fog_lo, &r_turb_fog_hi,
+				               &r_turb_fog_thresh4);
 
 			D_DrawTurbulent8Span ();
 
@@ -367,12 +398,37 @@ void D_DrawSpans8 (espan_t *pspan)
 				}
 			}
 
-			do
+			if (r_fog_active)
 			{
-				*pdest++ = *(pbase + (s >> 16) + (t >> 16) * cachewidth);
-				s += sstep;
-				t += tstep;
-			} while (--spancount > 0);
+				unsigned char *fog_lo, *fog_hi;
+				int           thresh4;
+				int           x;       /* screen x for Bayer dither */
+				int           yrow;    /* 0 or 2: (y&1)<<1 */
+				R_Fog_GetRows (zi, &fog_lo, &fog_hi, &thresh4);
+				/* recover initial screen-x of this sub-span from pdest */
+				x    = (int)(pdest - (unsigned char *)d_viewbuffer)
+				       - screenwidth * pspan->v;
+				yrow = (pspan->v & 1) << 1;
+				do
+				{
+					unsigned char texel = *(pbase + (s >> 16) + (t >> 16) * cachewidth);
+					unsigned char *fog  =
+						(r_fog_bayer2x2[yrow | (x & 1)] < thresh4) ? fog_hi : fog_lo;
+					*pdest++ = fog[texel];
+					s += sstep;
+					t += tstep;
+					x++;
+				} while (--spancount > 0);
+			}
+			else
+			{
+				do
+				{
+					*pdest++ = *(pbase + (s >> 16) + (t >> 16) * cachewidth);
+					s += sstep;
+					t += tstep;
+				} while (--spancount > 0);
+			}
 
 			s = snext;
 			t = tnext;
