@@ -342,102 +342,6 @@ void R_DrawSkyChain (msurface_t *s)
 #define	SKY_TEX		2000
 
 /*
-=================================================================
-
-  PCX Loading
-
-=================================================================
-*/
-
-typedef struct
-{
-    char	manufacturer;
-    char	version;
-    char	encoding;
-    char	bits_per_pixel;
-    unsigned short	xmin,ymin,xmax,ymax;
-    unsigned short	hres,vres;
-    unsigned char	palette[48];
-    char	reserved;
-    char	color_planes;
-    unsigned short	bytes_per_line;
-    unsigned short	palette_type;
-    char	filler[58];
-    unsigned 	data;			// unbounded
-} pcx_t;
-
-byte	*pcx_rgb;
-
-/*
-============
-LoadPCX
-============
-*/
-void LoadPCX (FILE *f)
-{
-	pcx_t	*pcx, pcxbuf;
-	byte	palette[768];
-	byte	*pix;
-	int		x, y;
-	int		dataByte, runLength;
-	int		count;
-
-//
-// parse the PCX file
-//
-	fread (&pcxbuf, 1, sizeof(pcxbuf), f);
-
-	pcx = &pcxbuf;
-
-	if (pcx->manufacturer != 0x0a
-		|| pcx->version != 5
-		|| pcx->encoding != 1
-		|| pcx->bits_per_pixel != 8
-		|| pcx->xmax >= 320
-		|| pcx->ymax >= 256)
-	{
-		Con_Printf ("Bad pcx file\n");
-		return;
-	}
-
-	// seek to palette
-	fseek (f, -768, SEEK_END);
-	fread (palette, 1, 768, f);
-
-	fseek (f, sizeof(pcxbuf) - 4, SEEK_SET);
-
-	count = (pcx->xmax+1) * (pcx->ymax+1);
-	pcx_rgb = malloc( count * 4);
-
-	for (y=0 ; y<=pcx->ymax ; y++)
-	{
-		pix = pcx_rgb + 4*y*(pcx->xmax+1);
-		for (x=0 ; x<=pcx->ymax ; )
-		{
-			dataByte = fgetc(f);
-
-			if((dataByte & 0xC0) == 0xC0)
-			{
-				runLength = dataByte & 0x3F;
-				dataByte = fgetc(f);
-			}
-			else
-				runLength = 1;
-
-			while(runLength-- > 0)
-			{
-				pix[0] = palette[dataByte*3];
-				pix[1] = palette[dataByte*3+1];
-				pix[2] = palette[dataByte*3+2];
-				pix[3] = 255;
-				pix += 4;
-				x++;
-			}
-		}
-	}
-}
-
-/*
 =========================================================
 
 TARGA LOADING
@@ -656,13 +560,10 @@ void R_LoadSkys (void)
 			continue;
 		}
 		LoadTGA (f);
-//		LoadPCX (f);
 
 		glTexImage2D (GL_TEXTURE_2D, 0, gl_solid_format, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, targa_rgba);
-//		glTexImage2D (GL_TEXTURE_2D, 0, gl_solid_format, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, pcx_rgb);
 
 		free (targa_rgba);
-//		free (pcx_rgb);
 
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);

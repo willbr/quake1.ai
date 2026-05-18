@@ -408,10 +408,6 @@ void SCR_Init (void)
 // register our commands
 //
 	Cmd_AddCommand ("screenshot",SCR_ScreenShot_f);
-	{
-		extern void SCR_ScreenShotPNG_f(void);
-		Cmd_AddCommand ("screenshot_png", SCR_ScreenShotPNG_f);
-	}
 	Cmd_AddCommand ("sizeup",SCR_SizeUp_f);
 	Cmd_AddCommand ("sizedown",SCR_SizeDown_f);
 
@@ -660,145 +656,16 @@ void SCR_DrawConsole (void)
 */ 
  
 
-typedef struct
-{
-    char	manufacturer;
-    char	version;
-    char	encoding;
-    char	bits_per_pixel;
-    unsigned short	xmin,ymin,xmax,ymax;
-    unsigned short	hres,vres;
-    unsigned char	palette[48];
-    char	reserved;
-    char	color_planes;
-    unsigned short	bytes_per_line;
-    unsigned short	palette_type;
-    char	filler[58];
-    unsigned char	data;			// unbounded
-} pcx_t;
-
-/* 
-============== 
-WritePCXfile 
-============== 
-*/ 
-void WritePCXfile (char *filename, byte *data, int width, int height,
-	int rowbytes, byte *palette) 
-{
-	int		i, j, length;
-	pcx_t	*pcx;
-	byte		*pack;
-	  
-	pcx = Hunk_TempAlloc (width*height*2+1000);
-	if (pcx == NULL)
-	{
-		Con_Printf("SCR_ScreenShot_f: not enough memory\n");
-		return;
-	} 
- 
-	pcx->manufacturer = 0x0a;	// PCX id
-	pcx->version = 5;			// 256 color
- 	pcx->encoding = 1;		// uncompressed
-	pcx->bits_per_pixel = 8;		// 256 color
-	pcx->xmin = 0;
-	pcx->ymin = 0;
-	pcx->xmax = LittleShort((short)(width-1));
-	pcx->ymax = LittleShort((short)(height-1));
-	pcx->hres = LittleShort((short)width);
-	pcx->vres = LittleShort((short)height);
-	Q_memset (pcx->palette,0,sizeof(pcx->palette));
-	pcx->color_planes = 1;		// chunky image
-	pcx->bytes_per_line = LittleShort((short)width);
-	pcx->palette_type = LittleShort(2);		// not a grey scale
-	Q_memset (pcx->filler,0,sizeof(pcx->filler));
-
-// pack the image
-	pack = &pcx->data;
-	
-	for (i=0 ; i<height ; i++)
-	{
-		for (j=0 ; j<width ; j++)
-		{
-			if ( (*data & 0xc0) != 0xc0)
-				*pack++ = *data++;
-			else
-			{
-				*pack++ = 0xc1;
-				*pack++ = *data++;
-			}
-		}
-
-		data += rowbytes - width;
-	}
-			
-// write the palette
-	*pack++ = 0x0c;	// palette ID byte
-	for (i=0 ; i<768 ; i++)
-		*pack++ = *palette++;
-		
-// write output file 
-	length = pack - (byte *)pcx;
-	COM_WriteFile (filename, pcx, length);
-} 
- 
-
-
-/* 
-================== 
-SCR_ScreenShot_f
-================== 
-*/  
-void SCR_ScreenShot_f (void) 
-{ 
-	int     i; 
-	char		pcxname[80]; 
-	char		checkname[MAX_OSPATH];
-
-// 
-// find a file name to save it to 
-// 
-	strcpy(pcxname,"quake00.pcx");
-		
-	for (i=0 ; i<=99 ; i++) 
-	{ 
-		pcxname[5] = i/10 + '0'; 
-		pcxname[6] = i%10 + '0'; 
-		sprintf (checkname, "%s/%s", com_gamedir, pcxname);
-		if (Sys_FileTime(checkname) == -1)
-			break;	// file doesn't exist
-	} 
-	if (i==100) 
-	{
-		Con_Printf ("SCR_ScreenShot_f: Couldn't create a PCX file\n"); 
-		return;
- 	}
-
-// 
-// save the pcx file 
-// 
-	D_EnableBackBufferAccess ();	// enable direct drawing of console to back
-									//  buffer
-
-	WritePCXfile (pcxname, vid.buffer, vid.width, vid.height, vid.rowbytes,
-				  host_basepal);
-
-	D_DisableBackBufferAccess ();	// for adapters that can't stay mapped in
-									//  for linear writes all the time
-
-	Con_Printf ("Wrote %s\n", pcxname);
-}
-
 /*
 ==================
-SCR_ScreenShotPNG_f
+SCR_ScreenShot_f
 
-Like SCR_ScreenShot_f but writes PNG via VID_SaveScreenshotPNG
-(platform/vid_sdl.c). Used by recreate-the-bug investigation cycles —
-result is viewable with any image tool without PCX conversion.
-Saves to com_gamedir/quakeNN.png with auto-incrementing index.
+Writes a PNG of the current framebuffer to com_gamedir/quakeNN.png with an
+auto-incrementing index (00..99). PNG encoding lives in platform/vid_sdl.c
+via stb_image_write — there is no longer any PCX path.
 ==================
 */
-void SCR_ScreenShotPNG_f (void)
+void SCR_ScreenShot_f (void)
 {
 	extern int VID_SaveScreenshotPNG(const char *path);
 	int  i;
@@ -813,14 +680,14 @@ void SCR_ScreenShotPNG_f (void)
 		if (Sys_FileTime(checkname) == -1) break;
 	}
 	if (i == 100) {
-		Con_Printf("SCR_ScreenShotPNG_f: couldn't create a PNG file\n");
+		Con_Printf("SCR_ScreenShot_f: couldn't create a PNG file\n");
 		return;
 	}
 	D_EnableBackBufferAccess();
 	if (VID_SaveScreenshotPNG(checkname))
 		Con_Printf("Wrote %s\n", checkname);
 	else
-		Con_Printf("SCR_ScreenShotPNG_f: VID_SaveScreenshotPNG failed\n");
+		Con_Printf("SCR_ScreenShot_f: VID_SaveScreenshotPNG failed\n");
 	D_DisableBackBufferAccess();
 }
 

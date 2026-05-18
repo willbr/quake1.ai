@@ -10,6 +10,7 @@ const Dir = std.Io.Dir;
 const Allocator = std.mem.Allocator;
 
 const palette_mod = @import("quake_palette.zig");
+const palette_png = @import("quake_palette_png.zig");
 const wolf_vswap  = @import("wolf_vswap.zig");
 const wolf_digi   = @import("wolf_digi.zig");
 const doom_wad    = @import("doom_wad.zig");
@@ -330,6 +331,7 @@ fn allOutputsExist(io: Io) bool {
     for (doom_sprite_sets) |s| if (!pathExists(io, s.out_path)) return false;
     for (doom_sound_sets)  |s| if (!pathExists(io, s.out_path)) return false;
     if (!pathExists(io, "id1/gfx/palette_doom.lmp")) return false;
+    if (!pathExists(io, "id1/gfx/palette.lmp")) return false;
     return true;
 }
 
@@ -341,6 +343,12 @@ fn pathExists(io: Io, path: []const u8) bool {
 }
 
 pub fn extractAll(io: Io, allocator: Allocator) !void {
+    // Regenerate id1/gfx/palette.lmp from tools/palette.png if the .lmp is
+    // gone. The PNG is the human-readable source of truth; the engine still
+    // reads the binary .lmp at runtime. This runs before allOutputsExist so a
+    // missing palette.lmp doesn't shortcut the rest of the extractor too.
+    try palette_png.regenerateLmpIfMissing(io, allocator);
+
     if (allOutputsExist(io)) return;
     std.debug.print("extracting Phase 6 assets...\n", .{});
     const quake_pal = try palette_mod.loadPalette(io, allocator);
