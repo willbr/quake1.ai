@@ -827,6 +827,18 @@ void Editor_PushPreviewEntities(void)
     if (!Editor_IsOpen()) return;
     if (!cl.worldmodel) return;
 
+    // Live view: don't push any .map preview models. Live view is pure
+    // game — engine-rendered entities only, no editor authoring overlay.
+    if (!view_map) return;
+
+    // Map view: the engine has already filled cl_visedicts with every live
+    // entity (runtime-spawned rockets/gibs/monsters, the player body, …).
+    // Map view wants to show only the .map authoring source, so drop the
+    // engine's choices wholesale — the loop below re-pushes a preview for
+    // each .map entity that has a model. Static-entity efrag chains and
+    // the BSP world render through separate pipelines and are unaffected.
+    cl_numvisedicts = 0;
+
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
@@ -1863,7 +1875,10 @@ static void detach_stale_live_ent(edit_entity_t *e)
 // in the array doesn't leave the gizmo pointing at the wrong entry. Skip
 // entries that are currently selected — keeps the user's context across
 // a churn frame so they don't lose a selected rocket mid-edit.
-static void reap_dead_transients(void)
+//
+// `force_all`: reap every transient regardless of liveness or selection.
+// Used when switching to map view, where transients shouldn't exist at all.
+static void reap_dead_transients(int force_all)
 {
     int i, w, k, dst;
     int old_count = edit_scene.numentities;
@@ -1878,8 +1893,9 @@ static void reap_dead_transients(void)
     {
         edit_entity_t *e = &edit_scene.entities[i];
         if (e->transient
-         && (!e->live_ent || e->live_ent->free)
-         && !Scene_SelectionContains(i, -1))
+         && (force_all
+             || ((!e->live_ent || e->live_ent->free)
+                 && !Scene_SelectionContains(i, -1))))
         {
             // Free per-entity allocations; brushes never set on transients.
             free(e->kv);
@@ -1993,7 +2009,12 @@ void Editor_MaterialiseLiveTransients(void)
     int i;
     int view_live = (int)editor_view_mode.value == 0;
 
-    if (!view_live) return;
+    // Map view: tear down any transients left over from a previous live
+    // session so runtime edicts (rockets, monsters, the player) stop
+    // rendering and stop being clickable. Editor_PreRender clears the
+    // selection on view-mode switch, so force_all won't strand the user's
+    // current focus.
+    if (!view_live) { reap_dead_transients(1); return; }
     if (!sv.active) return;
 
     // Refresh stale live_ent links on .map-authored entries before
@@ -2002,7 +2023,7 @@ void Editor_MaterialiseLiveTransients(void)
     for (i = 0; i < edit_scene.numentities; i++)
         detach_stale_live_ent(&edit_scene.entities[i]);
 
-    reap_dead_transients();
+    reap_dead_transients(0);
 
     for (n = 1; n < sv.num_edicts; n++)
     {
@@ -2022,13 +2043,15 @@ void Editor_MaterialiseLiveTransients(void)
 int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush,
                   int *out_plane)
 {
+    extern cvar_t editor_view_mode;
+    int view_live = (int)editor_view_mode.value == 0;
     vec3_t origin, dir;
     float best_t = 1e30f;
     float world_t;
     int best_ent = -1, best_brush = -1, best_plane = -1;
     int i, j, k;
 
-    reap_dead_transients();
+    reap_dead_transients(0);
 
     Editor_ScreenToRay(sx, sy, origin, dir);
     world_t = world_pick_occlusion(origin, dir);
@@ -2106,8 +2129,9 @@ int Editor_PickAt(float sx, float sy, int *out_ent, int *out_brush,
     // These are the things `find_or_create_transient` materialises into a
     // selectable handle. We require a non-degenerate absmin/absmax — fresh
     // edicts (or temp ents) often have collapsed bboxes and would pass the
-    // ray test at the wrong place.
-    if (sv.active)
+    // ray test at the wrong place. Map view skips this pass: clicking a
+    // live rocket in map view should not select it.
+    if (sv.active && view_live)
     {
         int n;
         for (n = 1; n < sv.num_edicts; n++)
