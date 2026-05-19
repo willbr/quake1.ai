@@ -31,6 +31,7 @@ void R_DrawSurfaceBlock8_mip0_rgb (void)
     unsigned        tex, r6, g6, b6;
     unsigned char  *psource, *prowdest;
     unsigned       *rptr;
+    int             dither_on = (r_lightmap_dither.value != 0.0f);
 
     psource = pbasesource;
     prowdest = prowdestbase;
@@ -50,6 +51,7 @@ void R_DrawSurfaceBlock8_mip0_rgb (void)
 
         for (by = 0; by < 16; by++)
         {
+            const unsigned char *brow = dither_on ? &r_bayer4x4[(by & 3) << 2] : 0;
             lightR_step = ((int)lightR_l - (int)lightR_r) >> 4;
             lightG_step = ((int)lightG_l - (int)lightG_r) >> 4;
             lightB_step = ((int)lightB_l - (int)lightB_r) >> 4;
@@ -60,10 +62,11 @@ void R_DrawSurfaceBlock8_mip0_rgb (void)
 
             for (bx = 15; bx >= 0; bx--)
             {
+                unsigned d = brow ? ((unsigned)brow[bx & 3] << (RGB_SHIFT - 4)) : 0u;
                 tex = psource[bx];
-                r6 = (RGB_LIGHT_INTEGER(lightR) * basepal_r[tex]) >> RGB_SHIFT;
-                g6 = (RGB_LIGHT_INTEGER(lightG) * basepal_g[tex]) >> RGB_SHIFT;
-                b6 = (RGB_LIGHT_INTEGER(lightB) * basepal_b[tex]) >> RGB_SHIFT;
+                r6 = ((RGB_LIGHT_INTEGER(lightR) * basepal_r[tex]) + d) >> RGB_SHIFT;
+                g6 = ((RGB_LIGHT_INTEGER(lightG) * basepal_g[tex]) + d) >> RGB_SHIFT;
+                b6 = ((RGB_LIGHT_INTEGER(lightB) * basepal_b[tex]) + d) >> RGB_SHIFT;
                 if (r6 > 63) r6 = 63;
                 if (g6 > 63) g6 = 63;
                 if (b6 > 63) b6 = 63;
@@ -107,6 +110,7 @@ void R_DrawSurfaceBlock8_mip1_rgb (void)
     unsigned        tex, r6, g6, b6;
     unsigned char  *psource, *prowdest;
     unsigned       *rptr;
+    int             dither_on = (r_lightmap_dither.value != 0.0f);
 
     psource = pbasesource;
     prowdest = prowdestbase;
@@ -126,6 +130,7 @@ void R_DrawSurfaceBlock8_mip1_rgb (void)
 
         for (by = 0; by < 8; by++)
         {
+            const unsigned char *brow = dither_on ? &r_bayer4x4[(by & 3) << 2] : 0;
             lightR_step = ((int)lightR_l - (int)lightR_r) >> 3;
             lightG_step = ((int)lightG_l - (int)lightG_r) >> 3;
             lightB_step = ((int)lightB_l - (int)lightB_r) >> 3;
@@ -134,10 +139,11 @@ void R_DrawSurfaceBlock8_mip1_rgb (void)
 
             for (bx = 7; bx >= 0; bx--)
             {
+                unsigned d = brow ? ((unsigned)brow[bx & 3] << (RGB_SHIFT - 4)) : 0u;
                 tex = psource[bx];
-                r6 = (RGB_LIGHT_INTEGER(lightR) * basepal_r[tex]) >> RGB_SHIFT;
-                g6 = (RGB_LIGHT_INTEGER(lightG) * basepal_g[tex]) >> RGB_SHIFT;
-                b6 = (RGB_LIGHT_INTEGER(lightB) * basepal_b[tex]) >> RGB_SHIFT;
+                r6 = ((RGB_LIGHT_INTEGER(lightR) * basepal_r[tex]) + d) >> RGB_SHIFT;
+                g6 = ((RGB_LIGHT_INTEGER(lightG) * basepal_g[tex]) + d) >> RGB_SHIFT;
+                b6 = ((RGB_LIGHT_INTEGER(lightB) * basepal_b[tex]) + d) >> RGB_SHIFT;
                 if (r6 > 63) r6 = 63;
                 if (g6 > 63) g6 = 63;
                 if (b6 > 63) b6 = 63;
@@ -181,6 +187,7 @@ void R_DrawSurfaceBlock8_mip2_rgb (void)
     unsigned        tex, r6, g6, b6;
     unsigned char  *psource, *prowdest;
     unsigned       *rptr;
+    int             dither_on = (r_lightmap_dither.value != 0.0f);
 
     psource = pbasesource;
     prowdest = prowdestbase;
@@ -200,6 +207,7 @@ void R_DrawSurfaceBlock8_mip2_rgb (void)
 
         for (by = 0; by < 4; by++)
         {
+            const unsigned char *brow = dither_on ? &r_bayer4x4[(by & 3) << 2] : 0;
             lightR_step = ((int)lightR_l - (int)lightR_r) >> 2;
             lightG_step = ((int)lightG_l - (int)lightG_r) >> 2;
             lightB_step = ((int)lightB_l - (int)lightB_r) >> 2;
@@ -208,10 +216,11 @@ void R_DrawSurfaceBlock8_mip2_rgb (void)
 
             for (bx = 3; bx >= 0; bx--)
             {
+                unsigned d = brow ? ((unsigned)brow[bx & 3] << (RGB_SHIFT - 4)) : 0u;
                 tex = psource[bx];
-                r6 = (RGB_LIGHT_INTEGER(lightR) * basepal_r[tex]) >> RGB_SHIFT;
-                g6 = (RGB_LIGHT_INTEGER(lightG) * basepal_g[tex]) >> RGB_SHIFT;
-                b6 = (RGB_LIGHT_INTEGER(lightB) * basepal_b[tex]) >> RGB_SHIFT;
+                r6 = ((RGB_LIGHT_INTEGER(lightR) * basepal_r[tex]) + d) >> RGB_SHIFT;
+                g6 = ((RGB_LIGHT_INTEGER(lightG) * basepal_g[tex]) + d) >> RGB_SHIFT;
+                b6 = ((RGB_LIGHT_INTEGER(lightB) * basepal_b[tex]) + d) >> RGB_SHIFT;
                 if (r6 > 63) r6 = 63;
                 if (g6 > 63) g6 = 63;
                 if (b6 > 63) b6 = 63;
@@ -255,6 +264,7 @@ void R_DrawSurfaceBlock8_mip3_rgb (void)
     unsigned        tex, r6, g6, b6;
     unsigned char  *psource, *prowdest;
     unsigned       *rptr;
+    int             dither_on = (r_lightmap_dither.value != 0.0f);
 
     psource = pbasesource;
     prowdest = prowdestbase;
@@ -274,6 +284,7 @@ void R_DrawSurfaceBlock8_mip3_rgb (void)
 
         for (by = 0; by < 2; by++)
         {
+            const unsigned char *brow = dither_on ? &r_bayer4x4[(by & 3) << 2] : 0;
             lightR_step = ((int)lightR_l - (int)lightR_r) >> 1;
             lightG_step = ((int)lightG_l - (int)lightG_r) >> 1;
             lightB_step = ((int)lightB_l - (int)lightB_r) >> 1;
@@ -282,10 +293,11 @@ void R_DrawSurfaceBlock8_mip3_rgb (void)
 
             for (bx = 1; bx >= 0; bx--)
             {
+                unsigned d = brow ? ((unsigned)brow[bx & 3] << (RGB_SHIFT - 4)) : 0u;
                 tex = psource[bx];
-                r6 = (RGB_LIGHT_INTEGER(lightR) * basepal_r[tex]) >> RGB_SHIFT;
-                g6 = (RGB_LIGHT_INTEGER(lightG) * basepal_g[tex]) >> RGB_SHIFT;
-                b6 = (RGB_LIGHT_INTEGER(lightB) * basepal_b[tex]) >> RGB_SHIFT;
+                r6 = ((RGB_LIGHT_INTEGER(lightR) * basepal_r[tex]) + d) >> RGB_SHIFT;
+                g6 = ((RGB_LIGHT_INTEGER(lightG) * basepal_g[tex]) + d) >> RGB_SHIFT;
+                b6 = ((RGB_LIGHT_INTEGER(lightB) * basepal_b[tex]) + d) >> RGB_SHIFT;
                 if (r6 > 63) r6 = 63;
                 if (g6 > 63) g6 = 63;
                 if (b6 > 63) b6 = 63;

@@ -69,7 +69,10 @@ extern cvar_t	r_aliasstats;
 extern cvar_t	r_dspeeds;
 extern cvar_t	r_drawflat;
 extern cvar_t	r_lightmap;
+extern cvar_t	r_lightmap_dither;
 extern cvar_t	r_ambient;
+
+extern const unsigned char r_bayer4x4[16];	// shared by mono + RGB block writers
 extern cvar_t	r_reportsurfout;
 extern cvar_t	r_maxsurfs;
 extern cvar_t	r_numsurfs;

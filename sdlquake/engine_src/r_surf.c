@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_local.h"
+#include "r_drawflat.h"
 
 drawsurf_t	r_drawsurf;
 
@@ -53,6 +54,16 @@ static void	(*surfmiptable[4])(void) = {
 
 unsigned		blocklights[18*18];
 unsigned		blocklights_rgb[18*18*3];
+
+/* 4x4 Bayer ordered dither table, shared by mono and RGB block writers.
+   Values 0..15; callers shift to scale to the appropriate quantisation step.
+   Indexed as r_bayer4x4[(row & 3) * 4 + (col & 3)]. */
+const unsigned char r_bayer4x4[16] = {
+     0,  8,  2, 10,
+    12,  4, 14,  6,
+     3, 11,  1,  9,
+    15,  7, 13,  5,
+};
 
 /*
 ===============
@@ -553,6 +564,14 @@ void R_DrawSurface (void)
 		}
 		r_source = r_lightmap_const;
 	}
+
+	// r_drawflat 2: replace texel sampling with a category-coloured uniform
+	// buffer. Same UV-wrap-no-op trick as r_lightmap. Lightmap blend still
+	// runs, producing lit flat shading.
+	if (r_drawflat.value == 2) {
+		int cat = R_DrawFlat_SurfCategory (r_drawsurf.surf);
+		r_source = r_drawflat_src[cat];
+	}
 	
 // the fractional light values should range from 0 to (VID_GRADES - 1) << 16
 // from a source range of 0 - 255
@@ -644,6 +663,7 @@ void R_DrawSurfaceBlock8_mip0 (void)
 {
 	int				v, i, b, lightstep, lighttemp, light;
 	unsigned char	pix, *psource, *prowdest;
+	int				dither_on = (r_lightmap_dither.value != 0.0f);
 
 	psource = pbasesource;
 	prowdest = prowdestbase;
@@ -660,6 +680,7 @@ void R_DrawSurfaceBlock8_mip0 (void)
 
 		for (i=0 ; i<16 ; i++)
 		{
+			const unsigned char *brow = dither_on ? &r_bayer4x4[(i & 3) << 2] : 0;
 			lighttemp = lightleft - lightright;
 			lightstep = lighttemp >> 4;
 
@@ -667,12 +688,14 @@ void R_DrawSurfaceBlock8_mip0 (void)
 
 			for (b=15; b>=0; b--)
 			{
+				unsigned d = brow ? ((unsigned)brow[b & 3] << 4) : 0u;
+				unsigned row = ((unsigned)light + d) & 0xFF00u;
+				if (row > (63u << 8)) row = 63u << 8;
 				pix = psource[b];
-				prowdest[b] = ((unsigned char *)vid.colormap)
-						[(light & 0xFF00) + pix];
+				prowdest[b] = ((unsigned char *)vid.colormap)[row + pix];
 				light += lightstep;
 			}
-	
+
 			psource += sourcetstep;
 			lightright += lightrightstep;
 			lightleft += lightleftstep;
@@ -694,6 +717,7 @@ void R_DrawSurfaceBlock8_mip1 (void)
 {
 	int				v, i, b, lightstep, lighttemp, light;
 	unsigned char	pix, *psource, *prowdest;
+	int				dither_on = (r_lightmap_dither.value != 0.0f);
 
 	psource = pbasesource;
 	prowdest = prowdestbase;
@@ -710,6 +734,7 @@ void R_DrawSurfaceBlock8_mip1 (void)
 
 		for (i=0 ; i<8 ; i++)
 		{
+			const unsigned char *brow = dither_on ? &r_bayer4x4[(i & 3) << 2] : 0;
 			lighttemp = lightleft - lightright;
 			lightstep = lighttemp >> 3;
 
@@ -717,12 +742,14 @@ void R_DrawSurfaceBlock8_mip1 (void)
 
 			for (b=7; b>=0; b--)
 			{
+				unsigned d = brow ? ((unsigned)brow[b & 3] << 4) : 0u;
+				unsigned row = ((unsigned)light + d) & 0xFF00u;
+				if (row > (63u << 8)) row = 63u << 8;
 				pix = psource[b];
-				prowdest[b] = ((unsigned char *)vid.colormap)
-						[(light & 0xFF00) + pix];
+				prowdest[b] = ((unsigned char *)vid.colormap)[row + pix];
 				light += lightstep;
 			}
-	
+
 			psource += sourcetstep;
 			lightright += lightrightstep;
 			lightleft += lightleftstep;
@@ -744,6 +771,7 @@ void R_DrawSurfaceBlock8_mip2 (void)
 {
 	int				v, i, b, lightstep, lighttemp, light;
 	unsigned char	pix, *psource, *prowdest;
+	int				dither_on = (r_lightmap_dither.value != 0.0f);
 
 	psource = pbasesource;
 	prowdest = prowdestbase;
@@ -760,6 +788,7 @@ void R_DrawSurfaceBlock8_mip2 (void)
 
 		for (i=0 ; i<4 ; i++)
 		{
+			const unsigned char *brow = dither_on ? &r_bayer4x4[(i & 3) << 2] : 0;
 			lighttemp = lightleft - lightright;
 			lightstep = lighttemp >> 2;
 
@@ -767,12 +796,14 @@ void R_DrawSurfaceBlock8_mip2 (void)
 
 			for (b=3; b>=0; b--)
 			{
+				unsigned d = brow ? ((unsigned)brow[b & 3] << 4) : 0u;
+				unsigned row = ((unsigned)light + d) & 0xFF00u;
+				if (row > (63u << 8)) row = 63u << 8;
 				pix = psource[b];
-				prowdest[b] = ((unsigned char *)vid.colormap)
-						[(light & 0xFF00) + pix];
+				prowdest[b] = ((unsigned char *)vid.colormap)[row + pix];
 				light += lightstep;
 			}
-	
+
 			psource += sourcetstep;
 			lightright += lightrightstep;
 			lightleft += lightleftstep;
@@ -794,6 +825,7 @@ void R_DrawSurfaceBlock8_mip3 (void)
 {
 	int				v, i, b, lightstep, lighttemp, light;
 	unsigned char	pix, *psource, *prowdest;
+	int				dither_on = (r_lightmap_dither.value != 0.0f);
 
 	psource = pbasesource;
 	prowdest = prowdestbase;
@@ -810,6 +842,7 @@ void R_DrawSurfaceBlock8_mip3 (void)
 
 		for (i=0 ; i<2 ; i++)
 		{
+			const unsigned char *brow = dither_on ? &r_bayer4x4[(i & 3) << 2] : 0;
 			lighttemp = lightleft - lightright;
 			lightstep = lighttemp >> 1;
 
@@ -817,12 +850,14 @@ void R_DrawSurfaceBlock8_mip3 (void)
 
 			for (b=1; b>=0; b--)
 			{
+				unsigned d = brow ? ((unsigned)brow[b & 3] << 4) : 0u;
+				unsigned row = ((unsigned)light + d) & 0xFF00u;
+				if (row > (63u << 8)) row = 63u << 8;
 				pix = psource[b];
-				prowdest[b] = ((unsigned char *)vid.colormap)
-						[(light & 0xFF00) + pix];
+				prowdest[b] = ((unsigned char *)vid.colormap)[row + pix];
 				light += lightstep;
 			}
-	
+
 			psource += sourcetstep;
 			lightright += lightrightstep;
 			lightleft += lightleftstep;

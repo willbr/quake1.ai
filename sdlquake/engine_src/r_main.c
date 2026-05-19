@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "r_fog.h"
+#include "r_drawflat.h"
 
 //define	PASSAGES
 
@@ -132,12 +133,14 @@ static float r_coloredlight_last      = -1.0f;	// forces flush on first frame
 static float r_colored_dlights_last   = -1.0f;
 static float r_lightmap_last          = -1.0f;
 static float r_decals_intensity_last  = -1.0f;
+static float r_drawflat_last          = -1.0f;
 cvar_t	r_drawentities = {"r_drawentities","1"};
 cvar_t	r_drawviewmodel = {"r_drawviewmodel","1"};
 cvar_t	r_aliasstats = {"r_polymodelstats","0"};
 cvar_t	r_dspeeds = {"r_dspeeds","0"};
 cvar_t	r_drawflat = {"r_drawflat", "0"};
 cvar_t	r_lightmap = {"r_lightmap", "0"};
+cvar_t	r_lightmap_dither = {"r_lightmap_dither", "1", true};	// archived
 cvar_t	r_ambient = {"r_ambient", "0"};
 cvar_t	r_reportsurfout = {"r_reportsurfout", "0"};
 cvar_t	r_maxsurfs = {"r_maxsurfs", "0"};
@@ -228,6 +231,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_graphheight);
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_lightmap);
+	Cvar_RegisterVariable (&r_lightmap_dither);
 	Cvar_RegisterVariable (&r_ambient);
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_RegisterVariable (&r_waterwarp);
@@ -263,6 +267,7 @@ void R_Init (void)
 	r_refdef.yOrigin = YCENTERING;
 
 	R_InitParticles ();
+	R_DrawFlat_Init ();
 
 // TODO: collect 386-specific code in one place
 #if	id386
@@ -1208,13 +1213,15 @@ void R_RenderView (void)
 	if (r_coloredlight.value    != r_coloredlight_last ||
 	    r_colored_dlights.value != r_colored_dlights_last ||
 	    r_lightmap.value        != r_lightmap_last ||
-	    r_decals_intensity.value != r_decals_intensity_last)
+	    r_decals_intensity.value != r_decals_intensity_last ||
+	    r_drawflat.value        != r_drawflat_last)
 	{
 		D_FlushCaches ();
 		r_coloredlight_last      = r_coloredlight.value;
 		r_colored_dlights_last   = r_colored_dlights.value;
 		r_lightmap_last          = r_lightmap.value;
 		r_decals_intensity_last  = r_decals_intensity.value;
+		r_drawflat_last          = r_drawflat.value;
 	}
 
 	R_RenderView_ ();
