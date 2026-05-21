@@ -139,14 +139,16 @@ static mcp_raw_sock_t   mcp_sse_sock    = (mcp_raw_sock_t)MCP_SOCK_INVALID;
 static SDL_Mutex       *mcp_sse_mutex   = NULL;
 
 // `mcp_http_port` cvar — runtime control over the HTTP listener. Setting it
-// non-zero brings the listener up on that port (lazy, from MCP_Frame). The
-// default string lives in a mutable buffer so MCP_SetHttpPortDefault can
-// pre-seed it from the --mcp-http flag before Cvar_RegisterVariable copies
-// it onto the zone heap. Set-once-never-restart: once the listener is up,
-// changing the cvar prints a warning and reverts it. Teardown / port-swap
-// at runtime would need extra plumbing to drain in-flight HTTP workers --
-// see overnight.md.
-static char    mcp_http_port_default[16] = "0";
+// non-zero brings the listener up on that port (lazy, from MCP_Frame); set
+// to 0 to disable. Default is 9876 so devs can `mcp_call.py` / `curl`
+// the running engine straight out of the box; matches scripts/mcp_call.py's
+// hardcoded PORT. The default string lives in a mutable buffer so
+// MCP_SetHttpPortDefault can override it from the --mcp-http flag before
+// Cvar_RegisterVariable copies it onto the zone heap. Set-once-never-restart:
+// once the listener is up, changing the cvar prints a warning and reverts
+// it. Teardown / port-swap at runtime would need extra plumbing to drain
+// in-flight HTTP workers -- see overnight.md.
+static char    mcp_http_port_default[16] = "9876";
 static cvar_t  mcp_http_port_cvar = { "mcp_http_port", mcp_http_port_default };
 static int     mcp_http_started_port = 0;  // 0 = never started
 
@@ -747,6 +749,48 @@ static void tool_console_exec(const char *id_json, const char *command)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: notify — mid-screen centerprint, optional golden screen flash + sound
+// ---------------------------------------------------------------------------
+//
+// Lets an external agent (e.g. Claude finishing a task) surface a short
+// message in-game without forcing the player to open the console. The
+// centerprint is SCR_CenterPrint, the same channel maps use for level
+// intro text, so it shows for `scr_centertime` seconds (default 2). With
+// flash=true we also queue `bf` for a one-frame golden screen flash as a
+// peripheral-vision cue, and with a non-empty sound we route `play <sfx>`
+// for an audible ping.
+
+static void tool_notify(const char *id_json, const char *message, int flash,
+                        const char *sound)
+{
+    char copy[256];
+    if (!message || !message[0])
+    {
+        mcp_error(id_json, -32602, "missing message parameter");
+        return;
+    }
+    /* SCR_CenterPrint signature is non-const and writes scr_centerstring
+     * via strncpy. Take a mutable copy so a caller's literal can't be
+     * touched, and so we control the length cap. */
+    strncpy(copy, message, sizeof(copy) - 1);
+    copy[sizeof(copy) - 1] = '\0';
+    SCR_CenterPrint(copy);
+    if (flash) Cbuf_AddText("bf\n");
+    if (sound && sound[0])
+    {
+        /* Route through the `play` console command — handles precache,
+         * channel allocation, and works whether or not a map is loaded
+         * (snd_dma falls back to the local listener). Caller-supplied
+         * path is treated as developer input; no shell-quoting concerns
+         * since Cmd_TokenizeString parses on whitespace. */
+        char buf[128];
+        snprintf(buf, sizeof(buf), "play %s\n", sound);
+        Cbuf_AddText(buf);
+    }
+    mcp_text_result(id_json, "ok");
+}
+
+// ---------------------------------------------------------------------------
 // Tool: console_tail — last N lines from the engine console scrollback
 // ---------------------------------------------------------------------------
 
@@ -1197,6 +1241,14 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
          "\"properties\":{" \
            "\"command\":{\"type\":\"string\",\"description\":\"Console command line\"}}," \
          "\"required\":[\"command\"]}}," \
+      "{\"name\":\"notify\"," \
+       "\"description\":\"Show a short message in-game via SCR_CenterPrint (the channel used for map intro text), with an optional golden screen flash and notification sound. Use to surface task-done events to a player without forcing them to open the console.\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"message\":{\"type\":\"string\",\"description\":\"Text to centerprint (max ~255 chars; \\\\n splits lines)\"}," \
+           "\"flash\":{\"type\":\"boolean\",\"description\":\"Trigger bf golden flash too (default true)\"}," \
+           "\"sound\":{\"type\":\"string\",\"description\":\"Sound to play (relative to id1/sound/, default misc/talk.wav; empty string = silent)\"}}," \
+         "\"required\":[\"message\"]}}," \
       "{\"name\":\"console_tail\"," \
        "\"description\":\"Return the last N lines from the engine console scrollback (defaults to 50, max 200)\"," \
        "\"inputSchema\":{\"type\":\"object\"," \
@@ -1348,6 +1400,27 @@ static void mcp_dispatch(const char *line)
             int n = 50;
             if (args) json_int(args, "lines", &n);
             tool_console_tail(id_json, n);
+        }
+        else if (strcmp(tool_name, "notify") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            char msg[256] = {0};
+            char sound[64];
+            /* Default flash=true unless the args explicitly carry
+             * "flash":false. No json_bool helper exists; a substring scan
+             * is sufficient here since "flash" only appears as the key. */
+            int flash = 1;
+            strcpy(sound, "misc/talk.wav");
+            if (args)
+            {
+                json_str(args, "message", msg, sizeof(msg));
+                if (strstr(args, "\"flash\":false")) flash = 0;
+                /* json_str overwrites sound only if key present; an
+                 * explicit empty string ("sound":"") still lands in the
+                 * buffer as '\0' and silences the cue. */
+                json_str(args, "sound", sound, sizeof(sound));
+            }
+            tool_notify(id_json, msg, flash, sound);
         }
         else if (strcmp(tool_name, "editor_get_scene") == 0)
         {
