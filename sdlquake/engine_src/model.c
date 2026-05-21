@@ -1714,9 +1714,30 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 
 	mod->type = mod_alias;
 
-// FIXME: do this right
-	mod->mins[0] = mod->mins[1] = mod->mins[2] = -16;
-	mod->maxs[0] = mod->maxs[1] = mod->maxs[2] = 16;
+// Union the per-frame trivertx_t bboxes (de-quantised via pmodel scale +
+// scale_origin) into mod->mins/maxs. WinQuake used to hardcode ±16 here;
+// that broke SV_SetModel sizing for small alias models (gibs, heads) which
+// inherited a 32-unit cube. We need the real bounds so PF_setmodel /
+// engine_sv_setmodel get an accurate collision bbox, R_CullBox works, and
+// the r_drawbboxes debug overlay hugs the visual extent.
+	{
+		int f, j;
+		float fmins[3], fmaxs[3];
+		for (j = 0; j < 3; j++) { fmins[j] =  1e30f; fmaxs[j] = -1e30f; }
+		for (f = 0; f < numframes; f++)
+		{
+			for (j = 0; j < 3; j++)
+			{
+				float lo = (float)pheader->frames[f].bboxmin.v[j]
+						 * pmodel->scale[j] + pmodel->scale_origin[j];
+				float hi = (float)pheader->frames[f].bboxmax.v[j]
+						 * pmodel->scale[j] + pmodel->scale_origin[j];
+				if (lo < fmins[j]) fmins[j] = lo;
+				if (hi > fmaxs[j]) fmaxs[j] = hi;
+			}
+		}
+		for (j = 0; j < 3; j++) { mod->mins[j] = fmins[j]; mod->maxs[j] = fmaxs[j]; }
+	}
 
 //
 // move the complete, relocatable alias model to the cache
