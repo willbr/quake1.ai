@@ -802,6 +802,7 @@ void R_DrawParticles (void)
 		// this same frame.  Guarded so still-air or no-DLL behaviour
 		// is byte-identical to legacy r_part.c.
 #if NATIVE_GAME
+		int wind_debug_color = -1;
 		if (!r_particle_wind_disable.value) {
 			vec3_t wind = {0, 0, 0};
 			if (g_game_api && g_game_api->Wind_SampleVelocity)
@@ -825,10 +826,12 @@ void R_DrawParticles (void)
 						DebugLines_Add(p->org, tip, 15, 1);
 
 						if (r_particle_wind_debug.value >= 2) {
-							// Recolour by drag bucket: cyan=light, green=mid, red=heavy.
-							if      (k >= 3.0f) p->color = 192;
-							else if (k >= 1.5f) p->color = 110;
-							else                p->color =  79;
+							// Drag bucket: cyan=light, green=mid, red=heavy.
+							// Applied after the physics switch so ramp-animated
+							// types (pt_fire/explode/explode2) don't overwrite it.
+							if      (k >= 3.0f) wind_debug_color = 192;
+							else if (k >= 1.5f) wind_debug_color = 110;
+							else                wind_debug_color =  79;
 						}
 					}
 				}
@@ -898,6 +901,12 @@ void R_DrawParticles (void)
 			p->vel[2] -= grav;
 			break;
 		}
+
+#if NATIVE_GAME
+		// Apply wind-debug bucket colour after the type switch so it
+		// wins against ramp3/ramp1/ramp2 reassignments above.
+		if (wind_debug_color >= 0) p->color = wind_debug_color;
+#endif
 	}
 
 #ifdef GLQUAKE
