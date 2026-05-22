@@ -20,6 +20,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_local.h"
+#include "hotreload.h"   // g_game_api + game_api_t (NATIVE_GAME guard)
+#include <math.h>        // expf
 
 #define MAX_PARTICLES			8192	// default max # of particles at one
 										//  time (raised for sim_wind smoke)
@@ -793,6 +795,27 @@ void R_DrawParticles (void)
 			D_DrawSmokeParticle (p);
 		else
 			D_DrawParticle (p);
+#endif
+		// Wind nudge — drift particle velocity toward locally-sampled
+		// wind velocity.  Pre-integration so the kick takes effect
+		// this same frame.  Guarded so still-air or no-DLL behaviour
+		// is byte-identical to legacy r_part.c.
+#if NATIVE_GAME
+		if (!r_particle_wind_disable.value) {
+			vec3_t wind = {0, 0, 0};
+			if (g_game_api && g_game_api->Wind_SampleVelocity)
+				g_game_api->Wind_SampleVelocity(p->org, wind);
+			float wlen2 = wind[0]*wind[0] + wind[1]*wind[1] + wind[2]*wind[2];
+			if (wlen2 > 1.0f) {
+				float k = wind_drag_k[p->type] * r_particle_wind_scale.value;
+				if (k > 0) {
+					float a = 1.0f - expf(-k * frametime);
+					p->vel[0] += (wind[0] - p->vel[0]) * a;
+					p->vel[1] += (wind[1] - p->vel[1]) * a;
+					p->vel[2] += (wind[2] - p->vel[2]) * a;
+				}
+			}
+		}
 #endif
 		p->org[0] += p->vel[0]*frametime;
 		p->org[1] += p->vel[1]*frametime;

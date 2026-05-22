@@ -71,6 +71,9 @@ extern cvar_t	r_drawflat;
 extern cvar_t	r_lightmap;
 extern cvar_t	r_lightmap_dither;
 extern cvar_t	r_ambient;
+extern cvar_t	r_particle_wind_scale;
+extern cvar_t	r_particle_wind_disable;
+extern cvar_t	r_particle_wind_debug;
 
 extern const unsigned char r_bayer4x4[16];	// shared by mono + RGB block writers
 extern cvar_t	r_reportsurfout;
