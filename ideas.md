@@ -10,13 +10,11 @@
     * water plants
 * cables
 * dust motes
-* gibs should bob on water
 * blood should pool on water
-* mipmaps?
 * particles with different sizes, and dithering
 * particles should react to gust and wind
 * procedual animation, tomb raider style models made of parts
-* compile SDL ourselves on mac and windows
+* compile SDL ourselves on mac and windows (currently vendored prebuilts)
 * tearing in screenshots, does it need a temp buffer?
 * unit test player ai so it can complete all levels
 * replace quake error message box with a standard error message
@@ -33,7 +31,7 @@ remove other old code, directx
 
 * flashlight, shadows
 * bump mapping
-* atmospheric distance fog + vibrant palette (Star Fox 64, Zelda)
+* vibrant palette (Star Fox 64, Zelda)
 * texture filtering
 * more particle effects — billboarded sprites, explosions, blood, dust, lens flares
 * billboard text that floats in game
@@ -49,7 +47,6 @@ remove other old code, directx
 ## Debug rendering
 
 * flame graph for render timings
-* flat-shaded mode (no texturing, solid face colours)
 * wireframe overlay (edges only, or edges over solid)
 * BSP leaf / node boundaries
 * PVS visualisation for current leaf
@@ -97,8 +94,8 @@ remove other old code, directx
 
 ## Environmental fx
 
-* wind that blows smoke, plants, rain
-* permanent damage to a level (broken crates stay broken, corpses stay)
+* wind that blows plants, rain (wind+smoke shipped in Phase 8 M4)
+* permanent damage: extend persistence beyond gibs+blood-decals to corpses, broken crates, scorch marks
 * make the world more interactive
 
 ## UI & HUD
@@ -113,13 +110,11 @@ remove other old code, directx
 * prefab browser with previews
 * non destructing operations, e.g. clone a group that auto updates
 * remove on-disk files: .h1, .h2, .pts, hull files, leak point files
-* live `.map` editing
-* live entity editing
 * selection mode: brush, face, edge, vertex, group
 * brush boolean ops — subtract, intersect, hollow
 * live texture painting (paint lightmap or diffuse onto a face, hot-reload)
-* undo / redo stack with branch points
-* light baking on a worker thread, progressive refinement
+* undo/redo branch points (linear undo/redo already shipped)
+* progressive light bake refinement on the worker thread (worker thread + initial bake already shipped)
 * prefab library, drag-and-drop entity templates
 * edge-to-stairs gizmo
 * room tool, and corridors
@@ -238,7 +233,6 @@ remove other old code, directx
 
 ## New player skills & weapons
 
-* blink (Dishonored teleport)
 * throwable objects, including a throwable camera
 * Prey gloo cannon to build platforms
 * deployable turrets
@@ -250,7 +244,6 @@ remove other old code, directx
 
 ## Stealth gameplay
 
-* smoke bombs
 * stealth objectives, alert states
 
 ## Camera & perspective
