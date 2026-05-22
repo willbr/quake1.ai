@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "hotreload.h"   // g_game_api + game_api_t (NATIVE_GAME guard)
+#include "debug_lines.h" // DebugLines_Add — debug overlay for r_particle_wind_debug
 #include <math.h>        // expf
 
 #define MAX_PARTICLES			8192	// default max # of particles at one
@@ -813,6 +814,23 @@ void R_DrawParticles (void)
 					p->vel[0] += (wind[0] - p->vel[0]) * a;
 					p->vel[1] += (wind[1] - p->vel[1]) * a;
 					p->vel[2] += (wind[2] - p->vel[2]) * a;
+
+					if (r_particle_wind_debug.value >= 1) {
+						vec3_t tip = {
+							p->org[0] + wind[0] * 0.1f,
+							p->org[1] + wind[1] * 0.1f,
+							p->org[2] + wind[2] * 0.1f,
+						};
+						// Colour 15 = white in id1 palette; 1 = ztest on.
+						DebugLines_Add(p->org, tip, 15, 1);
+
+						if (r_particle_wind_debug.value >= 2) {
+							// Recolour by drag bucket: cyan=light, green=mid, red=heavy.
+							if      (k >= 3.0f) p->color = 192;
+							else if (k >= 1.5f) p->color = 110;
+							else                p->color =  79;
+						}
+					}
 				}
 			}
 		}
