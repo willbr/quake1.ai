@@ -30,6 +30,23 @@ int		ramp1[8] = {0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61};
 int		ramp2[8] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66};
 int		ramp3[8] = {0x6d, 0x6b, 6, 5, 4, 3};
 
+// Per-type wind drag coefficients.  Used by R_DrawParticles to lerp
+// each active particle's velocity toward the locally-sampled wind
+// velocity.  Higher k snaps faster; 0 disables for that type.
+// Indexed by ptype_t (see d_iface.h).  pt_grav is excluded (heavy
+// blood from gibs should not billow).
+static const float wind_drag_k[] = {
+    [pt_static]   = 3.0f,
+    [pt_smoke]    = 4.0f,
+    [pt_fire]     = 2.0f,
+    [pt_explode]  = 0.6f,
+    [pt_explode2] = 0.6f,
+    [pt_blob]     = 0.4f,
+    [pt_blob2]    = 0.4f,
+    [pt_grav]     = 0.0f,
+    [pt_slowgrav] = 2.5f,
+};
+
 particle_t	*active_particles, *free_particles;
 
 particle_t	*particles;
