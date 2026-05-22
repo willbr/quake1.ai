@@ -141,6 +141,9 @@ cvar_t	r_dspeeds = {"r_dspeeds","0"};
 cvar_t	r_drawflat = {"r_drawflat", "0"};
 cvar_t	r_lightmap = {"r_lightmap", "0"};
 cvar_t	r_lightmap_dither = {"r_lightmap_dither", "1", true};	// archived
+cvar_t	r_particle_wind_scale   = {"r_particle_wind_scale",   "1"};
+cvar_t	r_particle_wind_disable = {"r_particle_wind_disable", "0"};
+cvar_t	r_particle_wind_debug   = {"r_particle_wind_debug",   "0"};
 cvar_t	r_ambient = {"r_ambient", "0"};
 cvar_t	r_reportsurfout = {"r_reportsurfout", "0"};
 cvar_t	r_maxsurfs = {"r_maxsurfs", "0"};
@@ -232,6 +235,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_lightmap);
 	Cvar_RegisterVariable (&r_lightmap_dither);
+	Cvar_RegisterVariable (&r_particle_wind_scale);
+	Cvar_RegisterVariable (&r_particle_wind_disable);
+	Cvar_RegisterVariable (&r_particle_wind_debug);
 	Cvar_RegisterVariable (&r_ambient);
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_RegisterVariable (&r_waterwarp);
