@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 21
+#define GAME_API_VERSION 22
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -246,6 +246,11 @@ typedef struct game_api_s {
     // may be NULL in older DLLs — engine handlers must null-check.
     void  (*open_all_doors)(void);
     void  (*open_all_secret_doors)(void);
+
+    // Debug: deterministically inflict damage on an edict (MCP-only). Uses
+    // world as inflictor + attacker so corpse-overdamage / gib branches
+    // fire the same way as a normal hit, without simulating a weapon trace.
+    void  (*mcp_damage)(edict_t *targ, float damage);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);

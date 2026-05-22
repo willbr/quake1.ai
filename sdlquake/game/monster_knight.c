@@ -21,6 +21,7 @@ extern void ai_painforward(float dist);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void ThrowHead(const char *model, float damage);
 extern void ThrowGib(const char *model, float damage);
+extern void Corpse_LayProne(edict_t *self);
 extern void walkmonster_start(edict_t *self);
 
 // Frame indices (sequential from $frame directives)
@@ -224,7 +225,7 @@ static void knight_pain(edict_t *self, edict_t *attacker, float damage) {
 // ---------------------------------------------------------------------------
 static void kn_die1(edict_t *e)  { FRAME(e,KN_DEATH1, kn_die2);  }
 static void kn_die2(edict_t *e)  { FRAME(e,KN_DEATH2, kn_die3);  }
-static void kn_die3(edict_t *e)  { FRAME(e,KN_DEATH3, kn_die4);  e->v.solid = SOLID_NOT; }
+static void kn_die3(edict_t *e)  { FRAME(e,KN_DEATH3, kn_die4);  Corpse_LayProne(e); }
 static void kn_die4(edict_t *e)  { FRAME(e,KN_DEATH4, kn_die5);  }
 static void kn_die5(edict_t *e)  { FRAME(e,KN_DEATH5, kn_die6);  }
 static void kn_die6(edict_t *e)  { FRAME(e,KN_DEATH6, kn_die7);  }
@@ -235,7 +236,7 @@ static void kn_die10(edict_t *e) { FRAME(e,KN_DEATH10,kn_die10); }
 
 static void kn_dieb1(edict_t *e)  { FRAME(e,KN_DEATHB1, kn_dieb2);  }
 static void kn_dieb2(edict_t *e)  { FRAME(e,KN_DEATHB2, kn_dieb3);  }
-static void kn_dieb3(edict_t *e)  { FRAME(e,KN_DEATHB3, kn_dieb4);  e->v.solid = SOLID_NOT; }
+static void kn_dieb3(edict_t *e)  { FRAME(e,KN_DEATHB3, kn_dieb4);  Corpse_LayProne(e); }
 static void kn_dieb4(edict_t *e)  { FRAME(e,KN_DEATHB4, kn_dieb5);  }
 static void kn_dieb5(edict_t *e)  { FRAME(e,KN_DEATHB5, kn_dieb6);  }
 static void kn_dieb6(edict_t *e)  { FRAME(e,KN_DEATHB6, kn_dieb7);  }

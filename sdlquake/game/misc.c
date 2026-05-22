@@ -204,6 +204,14 @@ static void barrel_explode(edict_t *self) {
     eng->SV_StartSound(self, CHAN_VOICE, "weapons/r_exp3.wav", 1, ATTN_NORM);
     vec3_t zdir = {0,0,0};
     eng->SV_Particle(self->v.origin, zdir, 75, 255);
+    // Broadcast TE_EXPLOSION at the base so the client spawns a floor scorch
+    // (cl_tent.c maps TE_EXPLOSION -> DECAL_SCORCH). The sprite is then lifted
+    // +32z below so it doesn't render half-buried in the ground.
+    eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
+    eng->MSG_WriteByte(MSG_BROADCAST, TE_EXPLOSION);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
     vec3_t new_origin = {self->v.origin[0], self->v.origin[1], self->v.origin[2] + 32};
     eng->SV_SetOrigin(self, new_origin);
     BecomeExplosion();

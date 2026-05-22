@@ -19,6 +19,7 @@ extern float CanDamage(edict_t *targ, edict_t *inflictor);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void ThrowHead(const char *gibname, float dm);
 extern void ThrowGib(const char *gibname, float dm);
+extern void Corpse_LayProne(edict_t *self);
 extern void walkmonster_start(edict_t *self);
 
 // Frame indices
@@ -276,7 +277,7 @@ static void dog_die_cb(edict_t *self) {
         return;
     }
     eng->SV_StartSound(self, CHAN_VOICE, "dog/ddeath.wav", 1, ATTN_NORM);
-    self->v.solid = SOLID_NOT;
+    Corpse_LayProne(self);
     if (eng->Random() > 0.5f)
         dog_die1(self);
     else

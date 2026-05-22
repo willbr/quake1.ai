@@ -21,7 +21,7 @@ and enters the host loop.
   and writes a `quake_crash_*.log` next to the executable. Without it,
   an SEH-level crash would silently drop with no diagnostic.
 - **Command-line flags** (parsed in `main`, before `Host_Init`):
-  - `--mcp` — stdio MCP transport, no stdout chatter
+  - `--mcp-stdio` — stdio MCP transport, no stdout chatter
   - `--mcp-http PORT` — HTTP/SSE MCP transport on `localhost:PORT`
   - `--hot-reload` — poll `game.dll` mtime and reload on change
   - All other args (`+map e1m1`, `+set foo bar`, …) are forwarded to

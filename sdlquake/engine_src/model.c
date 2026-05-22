@@ -850,8 +850,9 @@ void Mod_LoadFaces (lump_t *l)
 	for ( surfnum=0 ; surfnum<count ; surfnum++, in++, out++)
 	{
 		out->firstedge = LittleLong(in->firstedge);
-		out->numedges = LittleShort(in->numedges);		
+		out->numedges = LittleShort(in->numedges);
 		out->flags = 0;
+		out->last_miplevel = -1;	// sentinel: skip hysteresis on first visible frame
 
 		planenum = LittleShort(in->planenum);
 		side = LittleShort(in->side);

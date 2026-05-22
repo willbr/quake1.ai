@@ -280,11 +280,28 @@ static int FindTarget(void) {
 
 // ---------------------------------------------------------------------------
 // Movement primitives — called from monster frame callbacks (g->self already set)
+//
+// All of these short-circuit on a dead entity. Some death animations (notably
+// hellknight's hk_die1/2/3/8/9) keep calling ai_forward mid-anim, which in
+// vanilla just translated the now-SOLID_NOT corpse forward harmlessly. With
+// corpses now SOLID_BBOX (prone bbox) so they can be over-damaged into gibs,
+// a corpse that keeps stomping forward through the death anim looks like a
+// dead body sliding toward the player and bumps into them. Stopping movement
+// once dead avoids that without changing live-monster behavior.
 // ---------------------------------------------------------------------------
-void ai_forward(float dist) { eng->SV_WalkMove(g->self, g->self->v.angles[1],       dist); }
-void ai_back   (float dist) { eng->SV_WalkMove(g->self, g->self->v.angles[1] + 180, dist); }
-void ai_pain   (float dist) { ai_back(dist); }
-void ai_painforward(float dist) { eng->SV_WalkMove(g->self, g->self->v.ideal_yaw, dist); }
+void ai_forward(float dist) {
+    if (g->self->v.deadflag != DEAD_NO) return;
+    eng->SV_WalkMove(g->self, g->self->v.angles[1], dist);
+}
+void ai_back(float dist) {
+    if (g->self->v.deadflag != DEAD_NO) return;
+    eng->SV_WalkMove(g->self, g->self->v.angles[1] + 180, dist);
+}
+void ai_pain(float dist) { ai_back(dist); }
+void ai_painforward(float dist) {
+    if (g->self->v.deadflag != DEAD_NO) return;
+    eng->SV_WalkMove(g->self, g->self->v.ideal_yaw, dist);
+}
 
 void ai_walk(float dist) {
     {

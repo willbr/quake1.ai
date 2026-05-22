@@ -16,6 +16,7 @@ extern void ai_charge(float dist);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void ThrowHead(const char *model, float damage);
 extern void ThrowGib(const char *model, float damage);
+extern void Corpse_LayProne(edict_t *self);
 extern void walkmonster_start(edict_t *self);
 extern void SpawnMeatSpray(vec3_t org, vec3_t vel);
 extern void SUB_Remove(edict_t *e);
@@ -380,7 +381,7 @@ static void sham_pain(edict_t *self, edict_t *attacker, float damage) {
 // ---------------------------------------------------------------------------
 static void sham_death1(edict_t *e)  { FRAME(e,SM_DEATH1, sham_death2);  }
 static void sham_death2(edict_t *e)  { FRAME(e,SM_DEATH2, sham_death3);  }
-static void sham_death3(edict_t *e)  { FRAME(e,SM_DEATH3, sham_death4);  e->v.solid = SOLID_NOT; }
+static void sham_death3(edict_t *e)  { FRAME(e,SM_DEATH3, sham_death4);  Corpse_LayProne(e); }
 static void sham_death4(edict_t *e)  { FRAME(e,SM_DEATH4, sham_death5);  }
 static void sham_death5(edict_t *e)  { FRAME(e,SM_DEATH5, sham_death6);  }
 static void sham_death6(edict_t *e)  { FRAME(e,SM_DEATH6, sham_death7);  }

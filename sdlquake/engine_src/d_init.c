@@ -26,7 +26,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 cvar_t	d_subdiv16 = {"d_subdiv16", "1"};
 cvar_t	d_mipcap = {"d_mipcap", "0"};
-cvar_t	d_mipscale = {"d_mipscale", "1"};
+// d_mipscale biases the per-surface mip ladder; thresholds in d_scalemip[]
+// are multiplied by this value. Default is 1.3 (raised from id's 1.0): at
+// 320x200 with nearest-neighbour sampling, mip 3 is still the floor and
+// distant texels are undersampled — biasing transitions to coarser mips
+// earlier reduces the resulting per-pixel shimmer as the camera turns,
+// at the cost of slightly blurrier mid-range surfaces. Tune live in the
+// imgui cvar panel.
+cvar_t	d_mipscale = {"d_mipscale", "1.3"};
 
 surfcache_t		*d_initial_rover;
 qboolean		d_roverwrapped;

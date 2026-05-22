@@ -17,6 +17,7 @@ extern game_globals_t *g;
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void T_RadiusDamage(edict_t *bomb, edict_t *attacker, float rad, edict_t *ignore);
 extern void SpawnBlood(vec3_t org, vec3_t vel, float damage);
+extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
 extern void player_run(edict_t *self);
 extern void BecomeExplosion(void);
 extern void SUB_Remove(edict_t *self);
@@ -58,6 +59,7 @@ static void p6_fire_bullet(float damage, vec3_t aim, float spread_x, float sprea
     end[1] = src[1] + dir[1]*2048;
     end[2] = src[2] + dir[2]*2048;
     eng->SV_Traceline(src, end, 0, self);
+    Corpse_BulletTrace(src, end, self);
 
     if (g->trace_fraction == 1.0f)
         return;  // missed everything
@@ -114,6 +116,7 @@ static int p6_doom_melee_hit(int damage, float angle_jitter_radians) {
     end[1] = src[1] + aim[1]*MELEERANGE_QU;
     end[2] = src[2] + aim[2]*MELEERANGE_QU;
     eng->SV_Traceline(src, end, 0, self);
+    Corpse_BulletTrace(src, end, self);
     if (g->trace_fraction == 1.0f)
         return 0;
 
@@ -184,6 +187,7 @@ static int p6_wolf_hitscan(float shoot_cone_radians) {
         end[1] = src[1] + g->v_forward[1]*8192.0f;
         end[2] = src[2] + g->v_forward[2]*8192.0f;
         eng->SV_Traceline(src, end, 0, self);
+        Corpse_BulletTrace(src, end, self);
         if (g->trace_ent && g->trace_ent != self &&
             g->trace_ent->v.takedamage != DAMAGE_NO &&
             g->trace_ent->v.health > 0)

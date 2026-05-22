@@ -830,10 +830,12 @@ void R_DrawParticles (void)
 			break;
 
 		case pt_grav:
-#ifdef QUAKE2
+			// Blood-from-gib trails use pt_grav; pt_slowgrav is the 5% drift
+			// used for everything else. Original WinQuake fell through here
+			// and made blood float; the QUAKE2 branch fixed it. Always apply
+			// full gravity so gib blood actually falls.
 			p->vel[2] -= grav * 20;
 			break;
-#endif
 		case pt_slowgrav:
 			p->vel[2] -= grav;
 			break;

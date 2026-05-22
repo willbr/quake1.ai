@@ -18,6 +18,157 @@ __attribute__((weak)) void ClientObituary(edict_t *targ, edict_t *attacker)
 __attribute__((weak)) void monster_death_use(void) {}
 __attribute__((weak)) void FoundTarget(void)       {}
 
+// ---------------------------------------------------------------------------
+// Corpse over-damage → gib (table + lookup; helpers defined further below
+// where they have ThrowHead/ThrowGib in scope).
+//
+// After a monster (or the player) finishes its death animation, its entity
+// sticks around as a corpse. Vanilla Quake sets `solid = SOLID_NOT` on it so
+// hitscan and traces pass straight through, and `takedamage = DAMAGE_NO` so
+// further damage is ignored — corpses are inert.
+//
+// Here we keep the corpse trace-hittable (flat prone bbox) and damage-able,
+// and route any damage taken in that state through GibCorpse() once enough
+// damage has been dealt to push health below the per-classname gib threshold.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    const char *classname;
+    int         gib_threshold;   // gib when health drops below this (negative)
+    const char *head_model;
+    const char *gib_models[3];
+} corpse_gib_info_t;
+
+static const corpse_gib_info_t k_corpse_gibs[] = {
+    {"monster_army",        -35, "progs/h_guard.mdl",  {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
+    {"monster_enforcer",    -35, "progs/h_mega.mdl",   {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
+    {"monster_ogre",        -80, "progs/h_ogre.mdl",   {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}},
+    {"monster_ogre_marksman",-80,"progs/h_ogre.mdl",   {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}},
+    {"monster_demon1",      -80, "progs/h_demon.mdl",  {"progs/gib1.mdl","progs/gib1.mdl","progs/gib1.mdl"}},
+    {"monster_knight",      -40, "progs/h_knight.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
+    {"monster_hell_knight", -40, "progs/h_hellkn.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
+    {"monster_shalrath",    -90, "progs/h_shal.mdl",   {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
+    {"monster_shambler",    -60, "progs/h_shams.mdl",  {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
+    {"monster_wizard",      -40, "progs/h_wizard.mdl", {"progs/gib2.mdl","progs/gib2.mdl","progs/gib2.mdl"}},
+    {"monster_dog",         -35, "progs/h_dog.mdl",    {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}},
+    {"player",              -40, "progs/h_player.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
+};
+
+static const corpse_gib_info_t *corpse_gib_lookup(const char *classname) {
+    if (!classname) return NULL;
+    for (size_t i = 0; i < sizeof(k_corpse_gibs)/sizeof(k_corpse_gibs[0]); i++) {
+        if (strcmp(classname, k_corpse_gibs[i].classname) == 0)
+            return &k_corpse_gibs[i];
+    }
+    return NULL;
+}
+
+// Corpse becomes a non-blocking volume: SOLID_TRIGGER means tracelines and
+// player movement pass straight through (world.c:835-839 filters both
+// SOLID_NOT and SOLID_TRIGGER from the solid clip list), but PF_findradius
+// (pr_cmds.c:898) only skips SOLID_NOT — so T_RadiusDamage still finds the
+// body and can over-damage it into gibs via grenades/rockets. Killed() has
+// already nulled v.touch, so the trigger volume fires no touch callbacks.
+// Hitscan can still over-damage corpses via Corpse_BulletTrace, which weapon
+// code calls after SV_Traceline to fold any corpse-line intersection back
+// into the trace_* globals.
+void Corpse_LayProne(edict_t *self) {
+    // SV_LinkEdict sorts entities into solid_edicts vs trigger_edicts based on
+    // v.solid at link time; just changing v.solid in place leaves a now-trigger
+    // entity stranded in solid_edicts, which trips the
+    // "Trigger in clipping list" assert on the next traceline. SV_SetSize
+    // re-links, so call it to relocate it.
+    //
+    // Also flatten Z to a prone slab so the debug bbox hugs the sprawled
+    // corpse instead of standing tall. Model->mins/maxs can't help: it's the
+    // union across all frames (including standing), so the engine's bbox
+    // stays full-height. XY footprint is preserved (monsters sprawl
+    // roughly within their walking diameter).
+    self->v.solid = SOLID_TRIGGER;
+    vec3_t mins = { self->v.mins[0], self->v.mins[1], self->v.mins[2] };
+    vec3_t maxs = { self->v.maxs[0], self->v.maxs[1], self->v.mins[2] + 16.0f };
+    eng->SV_SetSize(self, mins, maxs);
+}
+
+// Hybrid corpse/gib-hit for hitscan weapons. Corpses and gibs are
+// SOLID_TRIGGER so the engine's traceline skips them; this helper runs an
+// O(edicts) AABB-vs-segment pass over damageable triggers and, if any one is
+// hit closer than the current world trace, rewrites g->trace_* to point at
+// it. Downstream TraceAttack / multi-damage then routes through T_Damage —
+// the deadflag branch over-damages corpses into gibs, and the gib-classname
+// branch knocks individual gibs around.
+//
+// `start` and `end` must match the original SV_Traceline; `skip` is excluded
+// (matches SV_Traceline's skip semantics). Call this AFTER eng->SV_Traceline.
+void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip) {
+    float d[3] = { end[0]-start[0], end[1]-start[1], end[2]-start[2] };
+
+    float best_t  = g->trace_fraction;  // tighten as we find closer hits
+    edict_t *best_ent  = NULL;
+    int best_axis = -1;
+    int best_sign = 0;
+
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        if (e == skip) continue;
+        if (e->v.solid != SOLID_TRIGGER) continue;
+        if (!e->v.takedamage) continue;
+
+        float tmin = 0.0f, tmax = best_t;
+        int axis = -1, sign = 0;
+        int valid = 1;
+        for (int i = 0; i < 3; i++) {
+            if (fabsf(d[i]) < 1e-6f) {
+                if (start[i] < e->v.absmin[i] || start[i] > e->v.absmax[i]) {
+                    valid = 0; break;
+                }
+                continue;
+            }
+            float inv = 1.0f / d[i];
+            float t1  = (e->v.absmin[i] - start[i]) * inv;
+            float t2  = (e->v.absmax[i] - start[i]) * inv;
+            // Entry face normal points opposite the ray's component on this axis.
+            int s = (d[i] > 0.0f) ? -1 : 1;
+            if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
+            if (t1 > tmin) { tmin = t1; axis = i; sign = s; }
+            if (t2 < tmax) tmax = t2;
+            if (tmin > tmax) { valid = 0; break; }
+        }
+        if (valid && tmin < best_t) {
+            best_t = tmin;
+            best_ent = e;
+            best_axis = axis;
+            best_sign = sign;
+        }
+    }
+
+    if (!best_ent) return;
+
+    g->trace_fraction = best_t;
+    g->trace_endpos[0] = start[0] + d[0] * best_t;
+    g->trace_endpos[1] = start[1] + d[1] * best_t;
+    g->trace_endpos[2] = start[2] + d[2] * best_t;
+    g->trace_ent = best_ent;
+    g->trace_plane_normal[0] = g->trace_plane_normal[1] = g->trace_plane_normal[2] = 0.0f;
+    if (best_axis >= 0) {
+        g->trace_plane_normal[best_axis] = (float)best_sign;
+    } else {
+        // Bullet started inside the bbox. Normal pointing back along the bullet
+        // is the best we can do; downstream blood-spray code uses it only to
+        // bias the spawn direction, so the magnitude doesn't matter.
+        float len = sqrtf(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+        if (len > 0.0f) {
+            g->trace_plane_normal[0] = -d[0] / len;
+            g->trace_plane_normal[1] = -d[1] / len;
+            g->trace_plane_normal[2] = -d[2] / len;
+        }
+    }
+    g->trace_allsolid = 0.0f;
+    g->trace_startsolid = 0.0f;
+}
+
+// Forward decl — definition below where ThrowHead/ThrowGib are in scope.
+int GibCorpse(edict_t *self);
+
 int CanDamage(edict_t *targ, edict_t *inflictor)
 {
     vec3_t mid, p;
@@ -59,6 +210,15 @@ static void Killed(edict_t *targ, edict_t *attacker)
     edict_t *oself = g->self;
     g->self = targ;
 
+    // Already dead/dying: don't re-trigger the death sequence. Without this,
+    // further damage on a corpse (now that we leave `takedamage = DAMAGE_YES`)
+    // would re-enter Killed → th_die and restart the death animation. Actual
+    // corpse over-damage is routed to GibCorpse via T_Damage's deadflag branch.
+    if (g->self->v.deadflag != DEAD_NO) {
+        g->self = oself;
+        return;
+    }
+
     // Emit death stims for the AI sense filter.
     {
         stimulus_t s = {0};
@@ -96,7 +256,11 @@ static void Killed(edict_t *targ, edict_t *attacker)
 
     ClientObituary(g->self, attacker);
 
-    g->self->v.takedamage = DAMAGE_NO;
+    // Stay damageable so corpses can be over-damaged into gibs. The death
+    // callback (th_die) may still call ThrowHead, which sets takedamage=NO
+    // on the head entity — heads/gibs are excluded by that takedamage check.
+    g->self->v.takedamage = DAMAGE_YES;
+    g->self->v.deadflag   = DEAD_DEAD;
     g->self->v.touch      = NULL;
 
     monster_death_use();
@@ -114,6 +278,57 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage
 
     if (!targ->v.takedamage)
         return;
+
+    // Gib-class entity: any hit applies a directional impulse and schedules
+    // removal after a short, visible fling. Grenades/rockets scatter piles
+    // of gibs via this branch (T_RadiusDamage's iteration is solidity-agnostic
+    // and CanDamage's traceline succeeds through SOLID_NOT heads). Shotguns
+    // and nails hit gib bboxes directly.
+    if (targ->v.classname && strcmp(targ->v.classname, "gib") == 0) {
+        // Only explosions destroy gibs. Hitscan / projectile hits push them
+        // (impulse applied at the hit site in weapons.c) but leave their
+        // lifetime alone — the persistent-gib system handles eventual cleanup.
+        // Client inflictor = hitscan; world inflictor = environmental damage.
+        int is_hitscan = ((int)inflictor->v.flags & FL_CLIENT) != 0;
+        if (inflictor != g->world && !is_hitscan) {
+            vec3_t dir;
+            dir[0] = targ->v.origin[0] - (inflictor->v.absmin[0] + inflictor->v.absmax[0]) * 0.5f;
+            dir[1] = targ->v.origin[1] - (inflictor->v.absmin[1] + inflictor->v.absmax[1]) * 0.5f;
+            dir[2] = targ->v.origin[2] - (inflictor->v.absmin[2] + inflictor->v.absmax[2]) * 0.5f;
+            eng->VectorNormalize(dir, dir);
+            // Multiplier matches living-target knockback (×8) — earlier I had
+            // ×40, which sent heads zooming across the map and (when the
+            // explosion landed past the head) right back at the player.
+            targ->v.velocity[0] += dir[0] * damage * 8.0f;
+            targ->v.velocity[1] += dir[1] * damage * 8.0f;
+            targ->v.velocity[2] += dir[2] * damage * 8.0f + 30.0f;
+            targ->v.avelocity[0] = (eng->Random()*2.0f - 1.0f) * 400.0f;
+            targ->v.avelocity[1] = (eng->Random()*2.0f - 1.0f) * 400.0f;
+            targ->v.avelocity[2] = (eng->Random()*2.0f - 1.0f) * 400.0f;
+            targ->v.flags = (float)((int)targ->v.flags & ~FL_ONGROUND);
+            // Explosion path: pop in ~0.5s so the fling is visible. If the
+            // timer is already on a short fuse (multiple hits in quick
+            // succession), don't extend it.
+            if (targ->v.nextthink < 0.0f || targ->v.nextthink - g->time > 1.0f) {
+                targ->v.nextthink = g->time + 0.5f;
+                targ->v.think     = SUB_Remove;
+            }
+        }
+        return;
+    }
+
+    // Dying / dead path: skip pain, AI re-target, knockback, etc. — none of
+    // that applies once an entity has begun dying. We do keep accumulating
+    // damage on health so a settled corpse can be over-damaged into gibs.
+    if (targ->v.deadflag != DEAD_NO) {
+        targ->v.health -= damage;
+        if (targ->v.deadflag == DEAD_DEAD) {
+            const corpse_gib_info_t *info = corpse_gib_lookup(targ->v.classname);
+            if (info && targ->v.health < (float)info->gib_threshold)
+                GibCorpse(targ);
+        }
+        return;
+    }
 
     g->damage_attacker = attacker;
 
@@ -361,12 +576,21 @@ void ThrowGib(const char *gibname, float dm) {
     n->v.origin[0] = self->v.origin[0];
     n->v.origin[1] = self->v.origin[1];
     n->v.origin[2] = self->v.origin[2];
+    n->v.classname = "gib";
     eng->SV_SetModel(n, gibname);
-    vec3_t zero = {0,0,0};
-    eng->SV_SetSize(n, zero, zero);
+    // SOLID_TRIGGER: non-blocking for player movement and engine tracelines
+    // (world.c:835-839 filters triggers from the solid clip list), but
+    // PF_findradius (pr_cmds.c:898) still includes it so explosions scatter
+    // gibs via the T_Damage gib branch, and Corpse_BulletTrace picks it up
+    // so shotgun pellets can knock a gib around. Re-link via SV_SetSize so
+    // the edict files under trigger_edicts; setting v.solid in place would
+    // strand it in solid_edicts and trip the next traceline's assert.
+    n->v.solid     = SOLID_TRIGGER;
+    eng->SV_SetSize(n, n->v.mins, n->v.maxs);
     VelocityForDamage(dm, n->v.velocity);
-    n->v.movetype = MOVETYPE_BOUNCE;
-    n->v.solid    = SOLID_NOT;
+    n->v.movetype  = MOVETYPE_BOUNCE;
+    n->v.takedamage = DAMAGE_YES;
+    n->v.health    = 1.0f;
     n->v.avelocity[0] = eng->Random()*600.0f;
     n->v.avelocity[1] = eng->Random()*600.0f;
     n->v.avelocity[2] = eng->Random()*600.0f;
@@ -385,20 +609,49 @@ void ThrowGib(const char *gibname, float dm) {
 
 void ThrowHead(const char *gibname, float dm) {
     edict_t *self = g->self;
+    self->v.classname   = "gib";  // override the corpse classname; this is now a gib
     eng->SV_SetModel(self, gibname);
     self->v.frame       = 0;
     self->v.nextthink   = -1.0f;
     self->v.movetype    = MOVETYPE_BOUNCE;
-    self->v.takedamage  = DAMAGE_NO;
-    self->v.solid       = SOLID_NOT;
+    // SOLID_TRIGGER for the same reasons as ThrowGib: non-blocking for player
+    // and traces, but findradius and Corpse_BulletTrace still reach it. The
+    // SV_SetSize call re-links the edict into trigger_edicts.
+    self->v.takedamage  = DAMAGE_YES;
+    self->v.health      = 1.0f;
+    self->v.solid       = SOLID_TRIGGER;
     self->v.view_ofs[0] = 0; self->v.view_ofs[1] = 0; self->v.view_ofs[2] = 8;
-    vec3_t mins = {-16,-16,0}, maxs = {16,16,56};
-    eng->SV_SetSize(self, mins, maxs);
+    eng->SV_SetSize(self, self->v.mins, self->v.maxs);
     VelocityForDamage(dm, self->v.velocity);
-    self->v.origin[2] -= 24.0f;
     self->v.flags = (float)((int)self->v.flags & ~FL_ONGROUND);
     self->v.avelocity[0] = 0;
     self->v.avelocity[1] = (eng->Random()*2.0f - 1.0f) * 600.0f;
     self->v.avelocity[2] = 0;
     self->v.decal_on_bounce = 1.0f;
+}
+
+// Throw a head + 3 gibs from a corpse with the per-classname models. Returns
+// 1 on success, 0 if no gib info is registered for this classname (in which
+// case the caller should leave the corpse intact). Used by the corpse over-
+// damage path; the initial gib-death (when a monster is killed with enough
+// overkill that its own th_die spawns gibs) does NOT go through here and
+// keeps the vanilla random-velocity fling.
+int GibCorpse(edict_t *self) {
+    const corpse_gib_info_t *info = corpse_gib_lookup(self->v.classname);
+    if (!info) return 0;
+    edict_t *oself = g->self;
+    g->self = self;
+    eng->SV_StartSound(self, CHAN_VOICE, "player/udeath.wav", 1, ATTN_NORM);
+    ThrowHead(info->head_model, self->v.health);
+    // Stationary head: the corpse was already settled when over-damaged, so
+    // a random VelocityForDamage on the head looks like the head is sliding
+    // around long after the hit. Zeroing here keeps it where the corpse fell;
+    // a later grenade can still kick it via the T_Damage gib branch.
+    self->v.velocity[0] = self->v.velocity[1] = self->v.velocity[2] = 0.0f;
+    self->v.avelocity[0] = self->v.avelocity[1] = self->v.avelocity[2] = 0.0f;
+    ThrowGib(info->gib_models[0], self->v.health);
+    ThrowGib(info->gib_models[1], self->v.health);
+    ThrowGib(info->gib_models[2], self->v.health);
+    g->self = oself;
+    return 1;
 }

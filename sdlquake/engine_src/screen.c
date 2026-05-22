@@ -91,19 +91,73 @@ Called for important messages that should stay in the center of the screen
 for a few moments
 ==============
 */
+// SCR_DrawCenterString renders at most 40 chars per line and silently drops
+// the rest (see the `l<40` cap in its draw loop). Rather than make every
+// caller hand-wrap, do it here once: walk the input and insert '\n' at the
+// last space inside each 40-char window. If no space fits (a word longer
+// than the line width), hard-break at 40 so the overflow still renders
+// instead of vanishing. scr_center_lines is recounted from the wrapped
+// buffer afterwards so the ≤4-line vs >4-line vertical-anchor decision in
+// SCR_DrawCenterString stays accurate.
+#define SCR_CENTER_LINE_WIDTH 40
+
 void SCR_CenterPrint (char *str)
 {
-	strncpy (scr_centerstring, str, sizeof(scr_centerstring)-1);
-	scr_centertime_off = scr_centertime.value;
-	scr_centertime_start = cl.time;
+	char *dst       = scr_centerstring;
+	char *dst_end   = scr_centerstring + sizeof(scr_centerstring) - 1;
+	char *line_start = dst;
 
-// count the number of lines for centering
-	scr_center_lines = 1;
-	while (*str)
+	while (*str && dst < dst_end)
 	{
 		if (*str == '\n')
+		{
+			*dst++ = *str++;
+			line_start = dst;
+			continue;
+		}
+
+		if (dst - line_start >= SCR_CENTER_LINE_WIDTH)
+		{
+			// Walk back to the last space inside the current line.
+			char *brk = dst;
+			while (brk > line_start && *(brk - 1) != ' ')
+				brk--;
+
+			if (brk > line_start)
+			{
+				// Convert the trailing space into the line break; chars
+				// after it carry forward as the next line.
+				*(brk - 1) = '\n';
+				line_start = brk;
+			}
+			else
+			{
+				// Single word longer than line width — hard-break.
+				if (dst >= dst_end) break;
+				*dst++ = '\n';
+				line_start = dst;
+			}
+		}
+
+		*dst++ = *str++;
+	}
+	*dst = '\0';
+
+	scr_centertime_start = cl.time;
+
+	scr_center_lines = 1;
+	for (char *s = scr_centerstring; *s; s++)
+		if (*s == '\n')
 			scr_center_lines++;
-		str++;
+
+	// Scale on-screen time with line count so wrapped multi-line messages
+	// stay up long enough to read. ~0.8 s/line is comfortable at Quake's
+	// ~200 wpm reading-density; clamp the floor to scr_centertime so single
+	// lines and short map intros keep their existing snappy feel.
+	{
+		float scaled = (float)scr_center_lines * 0.8f;
+		scr_centertime_off = scr_centertime.value;
+		if (scaled > scr_centertime_off) scr_centertime_off = scaled;
 	}
 }
 

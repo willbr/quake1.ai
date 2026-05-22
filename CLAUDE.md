@@ -65,7 +65,7 @@ Fixed 320×200 resolution. Each frame: Quake's software renderer writes 8-bit pa
 `sdlquake/mcp/mcp_server.c` — JSON-RPC 2.0. A background thread reads requests and pushes to a mutex-protected queue; the main loop calls `MCP_Frame()` each frame to drain and respond, so all game-state access stays on the main thread.
 
 Two transports:
-- `--mcp` — stdio (Claude Code spawns the process; see `.mcp.json`).
+- `--mcp-stdio` — stdio (Claude Code spawns the process; see `.mcp.json`).
 - `--mcp-http <port>` — HTTP/SSE on `localhost:<port>` (attach Claude Code to an already-running game session).
 
 Tools include `get_player_state`, `list_entities`, `set_cvar`, `console_exec`, and `screenshot` (writes sandboxed to `screenshots/`). `scripts/mcp_call.py` is a one-shot CLI against the HTTP transport.

@@ -14,6 +14,8 @@
 #define mkdir(p,m) _mkdir(p)
 #else
 #include <sys/stat.h>
+#include <execinfo.h>
+#include <unistd.h>
 #endif
 
 #include "quakedef.h"
@@ -137,6 +139,15 @@ void Sys_Error(char *error, ...)
     vsnprintf(text, sizeof(text), error, argptr);
     va_end(argptr);
     fprintf(stderr, "Quake Error: %s\n", text);
+#ifndef _WIN32
+    {
+        void *frames[64];
+        int n = backtrace(frames, 64);
+        fprintf(stderr, "Backtrace (%d frames):\n", n);
+        fflush(stderr);
+        backtrace_symbols_fd(frames, n, fileno(stderr));
+    }
+#endif
     if (!mcp_active && !sys_headless)
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Quake Error", text, NULL);
     Host_Shutdown();
@@ -234,7 +245,7 @@ static void print_usage(void)
         "Usage: quake [options] [+command ...]\n"
         "\n"
         "Platform options:\n"
-        "  --mcp                Run MCP server on stdio (logs go to stderr)\n"
+        "  --mcp-stdio          Run MCP server on stdio (logs go to stderr)\n"
         "  --mcp-http <port>    Set the `mcp_http_port` cvar default; HTTP/SSE\n"
         "                       server starts at first frame on localhost:PORT\n"
         "  --hot-reload         Poll game.dll for changes and reload at runtime\n"
@@ -260,7 +271,7 @@ static void print_usage(void)
         "Examples:\n"
         "  quake +map e1m1\n"
         "  quake --hot-reload +map start\n"
-        "  quake --mcp -dedicated +map e1m1\n"
+        "  quake --mcp-stdio -dedicated +map e1m1\n"
         "  quake -game rogue +map ctf1\n",
         stdout);
     fflush(stdout);
@@ -325,14 +336,14 @@ int main(int argc, char **argv)
 
     // --mcp-http <port> just seeds the mcp_http_port cvar's default; the HTTP
     // listener is started lazily from MCP_Frame once Host_Init has registered
-    // the cvar. --mcp (stdio) still needs to bind stdin pre-Host_Init so
+    // the cvar. --mcp-stdio still needs to bind stdin pre-Host_Init so
     // engine printf output is routed away from the response stream.
     if (!list_cvars)
     {
         int mcp_http_idx = COM_CheckParm("--mcp-http");
         if (mcp_http_idx && mcp_http_idx + 1 < com_argc)
             MCP_SetHttpPortDefault(atoi(com_argv[mcp_http_idx + 1]));
-        else if (COM_CheckParm("--mcp"))
+        else if (COM_CheckParm("--mcp-stdio"))
             MCP_Init(0);
     }
 

@@ -28,8 +28,99 @@ static void emit_weapon_sound(edict_t *shooter, float intensity) {
 // combat.c
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void T_RadiusDamage(edict_t *bomb, edict_t *attacker, float rad, edict_t *ignore);
+extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
 // subs.c
 extern void SUB_Remove(edict_t *self);
+
+// Forward decls — used by Spike_GibPathScan below.
+void superspike_touch(edict_t *self, edict_t *other);
+void SpawnBlood(vec3_t org, vec3_t vel, float damage);
+
+// Apply hit-site impulse to a gib along `dir` (must be normalized). Used by
+// hitscan and direct-projectile hits — both have the actual shot direction
+// in scope, which gives better-feeling knockback than T_Damage's gib branch
+// (which infers direction from inflictor midpoint, fine for radius damage).
+// Does *not* shorten the gib's lifetime: the persistent-gib system already
+// handles long-term cleanup (visibility-aware despawn + LRU cap).
+static void gib_apply_hit_impulse(edict_t *gib, vec3_t dir, float damage) {
+    gib->v.velocity[0] += dir[0] * damage * 40.0f;
+    gib->v.velocity[1] += dir[1] * damage * 40.0f;
+    gib->v.velocity[2] += dir[2] * damage * 40.0f + 30.0f;
+    gib->v.avelocity[0] = (eng->Random()*2.0f - 1.0f) * 400.0f;
+    gib->v.avelocity[1] = (eng->Random()*2.0f - 1.0f) * 400.0f;
+    gib->v.avelocity[2] = (eng->Random()*2.0f - 1.0f) * 400.0f;
+    gib->v.flags = (float)((int)gib->v.flags & ~FL_ONGROUND);
+}
+
+static int is_gib(edict_t *e) {
+    return e && e->v.classname && strcmp(e->v.classname, "gib") == 0;
+}
+
+// Slab-method AABB-vs-segment. Returns 1 if the segment from `start` to `end`
+// intersects the box [mins,maxs]; `*out_t` (if non-NULL) is the entry parameter
+// in [0,1].
+static int segment_hits_aabb(vec3_t start, vec3_t end, float *mins, float *maxs, float *out_t) {
+    float d[3] = { end[0]-start[0], end[1]-start[1], end[2]-start[2] };
+    float tmin = 0.0f, tmax = 1.0f;
+    for (int i = 0; i < 3; i++) {
+        if (fabsf(d[i]) < 1e-6f) {
+            if (start[i] < mins[i] || start[i] > maxs[i]) return 0;
+            continue;
+        }
+        float inv = 1.0f / d[i];
+        float t1 = (mins[i] - start[i]) * inv;
+        float t2 = (maxs[i] - start[i]) * inv;
+        if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+        if (tmin > tmax) return 0;
+    }
+    if (out_t) *out_t = tmin;
+    return 1;
+}
+
+// Per-frame: for each in-flight spike, sweep its next-frame segment against
+// gib AABBs. Gibs are SOLID_TRIGGER so the engine's missile trace ignores them
+// and SV_TouchLinks at the spike's wall-impact position doesn't overlap a gib
+// the spike passed *through* — so spike_touch never fires for gibs. We hijack
+// here, before physics runs, to apply impulse and free the spike pre-emptively.
+//
+// dt is a generous over-estimate of one server tick; over-shoot means a spike
+// can be freed up to ~1 frame before it would visually reach the gib (the
+// spike is a tiny fast-moving sprite — imperceptible). Under-shoot would mean
+// missing gibs at low fps, so we err high.
+void Spike_GibPathScan(void) {
+    const float dt = 0.02f;
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        if (e->v.movetype != MOVETYPE_FLYMISSILE) continue;
+        const char *cn = e->v.classname;
+        if (!cn || strcmp(cn, "spike") != 0) continue;
+        float dmg = (e->v.touch == superspike_touch) ? 18.0f : 9.0f;
+
+        vec3_t start = { e->v.origin[0], e->v.origin[1], e->v.origin[2] };
+        vec3_t end   = { start[0] + e->v.velocity[0] * dt,
+                         start[1] + e->v.velocity[1] * dt,
+                         start[2] + e->v.velocity[2] * dt };
+
+        edict_t *best = NULL;
+        float best_t = 1.0f;
+        for (edict_t *gent = eng->ED_Next(g->world); gent; gent = eng->ED_Next(gent)) {
+            if (!is_gib(gent) || !gent->v.takedamage) continue;
+            float t;
+            if (segment_hits_aabb(start, end, gent->v.absmin, gent->v.absmax, &t) && t < best_t) {
+                best_t = t;
+                best = gent;
+            }
+        }
+        if (best) {
+            vec3_t vdir; eng->VectorNormalize(e->v.velocity, vdir);
+            vec3_t bvel = { vdir[0]*40, vdir[1]*40, vdir[2]*40 };
+            SpawnBlood(best->v.origin, bvel, dmg);
+            gib_apply_hit_impulse(best, vdir, dmg);
+            eng->ED_Free(e);
+        }
+    }
+}
 // player.c
 extern void player_run(edict_t *self);
 extern void player_axe1(edict_t *self);
@@ -127,6 +218,7 @@ void W_FireAxe(void) {
     end[1] = source[1] + g->v_forward[1]*64;
     end[2] = source[2] + g->v_forward[2]*64;
     eng->SV_Traceline(source, end, 0, self);
+    Corpse_BulletTrace(source, end, self);
 
     if (g->trace_fraction == 1.0f) return;
 
@@ -267,6 +359,11 @@ static void TraceAttack(float damage, vec3_t dir) {
         vec3_t sv = {vel[0]*0.2f, vel[1]*0.2f, vel[2]*0.2f};
         SpawnBlood(org, sv, damage);
         AddMultiDamage(g->trace_ent, damage);
+        // Hitscan impulse on gibs: push along the bullet's path. T_Damage's
+        // gib branch suppresses its own (inflictor-midpoint) impulse when the
+        // inflictor is a client, so this is the sole hitscan contribution.
+        if (is_gib(g->trace_ent))
+            gib_apply_hit_impulse(g->trace_ent, dir, damage);
     } else {
         eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
         eng->MSG_WriteByte(MSG_BROADCAST, TE_GUNSHOT);
@@ -298,6 +395,7 @@ static void FireBullets(float shotcount, vec3_t dir, vec3_t spread) {
         end[1] = src[1] + direction[1]*2048;
         end[2] = src[2] + direction[2]*2048;
         eng->SV_Traceline(src, end, 0, self);
+        Corpse_BulletTrace(src, end, self);
         if (g->trace_fraction != 1.0f)
             TraceAttack(4, direction);
 
@@ -436,6 +534,7 @@ static void LightningDamage(vec3_t p1, vec3_t p2, edict_t *from, float damage) {
     vec3_t par = {0,0,100};
 
     eng->SV_Traceline(p1, p2, 0, self);
+    Corpse_BulletTrace(p1, p2, self);
     if (g->trace_ent->v.takedamage) {
         eng->SV_Particle(g->trace_endpos, par, 225, damage*4);
         T_Damage(g->trace_ent, from, from, damage);
@@ -448,6 +547,7 @@ static void LightningDamage(vec3_t p1, vec3_t p2, edict_t *from, float damage) {
     vec3_t p1f = {p1[0]+foff[0], p1[1]+foff[1], p1[2]};
     vec3_t p2f = {p2[0]+foff[0], p2[1]+foff[1], p2[2]};
     eng->SV_Traceline(p1f, p2f, 0, self);
+    Corpse_BulletTrace(p1f, p2f, self);
     if (g->trace_ent != e1 && g->trace_ent->v.takedamage) {
         eng->SV_Particle(g->trace_endpos, par, 225, damage*4);
         T_Damage(g->trace_ent, from, from, damage);
@@ -457,6 +557,7 @@ static void LightningDamage(vec3_t p1, vec3_t p2, edict_t *from, float damage) {
     vec3_t p1b = {p1[0]-foff[0], p1[1]-foff[1], p1[2]};
     vec3_t p2b = {p2[0]-foff[0], p2[1]-foff[1], p2[2]};
     eng->SV_Traceline(p1b, p2b, 0, self);
+    Corpse_BulletTrace(p1b, p2b, self);
     if (g->trace_ent != e1 && g->trace_ent != e2 && g->trace_ent->v.takedamage) {
         eng->SV_Particle(g->trace_endpos, par, 225, damage*4);
         T_Damage(g->trace_ent, from, from, damage);

@@ -2,6 +2,13 @@
 
 ## Next
 
+* plants and forna
+    * grass
+    * trees
+    * bushes
+    * flowers
+    * water plants
+* cables
 * dust motes
 * gibs should bob on water
 * blood should pool on water
@@ -12,16 +19,14 @@
 * compile SDL ourselves on mac and windows
 * tearing in screenshots, does it need a temp buffer?
 * unit test player ai so it can complete all levels
-* rename --mcp to mcp-stdio
-* add a cvar to enable mcp while running
-* replace quake error message box with a stderr message
+* replace quake error message box with a standard error message
 * more enimies, multiply every enemy
 * add images to my docs
 * increase decal resolution
+* .dem editor mode
+* snow and footsteps
 
 * 3 clicks to add a cluck, draw the plane then add height
-convert palette to a png
-remove old pcx code
 remove other old code, directx
 
 ## Rendering & visuals
@@ -130,6 +135,17 @@ remove other old code, directx
     * lua code?
     * cached bsp?
 
+## Procedural Generation
+
+* models
+* maps
+* textures
+* audio
+    * sound effects
+    * music
+    * speach
+* story
+
 ## Game logic / scripting
 
 * random / procedural maps
@@ -148,11 +164,9 @@ remove other old code, directx
 * `record_demo` / `replay_demo` / `scrub_to_tick`
 * `rewind` — time-travel debugger via periodic state snapshots
 * `spawn_entity` / `damage_entity` for scripted test scenarios
-* A/B harness — run two `game.dll` builds side-by-side, compare metrics
 
 ## Modding ecosystem
 
-* multi-DLL plugin loader (load N `game.dll`s, each owning a subsystem)
 * per-map cvar profiles (auto-applied on map load)
 * asset hot-reload for textures / sounds / models, not just code
 

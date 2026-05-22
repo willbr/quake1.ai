@@ -10,10 +10,10 @@ Selected at startup via the engine command line:
 
 | Flag | Transport | When to use |
 |---|---|---|
-| `--mcp` | stdio | Claude Code spawns `quake.exe` as a child process; everything is line-framed over stdin/stdout. |
+| `--mcp-stdio` | stdio | Claude Code spawns `quake.exe` as a child process; everything is line-framed over stdin/stdout. |
 | `--mcp-http PORT` | HTTP + SSE | Engine is already running; client connects to `http://localhost:PORT/sse`. |
 
-### stdio (`--mcp`)
+### stdio (`--mcp-stdio`)
 
 - Background SDL thread reads stdin line-by-line, pushes each line as a
   JSON-RPC request into a 16-slot ring queue (`mcp_queue`).

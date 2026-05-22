@@ -17,6 +17,7 @@ extern void ai_charge(float dist);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void ThrowHead(const char *model, float damage);
 extern void ThrowGib(const char *model, float damage);
+extern void Corpse_LayProne(edict_t *self);
 extern void walkmonster_start(edict_t *self);
 extern int CanDamage(edict_t *targ, edict_t *inflictor);
 extern void SpawnMeatSpray(vec3_t org, vec3_t vel);
@@ -218,7 +219,7 @@ static void dm_die2(edict_t *e) { FRAME(e,DM_DEATH2,dm_die3); }
 static void dm_die3(edict_t *e) { FRAME(e,DM_DEATH3,dm_die4); }
 static void dm_die4(edict_t *e) { FRAME(e,DM_DEATH4,dm_die5); }
 static void dm_die5(edict_t *e) { FRAME(e,DM_DEATH5,dm_die6); }
-static void dm_die6(edict_t *e) { FRAME(e,DM_DEATH6,dm_die7); e->v.solid = SOLID_NOT; }
+static void dm_die6(edict_t *e) { FRAME(e,DM_DEATH6,dm_die7); Corpse_LayProne(e); }
 static void dm_die7(edict_t *e) { FRAME(e,DM_DEATH7,dm_die8); }
 static void dm_die8(edict_t *e) { FRAME(e,DM_DEATH8,dm_die9); }
 static void dm_die9(edict_t *e) { FRAME(e,DM_DEATH9,dm_die9); }

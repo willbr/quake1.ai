@@ -117,6 +117,14 @@ typedef struct msurface_s
 // surface generation data
 	struct surfcache_s	*cachespots[MIPLEVELS];
 
+	// Per-surface mip hysteresis: remembers the mip level chosen last frame
+	// this surface was visible. d_edge.c uses it to apply a deadband around
+	// the d_scalemip[] thresholds so the surface doesn't flutter between
+	// adjacent mips when the camera lingers near a boundary, and the snap
+	// when crossing happens once instead of repeatedly. -1 = no previous
+	// frame (freshly-visible surface uses raw D_MipLevelForScale result).
+	signed char	last_miplevel;
+
 	short		texturemins[2];
 	short		extents[2];
 

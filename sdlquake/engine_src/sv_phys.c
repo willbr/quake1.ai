@@ -1386,8 +1386,9 @@ void SV_Physics_Toss (edict_t *ent)
 // so they drift up to the surface and settle there. Gate on watertype (not
 // waterlevel) — SV_CheckWaterTransition, used by toss entities, only ever
 // sets waterlevel to 1 or a negative content code, never the 2/3 used for
-// sized actors. At the surface (air directly above origin) we pin vertical
-// velocity to zero so they stop rising and bob in place.
+// sized actors. The "at surface" probe is the gib's bbox vertical centre
+// (origin + midpoint of mins/maxs z); pinning velocity there leaves the gib
+// half-submerged instead of perched on top.
 	{
 		int in_liquid = (ent->v.decal_on_bounce
 			&& (int)ent->v.watertype <= CONTENTS_WATER
@@ -1395,11 +1396,12 @@ void SV_Physics_Toss (edict_t *ent)
 		int at_surface = 0;
 		if (in_liquid)
 		{
-			vec3_t above;
-			above[0] = ent->v.origin[0];
-			above[1] = ent->v.origin[1];
-			above[2] = ent->v.origin[2] + 1.0f;
-			if (SV_PointContents (above) > CONTENTS_WATER)
+			vec3_t probe;
+			probe[0] = ent->v.origin[0];
+			probe[1] = ent->v.origin[1];
+			probe[2] = ent->v.origin[2]
+				+ 0.5f * (ent->v.mins[2] + ent->v.maxs[2]);
+			if (SV_PointContents (probe) > CONTENTS_WATER)
 				at_surface = 1;
 		}
 		if (ent->v.movetype != MOVETYPE_FLY
@@ -1411,10 +1413,15 @@ void SV_Physics_Toss (edict_t *ent)
 			float drag;
 			if (at_surface)
 			{
-				// At the waterline — kill any vertical motion so the gib
-				// settles flat on the surface instead of poking through.
-				if (ent->v.velocity[2] > 0)
-					ent->v.velocity[2] = 0;
+				// Bob: drive z with the derivative of A*sin(ω*t + φ) so
+				// position naturally follows a sine wave once the gib has
+				// settled. Per-gib phase from the edict index keeps gibs
+				// from bobbing in lockstep. A=1.5u, ω=2 rad/s → period
+				// ~3.1s, peak vel 3 u/s. Replaces the prior velocity[2]=0
+				// pin since this overrides any vertical drift.
+				float phase = (float)NUM_FOR_EDICT (ent) * 0.7f;
+				ent->v.velocity[2] = 1.5f * 2.0f
+					* cos ((float)sv.time * 2.0f + phase);
 			}
 			else
 			{
@@ -1426,7 +1433,9 @@ void SV_Physics_Toss (edict_t *ent)
 			if (drag < 0) drag = 0;
 			ent->v.velocity[0] *= drag;
 			ent->v.velocity[1] *= drag;
-			ent->v.velocity[2] *= drag;
+			// Skip z drag at the surface — velocity[2] is driven directly
+			// by the bob cosine above; damping it would shrink the bob.
+			if (!at_surface) ent->v.velocity[2] *= drag;
 			ent->v.avelocity[0] *= drag;
 			ent->v.avelocity[1] *= drag;
 			ent->v.avelocity[2] *= drag;

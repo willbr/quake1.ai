@@ -18,6 +18,7 @@ extern void ai_pain(float dist);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void ThrowHead(const char *gibname, float dm);
 extern void ThrowGib(const char *gibname, float dm);
+extern void Corpse_LayProne(edict_t *self);
 extern void DropBackpack(void);
 extern void SUB_Remove(edict_t *self);
 extern void SUB_CheckRefire(thinkfn_t fn);
@@ -248,7 +249,7 @@ static void enf_pain_cb(edict_t *self, edict_t *attacker, float damage) {
 // Death
 static void enf_die1(edict_t *e)  { FRAME(e,ENF_DEATH1,enf_die2); }
 static void enf_die2(edict_t *e)  { FRAME(e,ENF_DEATH2,enf_die3); }
-static void enf_die3(edict_t *e)  { FRAME(e,ENF_DEATH3,enf_die4); e->v.solid=SOLID_NOT; e->v.ammo_cells=5; DropBackpack(); }
+static void enf_die3(edict_t *e)  { FRAME(e,ENF_DEATH3,enf_die4); Corpse_LayProne(e); e->v.ammo_cells=5; DropBackpack(); }
 static void enf_die4(edict_t *e)  { FRAME(e,ENF_DEATH4,enf_die5);  ai_forward(14); }
 static void enf_die5(edict_t *e)  { FRAME(e,ENF_DEATH5,enf_die6);  ai_forward(2); }
 static void enf_die6(edict_t *e)  { FRAME(e,ENF_DEATH6,enf_die7); }
@@ -263,7 +264,7 @@ static void enf_die14(edict_t *e) { FRAME(e,ENF_DEATH14,enf_die14); }
 
 static void enf_fdie1(edict_t *e)  { FRAME(e,ENF_FDEATH1,enf_fdie2); }
 static void enf_fdie2(edict_t *e)  { FRAME(e,ENF_FDEATH2,enf_fdie3); }
-static void enf_fdie3(edict_t *e)  { FRAME(e,ENF_FDEATH3,enf_fdie4); e->v.solid=SOLID_NOT; e->v.ammo_cells=5; DropBackpack(); }
+static void enf_fdie3(edict_t *e)  { FRAME(e,ENF_FDEATH3,enf_fdie4); Corpse_LayProne(e); e->v.ammo_cells=5; DropBackpack(); }
 static void enf_fdie4(edict_t *e)  { FRAME(e,ENF_FDEATH4,enf_fdie5); }
 static void enf_fdie5(edict_t *e)  { FRAME(e,ENF_FDEATH5,enf_fdie6); }
 static void enf_fdie6(edict_t *e)  { FRAME(e,ENF_FDEATH6,enf_fdie7); }

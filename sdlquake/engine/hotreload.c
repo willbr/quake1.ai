@@ -1111,6 +1111,13 @@ void HotReload_EnablePolling(void)
     Con_Printf("hotreload: polling enabled\n");
 }
 
+// MCP-only: route a damage event through the loaded game DLL.
+void MCP_DamageEntity(edict_t *targ, float damage)
+{
+    if (g_game_api && g_game_api->mcp_damage)
+        g_game_api->mcp_damage(targ, damage);
+}
+
 #else /* !NATIVE_GAME — game DLL not used */
 
 game_api_t *g_game_api = NULL;

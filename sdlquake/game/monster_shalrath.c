@@ -16,6 +16,7 @@ extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float
 extern void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t *ignore);
 extern void ThrowHead(const char *model, float damage);
 extern void ThrowGib(const char *model, float damage);
+extern void Corpse_LayProne(edict_t *self);
 extern void walkmonster_start(edict_t *self);
 extern void SUB_Remove(edict_t *e);
 
@@ -256,7 +257,7 @@ static void shalrath_die(edict_t *self) {
         return;
     }
     eng->SV_StartSound(self, CHAN_VOICE, "shalrath/death.wav", 1, ATTN_NORM);
-    self->v.solid = SOLID_NOT;
+    Corpse_LayProne(self);
     shal_death1(self);
 }
 

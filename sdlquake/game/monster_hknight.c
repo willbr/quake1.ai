@@ -19,6 +19,7 @@ extern void ai_forward(float dist);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void ThrowHead(const char *model, float damage);
 extern void ThrowGib(const char *model, float damage);
+extern void Corpse_LayProne(edict_t *self);
 extern void walkmonster_start(edict_t *self);
 extern void SUB_AttackFinished(float t);
 extern void launch_spike(vec3_t org, vec3_t dir);
@@ -237,7 +238,7 @@ static void hk_die2(edict_t *e),hk_die3(edict_t *e),hk_die4(edict_t *e),hk_die5(
             hk_die10(edict_t *e),hk_die11(edict_t *e),hk_die12(edict_t *e);
 static void hk_die1(edict_t *e) { FRAME(e,HK_DEATH1,hk_die2); ai_forward(10); }
 static void hk_die2(edict_t *e) { FRAME(e,HK_DEATH2,hk_die3); ai_forward(8);  }
-static void hk_die3(edict_t *e) { FRAME(e,HK_DEATH3,hk_die4); e->v.solid = SOLID_NOT; ai_forward(7); }
+static void hk_die3(edict_t *e) { FRAME(e,HK_DEATH3,hk_die4); Corpse_LayProne(e); ai_forward(7); }
 static void hk_die4(edict_t *e) { FRAME(e,HK_DEATH4,hk_die5); }
 static void hk_die5(edict_t *e) { FRAME(e,HK_DEATH5,hk_die6); }
 static void hk_die6(edict_t *e) { FRAME(e,HK_DEATH6,hk_die7); }
@@ -252,7 +253,7 @@ static void hk_dieb2(edict_t *e),hk_dieb3(edict_t *e),hk_dieb4(edict_t *e),hk_di
             hk_dieb6(edict_t *e),hk_dieb7(edict_t *e),hk_dieb8(edict_t *e),hk_dieb9(edict_t *e);
 static void hk_dieb1(edict_t *e) { FRAME(e,HK_DEATHB1,hk_dieb2); }
 static void hk_dieb2(edict_t *e) { FRAME(e,HK_DEATHB2,hk_dieb3); }
-static void hk_dieb3(edict_t *e) { FRAME(e,HK_DEATHB3,hk_dieb4); e->v.solid = SOLID_NOT; }
+static void hk_dieb3(edict_t *e) { FRAME(e,HK_DEATHB3,hk_dieb4); Corpse_LayProne(e); }
 static void hk_dieb4(edict_t *e) { FRAME(e,HK_DEATHB4,hk_dieb5); }
 static void hk_dieb5(edict_t *e) { FRAME(e,HK_DEATHB5,hk_dieb6); }
 static void hk_dieb6(edict_t *e) { FRAME(e,HK_DEATHB6,hk_dieb7); }

@@ -20,6 +20,7 @@ extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float
 extern void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t *ignore);
 extern void ThrowHead(const char *model, float damage);
 extern void ThrowGib(const char *model, float damage);
+extern void Corpse_LayProne(edict_t *self);
 extern void walkmonster_start(edict_t *self);
 extern int CanDamage(edict_t *targ, edict_t *inflictor);
 extern void SpawnMeatSpray(vec3_t org, vec3_t vel);
@@ -405,7 +406,7 @@ static void og_die2(edict_t *e),og_die3(edict_t *e),og_die4(edict_t *e),og_die5(
 static void og_die1(edict_t *e)  { FRAME(e,OG_DEATH1, og_die2);  }
 static void og_die2(edict_t *e)  { FRAME(e,OG_DEATH2, og_die3);  }
 static void og_die3(edict_t *e)  {
-    FRAME(e,OG_DEATH3,og_die4); e->v.solid = SOLID_NOT;
+    FRAME(e,OG_DEATH3,og_die4); Corpse_LayProne(e);
     e->v.ammo_rockets = 2; DropBackpack(e);
 }
 static void og_die4(edict_t *e)  { FRAME(e,OG_DEATH4, og_die5);  }
@@ -426,7 +427,7 @@ static void og_bdie2(edict_t *e),og_bdie3(edict_t *e),og_bdie4(edict_t *e),og_bd
 static void og_bdie1(edict_t *e)  { FRAME(e,OG_BDEATH1,og_bdie2);  }
 static void og_bdie2(edict_t *e)  { FRAME(e,OG_BDEATH2,og_bdie3);  ai_forward(5); }
 static void og_bdie3(edict_t *e)  {
-    FRAME(e,OG_BDEATH3,og_bdie4); e->v.solid = SOLID_NOT;
+    FRAME(e,OG_BDEATH3,og_bdie4); Corpse_LayProne(e);
     e->v.ammo_rockets = 2; DropBackpack(e);
 }
 static void og_bdie4(edict_t *e)  { FRAME(e,OG_BDEATH4,og_bdie5);  ai_forward(1); }

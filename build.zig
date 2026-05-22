@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
         "net_dgrm.c", "net_loop.c", "net_main.c", "net_vcr.c",
         "nonintel.c",
         "pr_edict.c",
-        "r_aclip.c", "r_alias.c", "r_bsp.c", "r_draw.c", "r_edge.c",
+        "r_aclip.c", "r_alias.c", "r_bsp.c", "r_draw.c", "r_drawflat.c", "r_edge.c",
         "r_efrag.c", "r_light.c", "r_livelight.c", "r_lut.c", "r_main.c", "r_misc.c", "r_part.c",
         "r_decals.c",
         "r_sky.c", "r_sprite.c", "r_surf.c", "r_surf_rgb.c", "r_vars.c",

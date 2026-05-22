@@ -29,7 +29,7 @@ zig build game                              # rebuild game.dll only (fast iterat
 
 | Flag | Effect |
 |---|---|
-| `--mcp` | MCP server on stdio (Claude Code spawns the process) |
+| `--mcp-stdio` | MCP server on stdio (Claude Code spawns the process) |
 | `--mcp-http <port>` | MCP server over HTTP/SSE on `localhost:<port>` (connect to running game) |
 | `--hot-reload` | Poll `game.dll` for changes and reload without restart |
 | `+map <name>` | Load map on startup (e.g. `+map e1m1`) |

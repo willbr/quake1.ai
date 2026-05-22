@@ -9,6 +9,8 @@
 extern engine_api_t   *eng;
 extern game_globals_t *g;
 
+extern void Corpse_LayProne(edict_t *self);
+
 extern float modelindex_player;   // client.c
 
 // ---------------------------------------------------------------------------
@@ -479,61 +481,13 @@ static void PlayerDead(edict_t *self)
     g->self->v.deadflag  = DEAD_DEAD;
 }
 
-static float crandom(void) { return eng->Random() * 2.0f - 1.0f; }
-
-static void VelocityForDamage(float dm, vec3_t out)
-{
-    out[0] = 100.0f * crandom();
-    out[1] = 100.0f * crandom();
-    out[2] = 200.0f + 100.0f * eng->Random();
-    if (dm > -50)        { out[0]*=0.7f; out[1]*=0.7f; out[2]*=0.7f; }
-    else if (dm > -200)  { out[0]*=2.0f; out[1]*=2.0f; out[2]*=2.0f; }
-    else                 { out[0]*=10.f; out[1]*=10.f; out[2]*=10.f; }
-}
-
-static void ThrowGib(const char *gibname, float dm)
-{
-    edict_t *gib;
-    vec3_t zero = {0,0,0};
-
-    gib = eng->ED_Alloc();
-    memcpy(gib->v.origin, g->self->v.origin, sizeof(vec3_t));
-    eng->SV_SetModel(gib, gibname);
-    eng->SV_SetSize(gib, zero, zero);
-    VelocityForDamage(dm, gib->v.velocity);
-    gib->v.movetype   = MOVETYPE_BOUNCE;
-    gib->v.solid      = SOLID_NOT;
-    gib->v.avelocity[0] = eng->Random() * 600;
-    gib->v.avelocity[1] = eng->Random() * 600;
-    gib->v.avelocity[2] = eng->Random() * 600;
-    gib->v.think      = SUB_Remove;
-    gib->v.ltime      = g->time;
-    gib->v.nextthink  = g->time + 10.0f + eng->Random() * 10.0f;
-    gib->v.frame      = 0;
-    gib->v.flags      = 0;
-    gib->v.decal_on_bounce = 1.0f;
-}
-
-static void ThrowHead(const char *gibname, float dm)
-{
-    vec3_t hmin = {-16,-16, 0}, hmax = {16,16,56};
-    eng->SV_SetModel(g->self, gibname);
-    g->self->v.frame      = 0;
-    g->self->v.nextthink  = -1;
-    g->self->v.movetype   = MOVETYPE_BOUNCE;
-    g->self->v.takedamage = DAMAGE_NO;
-    g->self->v.solid      = SOLID_NOT;
-    g->self->v.view_ofs[0] = g->self->v.view_ofs[1] = 0;
-    g->self->v.view_ofs[2] = 8;
-    eng->SV_SetSize(g->self, hmin, hmax);
-    VelocityForDamage(dm, g->self->v.velocity);
-    g->self->v.origin[2]  -= 24.0f;
-    g->self->v.flags = (float)((int)g->self->v.flags & ~FL_ONGROUND);
-    g->self->v.avelocity[0] = 0;
-    g->self->v.avelocity[1] = crandom() * 600.0f;
-    g->self->v.avelocity[2] = 0;
-    g->self->v.decal_on_bounce = 1.0f;
-}
+// ThrowGib / ThrowHead live in combat.c — same code shape the monsters use,
+// so player gibs get the model-derived bbox, gib-ring lifetime management,
+// and SOLID_TRIGGER hitscan-knockback that monster gibs got. The only
+// player-specific bit (origin_z -= 24 in vanilla player.qc ThrowHead) moves
+// to GibPlayer below.
+extern void ThrowGib(const char *gibname, float dm);
+extern void ThrowHead(const char *gibname, float dm);
 
 static void DeathSound(void)
 {
@@ -558,6 +512,12 @@ static void DeathSound(void)
 static void GibPlayer(void)
 {
     ThrowHead("progs/h_player.mdl", g->self->v.health);
+    // Vanilla player.qc drops the head's origin by 24 after ThrowHead so the
+    // standalone head sits at body-center height instead of where the player
+    // model's head bone was. Monster ThrowHead doesn't need this — only the
+    // player has this offset because the player capsule's origin is at the
+    // feet/eye level rather than the bbox centre.
+    g->self->v.origin[2] -= 24.0f;
     ThrowGib("progs/gib1.mdl", g->self->v.health);
     ThrowGib("progs/gib2.mdl", g->self->v.health);
     ThrowGib("progs/gib3.mdl", g->self->v.health);
@@ -669,7 +629,7 @@ void PlayerDie(edict_t *self)
     g->self->v.view_ofs[0] = g->self->v.view_ofs[1] = 0;
     g->self->v.view_ofs[2] = -8;
     g->self->v.deadflag    = DEAD_DYING;
-    g->self->v.solid       = SOLID_NOT;
+    Corpse_LayProne(g->self);
     g->self->v.flags = (float)((int)g->self->v.flags & ~FL_ONGROUND);
     g->self->v.movetype    = MOVETYPE_TOSS;
 
@@ -707,7 +667,7 @@ void set_suicide_frame(edict_t *self)
     if (!g->self->v.model || strcmp(g->self->v.model, "progs/player.mdl") != 0)
         return;
     g->self->v.frame     = FR_DEATHA11;
-    g->self->v.solid     = SOLID_NOT;
+    Corpse_LayProne(g->self);
     g->self->v.movetype  = MOVETYPE_TOSS;
     g->self->v.deadflag  = DEAD_DEAD;
     g->self->v.nextthink = -1;

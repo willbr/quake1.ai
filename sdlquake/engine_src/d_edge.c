@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d_local.h"
+#include "r_drawflat.h"
 
 static int	miplevel;
 
@@ -184,7 +185,10 @@ void D_DrawSurfaces (void)
 	VectorCopy (transformed_modelorg, world_transformed_modelorg);
 
 // TODO: could preset a lot of this at mode set time
-	if (r_drawflat.value)
+	// r_drawflat 1: original id "hash s->data" debug mode. Mode 2 (lit
+	// coloured flat shading) falls through to the normal textured path
+	// below, where R_DrawSurface picks up the per-category source override.
+	if (r_drawflat.value == 1)
 	{
 		for (s = &surfaces[1] ; s<surface_p ; s++)
 		{
@@ -214,13 +218,26 @@ void D_DrawSurfaces (void)
 
 			if (s->flags & SURF_DRAWSKY)
 			{
-				if (!r_skymade)
+				if (r_drawflat.value == 2)
 				{
-					R_MakeSky ();
+					// Flat-shaded sky: one solid colour instead of the
+					// scrolling sky panorama. Reads as "outside / out of
+					// bounds" in nav mode.
+					extern byte r_drawflat_src[][256 * 256];
+					int sky_color = r_drawflat_src[R_FLAT_CAT_SKY][0];
+					D_DrawSolidSurface (s, sky_color);
+					D_DrawZSpans (s->spans);
 				}
+				else
+				{
+					if (!r_skymade)
+					{
+						R_MakeSky ();
+					}
 
-				D_DrawSkyScans8 (s->spans);
-				D_DrawZSpans (s->spans);
+					D_DrawSkyScans8 (s->spans);
+					D_DrawZSpans (s->spans);
+				}
 			}
 			else if (s->flags & SURF_DRAWBACKGROUND)
 			{
@@ -254,6 +271,16 @@ void D_DrawSurfaces (void)
 
 					R_RotateBmodel ();	// FIXME: don't mess with the frustum,
 										// make entity passed in
+				}
+
+				// r_drawflat 2: override cacheblock with category source.
+				// Turbulent8 still warps, but a uniform source warps to a
+				// uniform output, so water/lava/slime read as solid blocks.
+				if (r_drawflat.value == 2)
+				{
+					int cat = R_DrawFlat_SurfCategory (pface);
+					cacheblock = (pixel_t *)r_drawflat_src[cat];
+					cachewidth = 64;
 				}
 
 				D_CalcGradients (pface);
@@ -293,8 +320,30 @@ void D_DrawSurfaces (void)
 				}
 
 				pface = s->data;
-				miplevel = D_MipLevelForScale (s->nearzi * scale_for_mip
-				* pface->texinfo->mipadjust);
+				{
+					float mipscale = s->nearzi * scale_for_mip
+						* pface->texinfo->mipadjust;
+					int raw_mip = D_MipLevelForScale (mipscale);
+					int prev    = pface->last_miplevel;
+					// Hysteresis: hold prev mip while scale sits within a
+					// 15% deadband of the threshold that separates prev
+					// from raw. d_scalemip[k] is the boundary between mip k
+					// (above) and mip k+1 (below); the boundary between any
+					// two mips prev,raw is at min(prev,raw).
+					if (prev >= 0 && prev != raw_mip)
+					{
+						int b = (prev < raw_mip) ? prev : raw_mip;
+						if (b >= 0 && b < MIPLEVELS - 1)
+						{
+							float t = d_scalemip[b];
+							if (mipscale > t * 0.85f
+							 && mipscale < t * 1.15f)
+								raw_mip = prev;
+						}
+					}
+					pface->last_miplevel = (signed char)raw_mip;
+					miplevel = raw_mip;
+				}
 
 			// FIXME: make this passed in to D_CacheSurface
 				pcurrentcache = D_CacheSurface (pface, miplevel);

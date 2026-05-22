@@ -49,7 +49,8 @@ void ClientKill(edict_t *);
 void SetNewParms(void);
 void SetChangeParms(edict_t *);
 
-static void game_start_frame(void)                 { Sim_Frame(); StartFrame(); }
+void Spike_GibPathScan(void);                       // weapons.c
+static void game_start_frame(void)                 { Sim_Frame(); Spike_GibPathScan(); StartFrame(); }
 static void game_client_connect(edict_t *c)        { ClientConnect(c); }
 static void game_client_disconnect(edict_t *c)     { ClientDisconnect(c); }
 static void game_put_client_in_server(edict_t *c)  { PutClientInServer(c); }
@@ -76,6 +77,16 @@ static void game_debug_draw_overlays(void)
     Sim_Patrol_DebugDraw();
 }
 
+// Debug-only damage entry point used by the MCP `damage_entity` tool. World
+// is both the inflictor and the attacker so the corpse-overdamage / gib
+// branches in T_Damage fire normally without simulating a weapon trace.
+extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
+static void game_mcp_damage(edict_t *targ, float damage)
+{
+    if (!targ || targ->free) return;
+    T_Damage(targ, g->world, g->world, damage);
+}
+
 static game_api_t s_api = {
     GAME_API_VERSION,
     game_init,
@@ -96,6 +107,7 @@ static game_api_t s_api = {
     game_debug_draw_overlays,
     Doors_OpenAll,
     Doors_OpenAllSecret,
+    game_mcp_damage,
 };
 
 #ifdef _WIN32

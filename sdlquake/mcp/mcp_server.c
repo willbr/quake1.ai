@@ -2,7 +2,7 @@
 //
 // Two transport modes, selected at init time:
 //
-//   stdio (--mcp):
+//   stdio (--mcp-stdio):
 //     Background thread reads stdin; main thread writes to stdout.
 //     Claude Code must be the parent process (spawns quake.exe via .mcp.json).
 //
@@ -775,6 +775,10 @@ static void tool_notify(const char *id_json, const char *message, int flash,
     strncpy(copy, message, sizeof(copy) - 1);
     copy[sizeof(copy) - 1] = '\0';
     SCR_CenterPrint(copy);
+    /* Mirror to the console scrollback so the message persists after the
+     * centerprint times out — useful when several notifies fire in quick
+     * succession or when the player wants to scroll back later. */
+    Con_Printf("notify: %s\n", copy);
     if (flash) Cbuf_AddText("bf\n");
     if (sound && sound[0])
     {
@@ -1002,6 +1006,129 @@ static void tool_teleport(const char *id_json, const char *args)
     d = json_escape_append(d, end, raw);
     *d = '\0';
     mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
+// Tool: inspect_entity -- rich state dump for a single edict by id. Used to
+// debug entity behavior (sliding gibs, runaway velocity, missing FL_ONGROUND).
+// ---------------------------------------------------------------------------
+
+static void tool_inspect_entity(const char *id_json, const char *args)
+{
+    extern server_t sv;
+    extern int      pr_edict_size;
+    extern char    *pr_strings;
+
+    int eid = -1;
+    if (!args || !json_int(args, "id", &eid) || eid < 0)
+    {
+        mcp_error(id_json, -32602, "missing id");
+        return;
+    }
+    if (!sv.active || eid >= sv.num_edicts || pr_edict_size <= 0)
+    {
+        mcp_error(id_json, -32602, "no active server or id out of range");
+        return;
+    }
+    edict_t *e = (edict_t *)((byte *)sv.edicts + eid * pr_edict_size);
+    if (e->free)
+    {
+        mcp_error(id_json, -32602, "edict is free");
+        return;
+    }
+#if NATIVE_GAME
+    const char *cn    = e->v.classname ? e->v.classname : "";
+    const char *model = e->v.model ? e->v.model : "";
+#else
+    const char *cn    = pr_strings + e->v.classname;
+    const char *model = pr_strings + e->v.model;
+#endif
+
+    char raw[1536];
+    int onground = ((int)e->v.flags & FL_ONGROUND) ? 1 : 0;
+    int monster  = ((int)e->v.flags & FL_MONSTER) ? 1 : 0;
+    int client   = ((int)e->v.flags & FL_CLIENT) ? 1 : 0;
+    float dt_to_think = e->v.nextthink > 0 ? (float)(e->v.nextthink - sv.time) : -1.0f;
+
+    snprintf(raw, sizeof(raw),
+        "{\"id\":%d,\"classname\":\"%s\",\"model\":\"%s\","
+        "\"origin\":[%.2f,%.2f,%.2f],"
+        "\"velocity\":[%.2f,%.2f,%.2f],"
+        "\"avelocity\":[%.2f,%.2f,%.2f],"
+        "\"angles\":[%.1f,%.1f,%.1f],"
+        "\"mins\":[%.1f,%.1f,%.1f],\"maxs\":[%.1f,%.1f,%.1f],"
+        "\"movetype\":%d,\"solid\":%d,"
+        "\"takedamage\":%g,\"deadflag\":%g,\"health\":%g,"
+        "\"flags_raw\":%d,\"on_ground\":%s,\"monster\":%s,\"client\":%s,"
+        "\"nextthink\":%g,\"sv_time\":%g,\"think_in\":%.3f,"
+        "\"think_ptr\":\"%p\"}",
+        eid, cn, model,
+        e->v.origin[0], e->v.origin[1], e->v.origin[2],
+        e->v.velocity[0], e->v.velocity[1], e->v.velocity[2],
+        e->v.avelocity[0], e->v.avelocity[1], e->v.avelocity[2],
+        e->v.angles[0], e->v.angles[1], e->v.angles[2],
+        e->v.mins[0], e->v.mins[1], e->v.mins[2],
+        e->v.maxs[0], e->v.maxs[1], e->v.maxs[2],
+        (int)e->v.movetype, (int)e->v.solid,
+        (double)e->v.takedamage, (double)e->v.deadflag, (double)e->v.health,
+        (int)e->v.flags,
+        onground ? "true" : "false",
+        monster  ? "true" : "false",
+        client   ? "true" : "false",
+        (double)e->v.nextthink, (double)sv.time, dt_to_think,
+        (void *)(uintptr_t)e->v.think);
+
+    char escaped[3072];
+    char *d = escaped;
+    char *dend = escaped + sizeof(escaped) - 1;
+    d = json_escape_append(d, dend, raw);
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
+// Tool: damage_entity -- deterministically apply damage to an edict.
+// Routes through game_api->damage_entity, which thunks into T_Damage with
+// the world as inflictor/attacker so corpse-overdamage and gib branches fire
+// the same way they would from a normal hit.
+// ---------------------------------------------------------------------------
+
+static void tool_damage_entity(const char *id_json, const char *args)
+{
+    extern server_t sv;
+    extern int      pr_edict_size;
+
+    int eid = -1;
+    int damage = 0;
+    if (!args || !json_int(args, "id", &eid) || eid < 0)
+    {
+        mcp_error(id_json, -32602, "missing id");
+        return;
+    }
+    if (!json_int(args, "damage", &damage) || damage <= 0)
+    {
+        mcp_error(id_json, -32602, "missing/invalid damage");
+        return;
+    }
+    if (!sv.active || eid >= sv.num_edicts || pr_edict_size <= 0)
+    {
+        mcp_error(id_json, -32602, "no active server or id out of range");
+        return;
+    }
+    edict_t *e = (edict_t *)((byte *)sv.edicts + eid * pr_edict_size);
+    if (e->free)
+    {
+        mcp_error(id_json, -32602, "edict is free");
+        return;
+    }
+    extern void MCP_DamageEntity(edict_t *targ, float damage);
+    MCP_DamageEntity(e, (float)damage);
+
+    char raw[128];
+    snprintf(raw, sizeof(raw),
+        "{\"id\":%d,\"health_after\":%g,\"deadflag\":%g}",
+        eid, (double)e->v.health, (double)e->v.deadflag);
+    mcp_text_result(id_json, raw);
 }
 
 // ---------------------------------------------------------------------------
@@ -1461,6 +1588,16 @@ static void mcp_dispatch(const char *line)
             const char *args = strstr(line, "\"arguments\":");
             tool_teleport(id_json, args ? args : "");
         }
+        else if (strcmp(tool_name, "inspect_entity") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_inspect_entity(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "damage_entity") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_damage_entity(id_json, args ? args : "");
+        }
         else if (strcmp(tool_name, "get_cvar") == 0)
         {
             const char *args = strstr(line, "\"arguments\":");
@@ -1563,7 +1700,7 @@ void MCP_Init(int port)
 void MCP_Frame(void)
 {
     // Drive mcp_http_port cvar: lazy-start the HTTP listener when set, refuse
-    // restart once running. Stdio mode (--mcp) bypasses the cvar entirely.
+    // restart once running. Stdio mode (--mcp-stdio) bypasses the cvar entirely.
     {
         int desired = (int)mcp_http_port_cvar.value;
         if (mcp_http_started_port == 0)

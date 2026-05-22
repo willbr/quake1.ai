@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_local.h"
 #include "d_local.h"	// FIXME: shouldn't be needed (is needed for patch
 						// right now, but that should move)
+#include "r_drawflat.h"
 
 #define LIGHT_MIN	5		// lowest light value we'll allow, to avoid the
 							//  need for inner-loop light clamping
@@ -812,6 +813,17 @@ void R_AliasDrawModel (alight_t *plighting)
 	R_AliasSetUpTransform (currententity->trivial_accept);
 	R_AliasSetupLighting (plighting);
 	R_AliasSetupFrame ();
+
+	// r_drawflat 2: replace the skin with a category-coloured uniform
+	// buffer. acolormap shading still applies, so each model reads as a
+	// lit flat colour (item/monster/etc).
+	if (r_drawflat.value == 2)
+	{
+		int cat = R_DrawFlat_AliasCategory (currententity);
+		r_affinetridesc.pskin = r_drawflat_src[cat];
+		// skinwidth/skinheight untouched — uniform source means any (s,t)
+		// sample returns the same byte.
+	}
 
 	if (!currententity->colormap)
 		Sys_Error ("R_AliasDrawModel: !currententity->colormap");

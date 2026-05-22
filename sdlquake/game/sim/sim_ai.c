@@ -466,7 +466,11 @@ void Sim_AI_Frame(void) {
             if (eng->ED_GetNum(cur) == b->edict_num) { e = cur; break; }
         }
         if (!e) { b->in_use = 0; continue; }
-        if (e->v.health <= 0) {
+        // Dead: skip sense + behavior ticks. The deadflag check matters because
+        // gibbed corpses (now classname="gib") keep health=1 so radius damage
+        // can finish them — without this, the brain would keep walk_toward'ing
+        // the head/gib past the corpse's death, sliding it after the player.
+        if (e->v.health <= 0 || e->v.deadflag != DEAD_NO) {
             b->state = AI_IDLE;
             b->alert_level = 0;
             continue;
@@ -516,7 +520,7 @@ void Sim_AI_Frame(void) {
             for (edict_t *cur = eng->ED_Next(g->world); cur; cur = eng->ED_Next(cur)) {
                 if (eng->ED_GetNum(cur) == b->edict_num) { e = cur; break; }
             }
-            if (!e || e->v.health <= 0) continue;
+            if (!e || e->v.health <= 0 || e->v.deadflag != DEAD_NO) continue;
 
             int color = (b->state == AI_COMBAT || b->state == AI_SEARCHING) ? 79
                       : (b->state == AI_SUSPICIOUS) ? 251

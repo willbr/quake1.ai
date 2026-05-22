@@ -16,6 +16,7 @@ extern void ai_face(void);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void ThrowHead(const char *model, float damage);
 extern void ThrowGib(const char *model, float damage);
+extern void Corpse_LayProne(edict_t *self);
 extern void flymonster_start(edict_t *self);
 extern void SUB_AttackFinished(float t);
 extern void SUB_Remove(edict_t *e);
@@ -318,7 +319,7 @@ static void wz_death1(edict_t *e) {
     eng->SV_StartSound(e, CHAN_VOICE, "wizard/wdeath.wav", 1, ATTN_NORM);
 }
 static void wz_death2(edict_t *e) { FRAME(e,WZ_DEATH2,wz_death3); }
-static void wz_death3(edict_t *e) { FRAME(e,WZ_DEATH3,wz_death4); e->v.solid = SOLID_NOT; }
+static void wz_death3(edict_t *e) { FRAME(e,WZ_DEATH3,wz_death4); Corpse_LayProne(e); }
 static void wz_death4(edict_t *e) { FRAME(e,WZ_DEATH4,wz_death5); }
 static void wz_death5(edict_t *e) { FRAME(e,WZ_DEATH5,wz_death6); }
 static void wz_death6(edict_t *e) { FRAME(e,WZ_DEATH6,wz_death7); }
