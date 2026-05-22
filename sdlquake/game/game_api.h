@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 22
+#define GAME_API_VERSION 23
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -251,6 +251,12 @@ typedef struct game_api_s {
     // world as inflictor + attacker so corpse-overdamage / gib branches
     // fire the same way as a normal hit, without simulating a weapon trace.
     void  (*mcp_damage)(edict_t *targ, float damage);
+
+    // Sample the wind voxel grid at a world position. Writes wind
+    // velocity (units/sec) into out_vel. Outside the grid bounds or
+    // before the grid is initialised, writes (0,0,0). Implemented in
+    // sim_wind.c. Used by r_part.c to drift visual particles.
+    void  (*Wind_SampleVelocity)(const vec3_t pos, vec3_t out_vel);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);

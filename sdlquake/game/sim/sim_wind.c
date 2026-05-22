@@ -331,6 +331,39 @@ float Wind_GetSmokeAt(const vec3_t pos) {
     return s_cells[i].smoke;
 }
 
+void Wind_SampleVelocity(const vec3_t pos, vec3_t out_vel) {
+    out_vel[0] = out_vel[1] = out_vel[2] = 0;
+    if (!s_ready) return;
+
+    // Continuous cell-space coordinate (cell-corner-centered).
+    float fx = (pos[0] - s_origin[0]) / s_cell_size;
+    float fy = (pos[1] - s_origin[1]) / s_cell_size;
+    float fz = (pos[2] - s_origin[2]) / s_cell_size;
+
+    int x0 = (int)floorf(fx);
+    int y0 = (int)floorf(fy);
+    int z0 = (int)floorf(fz);
+    float tx = fx - x0;
+    float ty = fy - y0;
+    float tz = fz - z0;
+
+    // Trilerp across the 8 neighbours. Any out-of-bounds neighbour
+    // contributes zero, so edges fade naturally to no-wind.
+    for (int dz = 0; dz < 2; dz++)
+    for (int dy = 0; dy < 2; dy++)
+    for (int dx = 0; dx < 2; dx++) {
+        int i = idx_or_neg(x0 + dx, y0 + dy, z0 + dz);
+        if (i < 0) continue;
+        float wx = (dx ? tx : 1.0f - tx);
+        float wy = (dy ? ty : 1.0f - ty);
+        float wz = (dz ? tz : 1.0f - tz);
+        float w  = wx * wy * wz;
+        out_vel[0] += s_cells[i].vx * w;
+        out_vel[1] += s_cells[i].vy * w;
+        out_vel[2] += s_cells[i].vz * w;
+    }
+}
+
 float Wind_PathOcclusion(const vec3_t a, const vec3_t b) {
     if (!s_ready) return 0;
     // 3D DDA along the line, summing smoke per cell touched.

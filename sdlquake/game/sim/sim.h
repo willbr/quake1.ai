@@ -144,6 +144,7 @@ void  Wind_Frame(void);
 void  Wind_DebugDraw(void);
 
 float Wind_GetSmokeAt(const vec3_t pos);
+void  Wind_SampleVelocity(const vec3_t pos, vec3_t out_vel);
 float Wind_PathOcclusion(const vec3_t a, const vec3_t b);
 
 void  Wind_AddImpulse(const vec3_t origin, const vec3_t dir,

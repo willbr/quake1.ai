@@ -108,6 +108,7 @@ static game_api_t s_api = {
     Doors_OpenAll,
     Doors_OpenAllSecret,
     game_mcp_damage,
+    Wind_SampleVelocity,
 };
 
 #ifdef _WIN32
