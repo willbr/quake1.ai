@@ -930,6 +930,11 @@ void R_BloodSpray (vec3_t org, vec3_t dir, int count)
 		p->type  = pt_blood;
 		p->ramp  = 0;
 		p->color = ramp_blood[0];	// 73 — bright fresh blood
+		// Per-droplet rate multiplier in [0.5, 2.0]. pt_blood overloads
+		// `birth` as its ramp-rate scale (pt_smoke is the only other user
+		// of `birth`). Staggers when droplets vanish so the carpet of
+		// blood thins gradually instead of disappearing as a wavefront.
+		p->birth = 0.5f + (rand() & 31) * (1.5f / 31.0f);
 
 		for (j = 0; j < 3; j++) {
 			p->org[j] = org[j] + ((rand() & 15) - 8);
@@ -1097,8 +1102,12 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 				break;
 
 			case 2:	// blood
-				p->type = pt_grav;
-				p->color = 67 + (rand()&3);
+				p->type = pt_blood;
+				p->color = ramp_blood[0];
+				p->ramp = 0;
+				p->birth = 0.5f + (rand() & 31) * (1.5f / 31.0f);
+				p->flags = PARTFL_STICK_ON_HIT;
+				p->die = cl.time + 20.0f;
 				for (j=0 ; j<3 ; j++)
 					p->org[j] = start[j] + ((rand()%6)-3);
 				break;
@@ -1128,8 +1137,12 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 				break;
 
 			case 4:	// slight blood
-				p->type = pt_grav;
-				p->color = 67 + (rand()&3);
+				p->type = pt_blood;
+				p->color = ramp_blood[0];
+				p->ramp = 0;
+				p->birth = 0.5f + (rand() & 31) * (1.5f / 31.0f);
+				p->flags = PARTFL_STICK_ON_HIT;
+				p->die = cl.time + 20.0f;
 				for (j=0 ; j<3 ; j++)
 					p->org[j] = start[j] + ((rand()%6)-3);
 				len -= 3;
@@ -1425,9 +1438,10 @@ void R_DrawParticles (void)
 					}
 				}
 			}
-			// Walk the colour ramp toward black over ~16.0s of life
-			// (8 entries / (time1 * 0.1) = 8 / 0.5 = 16.0 s).
-			p->ramp += time1 * 0.1f;
+			// Walk the colour ramp toward black. Per-droplet rate stored
+			// in `birth` (set by R_BloodSpray); range [0.5, 2.0] gives
+			// staggered lifetimes between ~8 s and ~32 s, averaging ~16 s.
+			p->ramp += time1 * 0.1f * p->birth;
 			if (p->ramp >= 8)
 				p->die = -1;
 			else
