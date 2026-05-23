@@ -4,6 +4,7 @@
 #include "game_types.h"
 #include "game_defs.h"
 #include <string.h>
+#include <math.h>
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -148,7 +149,52 @@ static void fire_touch(edict_t *self, edict_t *other) {
     // Gusted fireballs (movetype flipped to BOUNCE by abilities.c) ricochet
     // off world geometry instead of being consumed on first wall contact.
     if (other == g->world && (int)self->v.movetype == MOVETYPE_BOUNCE) return;
-    T_Damage(other, self, self, 20);
+
+    // If the fireball hit a wall (no FL_MONSTER|FL_CLIENT), emit sparks.
+    int flesh = ((int)other->v.flags & (FL_MONSTER | FL_CLIENT)) != 0;
+    if (!flesh) {
+        // Surface normal recovery via short traceline along velocity.
+        float vx = self->v.velocity[0];
+        float vy = self->v.velocity[1];
+        float vz = self->v.velocity[2];
+        float vlen2 = vx*vx + vy*vy + vz*vz;
+        float nx, ny, nz;
+        if (vlen2 > 1.0f) {
+            float inv = 1.0f / (float)sqrt(vlen2);
+            float dx = vx * inv * 4.0f;
+            float dy = vy * inv * 4.0f;
+            float dz = vz * inv * 4.0f;
+            vec3_t back = {self->v.origin[0] - dx,
+                           self->v.origin[1] - dy,
+                           self->v.origin[2] - dz};
+            vec3_t fwd  = {self->v.origin[0] + dx,
+                           self->v.origin[1] + dy,
+                           self->v.origin[2] + dz};
+            eng->SV_Traceline(back, fwd, 0, self);
+            if (g->trace_fraction < 1.0f) {
+                nx = g->trace_plane_normal[0];
+                ny = g->trace_plane_normal[1];
+                nz = g->trace_plane_normal[2];
+            } else {
+                nx = -vx * inv;
+                ny = -vy * inv;
+                nz = -vz * inv;
+            }
+        } else {
+            nx = 0; ny = 0; nz = 1;
+        }
+        eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+        eng->MSG_WriteByte (MSG_BROADCAST, TE_SPARKBURST);
+        eng->MSG_WriteCoord (MSG_BROADCAST, self->v.origin[0]);
+        eng->MSG_WriteCoord (MSG_BROADCAST, self->v.origin[1]);
+        eng->MSG_WriteCoord (MSG_BROADCAST, self->v.origin[2]);
+        eng->MSG_WriteChar (MSG_BROADCAST, (int)(nx * 127.0f));
+        eng->MSG_WriteChar (MSG_BROADCAST, (int)(ny * 127.0f));
+        eng->MSG_WriteChar (MSG_BROADCAST, (int)(nz * 127.0f));
+        eng->MSG_WriteByte (MSG_BROADCAST, 12);
+    }
+    if (other->v.takedamage)
+        T_Damage(other, self, self, 20);
     eng->ED_Free(self);
 }
 

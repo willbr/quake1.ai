@@ -823,7 +823,7 @@ void W_FireLightning(void) {
 static void GrenadeExplode(edict_t *self) {
     g->self = self;
     T_RadiusDamage(self, self->v.owner, 120, g->world);
-    splash_underwater_explosion(self->v.origin, 64); // 4.0x — big column splash
+    splash_underwater_explosion(self->v.origin, 48); // 3.0x grenade detonation column
     eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
     eng->MSG_WriteByte(MSG_BROADCAST, TE_EXPLOSION);
     eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
@@ -835,6 +835,7 @@ static void GrenadeExplode(edict_t *self) {
 static void GrenadeTouch(edict_t *self, edict_t *other) {
     g->self = self; g->other = other;
     if (other == self->v.owner) return;
+    splash_projectile_entry(self, 1024.0f, 24); // 1.5x grenade entry
     if (other->v.takedamage == DAMAGE_AIM) { GrenadeExplode(self); return; }
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/bounce.wav", 1, ATTN_NORM);
     if (self->v.velocity[0] == 0 && self->v.velocity[1] == 0 && self->v.velocity[2] == 0)
