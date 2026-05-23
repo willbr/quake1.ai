@@ -1708,8 +1708,13 @@ void R_DrawParticles (void)
 					// Wall-ish contact (|n.z|<0.7) → also flag for the
 					// slide step below so blood/water droplets droop
 					// downward instead of freezing flat on the wall.
-					if (fabs(n[2]) < 0.7f)
+					// Binary-search the wall's bottom Z once and stash
+					// it in vel[2] so the per-frame slide step is a
+					// cheap compare instead of a trace.
+					if (fabs(n[2]) < 0.7f) {
 						p->flags |= PARTFL_WALL_STICK;
+						p->vel[2] = R_FindWallBottom (p->org, n);
+					}
 				} else {
 					// First bounce: inline reflection at r_sparks_restitution.
 					// Clamp so the cvar can't be set super-elastic (>1) or
