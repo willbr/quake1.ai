@@ -43,6 +43,7 @@ remove other old code, directx
 * procgen textures
 * better visuals & effects — enhanced textures, particles, art direction (Gran Turismo, Crash Bandicoot)
 * review the software renderer — what cool things could we add?
+* parallax mapping
 
 ## Debug rendering
 
