@@ -831,75 +831,67 @@ When r_particle_slide_debug is on, each probe is recorded for ~10 s with a
 when the actual probe geometry is 1 u.
 ================
 */
-// Sideways probe spans 4 u total (2 u outside the wall to 2 u inside), so
-// R_TraceParticle is guaranteed to register a hit when the wall surface is
-// present at this Z.  An on-surface endpoint returns fraction = 1.0 = MISS,
-// which is why an earlier 1-u probe never detected the wall it was sitting
-// on.  The viz line matches the probe geometry so what you see is exactly
-// what was traced.
-#define SLIDE_PROBE_OUT		2.0f
-#define SLIDE_PROBE_IN		2.0f
+// Start the down-trace 1 u into the wall (impact is 0.5 u off the surface
+// in +n, so impact - n*1.0 sits 0.5 u inside any wall ≥1 u thick — the
+// thinnest brushes id1 ships have).  Tracing from there straight down
+// either exits solid at the wall's bottom edge or stays in solid the
+// whole search range, which is exactly the boundary we want.
+#define SLIDE_INSIDE_OFFSET	1.0f
+#define SLIDE_SEARCH_DEPTH	256.0f
 
-// Probes register HIT only when the contact plane's normal matches the
-// stuck wall's normal (dot >= 0.9, ~25° tolerance).  Without this filter
-// a probe below the wall's bottom edge can hit an unrelated surface
-// (floor, ceiling, perpendicular wall) and trick the search into thinking
-// the wall continues there.
-#define SLIDE_PROBE_NORMAL_DOT	0.9f
+/*
+================
+R_FindWallBottom
 
-static int slide_probe_z (const vec3_t impact, const vec3_t n, float z, trace_t *out)
-{
-	vec3_t a, b;
-	float dot;
-	a[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
-	a[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
-	a[2] = z;
-	b[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
-	b[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
-	b[2] = z;
-	if (!R_TraceParticle (a, b, out)) return 0;
-	dot = out->plane.normal[0]*n[0] + out->plane.normal[1]*n[1] + out->plane.normal[2]*n[2];
-	return dot >= SLIDE_PROBE_NORMAL_DOT;
-}
+Find the bottom Z extent of the wall the particle just stuck to.
 
-static void slide_debug_record_probe (const vec3_t impact, const vec3_t n, float z, int hit)
-{
-	vec3_t va, vb;
-	int color = hit ? 79 : 251;	// 79 = green, 251 = bright red
-	va[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
-	va[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
-	va[2] = z;
-	vb[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
-	vb[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
-	vb[2] = z;
-	SlideDebug_Push (va, vb, color, 10.0f);
-}
+Trace a single ray downward starting from a point 0.5 u inside the wall
+surface.  The BSP trace returns startsolid+allsolid flags and the
+fraction at which it exits solid:
 
+  - startsolid && allsolid → wall extends past the search depth.  Return
+    the cap; the slide either reaches it or hits a floor via the disambig.
+  - startsolid && fraction < 1 → ray exited solid at the wall's bottom
+    edge.  Return the exit Z.
+  - !startsolid → starting point wasn't in solid — wall thinner than 1 u
+    or unusual geometry.  Bail out by returning impact_z so the slide
+    releases immediately and falls through to R_SlideRelease's disambig.
+
+One trace replaces the previous 7-probe binary search and dodges the
+"adjacent parallel wall below" problem: tracing INSIDE the wall sees
+only this brush's solid extent, not whatever else is on the same plane.
+================
+*/
 static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 {
 	trace_t	tr;
-	float	z_hit  = impact[2];
-	float	z_miss = impact[2] - 256.0f;
-	int		hit;
+	vec3_t	a, b;
 
-	// Probe the search cap first.  If THIS wall is still there (matching
-	// normal), the wall extends past our search range — return the cap.
-	hit = slide_probe_z (impact, n, z_miss, &tr);
-	slide_debug_record_probe (impact, n, z_miss, hit);
-	if (hit)
-		return z_miss;
+	a[0] = impact[0] - n[0] * SLIDE_INSIDE_OFFSET;
+	a[1] = impact[1] - n[1] * SLIDE_INSIDE_OFFSET;
+	a[2] = impact[2];
+	b[0] = a[0];
+	b[1] = a[1];
+	b[2] = a[2] - SLIDE_SEARCH_DEPTH;
 
-	// Bisect.  Invariant: probe(z_hit) HITs, probe(z_miss) MISSes.
-	while (z_hit - z_miss > 2.0f) {
-		float z_mid = (z_hit + z_miss) * 0.5f;
-		hit = slide_probe_z (impact, n, z_mid, &tr);
-		slide_debug_record_probe (impact, n, z_mid, hit);
-		if (hit)
-			z_hit = z_mid;
-		else
-			z_miss = z_mid;
+	memset (&tr, 0, sizeof(tr));
+	tr.fraction = 1.0f;
+	SV_RecursiveHullCheck (&cl.worldmodel->hulls[0],
+	                       cl.worldmodel->hulls[0].firstclipnode,
+	                       0.0f, 1.0f, a, b, &tr);
+
+	if (r_particle_slide_debug.value) {
+		// Green line: the trace from inside-wall down to where it
+		// exited solid (or to the cap if allsolid).  Red instead if
+		// the starting point wasn't actually in solid (bail-out).
+		int color = tr.startsolid ? 79 : 251;
+		vec3_t end = { a[0], a[1], tr.startsolid && !tr.allsolid ? tr.endpos[2] : b[2] };
+		SlideDebug_Push (a, end, color, 10.0f);
 	}
-	return z_hit;
+
+	if (!tr.startsolid) return impact[2];
+	if (tr.allsolid)    return impact[2] - SLIDE_SEARCH_DEPTH;
+	return tr.endpos[2];
 }
 
 /*
