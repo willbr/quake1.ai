@@ -44,6 +44,7 @@ extern cvar_t r_sparks_restitution;
 
 // Particle sliding — declared in r_main.c, registered in R_Init.
 extern cvar_t r_particle_slide_speed;
+extern cvar_t r_particle_slide_debug;
 
 // Rain — declared in r_main.c, registered in R_Init.
 extern cvar_t r_rain;
@@ -1752,6 +1753,8 @@ void R_DrawParticles (void)
 					// cheap compare instead of a trace.
 					if (fabs(n[2]) < 0.7f) {
 						p->flags |= PARTFL_WALL_STICK;
+						// vel[0] = impact Z (debug viz only, r_particle_slide_debug).
+						p->vel[0] = p->org[2];
 						p->vel[2] = R_FindWallBottom (p->org, n);
 					}
 				} else {
@@ -1946,6 +1949,13 @@ void R_DrawParticles (void)
 				} else {
 					p->org[2] = new_z;
 				}
+			}
+			if (r_particle_slide_debug.value) {
+				// Cyan line: impact Z (top) down to wall_bottom_z (bottom).
+				// Droplet's current sprite renders somewhere along this line.
+				vec3_t top    = { p->org[0], p->org[1], p->vel[0] };
+				vec3_t bottom = { p->org[0], p->org[1], p->vel[2] };
+				DebugLines_Add (top, bottom, 244, 1);
 			}
 		}
 
