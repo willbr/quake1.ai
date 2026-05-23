@@ -1270,8 +1270,11 @@ R_SparkBurst
 
 Hemispherical spark burst at `origin`, biased along `normal` (so sparks
 fan away from the surface they spawn on). Used by TE_SPARKBURST (lightning
-gun impacts). Each spark: pt_spark, PARTFL_BOUNCE | PARTFL_RAMP_HOLD,
-cyan-white birth colour, lifetime ~0.8-1.2 s, speed 200-500 u/s.
+gun impacts and nailgun pings). Each spark: pt_spark, PARTFL_BOUNCE |
+PARTFL_RAMP_HOLD, cyan-white birth colour, lifetime 0.025-0.05 s in-flight
+(post-bounce die capped at 0.05 s, k=40 velocity drag → terminal travel
+~31 u). Sparks read as an instantaneous snap at the impact rather than
+crawling embers crossing the room. Birth speed 750-1250 u/s.
 
 count is multiplied by r_sparks_count_mul.value (clamped >= 0) so the
 cvar gates spawns uniformly regardless of caller. Origin is nudged 1 unit
@@ -1303,25 +1306,28 @@ void R_SparkBurst (vec3_t origin, vec3_t normal, int count)
 		p->next = active_particles;
 		active_particles = p;
 
-		// Tight-cone direction: bias each sample heavily along the surface
-		// normal with a small random perturbation so sparks fly in a
-		// directional shower ~5° wide. 12.0 normal weight + ±1 perturbation
-		// gives cone half-angle arctan(1/12) ≈ 4.8°.
-		v[0] = normal[0] * 12.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
-		v[1] = normal[1] * 12.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
-		v[2] = normal[2] * 12.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
+		// Wide-cone direction: bias along the surface normal but with
+		// enough perturbation that sparks fan out across the hemisphere
+		// instead of firing as a tight beam straight along the normal.
+		// Normal weight 2 + ±1.8 perturbation gives an outward-only fan
+		// (along-component min = 0.2, always away from the surface) with
+		// avg half-angle ~30° and peak ~80°.
+		v[0] = normal[0] * 2.0f + ((rand() & 1023) - 512) * (1.8f / 512.0f);
+		v[1] = normal[1] * 2.0f + ((rand() & 1023) - 512) * (1.8f / 512.0f);
+		v[2] = normal[2] * 2.0f + ((rand() & 1023) - 512) * (1.8f / 512.0f);
 		vlen = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
 
-		// Normalise then scale to a random speed in [1000, 2000].
+		// Normalise then scale to a random speed in [750, 1250].
+		// Combined with k=40 drag, terminal travel ≈ 1250/40 ≈ 31 u.
 		vlen = 1.0f / sqrtf (vlen);
-		speed = 1000.0f + (rand() & 255) * (1000.0f / 256.0f);
+		speed = 750.0f + (rand() & 255) * (500.0f / 256.0f);
 		for (j = 0; j < 3; j++) p->vel[j] = v[j] * vlen * speed;
 
 		VectorCopy (base, p->org);
 		p->color = 244 + (rand() % 3);		// cyan-white core: 244..246
 		p->ramp = 0;
 		p->birth = cl.time;
-		p->die = cl.time + 0.8f + (rand() & 31) * (0.4f / 31.0f);	// 0.8-1.2 s
+		p->die = cl.time + 0.025f + (rand() & 31) * (0.025f / 31.0f);	// 0.025-0.05 s
 		p->type = pt_spark;
 		p->flags = PARTFL_BOUNCE | PARTFL_RAMP_HOLD;
 	}
@@ -1665,9 +1671,15 @@ void R_DrawParticles (void)
 					p->org[2] = tr.endpos[2] + n[2] * 0.5f;
 					p->flags |= PARTFL_BOUNCED;
 					// For pt_spark: cooldown ramp starts now from white-hot.
+					// Tight post-bounce cap so a fast spark doesn't fly far
+					// after its first hit (post-bounce speed at restitution
+					// 0.5 is still ~1000 ups). 0.05 s × ~1000 ups = ~50 u
+					// max travel after bounce — stays local to the impact.
 					if (p->type == pt_spark) {
 						p->flags &= ~PARTFL_RAMP_HOLD;
 						p->ramp = 0;
+						if (p->die > cl.time + 0.05f)
+							p->die = cl.time + 0.05f;
 					}
 				}
 			} else {
@@ -1694,13 +1706,29 @@ void R_DrawParticles (void)
 				if (p->ramp >= 8) {
 					p->color = ramp1[7];		// 0x61 — dark ember
 					p->flags |= PARTFL_DWELL;
-					p->die = cl.time + r_sparks_settle_dwell.value;
+					// Don't let the dwell cvar extend a spark past its
+					// existing die cap (set on bounce above). Only ever
+					// shortens the on-screen ember, never lengthens it.
+					float dwell_die = cl.time + r_sparks_settle_dwell.value;
+					if (dwell_die < p->die)
+						p->die = dwell_die;
 				} else {
 					p->color = ramp1[(int)p->ramp];
 				}
 			}
-			if (!(p->flags & PARTFL_STUCK))
+			if (!(p->flags & PARTFL_STUCK)) {
 				p->vel[2] -= grav;	// light gravity (matches pt_slowgrav)
+				// In-flight drag so a spark (750-1250 ups birth) bleeds
+				// momentum within its 0.025-0.05 s window — keeps the
+				// burst snappy and local rather than letting initial
+				// velocity carry sparks far before die fires. Terminal
+				// travel ≈ v0/k ≈ 1250/40 = ~31 u.
+				float decay = 1.0f - 40.0f * frametime;
+				if (decay < 0.0f) decay = 0.0f;
+				p->vel[0] *= decay;
+				p->vel[1] *= decay;
+				p->vel[2] *= decay;
+			}
 			break;
 		case pt_fire:
 			p->ramp += time1;
@@ -1777,7 +1805,22 @@ void R_DrawParticles (void)
 			// Blood-from-gib trails use pt_grav; pt_slowgrav is the 5% drift
 			// used for everything else. Original WinQuake fell through here
 			// and made blood float; the QUAKE2 branch fixed it. Always apply
-			// full gravity so gib blood actually falls.
+			// full gravity so gib blood actually falls. Underwater: cut
+			// gravity to ~1/4 and apply heavy drag so brass shells (which
+			// use pt_grav + PARTFL_BOUNCE) sink slowly and lose lateral
+			// velocity quickly instead of falling like they're still in air.
+			if (cl.worldmodel) {
+				int c = SV_HullPointContents (&cl.worldmodel->hulls[0], 0, p->org);
+				if (c == CONTENTS_WATER || c == CONTENTS_SLIME || c == CONTENTS_LAVA) {
+					p->vel[2] -= grav * 5;
+					float drag = 1.0f - 6.0f * frametime;
+					if (drag < 0.0f) drag = 0.0f;
+					p->vel[0] *= drag;
+					p->vel[1] *= drag;
+					p->vel[2] *= drag;
+					break;
+				}
+			}
 			p->vel[2] -= grav * 20;
 			break;
 		case pt_slowgrav:

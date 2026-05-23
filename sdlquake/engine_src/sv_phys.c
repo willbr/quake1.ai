@@ -1316,7 +1316,90 @@ void SV_CheckWaterTransition (edict_t *ent)
 		if (ent->v.watertype == CONTENTS_EMPTY)
 		{	// just crossed into water
 			SV_StartSound (ent, 0, "misc/h2ohit1.wav", 255, 1);
-		}		
+
+			// Projectile splash on the moment of entry. Without this, a
+			// nail/rocket/grenade fired into water keeps flying through
+			// the (non-solid) liquid until it hits a solid behind or
+			// below, and any splash queued from spike_touch arrives
+			// visibly late (the gap between entry and that downstream
+			// solid hit). Walk straight up to the air/water boundary so
+			// the burst appears at the surface, not at the now-submerged
+			// origin. Strength scales with velocity magnitude so slow
+			// settling drops (gibs bobbing in) stay subtle while fast
+			// projectiles read as a real impact.
+			float vx = ent->v.velocity[0];
+			float vy = ent->v.velocity[1];
+			float vz = ent->v.velocity[2];
+			float vmag = (float)sqrt(vx*vx + vy*vy + vz*vz);
+			if (vmag >= 100.0f)
+			{
+				vec3_t up_probe;
+				up_probe[0] = ent->v.origin[0];
+				up_probe[1] = ent->v.origin[1];
+				up_probe[2] = ent->v.origin[2] + 4096.0f;
+				// Skip if there's no air above within 4096u (deep
+				// submersion — splashing would be detached anyway).
+				if (SV_PointContents (up_probe) > CONTENTS_WATER)
+				{
+					float lo_z = ent->v.origin[2];
+					float hi_z = ent->v.origin[2] + 4096.0f;
+					for (int bs = 0; bs < 14; bs++)
+					{
+						float mid_z = (lo_z + hi_z) * 0.5f;
+						vec3_t mid;
+						mid[0] = ent->v.origin[0];
+						mid[1] = ent->v.origin[1];
+						mid[2] = mid_z;
+						if (SV_PointContents (mid) <= CONTENTS_WATER)
+							lo_z = mid_z;
+						else
+							hi_z = mid_z;
+					}
+					// Per-particle splash strength is held at bullet
+					// pellet size (16) for all entries — droplet velocity,
+					// spread, and per-burst spawn-radius all read like a
+					// shotgun pellet, so the splash "feel" is consistent.
+					// Bigger projectiles (rocket, grenade) instead emit
+					// multiple bursts at offset XY positions so their
+					// larger physical footprint produces more droplets
+					// spread over a body-sized patch.
+					int strength = (int)(vmag * 0.03f);
+					if (strength > 16) strength = 16;
+					if (strength < 8)  strength = 8;
+					int n_bursts = 1;
+					float offset_r = 0.0f;
+#if NATIVE_GAME
+					if (ent->v.classname && strcmp (ent->v.classname, "missile") == 0) {
+						n_bursts = 4;            // rocket
+						offset_r = 12.0f;
+						strength = 16;
+					} else if (ent->v.classname && strcmp (ent->v.classname, "grenade") == 0) {
+						n_bursts = 3;            // grenade
+						offset_r = 10.0f;
+						strength = 16;
+					}
+#endif
+					int kind = 0; // water
+					if (cont == CONTENTS_SLIME) kind = 1;
+					if (cont == CONTENTS_LAVA)  kind = 2;
+					for (int bi = 0; bi < n_bursts; bi++) {
+						if (sv.datagram.cursize >= MAX_DATAGRAM - 16) break;
+						float ox = 0.0f, oy = 0.0f;
+						if (n_bursts > 1) {
+							ox = ((rand() & 1023) - 512) * (offset_r / 512.0f);
+							oy = ((rand() & 1023) - 512) * (offset_r / 512.0f);
+						}
+						MSG_WriteByte  (&sv.datagram, svc_temp_entity);
+						MSG_WriteByte  (&sv.datagram, TE_WATERSPLASH);
+						MSG_WriteCoord (&sv.datagram, ent->v.origin[0] + ox);
+						MSG_WriteCoord (&sv.datagram, ent->v.origin[1] + oy);
+						MSG_WriteCoord (&sv.datagram, hi_z);
+						MSG_WriteByte  (&sv.datagram, kind);
+						MSG_WriteByte  (&sv.datagram, strength);
+					}
+				}
+			}
+		}
 		ent->v.watertype = cont;
 		ent->v.waterlevel = 1;
 	}
@@ -1455,8 +1538,17 @@ void SV_Physics_Toss (edict_t *ent)
 #ifdef QUAKE2
 	VectorSubtract (ent->v.velocity, ent->v.basevelocity, ent->v.velocity);
 #endif
+	// Always run the water-transition check, even when the push moved
+	// cleanly (fraction == 1) and we're about to early-return. Without
+	// this, a fast nail/rocket that traverses water without hitting any
+	// solid this frame never gets its air→liquid transition detected,
+	// so the engine-side splash from SV_CheckWaterTransition never fires.
+	// The bottom-of-function call below still runs on the bounce path.
 	if (trace.fraction == 1)
+	{
+		if (!ent->free) SV_CheckWaterTransition (ent);
 		return;
+	}
 	if (ent->free)
 		return;
 	

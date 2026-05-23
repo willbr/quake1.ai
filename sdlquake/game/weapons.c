@@ -542,19 +542,6 @@ int splash_along_segment(vec3_t a, vec3_t b, int strength_q4) {
     return 0;
 }
 
-static void splash_projectile_entry(edict_t *self, float dist, int strength_q4) {
-    float vx = self->v.velocity[0], vy = self->v.velocity[1], vz = self->v.velocity[2];
-    float vlen = (float)sqrt(vx*vx + vy*vy + vz*vz);
-    if (vlen < 1.0f) return;
-    float s = dist / vlen;
-    vec3_t back, here;
-    here[0] = self->v.origin[0]; here[1] = self->v.origin[1]; here[2] = self->v.origin[2];
-    back[0] = here[0] - vx*s;
-    back[1] = here[1] - vy*s;
-    back[2] = here[2] - vz*s;
-    splash_at_water_entry(back, here, strength_q4);
-}
-
 // ---------------------------------------------------------------------------
 // Multi-damage accumulator (collect pellet hits, apply as one damage call)
 // ---------------------------------------------------------------------------
@@ -748,7 +735,10 @@ static void T_MissileTouch(edict_t *self, edict_t *other) {
         eng->ED_Free(self);
         return;
     }
-    splash_projectile_entry(self, 4096.0f, 48); // 3.0x rocket entry
+    // Entry splash now emitted engine-side by SV_CheckWaterTransition on
+    // the physics step that crosses into liquid, so the timing matches
+    // the actual water hit (was previously delayed until rocket reached
+    // a solid behind/below the water). Detonation column stays here.
     splash_underwater_explosion(self->v.origin, 64); // 4.0x detonation column
 
     float damg = 100 + eng->Random()*20;
@@ -790,6 +780,7 @@ static void W_FireRocket(void) {
     eng->VectorToAngles(missile->v.velocity, missile->v.angles);
 
     missile->v.touch     = T_MissileTouch;
+    missile->v.classname = "missile";
     missile->v.nextthink = g->time + 5;
     missile->v.think     = SUB_Remove;
     eng->SV_SetModel(missile, "progs/missile.mdl");
@@ -935,7 +926,7 @@ static void GrenadeExplode(edict_t *self) {
 static void GrenadeTouch(edict_t *self, edict_t *other) {
     g->self = self; g->other = other;
     if (other == self->v.owner) return;
-    splash_projectile_entry(self, 1024.0f, 24); // 1.5x grenade entry
+    // Entry splash handled engine-side by SV_CheckWaterTransition.
     if (other->v.takedamage == DAMAGE_AIM) { GrenadeExplode(self); return; }
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/bounce.wav", 1, ATTN_NORM);
     if (self->v.velocity[0] == 0 && self->v.velocity[1] == 0 && self->v.velocity[2] == 0)
@@ -1032,7 +1023,7 @@ static void spike_touch(edict_t *self, edict_t *other) {
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;
     if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) { eng->ED_Free(self); return; }
-    splash_projectile_entry(self, 2048.0f, 32); // 2.0x nail
+    // Entry splash handled engine-side by SV_CheckWaterTransition.
 
     if (is_flesh(other)) {
         spawn_touchblood(9);
@@ -1094,7 +1085,7 @@ static void spike_touch(edict_t *self, edict_t *other) {
             eng->MSG_WriteChar(MSG_BROADCAST, cvx);
             eng->MSG_WriteChar(MSG_BROADCAST, cvy);
             eng->MSG_WriteChar(MSG_BROADCAST, cvz);
-            eng->MSG_WriteByte(MSG_BROADCAST, 10);
+            eng->MSG_WriteByte(MSG_BROADCAST, 5);
         }
         if (other->v.takedamage)
             T_Damage(other, self, self->v.owner, 9);
@@ -1107,7 +1098,7 @@ void superspike_touch(edict_t *self, edict_t *other) {
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;
     if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) { eng->ED_Free(self); return; }
-    splash_projectile_entry(self, 2048.0f, 40); // 2.5x superspike
+    // Entry splash handled engine-side by SV_CheckWaterTransition.
 
     if (is_flesh(other)) {
         spawn_touchblood(18);
@@ -1157,7 +1148,7 @@ void superspike_touch(edict_t *self, edict_t *other) {
         eng->MSG_WriteChar(MSG_BROADCAST, cvx);
         eng->MSG_WriteChar(MSG_BROADCAST, cvy);
         eng->MSG_WriteChar(MSG_BROADCAST, cvz);
-        eng->MSG_WriteByte(MSG_BROADCAST, 15);
+        eng->MSG_WriteByte(MSG_BROADCAST, 7);
         if (other->v.takedamage)
             T_Damage(other, self, self->v.owner, 18);
     }
