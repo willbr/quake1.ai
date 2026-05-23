@@ -761,6 +761,53 @@ static int R_TraceParticle (const vec3_t start, const vec3_t end, trace_t *trace
 }
 
 /*
+================
+R_FindWallBottom
+
+Binary-search the vertical extent of the wall the particle just stuck to.
+Returns the lowest Z where the wall surface is still present (the Z just above
+the wall's bottom edge).  At stick time the wall is known present at impact[2];
+the search probes downward by 256 u, then bisects to ~2 u precision.
+
+`n` is the contact normal (points away from the wall). The probe is a 1-unit
+trace through the wall plane at a given Z: HIT means the wall is there, MISS
+means it's gone (air below the wall's bottom, a hole, etc.).
+================
+*/
+static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
+{
+	trace_t	tr;
+	vec3_t	a, b;
+	float	z_hit  = impact[2];
+	float	z_miss = impact[2] - 256.0f;
+
+	// Probe the search cap first.  If the wall is still there, the wall
+	// extends past our search range — return the cap and let the slide
+	// either reach it (rare: 64+ s at default 4 u/s, longer than blood
+	// lifetime) or hit the floor first via R_SlideRelease's disambig.
+	a[0] = impact[0] + n[0] * 0.5f;
+	a[1] = impact[1] + n[1] * 0.5f;
+	a[2] = z_miss;
+	b[0] = impact[0] - n[0] * 0.5f;
+	b[1] = impact[1] - n[1] * 0.5f;
+	b[2] = z_miss;
+	if (R_TraceParticle (a, b, &tr))
+		return z_miss;
+
+	// Bisect.  Invariant: probe(z_hit) HITs, probe(z_miss) MISSes.
+	while (z_hit - z_miss > 2.0f) {
+		float z_mid = (z_hit + z_miss) * 0.5f;
+		a[2] = z_mid;
+		b[2] = z_mid;
+		if (R_TraceParticle (a, b, &tr))
+			z_hit = z_mid;
+		else
+			z_miss = z_mid;
+	}
+	return z_hit;
+}
+
+/*
 ===============
 R_RainSpawn
 
