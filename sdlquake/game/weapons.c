@@ -29,6 +29,7 @@ static void emit_weapon_sound(edict_t *shooter, float intensity) {
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void T_RadiusDamage(edict_t *bomb, edict_t *attacker, float rad, edict_t *ignore);
 extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
+extern int  GibCorpse(edict_t *self);
 // subs.c
 extern void SUB_Remove(edict_t *self);
 
@@ -115,21 +116,40 @@ void Spike_GibPathScan(void) {
                          start[1] + e->v.velocity[1] * dt,
                          start[2] + e->v.velocity[2] * dt };
 
+        // Sweep against both gibs and settled corpses. Settled corpses are
+        // SOLID_TRIGGER (Corpse_LayProne'd) so spike physics skips them, just
+        // like gibs. Pre-LayProne (mid-death-animation) monsters are still
+        // SOLID_BBOX and handled by spike_touch -- excluded here so they get
+        // to finish their death animation before being gibbed.
         edict_t *best = NULL;
         float best_t = 1.0f;
+        int best_is_corpse = 0;
         for (edict_t *gent = eng->ED_Next(g->world); gent; gent = eng->ED_Next(gent)) {
-            if (!is_gib(gent) || !gent->v.takedamage) continue;
+            if (!gent->v.takedamage) continue;
+            int is_corpse = (gent->v.solid == SOLID_TRIGGER
+                             && is_flesh(gent)
+                             && gent->v.deadflag != DEAD_NO);
+            if (!is_gib(gent) && !is_corpse) continue;
             float t;
             if (segment_hits_aabb(start, end, gent->v.absmin, gent->v.absmax, &t) && t < best_t) {
                 best_t = t;
                 best = gent;
+                best_is_corpse = is_corpse;
             }
         }
         if (best) {
             vec3_t vdir; eng->VectorNormalize(e->v.velocity, vdir);
             vec3_t bvel = { vdir[0]*40, vdir[1]*40, vdir[2]*40 };
             SpawnBlood(best->v.origin, bvel, dmg);
-            gib_apply_hit_impulse(best, vdir, dmg);
+            if (best_is_corpse) {
+                if (!GibCorpse(best)) {
+                    // No gib entry -- still apply spike's intended damage so
+                    // T_Damage's deadflag branch tracks overkill normally.
+                    T_Damage(best, e, e->v.owner, dmg);
+                }
+            } else {
+                gib_apply_hit_impulse(best, vdir, dmg);
+            }
             eng->ED_Free(e);
         }
     }

@@ -8,6 +8,7 @@
 #include <string.h>
 
 extern void SUB_Remove(edict_t *e);
+extern void SpawnBlood(vec3_t org, vec3_t vel, float damage);
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -642,6 +643,25 @@ int GibCorpse(edict_t *self) {
     edict_t *oself = g->self;
     g->self = self;
     eng->SV_StartSound(self, CHAN_VOICE, "player/udeath.wav", 1, ATTN_NORM);
+    // Blood burst at the gib site. Several SpawnBlood calls with randomized
+    // outward velocities give a fuller spray than one large burst, since
+    // TE_BLOODSPRAY's particle count is capped at 255 per call and a single
+    // direction reads as a one-sided plume rather than a corpse rupture.
+    {
+        vec3_t centre = {
+            self->v.origin[0],
+            self->v.origin[1],
+            self->v.origin[2] + 8.0f,
+        };
+        for (int i = 0; i < 6; i++) {
+            vec3_t v = {
+                (eng->Random() * 2.0f - 1.0f) * 180.0f,
+                (eng->Random() * 2.0f - 1.0f) * 180.0f,
+                eng->Random() * 200.0f + 40.0f,
+            };
+            SpawnBlood(centre, v, 40.0f);
+        }
+    }
     ThrowHead(info->head_model, self->v.health);
     // Stationary head: the corpse was already settled when over-damaged, so
     // a random VelocityForDamage on the head looks like the head is sliding

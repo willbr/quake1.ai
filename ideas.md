@@ -159,6 +159,8 @@ remove other old code, directx
 * `record_demo` / `replay_demo` / `scrub_to_tick`
 * `rewind` — time-travel debugger via periodic state snapshots
 * `spawn_entity` / `damage_entity` for scripted test scenarios
+* pause game
+* render a sequence of frames to a contact sheet, to check effects animation
 
 ## Modding ecosystem
 
