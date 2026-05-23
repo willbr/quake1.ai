@@ -720,25 +720,36 @@ static void player_eject_shell(edict_t *self, float lateral_offset) {
 
 static void W_FireShotgun(void) {
     edict_t *self = g->self;
-    // Debug: replace the entire shotgun fire with a single deterministic
-    // blood droplet shot forward from the gun. No sound, no damage, no
-    // ammo cost, no pellets, no random spread.
-    if (eng->Cvar_VariableValue("g_test_shotgunblood") > 0) {
+    // Debug: replace the entire shotgun fire with N deterministic blood
+    // droplets shot from the gun, where N = g_test_shotgunblood (capped
+    // at 64). N==1 → one droplet straight forward; N>1 → small spread
+    // cone around the forward direction.
+    int blood_n = (int)eng->Cvar_VariableValue("g_test_shotgunblood");
+    if (blood_n > 0) {
+        if (blood_n > 64) blood_n = 64;
         eng->MakeVectors(self->v.v_angle);
         float mx = self->v.origin[0] + g->v_forward[0] * 16;
         float my = self->v.origin[1] + g->v_forward[1] * 16;
         float mz = self->v.absmin[2] + self->v.size[2] * 0.7f;
-        float vx = g->v_forward[0] * 500;
-        float vy = g->v_forward[1] * 500;
-        float vz = g->v_forward[2] * 500;
-        eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
-        eng->MSG_WriteByte (MSG_BROADCAST, TE_DEBUGBLOOD);
-        eng->MSG_WriteCoord(MSG_BROADCAST, mx);
-        eng->MSG_WriteCoord(MSG_BROADCAST, my);
-        eng->MSG_WriteCoord(MSG_BROADCAST, mz);
-        eng->MSG_WriteCoord(MSG_BROADCAST, vx);
-        eng->MSG_WriteCoord(MSG_BROADCAST, vy);
-        eng->MSG_WriteCoord(MSG_BROADCAST, vz);
+        int i;
+        for (i = 0; i < blood_n; i++) {
+            float c1 = (blood_n > 1) ? (eng->Random() - 0.5f) * 0.15f : 0.0f;
+            float c2 = (blood_n > 1) ? (eng->Random() - 0.5f) * 0.15f : 0.0f;
+            float dx = g->v_forward[0] + g->v_right[0]*c1 + g->v_up[0]*c2;
+            float dy = g->v_forward[1] + g->v_right[1]*c1 + g->v_up[1]*c2;
+            float dz = g->v_forward[2] + g->v_right[2]*c1 + g->v_up[2]*c2;
+            float vx = dx * 500;
+            float vy = dy * 500;
+            float vz = dz * 500;
+            eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+            eng->MSG_WriteByte (MSG_BROADCAST, TE_DEBUGBLOOD);
+            eng->MSG_WriteCoord(MSG_BROADCAST, mx);
+            eng->MSG_WriteCoord(MSG_BROADCAST, my);
+            eng->MSG_WriteCoord(MSG_BROADCAST, mz);
+            eng->MSG_WriteCoord(MSG_BROADCAST, vx);
+            eng->MSG_WriteCoord(MSG_BROADCAST, vy);
+            eng->MSG_WriteCoord(MSG_BROADCAST, vz);
+        }
         return;
     }
     emit_weapon_sound(self, 0.7f);
