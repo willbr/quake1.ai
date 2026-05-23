@@ -831,12 +831,12 @@ When r_particle_slide_debug is on, each probe is recorded for ~10 s with a
 when the actual probe geometry is 1 u.
 ================
 */
-// Start the down-trace 1 u into the wall (impact is 0.5 u off the surface
-// in +n, so impact - n*1.0 sits 0.5 u inside any wall ≥1 u thick — the
-// thinnest brushes id1 ships have).  Tracing from there straight down
-// either exits solid at the wall's bottom edge or stays in solid the
-// whole search range, which is exactly the boundary we want.
-#define SLIDE_INSIDE_OFFSET	1.0f
+// Start the down-trace several units into the wall (impact is 0.5 u off
+// the surface in +n).  Need enough offset to clear BSP-clipnode epsilon
+// — 1 u sometimes wasn't enough on id1 stone walls — but not so much
+// that thin brushes get skipped. 4 u is comfortably inside any wall
+// thicker than ~4.5 u (~all of id1) without being absurd.
+#define SLIDE_INSIDE_OFFSET	4.0f
 #define SLIDE_SEARCH_DEPTH	256.0f
 
 /*
