@@ -515,6 +515,37 @@ void R_PushSmokeTube (const float *origin, const float *axis,
 	}
 }
 
+// Forward decl from world.c — keeps r_part.c off the full world.h include
+// (which pulls server-side types). World-hull traceline only; no entity
+// list, no contents-flag handling.
+extern qboolean SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f,
+                                       vec3_t p1, vec3_t p2, trace_t *trace);
+
+/*
+===============
+R_TraceParticle
+
+Thin wrapper over SV_RecursiveHullCheck on cl.worldmodel->hulls[0]. Used
+by R_DrawParticles to test whether a particle's per-frame integration step
+crosses a world brush surface. World-only (no entity collision); returns 1
+on hit, 0 on clean traversal or when no worldmodel is loaded.
+===============
+*/
+static int R_TraceParticle (const vec3_t start, const vec3_t end, trace_t *trace)
+{
+	vec3_t p1, p2;
+	if (!cl.worldmodel) return 0;
+
+	memset (trace, 0, sizeof(*trace));
+	trace->fraction = 1.0f;
+
+	VectorCopy (start, p1);
+	VectorCopy (end,   p2);
+
+	SV_RecursiveHullCheck (&cl.worldmodel->hulls[0], 0, 0.0f, 1.0f, p1, p2, trace);
+	return (trace->fraction < 1.0f) ? 1 : 0;
+}
+
 void R_AddSmokePuff (vec3_t org, vec3_t dir, int color, int count)
 {
 	int			i, j;
