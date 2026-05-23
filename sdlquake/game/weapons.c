@@ -949,14 +949,42 @@ static void spike_touch(edict_t *self, edict_t *other) {
             eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
             eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
         } else {
-            // Player nailgun: emit a small TE_SPARKBURST in the ricochet
-            // direction (opposite the nail's velocity).
-            float vx = self->v.velocity[0], vy = self->v.velocity[1], vz = self->v.velocity[2];
+            // Player nailgun: emit a small TE_SPARKBURST off the wall's
+            // surface normal. Recover the normal by tracing a few units back
+            // → forward along the nail's velocity; fall back to negated
+            // velocity if the trace finds no surface (corner/sky edge case).
+            float vx = self->v.velocity[0];
+            float vy = self->v.velocity[1];
+            float vz = self->v.velocity[2];
             float vlen2 = vx*vx + vy*vy + vz*vz;
-            float ilen = (vlen2 > 1.0f) ? (1.0f / (float)sqrt(vlen2)) : 1.0f;
-            int cvx = (int)(-vx * ilen * 127.0f);
-            int cvy = (int)(-vy * ilen * 127.0f);
-            int cvz = (int)(-vz * ilen * 127.0f);
+            float nx, ny, nz;
+            if (vlen2 > 1.0f) {
+                float inv = 1.0f / (float)sqrt(vlen2);
+                float dx = vx * inv * 4.0f;
+                float dy = vy * inv * 4.0f;
+                float dz = vz * inv * 4.0f;
+                vec3_t back = {self->v.origin[0] - dx,
+                               self->v.origin[1] - dy,
+                               self->v.origin[2] - dz};
+                vec3_t fwd  = {self->v.origin[0] + dx,
+                               self->v.origin[1] + dy,
+                               self->v.origin[2] + dz};
+                eng->SV_Traceline(back, fwd, 0, self);
+                if (g->trace_fraction < 1.0f) {
+                    nx = g->trace_plane_normal[0];
+                    ny = g->trace_plane_normal[1];
+                    nz = g->trace_plane_normal[2];
+                } else {
+                    nx = -vx * inv;
+                    ny = -vy * inv;
+                    nz = -vz * inv;
+                }
+            } else {
+                nx = 0; ny = 0; nz = 1;	// degenerate; just shoot sparks up
+            }
+            int cvx = (int)(nx * 127.0f);
+            int cvy = (int)(ny * 127.0f);
+            int cvz = (int)(nz * 127.0f);
             eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
             eng->MSG_WriteByte(MSG_BROADCAST, TE_SPARKBURST);
             eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
@@ -984,14 +1012,42 @@ void superspike_touch(edict_t *self, edict_t *other) {
         spawn_touchblood(18);
         T_Damage(other, self, self->v.owner, 18);
     } else {
-        // Player super-nailgun: emit a TE_SPARKBURST in the ricochet
-        // direction (opposite the nail's velocity).
-        float vx = self->v.velocity[0], vy = self->v.velocity[1], vz = self->v.velocity[2];
+        // Player super-nailgun: emit a TE_SPARKBURST off the wall's
+        // surface normal. Recover the normal by tracing a few units back
+        // → forward along the nail's velocity; fall back to negated
+        // velocity if the trace finds no surface (corner/sky edge case).
+        float vx = self->v.velocity[0];
+        float vy = self->v.velocity[1];
+        float vz = self->v.velocity[2];
         float vlen2 = vx*vx + vy*vy + vz*vz;
-        float ilen = (vlen2 > 1.0f) ? (1.0f / (float)sqrt(vlen2)) : 1.0f;
-        int cvx = (int)(-vx * ilen * 127.0f);
-        int cvy = (int)(-vy * ilen * 127.0f);
-        int cvz = (int)(-vz * ilen * 127.0f);
+        float nx, ny, nz;
+        if (vlen2 > 1.0f) {
+            float inv = 1.0f / (float)sqrt(vlen2);
+            float dx = vx * inv * 4.0f;
+            float dy = vy * inv * 4.0f;
+            float dz = vz * inv * 4.0f;
+            vec3_t back = {self->v.origin[0] - dx,
+                           self->v.origin[1] - dy,
+                           self->v.origin[2] - dz};
+            vec3_t fwd  = {self->v.origin[0] + dx,
+                           self->v.origin[1] + dy,
+                           self->v.origin[2] + dz};
+            eng->SV_Traceline(back, fwd, 0, self);
+            if (g->trace_fraction < 1.0f) {
+                nx = g->trace_plane_normal[0];
+                ny = g->trace_plane_normal[1];
+                nz = g->trace_plane_normal[2];
+            } else {
+                nx = -vx * inv;
+                ny = -vy * inv;
+                nz = -vz * inv;
+            }
+        } else {
+            nx = 0; ny = 0; nz = 1;	// degenerate; just shoot sparks up
+        }
+        int cvx = (int)(nx * 127.0f);
+        int cvy = (int)(ny * 127.0f);
+        int cvz = (int)(nz * 127.0f);
         eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
         eng->MSG_WriteByte(MSG_BROADCAST, TE_SPARKBURST);
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
