@@ -53,6 +53,12 @@ int		ramp1[8] = {0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61};
 int		ramp2[8] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66};
 int		ramp3[8] = {0x6d, 0x6b, 6, 5, 4, 3};
 
+// Blood fade ramp: starts in the 73..79 bright blood-red range, walks through
+// darker reds, then jumps into the low palette indices (grayscale 0..15) to
+// reach pure black at the end. Used by pt_blood; advanced once per frame in
+// R_DrawParticles.
+int ramp_blood[8] = {73, 71, 69, 67, 5, 3, 1, 0};
+
 // Per-type wind drag coefficients.  Used by R_DrawParticles to lerp
 // each active particle's velocity toward the locally-sampled wind
 // velocity.  Higher k snaps faster; 0 disables for that type.
@@ -62,6 +68,7 @@ static const float wind_drag_k[] = {
     [pt_static]   = 3.0f,
     [pt_smoke]    = 1.5f,	// moderate drag -- puff holds its spawn impulse long enough to billow (~half a second), then drifts with the ambient wind
     [pt_spark]    = 0.0f,	// lightning-gun sparks bounce off geometry; ambient wind drift would fight that, so disable
+    [pt_blood]    = 0.0f,	// heavy gib droplets; gravity dominates, ambient wind drift would float them oddly
     [pt_fire]     = 0.4f,   // used by R_RocketTrail; spawns at zero vel,
                             // so any strong drag yanks the trail off the
                             // rocket's path. Keep this low.
@@ -785,9 +792,13 @@ void R_BloodSpray (vec3_t org, vec3_t dir, int count)
 		active_particles = p;
 		p->flags = PARTFL_STICK_ON_HIT;
 
-		p->die   = cl.time + 0.6f + (rand() & 31) * 0.02f;
-		p->type  = pt_grav;
-		p->color = (73 & ~7) + (rand() & 7); // blood ramp 72..79
+		// Lifetime is ramp-driven (see pt_blood case in R_DrawParticles);
+		// the explicit die is just a safety cap in case ramp advance gets
+		// frame-rate-starved.
+		p->die   = cl.time + 5.0f;
+		p->type  = pt_blood;
+		p->ramp  = 0;
+		p->color = ramp_blood[0];	// 73 — bright fresh blood
 
 		for (j = 0; j < 3; j++) {
 			p->org[j] = org[j] + ((rand() & 15) - 8);
@@ -1265,6 +1276,20 @@ void R_DrawParticles (void)
 			p->vel[2] -= grav;
 			break;
 
+		case pt_blood:
+			// Heavy droplet — full gravity (matches the original pt_grav
+			// blood path).  Stuck droplets keep gravity off so they don't
+			// "press into" the wall they splatted on.
+			if (!(p->flags & PARTFL_STUCK))
+				p->vel[2] -= grav * 20;
+			// Walk the colour ramp toward black over ~3.2s of life
+			// (8 entries / (time1 * 0.5) = 8 / 2.5 = 3.2 s).
+			p->ramp += time1 * 0.5f;
+			if (p->ramp >= 8)
+				p->die = -1;
+			else
+				p->color = ramp_blood[(int)p->ramp];
+			break;
 		case pt_grav:
 			// Blood-from-gib trails use pt_grav; pt_slowgrav is the 5% drift
 			// used for everything else. Original WinQuake fell through here

@@ -34,7 +34,8 @@ typedef struct
 typedef enum {
 	pt_static, pt_grav, pt_slowgrav, pt_fire, pt_explode, pt_explode2, pt_blob, pt_blob2,
 	pt_smoke,	// pt_static behaviour, but D_DrawSmokeParticle scales size by ramp and dithers
-	pt_spark	// bouncing electrical ember; cyan birth, ramp1 cool-down, stick on 2nd hit
+	pt_spark,	// bouncing electrical ember; cyan birth, ramp1 cool-down, stick on 2nd hit
+	pt_blood	// heavy gib droplet; pt_grav physics + ramp_blood fade to black
 } ptype_t;
 
 // Per-particle behaviour flags. Stored in particle_t::flags. Recycled
