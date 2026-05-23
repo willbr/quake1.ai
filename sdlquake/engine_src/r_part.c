@@ -70,8 +70,12 @@ static void R_RainBuildSkyList (void)
 	for (i = 0; i < m->numsurfaces && r_sky_bbox_count < R_RAIN_MAX_SKY; i++) {
 		msurface_t *s = &m->surfaces[i];
 		if (!(s->flags & SURF_DRAWSKY)) continue;
-		// Accept any orientation — vertical sky surfaces (e.g. slipgate
-		// backdrops on start.bsp) count just as much as ceiling sky.
+		// Reject anything not facing downward enough to be a real sky
+		// ceiling — slipgates also use sky-prefixed textures (so they
+		// get SURF_DRAWSKY) but their planes face horizontally. normal.z
+		// <= -0.5 catches genuine outdoor ceilings (normal points down)
+		// while skipping vertical slipgate panels.
+		if (!s->plane || s->plane->normal[2] > -0.5f) continue;
 		float xmin =  1e30f, xmax = -1e30f;
 		float ymin =  1e30f, ymax = -1e30f;
 		float zsum = 0.0f, zmax = -1e30f;
