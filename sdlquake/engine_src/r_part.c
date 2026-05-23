@@ -756,7 +756,7 @@ static void R_RainSpawn (void)
 		p->type   = pt_grav;
 		p->ramp   = 0;
 		p->birth  = cl.time;
-		p->die    = cl.time + 10.0f;
+		p->die    = cl.time + 1.5f;
 		p->flags  = PARTFL_STICK_ON_HIT;
 
 		if (debug) Con_Printf ("rain spawn at (%.0f %.0f %.0f) under sky bbox %d (zmax=%.0f)\n",
