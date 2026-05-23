@@ -44,6 +44,7 @@ extern cvar_t r_sparks_restitution;
 
 // Rain — declared in r_main.c, registered in R_Init.
 extern cvar_t r_rain;
+extern cvar_t r_rain_debug;
 
 // Floor of free particles that R_AddSmokePuff refuses to dip below.
 // Smoke is a low-priority visualization re-emitted every frame; gameplay
@@ -615,13 +616,13 @@ static int R_TraceParticle (const vec3_t start, const vec3_t end, trace_t *trace
 R_RainSpawn
 
 Spawn (r_rain.value * 8) rain droplets per frame in a 512-unit-radius
-cylinder around the player at +256 alt. Each candidate is sky-tested:
-  - skip if the spawn position is inside SOLID (avoid spawning in walls)
-  - skip if the surface directly above is not a sky surface (CONTENTS_SKY
-    on the far side of the trace hit). Solid ceilings and open void both
-    fail this test, so rain only falls in rooms with actual sky overhead.
-Otherwise spawn a pt_grav droplet with PARTFL_STICK_ON_HIT so it falls
-and splats on the floor.
+disk around the player at player_z + 8. For each candidate:
+  - skip if the candidate is inside SOLID (player near wall or floor)
+  - trace UP 4096 units; skip if no hit or far-side is not CONTENTS_SKY
+  - spawn the droplet at sky_z - 16, so it falls visibly through the
+    full column toward the player
+r_rain_debug 1 logs every attempt with candidate pos, trace result, and
+accept/reject reason.
 ===============
 */
 static void R_RainSpawn (void)
@@ -629,10 +630,10 @@ static void R_RainSpawn (void)
 	int    n, i;
 	float  radius = 512.0f;
 	vec3_t origin;
+	int    debug = (r_rain_debug.value >= 1);
 
 	if (!cl.worldmodel) return;
 
-	// r_origin is the rendering eye position, set by R_SetupFrame each frame.
 	VectorCopy (r_origin, origin);
 
 	n = (int)(r_rain.value * 8.0f);
@@ -642,57 +643,67 @@ static void R_RainSpawn (void)
 	for (i = 0; i < n; i++) {
 		if (!free_particles) return;
 
-		// Random sample in a disk of radius 512 around player.
+		// Random sample in disk around player.
 		float ang = (rand() & 1023) * (6.28318530718f / 1024.0f);
 		float r   = sqrtf((rand() & 1023) * (1.0f / 1023.0f)) * radius;
 		vec3_t candidate;
 		candidate[0] = origin[0] + cosf(ang) * r;
 		candidate[1] = origin[1] + sinf(ang) * r;
-		candidate[2] = origin[2] + 256.0f;
+		candidate[2] = origin[2] + 8.0f;	// near player altitude
 
-		// Skip if spawn is inside solid geometry.
-		if (SV_HullPointContents (&cl.worldmodel->hulls[0], 0, candidate) == CONTENTS_SOLID)
+		// Skip if spawn-source is inside solid (player likely poking into a wall).
+		if (SV_HullPointContents (&cl.worldmodel->hulls[0], 0, candidate) == CONTENTS_SOLID) {
+			if (debug) Con_Printf ("rain skip: in SOLID at (%.0f %.0f %.0f)\n",
+			                       candidate[0], candidate[1], candidate[2]);
 			continue;
-
-		// Sky-overhead test: trace upward; require a hit on a surface
-		// whose far side is CONTENTS_SKY. Solid ceilings (indoor) are
-		// skipped; open air with no ceiling within 4096 units is also
-		// skipped (we want actual sky overhead, not the void above the
-		// playable area).
-		{
-			trace_t tr;
-			vec3_t ceil, beyond;
-			ceil[0] = candidate[0];
-			ceil[1] = candidate[1];
-			ceil[2] = candidate[2] + 4096.0f;
-			if (!R_TraceParticle (candidate, ceil, &tr))
-				continue;	// no ceiling at all — not in a sky room
-			// Step a tiny way past the hit point along the trace direction
-			// (i.e. opposite the surface normal) to sample contents on the
-			// far side of the surface.
-			beyond[0] = tr.endpos[0] - tr.plane.normal[0] * 1.0f;
-			beyond[1] = tr.endpos[1] - tr.plane.normal[1] * 1.0f;
-			beyond[2] = tr.endpos[2] - tr.plane.normal[2] * 1.0f;
-			if (SV_HullPointContents (&cl.worldmodel->hulls[0], 0, beyond) != CONTENTS_SKY)
-				continue;	// hit a solid ceiling, not sky
 		}
 
-		// Spawn the rain droplet.
+		// Trace UP looking for a sky surface.
+		trace_t tr;
+		vec3_t ceil;
+		ceil[0] = candidate[0];
+		ceil[1] = candidate[1];
+		ceil[2] = candidate[2] + 4096.0f;
+		int hit = R_TraceParticle (candidate, ceil, &tr);
+		if (!hit) {
+			if (debug) Con_Printf ("rain skip: no ceiling within 4096 above (%.0f %.0f %.0f)\n",
+			                       candidate[0], candidate[1], candidate[2]);
+			continue;
+		}
+
+		// Check the contents past the hit surface (along the trace direction).
+		vec3_t beyond;
+		beyond[0] = tr.endpos[0] - tr.plane.normal[0] * 1.0f;
+		beyond[1] = tr.endpos[1] - tr.plane.normal[1] * 1.0f;
+		beyond[2] = tr.endpos[2] - tr.plane.normal[2] * 1.0f;
+		int cont = SV_HullPointContents (&cl.worldmodel->hulls[0], 0, beyond);
+		if (cont != CONTENTS_SKY) {
+			if (debug) Con_Printf ("rain skip: not sky (contents %d) above (%.0f %.0f %.0f), hit at z=%.0f\n",
+			                       cont, candidate[0], candidate[1], candidate[2], tr.endpos[2]);
+			continue;
+		}
+
+		// Spawn the droplet just below the sky surface so it visibly falls.
 		particle_t *p = free_particles;
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
 
-		VectorCopy (candidate, p->org);
+		p->org[0] = candidate[0];
+		p->org[1] = candidate[1];
+		p->org[2] = tr.endpos[2] - 16.0f;
 		p->vel[0] = ((rand() & 1023) - 512) * (1.0f / 1023.0f) * 50.0f;
 		p->vel[1] = ((rand() & 1023) - 512) * (1.0f / 1023.0f) * 50.0f;
 		p->vel[2] = -700.0f;
-		p->color  = 11;		// light gray droplet
+		p->color  = 11;
 		p->type   = pt_grav;
 		p->ramp   = 0;
 		p->birth  = cl.time;
-		p->die    = cl.time + 5.0f;
+		p->die    = cl.time + 10.0f;	// time to fall a long way
 		p->flags  = PARTFL_STICK_ON_HIT;
+
+		if (debug) Con_Printf ("rain spawn at (%.0f %.0f %.0f), sky z=%.0f\n",
+		                       p->org[0], p->org[1], p->org[2], tr.endpos[2]);
 	}
 }
 
