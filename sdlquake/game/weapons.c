@@ -643,11 +643,8 @@ static void TraceAttack(float damage, vec3_t dir) {
         // Shootable brushes still take damage.
         if (g->trace_ent->v.takedamage)
             AddMultiDamage(g->trace_ent, damage);
-        // Debug: shoot a stream of blood from the gun muzzle along the
-        // pellet direction. Visible "blood gun" effect for tuning the
-        // wall-slide. Droplets fall short of distant walls under gravity
-        // (TE_BLOODSPRAY's velocity encoding caps forward speed), so shoot
-        // walls at close range to splatter and watch them slide.
+        // Debug: shoot a single blood droplet from the gun muzzle along
+        // the pellet direction. damage=0.5 → SpawnBlood clamps count to 1.
         if (eng->Cvar_VariableValue("g_test_shotgunblood") > 0) {
             vec3_t muzzle, gun_vel;
             muzzle[0] = g->self->v.origin[0] + dir[0] * 16;
@@ -656,7 +653,7 @@ static void TraceAttack(float damage, vec3_t dir) {
             gun_vel[0] = dir[0] * 500;
             gun_vel[1] = dir[1] * 500;
             gun_vel[2] = dir[2] * 500;
-            SpawnBlood(muzzle, gun_vel, damage);
+            SpawnBlood(muzzle, gun_vel, 0.5f);
         }
     }
 }
