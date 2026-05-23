@@ -847,24 +847,21 @@ R_FindWallBottom
 
 Find the bottom Z extent of the wall the particle just stuck to.
 
-Walks straight down from the impact in SLIDE_STEP increments, doing one
-horizontal probe at each Z.  The probe traces perpendicular to the wall
-through the surface; it HITs if the wall is still there with a matching
-normal, MISSes otherwise.  First MISS = wall's bottom edge.
+Two-phase search:
+  1. Coarse exponential walk down (4, 8, 16, 32, 64, 128, 256 u) until
+     the first MISS — finds the "zone" where the wall ends.
+  2. Bisect inside that zone (between last HIT z and first MISS z) until
+     converged to SLIDE_STEP precision.
 
-This handles two tricky cases the inside-the-wall trace couldn't:
+Probes are horizontal traces perpendicular to the wall, HITting only
+with a matching contact normal (rejects floors, ceilings).  Walking
+down catches the FIRST gap in the surface, so a doorway opening
+correctly terminates the search before reaching any coplanar wall below.
 
-  - Wall flush on floor: at floor_z the horizontal probe grazes the
-    floor's horizontal surface and does not penetrate, so MISS — the
-    walk returns floor_z, which is what we want.
-  - Wall above a doorway with another coplanar wall below: walking
-    downward, the FIRST MISS is at the doorway opening; the walk
-    returns there and never reaches the coplanar wall below.
-
-Cost: up to SLIDE_SEARCH_DEPTH/SLIDE_STEP probes (64) per stuck droplet,
-roughly an order of magnitude more than the previous attempts but still
-sub-millisecond at typical splatter counts.  The 4 u resolution is the
-visual quantisation; finer steps don't change what you see.
+Cost: 1–7 coarse + ≤6 bisect probes per droplet (vs. 64 for a fixed-step
+linear walk).  Caveat: a gap small enough to fit between coarse step
+positions can be skipped — for typical Quake door / lintel heights (≥16
+u) the 4 u initial step catches them.
 ================
 */
 static void slide_debug_record_probe (const vec3_t impact, const vec3_t n, float z, int hit)
@@ -880,33 +877,59 @@ static void slide_debug_record_probe (const vec3_t impact, const vec3_t n, float
 	SlideDebug_Push (va, vb, color, 10.0f);
 }
 
-static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
+static int slide_probe_at_z (const vec3_t impact, const vec3_t n, float z)
 {
-	trace_t	tr;
-	vec3_t	a, b;
-	float	z;
-	int		hit;
-
+	trace_t tr;
+	vec3_t a, b;
+	int hit;
 	a[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
 	a[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
+	a[2] = z;
 	b[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
 	b[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
-
-	for (z = impact[2] - SLIDE_STEP; z > impact[2] - SLIDE_SEARCH_DEPTH; z -= SLIDE_STEP) {
-		a[2] = z;
-		b[2] = z;
-		if (R_TraceParticle (a, b, &tr)) {
-			float dot = tr.plane.normal[0]*n[0]
-			          + tr.plane.normal[1]*n[1]
-			          + tr.plane.normal[2]*n[2];
-			hit = dot >= SLIDE_PROBE_NORMAL_DOT;
-		} else {
-			hit = 0;
-		}
-		slide_debug_record_probe (impact, n, z, hit);
-		if (!hit) return z;
+	b[2] = z;
+	if (R_TraceParticle (a, b, &tr)) {
+		float dot = tr.plane.normal[0]*n[0]
+		          + tr.plane.normal[1]*n[1]
+		          + tr.plane.normal[2]*n[2];
+		hit = dot >= SLIDE_PROBE_NORMAL_DOT;
+	} else {
+		hit = 0;
 	}
-	return impact[2] - SLIDE_SEARCH_DEPTH;
+	slide_debug_record_probe (impact, n, z, hit);
+	return hit;
+}
+
+static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
+{
+	float last_hit_z = impact[2];
+	float first_miss_z;
+	float step;
+	float z;
+	int   found_miss = 0;
+
+	// Phase 1: coarse exponential walk — 4, 8, 16, 32, ... up to depth.
+	for (step = SLIDE_STEP; step <= SLIDE_SEARCH_DEPTH; step *= 2.0f) {
+		z = impact[2] - step;
+		if (slide_probe_at_z (impact, n, z)) {
+			last_hit_z = z;
+		} else {
+			first_miss_z = z;
+			found_miss = 1;
+			break;
+		}
+	}
+	if (!found_miss) return impact[2] - SLIDE_SEARCH_DEPTH;
+
+	// Phase 2: bisect between last HIT and first MISS to refine.
+	while (last_hit_z - first_miss_z > SLIDE_STEP) {
+		z = (last_hit_z + first_miss_z) * 0.5f;
+		if (slide_probe_at_z (impact, n, z))
+			last_hit_z = z;
+		else
+			first_miss_z = z;
+	}
+	return last_hit_z;
 }
 
 /*
