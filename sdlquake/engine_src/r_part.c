@@ -346,7 +346,7 @@ void R_ParticleExplosion (vec3_t org)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
-		p->flags = 0;
+		p->flags = PARTFL_BOUNCE;
 
 		p->die = cl.time + 5;
 		p->color = ramp1[0];
@@ -628,6 +628,7 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 			p->die = cl.time + 5;
 			p->color = ramp1[0];
 			p->ramp = rand()&3;
+			p->flags = PARTFL_BOUNCE;
 			if (i & 1)
 			{
 				p->type = pt_explode;
@@ -1251,7 +1252,7 @@ void R_DrawParticles (void)
 				p->color = ramp1[(int)p->ramp];
 			for (i=0 ; i<3 ; i++)
 				p->vel[i] += p->vel[i]*dvel;
-			p->vel[2] -= grav;
+			p->vel[2] -= grav * 20;
 			break;
 
 		case pt_explode2:
@@ -1262,7 +1263,7 @@ void R_DrawParticles (void)
 				p->color = ramp2[(int)p->ramp];
 			for (i=0 ; i<3 ; i++)
 				p->vel[i] -= p->vel[i]*frametime;
-			p->vel[2] -= grav;
+			p->vel[2] -= grav * 20;
 			break;
 
 		case pt_blob:
