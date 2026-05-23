@@ -325,6 +325,20 @@ void CL_ParseTEnt (void)
 		}
 		break;
 
+	case TE_DEBUGBLOOD:
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+		{
+			extern void R_DebugBloodDroplet (vec3_t org, vec3_t vel);
+			vec3_t dvel;
+			dvel[0] = MSG_ReadCoord ();
+			dvel[1] = MSG_ReadCoord ();
+			dvel[2] = MSG_ReadCoord ();
+			R_DebugBloodDroplet (pos, dvel);
+		}
+		break;
+
 	case TE_SPARKBURST:
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();

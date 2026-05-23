@@ -1367,6 +1367,35 @@ void R_BloodSpray (vec3_t org, vec3_t dir, int count)
 
 /*
 ===============
+R_DebugBloodDroplet
+
+Spawn one pt_blood droplet with exact origin and velocity — no random
+spread, no spawn jitter.  Used by TE_DEBUGBLOOD (g_test_shotgunblood)
+so the debug particle visibly travels in the direction it was fired
+instead of being lost in R_BloodSpray's ±150 per-axis randomisation.
+===============
+*/
+void R_DebugBloodDroplet (vec3_t org, vec3_t vel)
+{
+	particle_t *p;
+	if (!free_particles) return;
+	p = free_particles;
+	free_particles = p->next;
+	p->next = active_particles;
+	active_particles = p;
+
+	p->flags = PARTFL_STICK_ON_HIT;
+	p->die   = cl.time + 20.0f;
+	p->type  = pt_blood;
+	p->ramp  = 0;
+	p->color = ramp_blood[0];
+	p->birth = 1.0f;	// nominal ramp rate
+	p->org[0] = org[0]; p->org[1] = org[1]; p->org[2] = org[2];
+	p->vel[0] = vel[0]; p->vel[1] = vel[1]; p->vel[2] = vel[2];
+}
+
+/*
+===============
 R_SpawnGunshotChips
 
 Small black specks deposited on a wall by a shotgun pellet impact —

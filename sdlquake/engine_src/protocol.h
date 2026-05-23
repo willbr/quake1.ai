@@ -179,6 +179,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //   [coord*3 origin] [coord*3 velocity]
 #define TE_SHELLEJECT		19
 
+// Debug: single deterministic blood droplet (no per-droplet random spread).
+// Used by g_test_shotgunblood. Wire format:
+//   [coord*3 origin] [coord*3 velocity]
+#define TE_DEBUGBLOOD		20
+
 #ifdef QUAKE2
 #define TE_IMPLOSION		14
 #define TE_RAILTRAIL		15

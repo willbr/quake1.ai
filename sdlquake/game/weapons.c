@@ -720,19 +720,25 @@ static void player_eject_shell(edict_t *self, float lateral_offset) {
 
 static void W_FireShotgun(void) {
     edict_t *self = g->self;
-    // Debug: replace the entire shotgun fire with a single blood droplet
-    // shot forward from the gun. No sound, no damage, no ammo cost, no
-    // pellets — just one particle for tuning the wall-slide effect.
+    // Debug: replace the entire shotgun fire with a single deterministic
+    // blood droplet shot forward from the gun. No sound, no damage, no
+    // ammo cost, no pellets, no random spread.
     if (eng->Cvar_VariableValue("g_test_shotgunblood") > 0) {
         eng->MakeVectors(self->v.v_angle);
-        vec3_t muzzle, gun_vel;
-        muzzle[0] = self->v.origin[0] + g->v_forward[0] * 16;
-        muzzle[1] = self->v.origin[1] + g->v_forward[1] * 16;
-        muzzle[2] = self->v.absmin[2] + self->v.size[2] * 0.7f;
-        gun_vel[0] = g->v_forward[0] * 500;
-        gun_vel[1] = g->v_forward[1] * 500;
-        gun_vel[2] = g->v_forward[2] * 500;
-        SpawnBlood(muzzle, gun_vel, 0.5f);
+        float mx = self->v.origin[0] + g->v_forward[0] * 16;
+        float my = self->v.origin[1] + g->v_forward[1] * 16;
+        float mz = self->v.absmin[2] + self->v.size[2] * 0.7f;
+        float vx = g->v_forward[0] * 500;
+        float vy = g->v_forward[1] * 500;
+        float vz = g->v_forward[2] * 500;
+        eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+        eng->MSG_WriteByte (MSG_BROADCAST, TE_DEBUGBLOOD);
+        eng->MSG_WriteCoord(MSG_BROADCAST, mx);
+        eng->MSG_WriteCoord(MSG_BROADCAST, my);
+        eng->MSG_WriteCoord(MSG_BROADCAST, mz);
+        eng->MSG_WriteCoord(MSG_BROADCAST, vx);
+        eng->MSG_WriteCoord(MSG_BROADCAST, vy);
+        eng->MSG_WriteCoord(MSG_BROADCAST, vz);
         return;
     }
     emit_weapon_sound(self, 0.7f);

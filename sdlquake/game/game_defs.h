@@ -133,6 +133,7 @@
 #define TE_BLOODSPRAY  17
 #define TE_SPARKBURST  18
 #define TE_SHELLEJECT  19
+#define TE_DEBUGBLOOD  20
 
 // sound channels
 #define CHAN_AUTO   0
