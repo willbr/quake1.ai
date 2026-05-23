@@ -617,8 +617,9 @@ R_RainSpawn
 Spawn (r_rain.value * 8) rain droplets per frame in a 512-unit-radius
 cylinder around the player at +256 alt. Each candidate is sky-tested:
   - skip if the spawn position is inside SOLID (avoid spawning in walls)
-  - skip if a ceiling is within 1024 units overhead (indoor — no rain);
-    require trace fraction == 1.0 (open sky above the candidate point)
+  - skip if the surface directly above is not a sky surface (CONTENTS_SKY
+    on the far side of the trace hit). Solid ceilings and open void both
+    fail this test, so rain only falls in rooms with actual sky overhead.
 Otherwise spawn a pt_grav droplet with PARTFL_STICK_ON_HIT so it falls
 and splats on the floor.
 ===============
@@ -653,16 +654,27 @@ static void R_RainSpawn (void)
 		if (SV_HullPointContents (&cl.worldmodel->hulls[0], 0, candidate) == CONTENTS_SOLID)
 			continue;
 
-		// Skip if there is a ceiling within 1024 units overhead — that means
-		// we're indoors. Require fraction == 1.0f (nothing above us = open sky).
+		// Sky-overhead test: trace upward; require a hit on a surface
+		// whose far side is CONTENTS_SKY. Solid ceilings (indoor) are
+		// skipped; open air with no ceiling within 4096 units is also
+		// skipped (we want actual sky overhead, not the void above the
+		// playable area).
 		{
 			trace_t tr;
-			vec3_t ceil_pt;
-			ceil_pt[0] = candidate[0];
-			ceil_pt[1] = candidate[1];
-			ceil_pt[2] = candidate[2] + 1024.0f;
-			if (R_TraceParticle (candidate, ceil_pt, &tr))
-				continue;	// ceiling found overhead — skip
+			vec3_t ceil, beyond;
+			ceil[0] = candidate[0];
+			ceil[1] = candidate[1];
+			ceil[2] = candidate[2] + 4096.0f;
+			if (!R_TraceParticle (candidate, ceil, &tr))
+				continue;	// no ceiling at all — not in a sky room
+			// Step a tiny way past the hit point along the trace direction
+			// (i.e. opposite the surface normal) to sample contents on the
+			// far side of the surface.
+			beyond[0] = tr.endpos[0] - tr.plane.normal[0] * 1.0f;
+			beyond[1] = tr.endpos[1] - tr.plane.normal[1] * 1.0f;
+			beyond[2] = tr.endpos[2] - tr.plane.normal[2] * 1.0f;
+			if (SV_HullPointContents (&cl.worldmodel->hulls[0], 0, beyond) != CONTENTS_SKY)
+				continue;	// hit a solid ceiling, not sky
 		}
 
 		// Spawn the rain droplet.
