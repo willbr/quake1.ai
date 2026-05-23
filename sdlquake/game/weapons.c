@@ -56,6 +56,14 @@ static int is_gib(edict_t *e) {
     return e && e->v.classname && strcmp(e->v.classname, "gib") == 0;
 }
 
+// Returns true if the target is a player or monster (FL_CLIENT|FL_MONSTER).
+// Used to gate blood vs. spark/puff: shooting a secret door (which sets
+// takedamage=DAMAGE_YES so the player can trigger it) shouldn't spawn blood.
+static int is_flesh(edict_t *e) {
+    if (!e) return 0;
+    return ((int)e->v.flags & (FL_MONSTER | FL_CLIENT)) != 0;
+}
+
 // Slab-method AABB-vs-segment. Returns 1 if the segment from `start` to `end`
 // intersects the box [mins,maxs]; `*out_t` (if non-NULL) is the entry parameter
 // in [0,1].
@@ -281,7 +289,7 @@ void W_FireAxe(void) {
     org[1] = g->trace_endpos[1] - g->v_forward[1]*4;
     org[2] = g->trace_endpos[2] - g->v_forward[2]*4;
 
-    if (g->trace_ent->v.takedamage) {
+    if (is_flesh(g->trace_ent)) {
         g->trace_ent->v.axhitme = 1;
         vec3_t zero = {0,0,0};
         SpawnBlood(org, zero, 20);
@@ -293,6 +301,12 @@ void W_FireAxe(void) {
         eng->MSG_WriteCoord(MSG_BROADCAST, org[0]);
         eng->MSG_WriteCoord(MSG_BROADCAST, org[1]);
         eng->MSG_WriteCoord(MSG_BROADCAST, org[2]);
+        // Shootable brushes (secret doors, breakables) still take damage so
+        // they trigger / die — they just don't bleed.
+        if (g->trace_ent->v.takedamage) {
+            g->trace_ent->v.axhitme = 1;
+            T_Damage(g->trace_ent, self, self, 20);
+        }
     }
 }
 
@@ -523,7 +537,7 @@ static void TraceAttack(float damage, vec3_t dir) {
     org[1] = g->trace_endpos[1] - dir[1]*4;
     org[2] = g->trace_endpos[2] - dir[2]*4;
 
-    if (g->trace_ent->v.takedamage) {
+    if (is_flesh(g->trace_ent)) {
         vec3_t sv = {vel[0]*0.2f, vel[1]*0.2f, vel[2]*0.2f};
         SpawnBlood(org, sv, damage);
         AddMultiDamage(g->trace_ent, damage);
@@ -538,6 +552,9 @@ static void TraceAttack(float damage, vec3_t dir) {
         eng->MSG_WriteCoord(MSG_BROADCAST, org[0]);
         eng->MSG_WriteCoord(MSG_BROADCAST, org[1]);
         eng->MSG_WriteCoord(MSG_BROADCAST, org[2]);
+        // Shootable brushes still take damage.
+        if (g->trace_ent->v.takedamage)
+            AddMultiDamage(g->trace_ent, damage);
     }
 }
 
@@ -916,7 +933,7 @@ static void spike_touch(edict_t *self, edict_t *other) {
     if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) { eng->ED_Free(self); return; }
     splash_projectile_entry(self, 2048.0f, 32); // 2.0x nail
 
-    if (other->v.takedamage) {
+    if (is_flesh(other)) {
         spawn_touchblood(9);
         T_Damage(other, self, self->v.owner, 9);
     } else {
@@ -931,6 +948,8 @@ static void spike_touch(edict_t *self, edict_t *other) {
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+        if (other->v.takedamage)
+            T_Damage(other, self, self->v.owner, 9);
     }
     eng->ED_Free(self);
 }
@@ -942,7 +961,7 @@ void superspike_touch(edict_t *self, edict_t *other) {
     if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) { eng->ED_Free(self); return; }
     splash_projectile_entry(self, 2048.0f, 40); // 2.5x superspike
 
-    if (other->v.takedamage) {
+    if (is_flesh(other)) {
         spawn_touchblood(18);
         T_Damage(other, self, self->v.owner, 18);
     } else {
@@ -951,6 +970,8 @@ void superspike_touch(edict_t *self, edict_t *other) {
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+        if (other->v.takedamage)
+            T_Damage(other, self, self->v.owner, 18);
     }
     eng->ED_Free(self);
 }
