@@ -808,6 +808,49 @@ static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 }
 
 /*
+================
+R_SlideRelease
+
+Called when a sliding droplet's Z reaches its stashed wall_bottom_z.  One
+short downward trace decides what happened:
+
+  - Hit a floor-ish surface immediately below (n.z >= 0.7): the wall ends
+    at the floor; snap and stop (same visual as today's floor-stop).
+  - Hit a non-floor surface immediately below: the wall ends at the start
+    of another wall/ceiling; snap and stop.
+  - Trace clear (open air below): the wall ends in open air (doorway top,
+    ledge, window).  Clear STUCK | WALL_STICK and zero vel — the per-type
+    gravity in R_DrawParticles' type switch will accelerate the droplet
+    downward.  PARTFL_STICK_ON_HIT is still set on the particle, so the
+    next collision re-runs the existing stick branch and the droplet
+    re-sticks on whatever it lands on.
+================
+*/
+static void R_SlideRelease (particle_t *p)
+{
+	trace_t	tr;
+	vec3_t	below;
+
+	below[0] = p->org[0];
+	below[1] = p->org[1];
+	below[2] = p->org[2] - 4.0f;
+
+	if (R_TraceParticle (p->org, below, &tr)) {
+		// Surface immediately below — snap and stop sliding.
+		p->org[0] = tr.endpos[0] + tr.plane.normal[0] * 0.5f;
+		p->org[1] = tr.endpos[1] + tr.plane.normal[1] * 0.5f;
+		p->org[2] = tr.endpos[2] + tr.plane.normal[2] * 0.5f;
+		p->vel[0] = p->vel[1] = p->vel[2] = 0;
+		p->flags &= ~PARTFL_WALL_STICK;
+		// STUCK stays set: droplet is at rest on the new surface.
+	} else {
+		// Open air below — release for free-fall.
+		p->vel[0] = p->vel[1] = p->vel[2] = 0;
+		p->flags &= ~(PARTFL_STUCK | PARTFL_WALL_STICK);
+	}
+}
+
+/*
 ===============
 R_RainSpawn
 
@@ -1888,12 +1931,12 @@ void R_DrawParticles (void)
 			break;
 		}
 
-		// Sliding wall droplets: blood/water that stuck to a wall
-		// (|n.z|<0.7 at stick time) creeps downward at the cvar's
-		// speed.  Straight-down step keeps a vertical wall's
-		// normal-offset (0.5u) unchanged.  A short trace catches
-		// floors and ledges so the droplet stops cleanly instead
-		// of tunnelling.
+		// Sliding wall droplets: blood/water flagged WALL_STICK at
+		// stick time creep downward at the cvar's speed.  vel[2]
+		// holds the wall's bottom Z (found via binary search at
+		// stick time), so this is a cheap compare per frame.  When
+		// the droplet reaches the bottom, R_SlideRelease decides
+		// whether to snap to a floor or free-fall into open air.
 		if ((p->flags & (PARTFL_STUCK | PARTFL_WALL_STICK))
 		    == (PARTFL_STUCK | PARTFL_WALL_STICK)) {
 			float slide = r_particle_slide_speed.value;
@@ -1901,17 +1944,11 @@ void R_DrawParticles (void)
 			else if (slide > 32.0f) slide = 32.0f;
 			float dz = slide * frametime;
 			if (dz > 0.0f) {
-				vec3_t newpos = { p->org[0], p->org[1], p->org[2] - dz };
-				trace_t tr;
-				if (R_TraceParticle (p->org, newpos, &tr)) {
-					// Hit something on the way down — snap to
-					// contact and stop sliding.
-					p->org[0] = tr.endpos[0] + tr.plane.normal[0] * 0.5f;
-					p->org[1] = tr.endpos[1] + tr.plane.normal[1] * 0.5f;
-					p->org[2] = tr.endpos[2] + tr.plane.normal[2] * 0.5f;
-					p->flags &= ~PARTFL_WALL_STICK;
+				float new_z = p->org[2] - dz;
+				if (new_z <= p->vel[2]) {
+					R_SlideRelease (p);
 				} else {
-					p->org[2] = newpos[2];
+					p->org[2] = new_z;
 				}
 			}
 		}
