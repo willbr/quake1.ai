@@ -162,7 +162,7 @@ cvar_t	r_smoke_cell_threshold = {"r_smoke_cell_threshold", "0.02"};
 cvar_t	r_sparks_count_mul     = {"r_sparks_count_mul",     "1"};	// 0 disables sparks; 2 doubles per-burst count
 cvar_t	r_sparks_settle_dwell  = {"r_sparks_settle_dwell",  "0.5"};	// seconds a dark ember lingers after cool-down ramp finishes
 cvar_t	r_sparks_restitution   = {"r_sparks_restitution",   "0.5"};	// energy retained on first bounce (clamped to [0,1])
-cvar_t	r_particle_slide_speed = {"r_particle_slide_speed", "4"};	// units/sec that wall-stuck blood and water droplets creep downward; 0 disables sliding
+cvar_t	r_particle_slide_speed = {"r_particle_slide_speed", "2"};	// units/sec that wall-stuck blood and water droplets creep downward; 0 disables sliding
 cvar_t	r_rain                 = {"r_rain",                 "0"};	// 0 = off; higher = heavier rainfall (spawns r_rain*8 drops/frame)
 cvar_t	r_rain_debug           = {"r_rain_debug",           "0"};	// 1 = log every rain spawn attempt
 cvar_t	r_ambient = {"r_ambient", "0"};
