@@ -643,18 +643,6 @@ static void TraceAttack(float damage, vec3_t dir) {
         // Shootable brushes still take damage.
         if (g->trace_ent->v.takedamage)
             AddMultiDamage(g->trace_ent, damage);
-        // Debug: shoot a single blood droplet from the gun muzzle along
-        // the pellet direction. damage=0.5 → SpawnBlood clamps count to 1.
-        if (eng->Cvar_VariableValue("g_test_shotgunblood") > 0) {
-            vec3_t muzzle, gun_vel;
-            muzzle[0] = g->self->v.origin[0] + dir[0] * 16;
-            muzzle[1] = g->self->v.origin[1] + dir[1] * 16;
-            muzzle[2] = g->self->v.absmin[2] + g->self->v.size[2] * 0.7f;
-            gun_vel[0] = dir[0] * 500;
-            gun_vel[1] = dir[1] * 500;
-            gun_vel[2] = dir[2] * 500;
-            SpawnBlood(muzzle, gun_vel, 0.5f);
-        }
     }
 }
 
@@ -732,6 +720,21 @@ static void player_eject_shell(edict_t *self, float lateral_offset) {
 
 static void W_FireShotgun(void) {
     edict_t *self = g->self;
+    // Debug: replace the entire shotgun fire with a single blood droplet
+    // shot forward from the gun. No sound, no damage, no ammo cost, no
+    // pellets — just one particle for tuning the wall-slide effect.
+    if (eng->Cvar_VariableValue("g_test_shotgunblood") > 0) {
+        eng->MakeVectors(self->v.v_angle);
+        vec3_t muzzle, gun_vel;
+        muzzle[0] = self->v.origin[0] + g->v_forward[0] * 16;
+        muzzle[1] = self->v.origin[1] + g->v_forward[1] * 16;
+        muzzle[2] = self->v.absmin[2] + self->v.size[2] * 0.7f;
+        gun_vel[0] = g->v_forward[0] * 500;
+        gun_vel[1] = g->v_forward[1] * 500;
+        gun_vel[2] = g->v_forward[2] * 500;
+        SpawnBlood(muzzle, gun_vel, 0.5f);
+        return;
+    }
     emit_weapon_sound(self, 0.7f);
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/guncock.wav", 1, ATTN_NORM);
     self->v.punchangle[0] = -2;
