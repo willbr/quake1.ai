@@ -310,7 +310,22 @@ void CL_ParseTEnt (void)
 			R_BloodSpray (pos, bdir, count);
 		}
 		break;
-	
+
+	case TE_SPARKBURST:
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+		{
+			vec3_t normal;
+			int count;
+			normal[0] = MSG_ReadChar () * (1.0f / 127.0f);
+			normal[1] = MSG_ReadChar () * (1.0f / 127.0f);
+			normal[2] = MSG_ReadChar () * (1.0f / 127.0f);
+			count = MSG_ReadByte ();
+			R_SparkBurst (pos, normal, count);
+		}
+		break;
+
 	case TE_TELEPORT:
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();
