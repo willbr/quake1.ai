@@ -29,7 +29,7 @@ char	localmodels[MAX_MODELS][5];			// inline model names for precache
 
 #if NATIVE_GAME
 /* In NATIVE_GAME=1, pr_cmds.c is not compiled, so sv_aim is defined here. */
-cvar_t  sv_aim = {"sv_aim", "0.93"};
+cvar_t  sv_aim = {"sv_aim", "1"};  // 1 = no autoaim (default disabled)
 #endif
 
 //============================================================================
