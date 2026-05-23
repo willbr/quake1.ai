@@ -778,18 +778,21 @@ void W_FireLightning(void) {
     eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[1]);
     eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[2]);
 
-    // Spark shower at the bolt's visible endpoint. Palette 244-246 is
-    // the cyan-white core of progs/bolt2.mdl (244=#7fbfff,245=#abe7ff,
-    // 246=#d7ffff) — sparks match the bolt's own skin. R_RunParticleEffect
-    // narrows the mask to 244-246 for this range; ±150 per-particle
-    // velocity jitter gives spiky random directions; the small
-    // normal-aligned base velocity biases the burst away from the wall.
-    vec3_t spark_vel = {
-        g->trace_plane_normal[0] * 30,
-        g->trace_plane_normal[1] * 30,
-        g->trace_plane_normal[2] * 30 + 20
-    };
-    eng->SV_Particle(g->trace_endpos, spark_vel, 245, 60);
+    // Spark shower at the bolt's visible endpoint. TE_SPARKBURST carries
+    // origin + surface normal + count to the client, which spawns 20
+    // cyan-white pt_spark particles in the hemisphere oriented by the
+    // normal. They bounce once (r_sparks_restitution), stick on the second
+    // hit, ramp through ramp1[] (white -> yellow -> orange -> red -> dark),
+    // and linger as embers for r_sparks_settle_dwell seconds.
+    eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+    eng->MSG_WriteByte (MSG_BROADCAST, TE_SPARKBURST);
+    eng->MSG_WriteCoord (MSG_BROADCAST, g->trace_endpos[0]);
+    eng->MSG_WriteCoord (MSG_BROADCAST, g->trace_endpos[1]);
+    eng->MSG_WriteCoord (MSG_BROADCAST, g->trace_endpos[2]);
+    eng->MSG_WriteChar (MSG_BROADCAST, (int)(g->trace_plane_normal[0] * 127.0f));
+    eng->MSG_WriteChar (MSG_BROADCAST, (int)(g->trace_plane_normal[1] * 127.0f));
+    eng->MSG_WriteChar (MSG_BROADCAST, (int)(g->trace_plane_normal[2] * 127.0f));
+    eng->MSG_WriteByte (MSG_BROADCAST, 20);
 
     vec3_t lend = {g->trace_endpos[0]+g->v_forward[0]*4,
                    g->trace_endpos[1]+g->v_forward[1]*4,
