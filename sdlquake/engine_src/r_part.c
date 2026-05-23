@@ -1102,12 +1102,8 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 				break;
 
 			case 2:	// blood
-				p->type = pt_blood;
-				p->color = ramp_blood[0];
-				p->ramp = 0;
-				p->birth = 0.5f + (rand() & 31) * (1.5f / 31.0f);
-				p->flags = PARTFL_STICK_ON_HIT;
-				p->die = cl.time + 20.0f;
+				p->type = pt_grav;
+				p->color = 67 + (rand()&3);
 				for (j=0 ; j<3 ; j++)
 					p->org[j] = start[j] + ((rand()%6)-3);
 				break;
@@ -1137,12 +1133,8 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 				break;
 
 			case 4:	// slight blood
-				p->type = pt_blood;
-				p->color = ramp_blood[0];
-				p->ramp = 0;
-				p->birth = 0.5f + (rand() & 31) * (1.5f / 31.0f);
-				p->flags = PARTFL_STICK_ON_HIT;
-				p->die = cl.time + 20.0f;
+				p->type = pt_grav;
+				p->color = 67 + (rand()&3);
 				for (j=0 ; j<3 ; j++)
 					p->org[j] = start[j] + ((rand()%6)-3);
 				len -= 3;
