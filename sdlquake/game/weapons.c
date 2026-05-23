@@ -42,6 +42,10 @@ void splash_underwater_explosion(vec3_t org, int strength_q4);
 int  splash_along_segment(vec3_t a, vec3_t b, int strength_q4);
 static int is_liquid(int c);
 
+// items_push.c -- pushable pickups
+extern void Items_BulletSweep(vec3_t start, vec3_t end, vec3_t dir, float damage, edict_t *ignore);
+extern void Items_RadiusPush(vec3_t origin, float radius, float base_impulse, edict_t *ignore);
+
 // Apply hit-site impulse to a gib along `dir` (must be normalized). Used by
 // hitscan and direct-projectile hits — both have the actual shot direction
 // in scope, which gives better-feeling knockback than T_Damage's gib branch
@@ -115,6 +119,15 @@ void Spike_GibPathScan(void) {
         vec3_t end   = { start[0] + e->v.velocity[0] * dt,
                          start[1] + e->v.velocity[1] * dt,
                          start[2] + e->v.velocity[2] * dt };
+
+        // Push pickups the nail crosses this tick. The spike continues -- one
+        // nail through a row of three ammo boxes pushes all three. Owner is
+        // the player ent (avoids self-hit on dropped backpack the moment it
+        // appears).
+        {
+            vec3_t vdir; eng->VectorNormalize(e->v.velocity, vdir);
+            Items_BulletSweep(start, end, vdir, dmg, e->v.owner);
+        }
 
         // Sweep against both gibs and settled corpses. Settled corpses are
         // SOLID_TRIGGER (Corpse_LayProne'd) so spike physics skips them, just
@@ -653,6 +666,13 @@ static void FireBullets(float shotcount, vec3_t dir, vec3_t spread) {
         eng->SV_Traceline(src, end, 0, self);
         Corpse_BulletTrace(src, end, self);
         splash_at_water_entry(src, g->trace_endpos, 16); // 1.0x bullet pellet
+        // Push any pickups the pellet line crosses up to the wall hit. Each
+        // pellet pushes independently, so a tight shotgun cluster on a single
+        // box gets multiplied -- pleasingly heavy at point-blank.
+        {
+            vec3_t pend = { g->trace_endpos[0], g->trace_endpos[1], g->trace_endpos[2] };
+            Items_BulletSweep(src, pend, direction, 4.0f, self);
+        }
         if (g->trace_fraction != 1.0f)
             TraceAttack(4, direction);
 
@@ -768,6 +788,7 @@ static void T_MissileTouch(edict_t *self, edict_t *other) {
         T_Damage(other, self, self->v.owner, damg);
     }
     T_RadiusDamage(self, self->v.owner, 120, other);
+    Items_RadiusPush(self->v.origin, 160.0f, 120.0f, NULL);
 
     self->v.origin[0] -= 8 * (self->v.velocity[0] / (eng->VectorLength(self->v.velocity) + 0.0001f));
     self->v.origin[1] -= 8 * (self->v.velocity[1] / (eng->VectorLength(self->v.velocity) + 0.0001f));
@@ -822,6 +843,7 @@ static void LightningDamage(vec3_t p1, vec3_t p2, edict_t *from, float damage) {
     vec3_t f, foff;
     f[0] = p2[0]-p1[0]; f[1] = p2[1]-p1[1]; f[2] = p2[2]-p1[2];
     eng->VectorNormalize(f, f);
+    vec3_t beam_dir = { f[0], f[1], f[2] };  // saved before f is reused for spread
     // rotate 90° in XY to get a perpendicular spread offset
     float old_fy = f[1];
     f[0] = -old_fy;
@@ -834,6 +856,10 @@ static void LightningDamage(vec3_t p1, vec3_t p2, edict_t *from, float damage) {
 
     eng->SV_Traceline(p1, p2, 0, self);
     Corpse_BulletTrace(p1, p2, self);
+    {
+        vec3_t pend = { g->trace_endpos[0], g->trace_endpos[1], g->trace_endpos[2] };
+        Items_BulletSweep(p1, pend, beam_dir, damage, self);
+    }
     if (g->trace_ent->v.takedamage) {
         eng->SV_Particle(g->trace_endpos, par, 225, damage*4);
         T_Damage(g->trace_ent, from, from, damage);
@@ -873,6 +899,7 @@ void W_FireLightning(void) {
     }
     if (self->v.waterlevel > 1) {
         T_RadiusDamage(self, self, 35*self->v.ammo_cells, g->world);
+        Items_RadiusPush(self->v.origin, 200.0f, 35.0f*self->v.ammo_cells, NULL);
         self->v.ammo_cells = 0;
         W_SetCurrentAmmo();
         return;
@@ -934,6 +961,7 @@ void W_FireLightning(void) {
 static void GrenadeExplode(edict_t *self) {
     g->self = self;
     T_RadiusDamage(self, self->v.owner, 120, g->world);
+    Items_RadiusPush(self->v.origin, 160.0f, 120.0f, NULL);
     splash_underwater_explosion(self->v.origin, 48); // 3.0x grenade detonation column
     eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
     eng->MSG_WriteByte(MSG_BROADCAST, TE_EXPLOSION);
