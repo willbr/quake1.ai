@@ -1655,6 +1655,11 @@ void R_DrawParticles (void)
 					p->org[2] = tr.endpos[2] + n[2] * 0.5f;
 					p->vel[0] = p->vel[1] = p->vel[2] = 0;
 					p->flags |= PARTFL_STUCK;
+					// Wall-ish contact (|n.z|<0.7) → also flag for the
+					// slide step below so blood/water droplets droop
+					// downward instead of freezing flat on the wall.
+					if (fabs(n[2]) < 0.7f)
+						p->flags |= PARTFL_WALL_STICK;
 				} else {
 					// First bounce: inline reflection at r_sparks_restitution.
 					// Clamp so the cvar can't be set super-elastic (>1) or
