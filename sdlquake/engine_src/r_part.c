@@ -763,6 +763,57 @@ static int R_TraceParticle (const vec3_t start, const vec3_t end, trace_t *trace
 
 /*
 ================
+Slide debug visualisation
+
+Persistent record of binary-search probes from R_FindWallBottom so the
+user can see what the search actually did at stick time.  Each frame,
+SlideDebug_DrawAll re-submits unexpired entries to the engine's
+DebugLines overlay; entries expire after ~10 s.  Drained only when
+r_particle_slide_debug.value > 0.
+================
+*/
+typedef struct {
+	vec3_t	start;
+	vec3_t	end;
+	int		color;
+	float	expire_time;
+} slide_debug_entry_t;
+
+#define SLIDE_DEBUG_MAX 2048
+static slide_debug_entry_t	s_slide_debug[SLIDE_DEBUG_MAX];
+static int					s_slide_debug_count;
+
+static void SlideDebug_Push (const vec3_t a, const vec3_t b, int color, float ttl)
+{
+	slide_debug_entry_t *e;
+	if (!r_particle_slide_debug.value) return;
+	if (s_slide_debug_count >= SLIDE_DEBUG_MAX) return;
+	e = &s_slide_debug[s_slide_debug_count++];
+	e->start[0] = a[0]; e->start[1] = a[1]; e->start[2] = a[2];
+	e->end[0]   = b[0]; e->end[1]   = b[1]; e->end[2]   = b[2];
+	e->color    = color;
+	e->expire_time = cl.time + ttl;
+}
+
+static void SlideDebug_DrawAll (void)
+{
+	int	i, w = 0;
+	if (!r_particle_slide_debug.value) {
+		s_slide_debug_count = 0;
+		return;
+	}
+	for (i = 0; i < s_slide_debug_count; i++) {
+		if (cl.time >= s_slide_debug[i].expire_time) continue;
+		if (w != i) s_slide_debug[w] = s_slide_debug[i];
+		DebugLines_Add (s_slide_debug[w].start, s_slide_debug[w].end,
+		                s_slide_debug[w].color, 1);
+		w++;
+	}
+	s_slide_debug_count = w;
+}
+
+/*
+================
 R_FindWallBottom
 
 Binary-search the vertical extent of the wall the particle just stuck to.
@@ -773,14 +824,36 @@ the search probes downward by 256 u, then bisects to ~2 u precision.
 `n` is the contact normal (points away from the wall). The probe is a 1-unit
 trace through the wall plane at a given Z: HIT means the wall is there, MISS
 means it's gone (air below the wall's bottom, a hole, etc.).
+
+When r_particle_slide_debug is on, each probe is recorded for ~10 s with a
+4-u-long horizontal line at the probe Z, colour-coded green (HIT) or red
+(MISS), centred along the wall normal.  Long enough to be visible even
+when the actual probe geometry is 1 u.
 ================
 */
+static void slide_debug_record_probe (const vec3_t impact, const vec3_t n, float z, int hit)
+{
+	vec3_t va, vb;
+	int color = hit ? 79 : 251;	// 79 = green, 251 = bright red
+	// Draw a 4-u-long line perpendicular to the wall at this Z so the
+	// probe is visible from any viewing angle.  The actual probe is 1 u
+	// (impact ± n*0.5); the visualisation is wider for legibility.
+	va[0] = impact[0] + n[0] * 2.0f;
+	va[1] = impact[1] + n[1] * 2.0f;
+	va[2] = z;
+	vb[0] = impact[0] - n[0] * 2.0f;
+	vb[1] = impact[1] - n[1] * 2.0f;
+	vb[2] = z;
+	SlideDebug_Push (va, vb, color, 10.0f);
+}
+
 static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 {
 	trace_t	tr;
 	vec3_t	a, b;
 	float	z_hit  = impact[2];
 	float	z_miss = impact[2] - 256.0f;
+	int		hit;
 
 	// Probe the search cap first.  If the wall is still there, the wall
 	// extends past our search range — return the cap and let the slide
@@ -792,7 +865,9 @@ static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 	b[0] = impact[0] - n[0] * 0.5f;
 	b[1] = impact[1] - n[1] * 0.5f;
 	b[2] = z_miss;
-	if (R_TraceParticle (a, b, &tr))
+	hit = R_TraceParticle (a, b, &tr);
+	slide_debug_record_probe (impact, n, z_miss, hit);
+	if (hit)
 		return z_miss;
 
 	// Bisect.  Invariant: probe(z_hit) HITs, probe(z_miss) MISSes.
@@ -800,7 +875,9 @@ static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 		float z_mid = (z_hit + z_miss) * 0.5f;
 		a[2] = z_mid;
 		b[2] = z_mid;
-		if (R_TraceParticle (a, b, &tr))
+		hit = R_TraceParticle (a, b, &tr);
+		slide_debug_record_probe (impact, n, z_mid, hit);
+		if (hit)
 			z_hit = z_mid;
 		else
 			z_miss = z_mid;
@@ -1614,6 +1691,10 @@ void R_DrawParticles (void)
 	grav = frametime * sv_gravity.value * 0.05;
 	dvel = 4*frametime;
 
+	// Persistent slide-debug overlay: replay any unexpired probe records
+	// from past R_FindWallBottom calls. Drops entries when the cvar is off.
+	SlideDebug_DrawAll ();
+
 	// Rain spawner — gated by r_rain cvar; new drops integrate this frame.
 	if (r_rain.value > 0.0f)
 		R_RainSpawn ();
@@ -1951,11 +2032,39 @@ void R_DrawParticles (void)
 				}
 			}
 			if (r_particle_slide_debug.value) {
-				// Cyan line: impact Z (top) down to wall_bottom_z (bottom).
-				// Droplet's current sprite renders somewhere along this line.
+				// Main column: white line from impact Z (top) to
+				// wall_bottom_z (bottom) at the droplet's current XY.
 				vec3_t top    = { p->org[0], p->org[1], p->vel[0] };
 				vec3_t bottom = { p->org[0], p->org[1], p->vel[2] };
-				DebugLines_Add (top, bottom, 244, 1);
+				DebugLines_Add (top, bottom, 15, 1);
+				// Crosshair at the TOP (impact) — white. Three short
+				// lines, one along each axis, ±3 u, to mark the
+				// original impact point clearly.
+				{
+					vec3_t ca, cb;
+					ca[0] = top[0] - 3; ca[1] = top[1]; ca[2] = top[2];
+					cb[0] = top[0] + 3; cb[1] = top[1]; cb[2] = top[2];
+					DebugLines_Add (ca, cb, 15, 1);
+					ca[0] = top[0]; ca[1] = top[1] - 3; ca[2] = top[2];
+					cb[0] = top[0]; cb[1] = top[1] + 3; cb[2] = top[2];
+					DebugLines_Add (ca, cb, 15, 1);
+					ca[0] = top[0]; ca[1] = top[1]; ca[2] = top[2] - 3;
+					cb[0] = top[0]; cb[1] = top[1]; cb[2] = top[2] + 3;
+					DebugLines_Add (ca, cb, 15, 1);
+				}
+				// Crosshair at the BOTTOM (wall_bottom_z) — cyan.
+				{
+					vec3_t ca, cb;
+					ca[0] = bottom[0] - 3; ca[1] = bottom[1]; ca[2] = bottom[2];
+					cb[0] = bottom[0] + 3; cb[1] = bottom[1]; cb[2] = bottom[2];
+					DebugLines_Add (ca, cb, 244, 1);
+					ca[0] = bottom[0]; ca[1] = bottom[1] - 3; ca[2] = bottom[2];
+					cb[0] = bottom[0]; cb[1] = bottom[1] + 3; cb[2] = bottom[2];
+					DebugLines_Add (ca, cb, 244, 1);
+					ca[0] = bottom[0]; ca[1] = bottom[1]; ca[2] = bottom[2] - 3;
+					cb[0] = bottom[0]; cb[1] = bottom[1]; cb[2] = bottom[2] + 3;
+					DebugLines_Add (ca, cb, 244, 1);
+				}
 			}
 		}
 
