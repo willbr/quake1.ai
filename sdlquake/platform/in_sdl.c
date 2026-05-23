@@ -106,9 +106,11 @@ void IN_ProcessEvents(void)
         // editor when closed, cycles camera mode (free-fly <-> fps) when
         // open. Pass through to Quake when the console / menu / chat is up
         // so Tab-completion in the console still works. Same for ImGui
-        // text inputs.
+        // text inputs. con_forcedup catches the pre-map fullscreen console,
+        // where key_dest is still key_game but the user is typing into it.
         if (ev.key.scancode == SDL_SCANCODE_TAB
             && key_dest == key_game
+            && !con_forcedup
             && !IG_WantCaptureKeyboard())
         {
             if (ev.type == SDL_EVENT_KEY_DOWN)
