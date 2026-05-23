@@ -831,18 +831,24 @@ When r_particle_slide_debug is on, each probe is recorded for ~10 s with a
 when the actual probe geometry is 1 u.
 ================
 */
+// Sideways probe spans 4 u total (2 u outside the wall to 2 u inside), so
+// R_TraceParticle is guaranteed to register a hit when the wall surface is
+// present at this Z.  An on-surface endpoint returns fraction = 1.0 = MISS,
+// which is why an earlier 1-u probe never detected the wall it was sitting
+// on.  The viz line matches the probe geometry so what you see is exactly
+// what was traced.
+#define SLIDE_PROBE_OUT		2.0f
+#define SLIDE_PROBE_IN		2.0f
+
 static void slide_debug_record_probe (const vec3_t impact, const vec3_t n, float z, int hit)
 {
 	vec3_t va, vb;
 	int color = hit ? 79 : 251;	// 79 = green, 251 = bright red
-	// Draw a 4-u-long line perpendicular to the wall at this Z so the
-	// probe is visible from any viewing angle.  The actual probe is 1 u
-	// (impact ± n*0.5); the visualisation is wider for legibility.
-	va[0] = impact[0] + n[0] * 2.0f;
-	va[1] = impact[1] + n[1] * 2.0f;
+	va[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
+	va[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
 	va[2] = z;
-	vb[0] = impact[0] - n[0] * 2.0f;
-	vb[1] = impact[1] - n[1] * 2.0f;
+	vb[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
+	vb[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
 	vb[2] = z;
 	SlideDebug_Push (va, vb, color, 10.0f);
 }
@@ -859,11 +865,11 @@ static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 	// extends past our search range — return the cap and let the slide
 	// either reach it (rare: 64+ s at default 4 u/s, longer than blood
 	// lifetime) or hit the floor first via R_SlideRelease's disambig.
-	a[0] = impact[0] + n[0] * 0.5f;
-	a[1] = impact[1] + n[1] * 0.5f;
+	a[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
+	a[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
 	a[2] = z_miss;
-	b[0] = impact[0] - n[0] * 0.5f;
-	b[1] = impact[1] - n[1] * 0.5f;
+	b[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
+	b[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
 	b[2] = z_miss;
 	hit = R_TraceParticle (a, b, &tr);
 	slide_debug_record_probe (impact, n, z_miss, hit);
