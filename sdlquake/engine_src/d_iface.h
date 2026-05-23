@@ -33,8 +33,19 @@ typedef struct
 
 typedef enum {
 	pt_static, pt_grav, pt_slowgrav, pt_fire, pt_explode, pt_explode2, pt_blob, pt_blob2,
-	pt_smoke	// pt_static behaviour, but D_DrawSmokeParticle scales size by ramp and dithers
+	pt_smoke,	// pt_static behaviour, but D_DrawSmokeParticle scales size by ramp and dithers
+	pt_spark	// bouncing electrical ember; cyan birth, ramp1 cool-down, stick on 2nd hit
 } ptype_t;
+
+// Per-particle behaviour flags. Stored in particle_t::flags. Recycled
+// free-list slots carry stale bits, so every spawn site MUST set
+// p->flags explicitly (either 0 or the intended combination).
+#define PARTFL_BOUNCE		0x01	// bounce once at r_sparks_restitution; 2nd hit sticks
+#define PARTFL_STICK_ON_HIT	0x02	// first contact zeroes vel and freezes pos
+#define PARTFL_BOUNCED		0x04	// state: one bounce consumed
+#define PARTFL_STUCK		0x08	// state: skip integration + collision
+#define PARTFL_RAMP_HOLD	0x10	// pt_spark: hold cyan flicker until first bounce
+#define PARTFL_DWELL		0x20	// pt_spark: in post-ramp dark-ember dwell
 
 // !!! if this is changed, it must be changed in d_ifacea.h too !!!
 //     (asm files aren't compiled in the SDL build, so the offsets there
@@ -54,6 +65,8 @@ typedef struct particle_s
 	// curve in D_DrawSmokeParticle. Other ptypes ignore it; R_AddSmokePuff
 	// is the only spawn path that sets it.
 	float		birth;
+	// Per-particle collision/state bits. See PARTFL_* above.
+	byte		flags;
 } particle_t;
 
 #define PARTICLE_Z_CLIP	8.0
