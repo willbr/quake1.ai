@@ -131,6 +131,7 @@
 #define TE_TELEPORT    11
 #define TE_WATERSPLASH 16
 #define TE_BLOODSPRAY  17
+#define TE_SPARKBURST  18
 
 // sound channels
 #define CHAN_AUTO   0

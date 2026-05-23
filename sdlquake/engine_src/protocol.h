@@ -171,6 +171,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //   [coord*3 origin] [char*3 vel*16] [byte count]
 #define TE_BLOODSPRAY		17
 
+// Phase-8 hemispherical spark burst. Wire format:
+//   [coord*3 origin] [char*3 normal] [byte count]
+#define TE_SPARKBURST		18
+
 #ifdef QUAKE2
 #define TE_IMPLOSION		14
 #define TE_RAILTRAIL		15
