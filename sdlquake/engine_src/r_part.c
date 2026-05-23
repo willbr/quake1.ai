@@ -53,7 +53,8 @@ extern cvar_t r_rain_debug;
 #define R_RAIN_MAX_SKY  256
 typedef struct {
 	float xmin, xmax, ymin, ymax;
-	float z;
+	float z;     // average z (kept for legacy/debug; not used by spawn)
+	float zmax;  // highest vertex z — where rain spawns from
 } r_sky_bbox_t;
 static r_sky_bbox_t r_sky_bboxes[R_RAIN_MAX_SKY];
 static int           r_sky_bbox_count = 0;
@@ -73,7 +74,7 @@ static void R_RainBuildSkyList (void)
 		// backdrops on start.bsp) count just as much as ceiling sky.
 		float xmin =  1e30f, xmax = -1e30f;
 		float ymin =  1e30f, ymax = -1e30f;
-		float zsum = 0.0f;
+		float zsum = 0.0f, zmax = -1e30f;
 		int   zcount = 0;
 		for (j = 0; j < s->numedges; j++) {
 			int eidx = m->surfedges[s->firstedge + j];
@@ -85,6 +86,7 @@ static void R_RainBuildSkyList (void)
 			if (v[0] > xmax) xmax = v[0];
 			if (v[1] < ymin) ymin = v[1];
 			if (v[1] > ymax) ymax = v[1];
+			if (v[2] > zmax) zmax = v[2];
 			zsum += v[2]; zcount++;
 		}
 		if (zcount == 0) continue;
@@ -93,6 +95,7 @@ static void R_RainBuildSkyList (void)
 		r_sky_bboxes[r_sky_bbox_count].ymin = ymin;
 		r_sky_bboxes[r_sky_bbox_count].ymax = ymax;
 		r_sky_bboxes[r_sky_bbox_count].z    = zsum / (float)zcount;
+		r_sky_bboxes[r_sky_bbox_count].zmax = zmax;
 		r_sky_bbox_count++;
 	}
 	if (r_rain_debug.value >= 1)
@@ -668,18 +671,18 @@ static int R_TraceParticle (const vec3_t start, const vec3_t end, trace_t *trace
 ===============
 R_RainSpawn
 
-Spawn (r_rain.value * 8) rain droplets per frame in a 512-unit radius
-disk around the player, provided at least one cached sky surface centre
-is within 4096 XY units of the player (any orientation).
+Spawn (r_rain.value * 8) rain droplets per frame. For each slot, pick
+a random cached sky surface, sample random XY in its bbox, and spawn at
+(x, y, surface_zmax - 16). Skips if the point is inside SOLID or if the
+surface centre is more than 4096 XY units from the player.
 
 Steps each frame:
   1. Rebuild the sky-surface cache if the worldmodel changed.
-  2. Walk the cached bbox list; if any centre is within 4096 XY units
-     of the player, mark sky_nearby = 1 and break.
-  3. If no sky nearby, skip (dry map / player deep indoors).
-  4. For each of n spawn attempts:
-       - pick a random angle and radius in a 512-unit disk around the player
-       - spawn altitude = player_z + 768
+  2. For each of n spawn attempts:
+       - pick a random cached sky surface
+       - range-cull: skip if its centre is > 4096 XY from the player
+       - sample random XY within the surface bbox
+       - spawn at (x, y, surface_zmax - 16)
        - skip if the point lands inside SOLID geometry
        - emit a pt_grav droplet with PARTFL_STICK_ON_HIT
 
@@ -688,13 +691,12 @@ r_rain_debug 1 logs every spawn/skip with position.
 */
 static void R_RainSpawn (void)
 {
-	int    n, i, j;
+	int    n, i;
 	int    debug = (r_rain_debug.value >= 1);
 	vec3_t origin;
 
 	if (!cl.worldmodel) return;
 
-	// Rebuild the sky-surface cache on level change.
 	if (r_sky_bbox_model != cl.worldmodel)
 		R_RainBuildSkyList ();
 
@@ -707,36 +709,36 @@ static void R_RainSpawn (void)
 
 	n = (int)(r_rain.value * 8.0f);
 	if (n <= 0) return;
-	if (n > 64) n = 64;	// hard cap so silly cvar values don't drain the pool
+	if (n > 64) n = 64;
 
-	// Decide once per call whether any sky surface is near the player.
-	int sky_nearby = 0;
-	for (j = 0; j < r_sky_bbox_count; j++) {
-		float bcx = 0.5f * (r_sky_bboxes[j].xmin + r_sky_bboxes[j].xmax);
-		float bcy = 0.5f * (r_sky_bboxes[j].ymin + r_sky_bboxes[j].ymax);
-		float dx = bcx - origin[0];
-		float dy = bcy - origin[1];
-		if (dx*dx + dy*dy <= 4096.0f * 4096.0f) { sky_nearby = 1; break; }
-	}
-	if (!sky_nearby) {
-		if (debug) Con_Printf ("rain skip: no sky surfaces within 4096 of player\n");
-		return;
-	}
-
-	// Spawn drops in a disk around the player.
 	for (i = 0; i < n; i++) {
 		if (!free_particles) return;
 
-		float ang = (rand() & 1023) * (6.28318530718f / 1024.0f);
-		float r   = sqrtf((rand() & 1023) * (1.0f / 1023.0f)) * 512.0f;
-		vec3_t spawn;
-		spawn[0] = origin[0] + cosf(ang) * r;
-		spawn[1] = origin[1] + sinf(ang) * r;
-		spawn[2] = origin[2] + 768.0f;
+		// Pick a random sky surface, sample XY in its bbox.
+		int si = rand() % r_sky_bbox_count;
+		r_sky_bbox_t *b = &r_sky_bboxes[si];
 
-		// Skip if spawn is inside solid (don't materialise inside walls).
+		// Range cull: skip surfaces whose centre is too far from the player.
+		float bcx = 0.5f * (b->xmin + b->xmax);
+		float bcy = 0.5f * (b->ymin + b->ymax);
+		float dx = bcx - origin[0];
+		float dy = bcy - origin[1];
+		if (dx*dx + dy*dy > 4096.0f * 4096.0f) {
+			if (debug) Con_Printf ("rain skip: sky bbox %d too far (centre %.0f,%.0f)\n", si, bcx, bcy);
+			continue;
+		}
+
+		float u = (rand() & 1023) * (1.0f / 1023.0f);
+		float v = (rand() & 1023) * (1.0f / 1023.0f);
+		vec3_t spawn;
+		spawn[0] = b->xmin + (b->xmax - b->xmin) * u;
+		spawn[1] = b->ymin + (b->ymax - b->ymin) * v;
+		spawn[2] = b->zmax - 16.0f;
+
+		// Skip if spawn is inside SOLID (e.g. brush face inside another brush).
 		if (SV_HullPointContents (&cl.worldmodel->hulls[0], 0, spawn) == CONTENTS_SOLID) {
-			if (debug) Con_Printf ("rain skip: in SOLID at (%.0f %.0f %.0f)\n", spawn[0], spawn[1], spawn[2]);
+			if (debug) Con_Printf ("rain skip: in SOLID at (%.0f %.0f %.0f) under sky bbox %d\n",
+			                       spawn[0], spawn[1], spawn[2], si);
 			continue;
 		}
 
@@ -757,7 +759,8 @@ static void R_RainSpawn (void)
 		p->die    = cl.time + 10.0f;
 		p->flags  = PARTFL_STICK_ON_HIT;
 
-		if (debug) Con_Printf ("rain spawn at (%.0f %.0f %.0f)\n", spawn[0], spawn[1], spawn[2]);
+		if (debug) Con_Printf ("rain spawn at (%.0f %.0f %.0f) under sky bbox %d (zmax=%.0f)\n",
+		                       spawn[0], spawn[1], spawn[2], si, b->zmax);
 	}
 }
 
