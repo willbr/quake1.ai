@@ -1153,6 +1153,23 @@ void R_DrawParticles (void)
 		case pt_static:
 		case pt_smoke:
 			break;
+		case pt_spark:
+			if (p->flags & PARTFL_RAMP_HOLD) {
+				// In-flight cyan-white flicker — no cool-down yet.
+				p->color = 244 + (rand() % 3);
+			} else if (!(p->flags & PARTFL_DWELL)) {
+				p->ramp += time2;	// same advance rate as pt_explode
+				if (p->ramp >= 8) {
+					p->color = ramp1[7];		// 0x61 — dark ember
+					p->flags |= PARTFL_DWELL;
+					p->die = cl.time + r_sparks_settle_dwell.value;
+				} else {
+					p->color = ramp1[(int)p->ramp];
+				}
+			}
+			if (!(p->flags & PARTFL_STUCK))
+				p->vel[2] -= grav;	// light gravity (matches pt_slowgrav)
+			break;
 		case pt_fire:
 			p->ramp += time1;
 			if (p->ramp >= 6)
