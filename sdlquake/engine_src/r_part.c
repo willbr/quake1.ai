@@ -212,6 +212,7 @@ avelocities[0][i] = (rand()&255) * 0.01;
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
+		p->flags = 0;
 
 		p->die = cl.time + 0.01;
 		p->color = 0x6f;
@@ -278,7 +279,8 @@ void R_ReadPointFile_f (void)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
-		
+		p->flags = 0;
+
 		p->die = 99999;
 		p->color = (-c)&15;
 		p->type = pt_static;
@@ -336,6 +338,7 @@ void R_ParticleExplosion (vec3_t org)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
+		p->flags = 0;
 
 		p->die = cl.time + 5;
 		p->color = ramp1[0];
@@ -381,6 +384,7 @@ void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
+		p->flags = 0;
 
 		p->die = cl.time + 0.3;
 		p->color = colorStart + (colorMod % colorLength);
@@ -414,6 +418,7 @@ void R_BlobExplosion (vec3_t org)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
+		p->flags = 0;
 
 		p->die = cl.time + 1 + (rand()&8)*0.05;
 
@@ -532,6 +537,7 @@ void R_AddSmokePuff (vec3_t org, vec3_t dir, int color, int count)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
+		p->flags = 0;
 
 		// Lifetime and ramp range are tunable via r_smoke_* cvars (F12
 		// "Smoke" panel). ramp is the puff's TARGET (peak) size scale;
@@ -575,6 +581,7 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
+		p->flags = 0;
 
 		if (count == 1024)
 		{	// rocket explosion
@@ -645,7 +652,8 @@ void R_LavaSplash (vec3_t org)
 				free_particles = p->next;
 				p->next = active_particles;
 				active_particles = p;
-		
+				p->flags = 0;
+
 				p->die = cl.time + 2 + (rand()&31) * 0.02;
 				p->color = 224 + (rand()&7);
 				p->type = pt_slowgrav;
@@ -704,6 +712,7 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
+		p->flags = 0;
 
 		p->die  = cl.time + 0.9f + (rand() & 31) * 0.02f;
 		p->type = pt_grav;
@@ -742,6 +751,7 @@ void R_BloodSpray (vec3_t org, vec3_t dir, int count)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
+		p->flags = 0;
 
 		p->die   = cl.time + 0.6f + (rand() & 31) * 0.02f;
 		p->type  = pt_grav;
@@ -777,7 +787,8 @@ void R_TeleportSplash (vec3_t org)
 				free_particles = p->next;
 				p->next = active_particles;
 				active_particles = p;
-		
+				p->flags = 0;
+
 				p->die = cl.time + 0.2 + (rand()&7) * 0.02;
 				p->color = 7 + (rand()&7);
 				p->type = pt_slowgrav;
@@ -825,7 +836,8 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
-		
+		p->flags = 0;
+
 		VectorCopy (vec3_origin, p->vel);
 		p->die = cl.time + 2;
 
