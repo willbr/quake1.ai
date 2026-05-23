@@ -154,3 +154,20 @@ screenshot parity check.
   cheap; revisit only if profiling shows otherwise.
 - Decals, pt_smoke "puff" trails on smoke grenades, and other persistent
   visuals are untouched — they have no velocity to couple.
+
+## Tuning notes
+
+Post-implementation playtest revisions to `wind_drag_k[]`:
+
+- **`pt_fire`: 2.0 → 0.4.** `pt_fire` is used exclusively by `R_RocketTrail`
+  (rocket and smoke-trail variants), which spawn particles at zero initial
+  velocity. With the original `k=2.0`, m7_skeleton's 200 u/s wind source
+  yanked trail particles ~100 u/s downstream over their 2 s lifetime,
+  smearing the trail away from the rocket's flight path. `k=0.4` (matching
+  the heavy-debris bucket of pt_blob / pt_blob2) keeps the trail visually
+  anchored behind the projectile while still allowing subtle drift.
+
+Other values held at their initial settings — pt_smoke (4.0) confirmed
+correct via Gust-on-smokegrenade visuals on m7_skeleton; explosion and
+blob shards untested in-engine because m7's rocket-trail rendering had a
+pre-existing issue unrelated to this feature (see commit log).

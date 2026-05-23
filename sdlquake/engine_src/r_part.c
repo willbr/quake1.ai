@@ -41,7 +41,9 @@ int		ramp3[8] = {0x6d, 0x6b, 6, 5, 4, 3};
 static const float wind_drag_k[] = {
     [pt_static]   = 3.0f,
     [pt_smoke]    = 4.0f,
-    [pt_fire]     = 2.0f,
+    [pt_fire]     = 0.4f,   // used by R_RocketTrail; spawns at zero vel,
+                            // so any strong drag yanks the trail off the
+                            // rocket's path. Keep this low.
     [pt_explode]  = 0.6f,
     [pt_explode2] = 0.6f,
     [pt_blob]     = 0.4f,
