@@ -795,7 +795,7 @@ void R_BloodSpray (vec3_t org, vec3_t dir, int count)
 		// Lifetime is ramp-driven (see pt_blood case in R_DrawParticles);
 		// the explicit die is just a safety cap in case ramp advance gets
 		// frame-rate-starved.
-		p->die   = cl.time + 5.0f;
+		p->die   = cl.time + 10.0f;
 		p->type  = pt_blood;
 		p->ramp  = 0;
 		p->color = ramp_blood[0];	// 73 — bright fresh blood
@@ -1282,9 +1282,9 @@ void R_DrawParticles (void)
 			// "press into" the wall they splatted on.
 			if (!(p->flags & PARTFL_STUCK))
 				p->vel[2] -= grav * 20;
-			// Walk the colour ramp toward black over ~3.2s of life
-			// (8 entries / (time1 * 0.5) = 8 / 2.5 = 3.2 s).
-			p->ramp += time1 * 0.5f;
+			// Walk the colour ramp toward black over ~8.0s of life
+			// (8 entries / (time1 * 0.2) = 8 / 1.0 = 8.0 s).
+			p->ramp += time1 * 0.2f;
 			if (p->ramp >= 8)
 				p->die = -1;
 			else
