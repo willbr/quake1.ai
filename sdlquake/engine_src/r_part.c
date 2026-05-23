@@ -1041,6 +1041,72 @@ void R_BloodSpray (vec3_t org, vec3_t dir, int count)
 
 /*
 ===============
+R_SpawnGunshotChips
+
+Small black specks deposited on a wall by a shotgun pellet impact —
+buckshot-scatter pellet marks that augment the central DECAL_BULLET stain.
+Stationary pt_static, zero velocity, palette black, ~8 s lifetime. Spawned
+right at the trace endpos (which is on the surface) with a 1-2 u jitter so
+the cluster reads as a scatter pattern, not a single point.
+===============
+*/
+void R_SpawnGunshotChips (vec3_t pos)
+{
+	int			i, j;
+	particle_t	*p;
+	const int	count = 2;
+
+	for (i = 0; i < count; i++) {
+		if (!free_particles) return;
+		p = free_particles;
+		free_particles = p->next;
+		p->next = active_particles;
+		active_particles = p;
+		p->flags = 0;
+
+		p->die   = cl.time + 8.0f;
+		p->type  = pt_static;
+		p->color = 0;			// palette index 0 — true black
+		p->ramp  = 0;
+
+		for (j = 0; j < 3; j++) {
+			p->org[j] = pos[j] + ((rand() & 3) - 1);	// ±1 u jitter
+			p->vel[j] = 0;
+		}
+	}
+}
+
+/*
+===============
+R_SpawnShell
+
+Brass shell casing ejected from a fired shotgun. Single pt_grav particle
+with PARTFL_BOUNCE (one bounce, then stick), brass-coloured (palette 192..194),
+~3.5 s lifetime.
+===============
+*/
+void R_SpawnShell (vec3_t origin, vec3_t vel)
+{
+	particle_t	*p;
+
+	if (!free_particles) return;
+	p = free_particles;
+	free_particles = p->next;
+	p->next = active_particles;
+	active_particles = p;
+	p->flags = PARTFL_BOUNCE;
+
+	p->die   = cl.time + 120.0f;	// shells litter the floor for 2 min
+	p->type  = pt_grav;
+	p->color = 104 + (rand() % 3);	// dark orange shell hull: 104..106 (red-orange, less crimson than lava ramp)
+	p->ramp  = 0;
+
+	VectorCopy (origin, p->org);
+	VectorCopy (vel, p->vel);
+}
+
+/*
+===============
 R_SparkBurst
 
 Hemispherical spark burst at `origin`, biased along `normal` (so sparks

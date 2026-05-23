@@ -403,4 +403,11 @@ void R_SpawnBloodPool (vec3_t origin);
 // should fall back to a splat decal in that case.
 int  R_SpawnBloodDrip (vec3_t origin, vec3_t normal);
 
+// Shotgun pellet impact: a few neutral-grey debris flecks that stick on hit.
+void R_SpawnGunshotChips (vec3_t pos);
+
+// Brass shell casing ejected from a shotgun. Single pt_grav particle, bounces
+// once, brass-coloured, ~3.5 s lifetime.
+void R_SpawnShell (vec3_t origin, vec3_t vel);
+
 #endif

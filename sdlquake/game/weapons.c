@@ -590,6 +590,39 @@ static void FireBullets(float shotcount, vec3_t dir, vec3_t spread) {
     ApplyMultiDamage();
 }
 
+// Broadcast a TE_SHELLEJECT message: client spawns a brass-coloured pt_grav
+// particle with PARTFL_BOUNCE at `org` with velocity `vel`.
+static void eject_shell(vec3_t org, vec3_t vel) {
+    eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
+    eng->MSG_WriteByte(MSG_BROADCAST, TE_SHELLEJECT);
+    eng->MSG_WriteCoord(MSG_BROADCAST, org[0]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, org[1]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, org[2]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, vel[0]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, vel[1]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, vel[2]);
+}
+
+// Eject a shell to the right of the player's view, with the given lateral
+// nudge so super-shotgun can spawn two visually-distinct shells. Origin is
+// at view height (origin + view_ofs[2]) so the arc is visible above the
+// viewmodel sprite, not down at chest level where the gun is held.
+static void player_eject_shell(edict_t *self, float lateral_offset) {
+    eng->MakeVectors(self->v.v_angle);
+    vec3_t org, vel;
+    float ox = lateral_offset;
+    org[0] = self->v.origin[0] + g->v_forward[0]*16.0f + g->v_right[0]*(6.0f + ox);
+    org[1] = self->v.origin[1] + g->v_forward[1]*16.0f + g->v_right[1]*(6.0f + ox);
+    org[2] = self->v.origin[2] + self->v.view_ofs[2] - 4.0f;
+    float rspeed = 140.0f + eng->Random()*60.0f;	// 140..200 lateral
+    float upspd  = 90.0f  + eng->Random()*40.0f;	// 90..130 up
+    float fspeed = 60.0f  + eng->Random()*40.0f;	// 60..100 forward (clears the viewmodel)
+    vel[0] = g->v_right[0]*rspeed + g->v_forward[0]*fspeed + (eng->Random()-0.5f)*30.0f;
+    vel[1] = g->v_right[1]*rspeed + g->v_forward[1]*fspeed + (eng->Random()-0.5f)*30.0f;
+    vel[2] = upspd + g->v_right[2]*rspeed + g->v_forward[2]*fspeed;
+    eject_shell(org, vel);
+}
+
 static void W_FireShotgun(void) {
     edict_t *self = g->self;
     emit_weapon_sound(self, 0.7f);
@@ -600,6 +633,7 @@ static void W_FireShotgun(void) {
     eng->SV_Aim(self, 100000, dir);
     vec3_t spread = {0.04f, 0.04f, 0};
     FireBullets(6, dir, spread);
+    player_eject_shell(self, 0.0f);
 }
 
 static void W_FireSuperShotgun(void) {
@@ -613,6 +647,8 @@ static void W_FireSuperShotgun(void) {
     eng->SV_Aim(self, 100000, dir);
     vec3_t spread = {0.14f, 0.08f, 0};
     FireBullets(14, dir, spread);
+    player_eject_shell(self, -2.0f);
+    player_eject_shell(self, +2.0f);
 }
 
 // ---------------------------------------------------------------------------

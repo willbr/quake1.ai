@@ -229,6 +229,20 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord ();
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
 		R_SpawnDecal (pos, DECAL_BULLET);
+		R_SpawnGunshotChips (pos);
+		break;
+
+	case TE_SHELLEJECT:			// brass shell casing
+		{
+			vec3_t vel;
+			pos[0] = MSG_ReadCoord ();
+			pos[1] = MSG_ReadCoord ();
+			pos[2] = MSG_ReadCoord ();
+			vel[0] = MSG_ReadCoord ();
+			vel[1] = MSG_ReadCoord ();
+			vel[2] = MSG_ReadCoord ();
+			R_SpawnShell (pos, vel);
+		}
 		break;
 		
 	case TE_EXPLOSION:			// rocket explosion

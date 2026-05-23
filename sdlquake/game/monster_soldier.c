@@ -133,6 +133,31 @@ static void army_fire(edict_t *e) {
     ai_face();
     eng->SV_StartSound(e, CHAN_WEAPON, "soldier/sattck1.wav", 1, ATTN_NORM);
     edict_t *en = e->v.enemy;
+
+    // Eject one brass shell to the grunt's right. MakeVectors on its yaw
+    // gives us the right-vector; spawn at approximate muzzle height (~0.7
+    // of bbox) and fling outward.
+    {
+        vec3_t ang = { 0, e->v.angles[1], 0 };
+        eng->MakeVectors(ang);
+        vec3_t sorg, svel;
+        sorg[0] = e->v.origin[0] + g->v_forward[0]*4.0f + g->v_right[0]*10.0f;
+        sorg[1] = e->v.origin[1] + g->v_forward[1]*4.0f + g->v_right[1]*10.0f;
+        sorg[2] = e->v.absmin[2] + e->v.size[2]*0.7f;
+        float rspeed = 90.0f + eng->Random()*40.0f;
+        svel[0] = g->v_right[0]*rspeed + (eng->Random()-0.5f)*20.0f;
+        svel[1] = g->v_right[1]*rspeed + (eng->Random()-0.5f)*20.0f;
+        svel[2] = 40.0f + eng->Random()*30.0f;
+        eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
+        eng->MSG_WriteByte(MSG_BROADCAST, TE_SHELLEJECT);
+        eng->MSG_WriteCoord(MSG_BROADCAST, sorg[0]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, sorg[1]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, sorg[2]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, svel[0]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, svel[1]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, svel[2]);
+    }
+
     // dir = normalize(enemy.origin - enemy.velocity*0.2 - self.origin)
     vec3_t dir;
     dir[0] = en->v.origin[0] - en->v.velocity[0]*0.2f - e->v.origin[0];
