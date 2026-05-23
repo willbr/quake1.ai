@@ -937,17 +937,36 @@ static void spike_touch(edict_t *self, edict_t *other) {
         spawn_touchblood(9);
         T_Damage(other, self, self->v.owner, 9);
     } else {
-        eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
         const char *cn = self->v.classname;
-        if (cn && strcmp(cn, "wizspike") == 0)
-            eng->MSG_WriteByte(MSG_BROADCAST, TE_WIZSPIKE);
-        else if (cn && strcmp(cn, "knightspike") == 0)
-            eng->MSG_WriteByte(MSG_BROADCAST, TE_KNIGHTSPIKE);
-        else
-            eng->MSG_WriteByte(MSG_BROADCAST, TE_SPIKE);
-        eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
-        eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
-        eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+        if (cn && (strcmp(cn, "wizspike") == 0 || strcmp(cn, "knightspike") == 0)) {
+            // Monster spikes keep their coloured-puff temp entity.
+            eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
+            if (strcmp(cn, "wizspike") == 0)
+                eng->MSG_WriteByte(MSG_BROADCAST, TE_WIZSPIKE);
+            else
+                eng->MSG_WriteByte(MSG_BROADCAST, TE_KNIGHTSPIKE);
+            eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
+            eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
+            eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+        } else {
+            // Player nailgun: emit a small TE_SPARKBURST in the ricochet
+            // direction (opposite the nail's velocity).
+            float vx = self->v.velocity[0], vy = self->v.velocity[1], vz = self->v.velocity[2];
+            float vlen2 = vx*vx + vy*vy + vz*vz;
+            float ilen = (vlen2 > 1.0f) ? (1.0f / (float)sqrt(vlen2)) : 1.0f;
+            int cvx = (int)(-vx * ilen * 127.0f);
+            int cvy = (int)(-vy * ilen * 127.0f);
+            int cvz = (int)(-vz * ilen * 127.0f);
+            eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
+            eng->MSG_WriteByte(MSG_BROADCAST, TE_SPARKBURST);
+            eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
+            eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
+            eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+            eng->MSG_WriteChar(MSG_BROADCAST, cvx);
+            eng->MSG_WriteChar(MSG_BROADCAST, cvy);
+            eng->MSG_WriteChar(MSG_BROADCAST, cvz);
+            eng->MSG_WriteByte(MSG_BROADCAST, 10);
+        }
         if (other->v.takedamage)
             T_Damage(other, self, self->v.owner, 9);
     }
@@ -965,11 +984,23 @@ void superspike_touch(edict_t *self, edict_t *other) {
         spawn_touchblood(18);
         T_Damage(other, self, self->v.owner, 18);
     } else {
+        // Player super-nailgun: emit a TE_SPARKBURST in the ricochet
+        // direction (opposite the nail's velocity).
+        float vx = self->v.velocity[0], vy = self->v.velocity[1], vz = self->v.velocity[2];
+        float vlen2 = vx*vx + vy*vy + vz*vz;
+        float ilen = (vlen2 > 1.0f) ? (1.0f / (float)sqrt(vlen2)) : 1.0f;
+        int cvx = (int)(-vx * ilen * 127.0f);
+        int cvy = (int)(-vy * ilen * 127.0f);
+        int cvz = (int)(-vz * ilen * 127.0f);
         eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
-        eng->MSG_WriteByte(MSG_BROADCAST, TE_SUPERSPIKE);
+        eng->MSG_WriteByte(MSG_BROADCAST, TE_SPARKBURST);
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
         eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+        eng->MSG_WriteChar(MSG_BROADCAST, cvx);
+        eng->MSG_WriteChar(MSG_BROADCAST, cvy);
+        eng->MSG_WriteChar(MSG_BROADCAST, cvz);
+        eng->MSG_WriteByte(MSG_BROADCAST, 15);
         if (other->v.takedamage)
             T_Damage(other, self, self->v.owner, 18);
     }
