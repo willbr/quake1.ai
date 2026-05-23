@@ -72,10 +72,17 @@ static void R_RainBuildSkyList (void)
 		if (!(s->flags & SURF_DRAWSKY)) continue;
 		// Reject anything not facing downward enough to be a real sky
 		// ceiling — slipgates also use sky-prefixed textures (so they
-		// get SURF_DRAWSKY) but their planes face horizontally. normal.z
-		// <= -0.5 catches genuine outdoor ceilings (normal points down)
-		// while skipping vertical slipgate panels.
-		if (!s->plane || s->plane->normal[2] > -0.5f) continue;
+		// get SURF_DRAWSKY) but their planes face horizontally.
+		//
+		// Effective outward normal is plane->normal, negated when the
+		// SURF_PLANEBACK flag is set. We want outward_nz <= -0.5
+		// (faces downward into the room) to keep this surface.
+		if (!s->plane) continue;
+		{
+			float nz = s->plane->normal[2];
+			if (s->flags & SURF_PLANEBACK) nz = -nz;
+			if (nz > -0.5f) continue;
+		}
 		float xmin =  1e30f, xmax = -1e30f;
 		float ymin =  1e30f, ymax = -1e30f;
 		float zsum = 0.0f, zmax = -1e30f;
