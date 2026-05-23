@@ -129,6 +129,7 @@
 #define TE_LIGHTNING3  9
 #define TE_LAVASPLASH  10
 #define TE_TELEPORT    11
+#define TE_WATERSPLASH 16
 
 // sound channels
 #define CHAN_AUTO   0

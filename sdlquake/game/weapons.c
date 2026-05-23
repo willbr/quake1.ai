@@ -365,6 +365,67 @@ void SpawnChunk(vec3_t org, vec3_t vel) {
 }
 
 // ---------------------------------------------------------------------------
+// Water-surface splash: if the segment start->end crosses an air→liquid
+// boundary, binary-search for the crossing and emit a particle burst at the
+// surface. Returns 1 if a splash was emitted.
+// ---------------------------------------------------------------------------
+static int is_liquid(int c) {
+    return c == CONTENT_WATER || c == CONTENT_SLIME || c == CONTENT_LAVA;
+}
+
+static int splash_at_water_entry(vec3_t start, vec3_t end) {
+    if (is_liquid(eng->SV_PointContents(start))) return 0;
+    int end_c = eng->SV_PointContents(end);
+    if (!is_liquid(end_c)) return 0;
+
+    vec3_t lo, hi, mid;
+    lo[0] = start[0]; lo[1] = start[1]; lo[2] = start[2];
+    hi[0] = end[0];   hi[1] = end[1];   hi[2] = end[2];
+    for (int i = 0; i < 10; i++) {
+        mid[0] = (lo[0]+hi[0])*0.5f;
+        mid[1] = (lo[1]+hi[1])*0.5f;
+        mid[2] = (lo[2]+hi[2])*0.5f;
+        if (is_liquid(eng->SV_PointContents(mid))) {
+            hi[0] = mid[0]; hi[1] = mid[1]; hi[2] = mid[2];
+        } else {
+            lo[0] = mid[0]; lo[1] = mid[1]; lo[2] = mid[2];
+        }
+    }
+    // Use TE_WATERSPLASH instead of SV_Particle so the client spawns pt_grav
+    // particles with a ~1s lifetime — they rise, peak, then fall back. The
+    // svc_particle path forces pt_slowgrav + 0..0.4s die and bleeds the burst
+    // off via wind drag before gravity can pull it down.
+    int kind = 0;
+    if (end_c == CONTENT_SLIME) kind = 1;
+    if (end_c == CONTENT_LAVA)  kind = 2;
+    eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+    eng->MSG_WriteByte (MSG_BROADCAST, TE_WATERSPLASH);
+    eng->MSG_WriteCoord(MSG_BROADCAST, hi[0]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, hi[1]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, hi[2]);
+    eng->MSG_WriteByte (MSG_BROADCAST, kind);
+    return 1;
+}
+
+// Backtrace from a projectile's impact point along its inverse velocity, then
+// look for an air→liquid crossing. Used by spike/rocket touch handlers so a
+// projectile that punches through water before hitting solid still leaves a
+// surface splash. dist sets how far back to look (must exceed one frame of
+// travel, but not so far that we re-enter air on the other side of a wall).
+static void splash_projectile_entry(edict_t *self, float dist) {
+    float vx = self->v.velocity[0], vy = self->v.velocity[1], vz = self->v.velocity[2];
+    float vlen = (float)sqrt(vx*vx + vy*vy + vz*vz);
+    if (vlen < 1.0f) return;
+    float s = dist / vlen;
+    vec3_t back, here;
+    here[0] = self->v.origin[0]; here[1] = self->v.origin[1]; here[2] = self->v.origin[2];
+    back[0] = here[0] - vx*s;
+    back[1] = here[1] - vy*s;
+    back[2] = here[2] - vz*s;
+    splash_at_water_entry(back, here);
+}
+
+// ---------------------------------------------------------------------------
 // Multi-damage accumulator (collect pellet hits, apply as one damage call)
 // ---------------------------------------------------------------------------
 static edict_t *multi_ent    = NULL;
@@ -451,6 +512,7 @@ static void FireBullets(float shotcount, vec3_t dir, vec3_t spread) {
         end[2] = src[2] + direction[2]*2048;
         eng->SV_Traceline(src, end, 0, self);
         Corpse_BulletTrace(src, end, self);
+        splash_at_water_entry(src, g->trace_endpos);
         if (g->trace_fraction != 1.0f)
             TraceAttack(4, direction);
 
@@ -517,6 +579,7 @@ static void T_MissileTouch(edict_t *self, edict_t *other) {
         eng->ED_Free(self);
         return;
     }
+    splash_projectile_entry(self, 4096.0f);
 
     float damg = 100 + eng->Random()*20;
     if (other->v.health) {
@@ -794,6 +857,7 @@ static void spike_touch(edict_t *self, edict_t *other) {
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;
     if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) { eng->ED_Free(self); return; }
+    splash_projectile_entry(self, 2048.0f);
 
     if (other->v.takedamage) {
         spawn_touchblood(9);
@@ -819,6 +883,7 @@ void superspike_touch(edict_t *self, edict_t *other) {
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;
     if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) { eng->ED_Free(self); return; }
+    splash_projectile_entry(self, 2048.0f);
 
     if (other->v.takedamage) {
         spawn_touchblood(18);

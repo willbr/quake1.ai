@@ -661,6 +661,50 @@ void R_LavaSplash (vec3_t org)
 
 /*
 ===============
+R_WaterSplash
+
+Surface-splash burst for hitscan/projectile water impacts. Uses pt_grav so the
+spray rises and falls under full gravity (no wind drag, no slow-grav float).
+kind: 0=water (light cyan), 1=slime (green-grey), 2=lava (orange).
+===============
+*/
+void R_WaterSplash (vec3_t org, int kind)
+{
+	int			i, j;
+	particle_t	*p;
+	int			base_color;
+
+	switch (kind) {
+	case 1:  base_color = 176; break; // slime: 176..183 green-grey
+	case 2:  base_color = 232; break; // lava: 232..239 orange ramp
+	default: base_color = 244; break; // water: light cyan special-case
+	}
+
+	for (i = 0; i < 28; i++) {
+		if (!free_particles) return;
+		p = free_particles;
+		free_particles = p->next;
+		p->next = active_particles;
+		active_particles = p;
+
+		p->die  = cl.time + 0.9f + (rand() & 31) * 0.02f;
+		p->type = pt_grav;
+		if (base_color == 244)
+			p->color = 244 + (rand() % 3);
+		else
+			p->color = (base_color & ~7) + (rand() & 7);
+
+		for (j = 0; j < 2; j++) {
+			p->org[j] = org[j] + ((rand() & 7) - 4);
+			p->vel[j] = (rand() % 161) - 80;
+		}
+		p->org[2] = org[2] + (rand() & 3);
+		p->vel[2] = 180 + (rand() % 121); // 180..300 ups up
+	}
+}
+
+/*
+===============
 R_TeleportSplash
 
 ===============

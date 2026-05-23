@@ -34,6 +34,7 @@ sfx_t			*cl_sfx_ric1;
 sfx_t			*cl_sfx_ric2;
 sfx_t			*cl_sfx_ric3;
 sfx_t			*cl_sfx_r_exp3;
+sfx_t			*cl_sfx_h2ohit;
 #ifdef QUAKE2
 sfx_t			*cl_sfx_imp;
 sfx_t			*cl_sfx_rail;
@@ -53,6 +54,7 @@ void CL_InitTEnts (void)
 	cl_sfx_ric2 = S_PrecacheSound ("weapons/ric2.wav");
 	cl_sfx_ric3 = S_PrecacheSound ("weapons/ric3.wav");
 	cl_sfx_r_exp3 = S_PrecacheSound ("weapons/r_exp3.wav");
+	cl_sfx_h2ohit = S_PrecacheSound ("misc/h2ohit1.wav");
 #ifdef QUAKE2
 	cl_sfx_imp = S_PrecacheSound ("shambler/sattck1.wav");
 	cl_sfx_rail = S_PrecacheSound ("weapons/lstart.wav");
@@ -275,11 +277,22 @@ void CL_ParseTEnt (void)
 		break;
 // PGM 01/21/97
 
-	case TE_LAVASPLASH:	
+	case TE_LAVASPLASH:
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
 		R_LavaSplash (pos);
+		break;
+
+	case TE_WATERSPLASH:
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+		{
+			int kind = MSG_ReadByte ();
+			R_WaterSplash (pos, kind);
+			S_StartSound (-1, 0, cl_sfx_h2ohit, pos, 1, 1);
+		}
 		break;
 	
 	case TE_TELEPORT:

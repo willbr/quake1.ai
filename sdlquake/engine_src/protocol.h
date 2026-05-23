@@ -157,9 +157,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	TE_TELEPORT			11
 #define TE_EXPLOSION2		12
 
-// PGM 01/21/97 
+// PGM 01/21/97
 #define TE_BEAM				13
-// PGM 01/21/97 
+// PGM 01/21/97
+
+// Phase-8 water/slime/lava surface splash. Wire format:
+//   [coord*3 origin] [byte kind] where kind: 0=water 1=slime 2=lava
+#define TE_WATERSPLASH		16
 
 #ifdef QUAKE2
 #define TE_IMPLOSION		14
