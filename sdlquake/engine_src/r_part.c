@@ -534,25 +534,77 @@ extern int SV_HullPointContents (hull_t *hull, int num, vec3_t p);
 ===============
 R_TraceParticle
 
-Thin wrapper over SV_RecursiveHullCheck on cl.worldmodel->hulls[0]. Used
-by R_DrawParticles to test whether a particle's per-frame integration step
-crosses a world brush surface. World-only (no entity collision); returns 1
-on hit, 0 on clean traversal or when no worldmodel is loaded.
+Traces start→end against world brushes AND all visible brush entities
+(doors, platforms, buttons). Returns the closest hit; returns 1 on any
+hit, 0 on clean traversal or when no worldmodel is loaded.
+
+Brush-entity local space: subtract entity->origin from start/end before
+the hull check, then add it back to trace->endpos. Stock Quake doors and
+platforms never rotate, so this is exact. Rotating bmodels (if a mod ever
+adds them) would degrade to axis-aligned-bbox behaviour — visible glitch,
+not a crash.
 ===============
 */
 static int R_TraceParticle (const vec3_t start, const vec3_t end, trace_t *trace)
 {
 	vec3_t p1, p2;
+	trace_t best;
+	int i;
+
 	if (!cl.worldmodel) return 0;
 
-	memset (trace, 0, sizeof(*trace));
-	trace->fraction = 1.0f;
+	memset (&best, 0, sizeof(best));
+	best.fraction = 1.0f;
 
+	// 1. World brushes.
 	VectorCopy (start, p1);
 	VectorCopy (end,   p2);
+	SV_RecursiveHullCheck (&cl.worldmodel->hulls[0],
+	                       cl.worldmodel->hulls[0].firstclipnode,
+	                       0.0f, 1.0f, p1, p2, &best);
 
-	SV_RecursiveHullCheck (&cl.worldmodel->hulls[0], 0, 0.0f, 1.0f, p1, p2, trace);
-	return (trace->fraction < 1.0f) ? 1 : 0;
+	// 2. Visible brush entities (doors, platforms, buttons). Stock Quake
+	//    doors/plats don't rotate, so a simple origin subtract is enough
+	//    to put start/end into the entity's local space. The normal stays
+	//    in world space; the endpos needs translating back. If a rotating
+	//    bmodel ever shows up, blood will land on its axis-aligned bbox
+	//    rather than its true surface — visible glitch, not a crash.
+	for (i = 0; i < cl_numvisedicts; i++) {
+		entity_t *ent = cl_visedicts[i];
+		if (!ent || !ent->model) continue;
+		if (ent->model->type != mod_brush) continue;
+		// World model has been linked into cl_visedicts in some configs;
+		// skip it to avoid double-tracing.
+		if (ent == &cl_entities[0]) continue;
+		if (ent->model == cl.worldmodel) continue;
+
+		vec3_t lp1, lp2;
+		lp1[0] = start[0] - ent->origin[0];
+		lp1[1] = start[1] - ent->origin[1];
+		lp1[2] = start[2] - ent->origin[2];
+		lp2[0] = end[0]   - ent->origin[0];
+		lp2[1] = end[1]   - ent->origin[1];
+		lp2[2] = end[2]   - ent->origin[2];
+
+		trace_t local;
+		memset (&local, 0, sizeof(local));
+		local.fraction = 1.0f;
+
+		SV_RecursiveHullCheck (&ent->model->hulls[0],
+		                       ent->model->hulls[0].firstclipnode,
+		                       0.0f, 1.0f, lp1, lp2, &local);
+
+		if (local.fraction < best.fraction) {
+			best = local;
+			best.endpos[0] += ent->origin[0];
+			best.endpos[1] += ent->origin[1];
+			best.endpos[2] += ent->origin[2];
+			// best.plane.normal stays as-is (no rotation).
+		}
+	}
+
+	*trace = best;
+	return (best.fraction < 1.0f) ? 1 : 0;
 }
 
 void R_AddSmokePuff (vec3_t org, vec3_t dir, int color, int count)
