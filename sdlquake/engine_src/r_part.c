@@ -1910,8 +1910,9 @@ void R_DrawParticles (void)
 					// cheap compare instead of a trace.
 					if (fabs(n[2]) < 0.7f) {
 						p->flags |= PARTFL_WALL_STICK;
-						// vel[0] = impact Z (debug viz only, r_particle_slide_debug).
-						p->vel[0] = p->org[2];
+						// Per-droplet slide-rate multiplier in [0.5, 2.0]
+						// so droplets disperse instead of moving in lockstep.
+						p->vel[0] = 0.5f + (rand() & 31) * (1.5f / 31.0f);
 						p->vel[2] = R_FindWallBottom (p->org, n);
 					}
 				} else {
@@ -2068,6 +2069,9 @@ void R_DrawParticles (void)
 			// gravity to ~1/4 and apply heavy drag so brass shells (which
 			// use pt_grav + PARTFL_BOUNCE) sink slowly and lose lateral
 			// velocity quickly instead of falling like they're still in air.
+			// Stuck droplets skip gravity so vel[2] stays valid as the
+			// stashed wall_bottom_z (water-splash droplets on walls slide).
+			if (p->flags & PARTFL_STUCK) break;
 			if (cl.worldmodel) {
 				int c = SV_HullPointContents (&cl.worldmodel->hulls[0], 0, p->org);
 				if (c == CONTENTS_WATER || c == CONTENTS_SLIME || c == CONTENTS_LAVA) {
@@ -2087,18 +2091,19 @@ void R_DrawParticles (void)
 			break;
 		}
 
-		// Sliding wall droplets: blood/water flagged WALL_STICK at
-		// stick time creep downward at the cvar's speed.  vel[2]
-		// holds the wall's bottom Z (found via binary search at
-		// stick time), so this is a cheap compare per frame.  When
-		// the droplet reaches the bottom, R_SlideRelease decides
-		// whether to snap to a floor or free-fall into open air.
+		// Sliding wall droplets: blood/water flagged WALL_STICK at stick
+		// time creep downward at the cvar's speed × the droplet's
+		// per-droplet rate multiplier (vel[0], rolled [0.5, 2.0] at
+		// stick time so droplets disperse).  When org[2] reaches
+		// vel[2] (wall_bottom_z, found via R_FindWallBottom at stick
+		// time), R_SlideRelease decides whether to snap to a floor or
+		// free-fall into open air.
 		if ((p->flags & (PARTFL_STUCK | PARTFL_WALL_STICK))
 		    == (PARTFL_STUCK | PARTFL_WALL_STICK)) {
 			float slide = r_particle_slide_speed.value;
 			if (slide < 0.0f) slide = 0.0f;
 			else if (slide > 32.0f) slide = 32.0f;
-			float dz = slide * frametime;
+			float dz = slide * p->vel[0] * frametime;
 			if (dz > 0.0f) {
 				float new_z = p->org[2] - dz;
 				if (new_z <= p->vel[2]) {
@@ -2108,39 +2113,19 @@ void R_DrawParticles (void)
 				}
 			}
 			if (r_particle_slide_debug.value) {
-				// Main column: white line from impact Z (top) to
-				// wall_bottom_z (bottom) at the droplet's current XY.
-				vec3_t top    = { p->org[0], p->org[1], p->vel[0] };
-				vec3_t bottom = { p->org[0], p->org[1], p->vel[2] };
-				DebugLines_Add (top, bottom, 15, 1);
-				// Crosshair at the TOP (impact) — white. Three short
-				// lines, one along each axis, ±3 u, to mark the
-				// original impact point clearly.
-				{
-					vec3_t ca, cb;
-					ca[0] = top[0] - 3; ca[1] = top[1]; ca[2] = top[2];
-					cb[0] = top[0] + 3; cb[1] = top[1]; cb[2] = top[2];
-					DebugLines_Add (ca, cb, 15, 1);
-					ca[0] = top[0]; ca[1] = top[1] - 3; ca[2] = top[2];
-					cb[0] = top[0]; cb[1] = top[1] + 3; cb[2] = top[2];
-					DebugLines_Add (ca, cb, 15, 1);
-					ca[0] = top[0]; ca[1] = top[1]; ca[2] = top[2] - 3;
-					cb[0] = top[0]; cb[1] = top[1]; cb[2] = top[2] + 3;
-					DebugLines_Add (ca, cb, 15, 1);
-				}
-				// Crosshair at the BOTTOM (wall_bottom_z) — cyan.
-				{
-					vec3_t ca, cb;
-					ca[0] = bottom[0] - 3; ca[1] = bottom[1]; ca[2] = bottom[2];
-					cb[0] = bottom[0] + 3; cb[1] = bottom[1]; cb[2] = bottom[2];
-					DebugLines_Add (ca, cb, 244, 1);
-					ca[0] = bottom[0]; ca[1] = bottom[1] - 3; ca[2] = bottom[2];
-					cb[0] = bottom[0]; cb[1] = bottom[1] + 3; cb[2] = bottom[2];
-					DebugLines_Add (ca, cb, 244, 1);
-					ca[0] = bottom[0]; ca[1] = bottom[1]; ca[2] = bottom[2] - 3;
-					cb[0] = bottom[0]; cb[1] = bottom[1]; cb[2] = bottom[2] + 3;
-					DebugLines_Add (ca, cb, 244, 1);
-				}
+				// Small cyan 3-axis crosshair at wall_bottom_z under
+				// the droplet — shows where the slide will release.
+				vec3_t c = { p->org[0], p->org[1], p->vel[2] };
+				vec3_t ca, cb;
+				ca[0] = c[0] - 3; ca[1] = c[1]; ca[2] = c[2];
+				cb[0] = c[0] + 3; cb[1] = c[1]; cb[2] = c[2];
+				DebugLines_Add (ca, cb, 244, 1);
+				ca[0] = c[0]; ca[1] = c[1] - 3; ca[2] = c[2];
+				cb[0] = c[0]; cb[1] = c[1] + 3; cb[2] = c[2];
+				DebugLines_Add (ca, cb, 244, 1);
+				ca[0] = c[0]; ca[1] = c[1]; ca[2] = c[2] - 3;
+				cb[0] = c[0]; cb[1] = c[1]; cb[2] = c[2] + 3;
+				DebugLines_Add (ca, cb, 244, 1);
 			}
 		}
 
