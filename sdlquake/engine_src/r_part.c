@@ -42,6 +42,9 @@ extern cvar_t r_sparks_count_mul;
 extern cvar_t r_sparks_settle_dwell;
 extern cvar_t r_sparks_restitution;
 
+// Particle sliding — declared in r_main.c, registered in R_Init.
+extern cvar_t r_particle_slide_speed;
+
 // Rain — declared in r_main.c, registered in R_Init.
 extern cvar_t r_rain;
 extern cvar_t r_rain_debug;
@@ -1831,6 +1834,34 @@ void R_DrawParticles (void)
 		case pt_slowgrav:
 			p->vel[2] -= grav;
 			break;
+		}
+
+		// Sliding wall droplets: blood/water that stuck to a wall
+		// (|n.z|<0.7 at stick time) creeps downward at the cvar's
+		// speed.  Straight-down step keeps a vertical wall's
+		// normal-offset (0.5u) unchanged.  A short trace catches
+		// floors and ledges so the droplet stops cleanly instead
+		// of tunnelling.
+		if ((p->flags & (PARTFL_STUCK | PARTFL_WALL_STICK))
+		    == (PARTFL_STUCK | PARTFL_WALL_STICK)) {
+			float slide = r_particle_slide_speed.value;
+			if (slide < 0.0f) slide = 0.0f;
+			else if (slide > 32.0f) slide = 32.0f;
+			float dz = slide * frametime;
+			if (dz > 0.0f) {
+				vec3_t newpos = { p->org[0], p->org[1], p->org[2] - dz };
+				trace_t tr;
+				if (R_TraceParticle (p->org, newpos, &tr)) {
+					// Hit something on the way down — snap to
+					// contact and stop sliding.
+					p->org[0] = tr.endpos[0] + tr.plane.normal[0] * 0.5f;
+					p->org[1] = tr.endpos[1] + tr.plane.normal[1] * 0.5f;
+					p->org[2] = tr.endpos[2] + tr.plane.normal[2] * 0.5f;
+					p->flags &= ~PARTFL_WALL_STICK;
+				} else {
+					p->org[2] = newpos[2];
+				}
+			}
 		}
 
 #if NATIVE_GAME
