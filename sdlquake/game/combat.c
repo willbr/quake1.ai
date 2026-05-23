@@ -9,6 +9,7 @@
 
 extern void SUB_Remove(edict_t *e);
 extern void SpawnBlood(vec3_t org, vec3_t vel, float damage);
+void gib_blood_burst(vec3_t origin);
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -265,6 +266,19 @@ static void Killed(edict_t *targ, edict_t *attacker)
     g->self->v.touch      = NULL;
 
     monster_death_use();
+
+    // First-kill gib burst: if the killing damage drove health below the
+    // per-classname gib threshold, th_die will throw the head + gibs. Mirror
+    // GibCorpse's blood burst here so the visual is consistent whether the
+    // gibs come from a one-shot kill (this path) or corpse over-damage
+    // (GibCorpse). Origin captured before th_die runs since ThrowHead can
+    // re-use self as the head entity.
+    {
+        const corpse_gib_info_t *info = corpse_gib_lookup(g->self->v.classname);
+        if (info && g->self->v.health < (float)info->gib_threshold)
+            gib_blood_burst(g->self->v.origin);
+    }
+
     if (g->self->v.th_die)
         g->self->v.th_die(g->self);
 
@@ -631,6 +645,24 @@ void ThrowHead(const char *gibname, float dm) {
     self->v.decal_on_bounce = 1.0f;
 }
 
+// Blood burst for a gib event. Several SpawnBlood calls with randomized
+// outward velocities give a fuller spray than one large burst, since
+// TE_BLOODSPRAY's particle count is capped at 255 per call and a single
+// direction reads as a one-sided plume rather than a corpse rupture.
+// Called from both gib paths: first-kill (th_die) via Killed, and
+// corpse-over-damage via GibCorpse.
+void gib_blood_burst(vec3_t origin) {
+    vec3_t centre = { origin[0], origin[1], origin[2] + 8.0f };
+    for (int i = 0; i < 6; i++) {
+        vec3_t v = {
+            (eng->Random() * 2.0f - 1.0f) * 180.0f,
+            (eng->Random() * 2.0f - 1.0f) * 180.0f,
+            eng->Random() * 200.0f + 40.0f,
+        };
+        SpawnBlood(centre, v, 40.0f);
+    }
+}
+
 // Throw a head + 3 gibs from a corpse with the per-classname models. Returns
 // 1 on success, 0 if no gib info is registered for this classname (in which
 // case the caller should leave the corpse intact). Used by the corpse over-
@@ -643,25 +675,7 @@ int GibCorpse(edict_t *self) {
     edict_t *oself = g->self;
     g->self = self;
     eng->SV_StartSound(self, CHAN_VOICE, "player/udeath.wav", 1, ATTN_NORM);
-    // Blood burst at the gib site. Several SpawnBlood calls with randomized
-    // outward velocities give a fuller spray than one large burst, since
-    // TE_BLOODSPRAY's particle count is capped at 255 per call and a single
-    // direction reads as a one-sided plume rather than a corpse rupture.
-    {
-        vec3_t centre = {
-            self->v.origin[0],
-            self->v.origin[1],
-            self->v.origin[2] + 8.0f,
-        };
-        for (int i = 0; i < 6; i++) {
-            vec3_t v = {
-                (eng->Random() * 2.0f - 1.0f) * 180.0f,
-                (eng->Random() * 2.0f - 1.0f) * 180.0f,
-                eng->Random() * 200.0f + 40.0f,
-            };
-            SpawnBlood(centre, v, 40.0f);
-        }
-    }
+    gib_blood_burst(self->v.origin);
     ThrowHead(info->head_model, self->v.health);
     // Stationary head: the corpse was already settled when over-damaged, so
     // a random VelocityForDamage on the head looks like the head is sliding
