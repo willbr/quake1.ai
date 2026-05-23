@@ -62,9 +62,12 @@ static void clamp_vel(vec3_t v) {
 
 // dir must be normalized.
 static void apply_impulse(edict_t *e, vec3_t dir, float damage) {
+    // Damp the vertical component: a level shot should slide the box flat,
+    // a steep downward shot shouldn't drive it through the floor, and an
+    // upward shot shouldn't launch it. No additive upward pop.
     e->v.velocity[0] += dir[0] * damage * 6.0f;
     e->v.velocity[1] += dir[1] * damage * 6.0f;
-    e->v.velocity[2] += dir[2] * damage * 6.0f + 50.0f;  // small upward pop
+    e->v.velocity[2] += dir[2] * damage * 1.5f;
     clamp_vel(e->v.velocity);
     // No tumble: items keep their upright orientation, and any prior spin
     // (e.g. DM rotating powerups) is killed on hit.
