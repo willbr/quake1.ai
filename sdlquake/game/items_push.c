@@ -62,12 +62,15 @@ static void clamp_vel(vec3_t v) {
 
 // dir must be normalized.
 static void apply_impulse(edict_t *e, vec3_t dir, float damage) {
-    // Damp the vertical component: a level shot should slide the box flat,
-    // a steep downward shot shouldn't drive it through the floor, and an
-    // upward shot shouldn't launch it. No additive upward pop.
-    e->v.velocity[0] += dir[0] * damage * 6.0f;
-    e->v.velocity[1] += dir[1] * damage * 6.0f;
-    e->v.velocity[2] += dir[2] * damage * 1.5f;
+    e->v.velocity[0] += dir[0] * damage * 8.0f;
+    e->v.velocity[1] += dir[1] * damage * 8.0f;
+    // SV_Physics_Toss early-returns on FL_ONGROUND and zeroes velocity on
+    // any ground contact (sv_phys.c:1463 / :1603). Without a small upward
+    // delta the box re-grounds the very next tick and the slide dies. Floor
+    // velocity[2] to a fixed minimum so the box clears the floor for a
+    // couple of frames -- never amplify by shot angle, that's what was
+    // launching them. Doesn't compound on repeat hits.
+    if (e->v.velocity[2] < 25.0f) e->v.velocity[2] = 25.0f;
     clamp_vel(e->v.velocity);
     // No tumble: items keep their upright orientation, and any prior spin
     // (e.g. DM rotating powerups) is killed on hit.
