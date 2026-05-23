@@ -860,9 +860,9 @@ void R_SparkBurst (vec3_t origin, vec3_t normal, int count)
 			v[0] = -v[0]; v[1] = -v[1]; v[2] = -v[2];
 		}
 
-		// Normalise then scale to a random speed in [200, 500].
+		// Normalise then scale to a random speed in [500, 1000].
 		vlen = 1.0f / sqrtf (vlen);
-		speed = 200.0f + (rand() & 255) * (300.0f / 256.0f);
+		speed = 500.0f + (rand() & 255) * (500.0f / 256.0f);
 		for (j = 0; j < 3; j++) p->vel[j] = v[j] * vlen * speed;
 
 		VectorCopy (base, p->org);
