@@ -1144,10 +1144,57 @@ void R_DrawParticles (void)
 			}
 		}
 #endif
-		p->org[0] += p->vel[0]*frametime;
-		p->org[1] += p->vel[1]*frametime;
-		p->org[2] += p->vel[2]*frametime;
-		
+		// Stuck particles freeze position and skip integration entirely.
+		// They still tick through the type switch below so the ramp/dwell
+		// timer (and p->die) progresses normally.
+		if (p->flags & PARTFL_STUCK) {
+			// no position update
+		} else if (p->flags & (PARTFL_BOUNCE | PARTFL_STICK_ON_HIT)) {
+			vec3_t newpos;
+			trace_t tr;
+			newpos[0] = p->org[0] + p->vel[0] * frametime;
+			newpos[1] = p->org[1] + p->vel[1] * frametime;
+			newpos[2] = p->org[2] + p->vel[2] * frametime;
+
+			if (R_TraceParticle (p->org, newpos, &tr)) {
+				vec3_t n;
+				VectorCopy (tr.plane.normal, n);
+
+				if ((p->flags & PARTFL_STICK_ON_HIT) ||
+				    (p->flags & PARTFL_BOUNCED)) {
+					// Stick: park at impact, freeze velocity, mark stuck.
+					p->org[0] = tr.endpos[0] + n[0] * 0.5f;
+					p->org[1] = tr.endpos[1] + n[1] * 0.5f;
+					p->org[2] = tr.endpos[2] + n[2] * 0.5f;
+					p->vel[0] = p->vel[1] = p->vel[2] = 0;
+					p->flags |= PARTFL_STUCK;
+				} else {
+					// First bounce: inline reflection at r_sparks_restitution.
+					float r = r_sparks_restitution.value;
+					float d = p->vel[0]*n[0] + p->vel[1]*n[1] + p->vel[2]*n[2];
+					p->vel[0] = (p->vel[0] - 2.0f * d * n[0]) * r;
+					p->vel[1] = (p->vel[1] - 2.0f * d * n[1]) * r;
+					p->vel[2] = (p->vel[2] - 2.0f * d * n[2]) * r;
+					p->org[0] = tr.endpos[0] + n[0] * 0.5f;
+					p->org[1] = tr.endpos[1] + n[1] * 0.5f;
+					p->org[2] = tr.endpos[2] + n[2] * 0.5f;
+					p->flags |= PARTFL_BOUNCED;
+					// For pt_spark: cooldown ramp starts now from white-hot.
+					if (p->type == pt_spark) {
+						p->flags &= ~PARTFL_RAMP_HOLD;
+						p->ramp = 0;
+					}
+				}
+			} else {
+				VectorCopy (newpos, p->org);
+			}
+		} else {
+			// Non-collidable: original behaviour, unchanged.
+			p->org[0] += p->vel[0]*frametime;
+			p->org[1] += p->vel[1]*frametime;
+			p->org[2] += p->vel[2]*frametime;
+		}
+
 		switch (p->type)
 		{
 		case pt_static:
