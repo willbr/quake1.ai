@@ -53,12 +53,11 @@ int		ramp1[8] = {0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61};
 int		ramp2[8] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66};
 int		ramp3[8] = {0x6d, 0x6b, 6, 5, 4, 3};
 
-// Blood fade ramp: bright pure red (251 = #ff0000) walks monotonically
-// darker through the 247-251 saturated-red block and then the 64-79
-// half-saturated-red block, ending at pure black (0). Used by pt_blood;
-// advanced once per frame in R_DrawParticles. All entries are red-only
-// (G=B=0) so the fade stays chromatic — no detour through neutral grays.
-int ramp_blood[8] = {251, 250, 248, 79, 77, 74, 71, 0};
+// Blood fade ramp: dark red (248 = #8b0000) walks monotonically
+// darker through saturated reds, ending at pure black (0). All entries
+// are red-only (G=B=0) so the fade stays chromatic — no detour through
+// neutral grays. Used by pt_blood; advanced once per frame in R_DrawParticles.
+int ramp_blood[8] = {248, 79, 77, 75, 73, 71, 67, 0};
 
 // Per-type wind drag coefficients.  Used by R_DrawParticles to lerp
 // each active particle's velocity toward the locally-sampled wind
