@@ -643,13 +643,12 @@ static void TraceAttack(float damage, vec3_t dir) {
         // Shootable brushes still take damage.
         if (g->trace_ent->v.takedamage)
             AddMultiDamage(g->trace_ent, damage);
-        // Debug: shoot blood from the gun on every pellet so you can
-        // splatter walls freely while tuning the wall-slide effect.
+        // Debug: shoot a stream of blood from the gun muzzle along the
+        // pellet direction. Visible "blood gun" effect for tuning the
+        // wall-slide. Droplets fall short of distant walls under gravity
+        // (TE_BLOODSPRAY's velocity encoding caps forward speed), so shoot
+        // walls at close range to splatter and watch them slide.
         if (eng->Cvar_VariableValue("g_test_shotgunblood") > 0) {
-            // Stream from the gun muzzle along the pellet direction —
-            // visible "blood gun" effect. Droplets fall short of distant
-            // walls under gravity (TE_BLOODSPRAY's velocity encoding caps
-            // forward speed), but at close range many reach the wall.
             vec3_t muzzle, gun_vel;
             muzzle[0] = g->self->v.origin[0] + dir[0] * 16;
             muzzle[1] = g->self->v.origin[1] + dir[1] * 16;
@@ -658,17 +657,6 @@ static void TraceAttack(float damage, vec3_t dir) {
             gun_vel[1] = dir[1] * 500;
             gun_vel[2] = dir[2] * 500;
             SpawnBlood(muzzle, gun_vel, damage);
-            // Guaranteed wall splatter: spawn just outside the wall surface
-            // with inward velocity so droplets actually reach and stick to
-            // the wall. Wall-slide debug needs droplets here to draw lines.
-            vec3_t wall_org, wall_vel;
-            wall_org[0] = g->trace_endpos[0] + g->trace_plane_normal[0] * 4;
-            wall_org[1] = g->trace_endpos[1] + g->trace_plane_normal[1] * 4;
-            wall_org[2] = g->trace_endpos[2] + g->trace_plane_normal[2] * 4;
-            wall_vel[0] = dir[0] * 200;
-            wall_vel[1] = dir[1] * 200;
-            wall_vel[2] = dir[2] * 200;
-            SpawnBlood(wall_org, wall_vel, damage);
         }
     }
 }
