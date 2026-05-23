@@ -811,18 +811,15 @@ static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 ================
 R_SlideRelease
 
-Called when a sliding droplet's Z reaches its stashed wall_bottom_z.  A short
-downward trace decides what happened:
+Called when a sliding droplet's Z reaches its stashed wall_bottom_z.  One
+short downward trace decides what happened:
 
   - Surface immediately below (within 4 u): snap to it and stop sliding.
-  - Open air below: extend the slide.  Trace farther down (up to 256 u) to
-    find the next surface; update vel[2] to that Z so the slide step keeps
-    creeping downward at the cvar's speed until reaching it.  If still no
-    surface, push vel[2] far below current org[2] so the slide step keeps
-    decrementing without re-firing this helper — droplet drifts at slide
-    speed for the rest of its life.  This keeps blood and water visually
-    consistent (no dramatic gravity drop after a wall edge) and reads as a
-    continuous drip.
+  - Open air below: release for free-fall.  Clear STUCK | WALL_STICK and
+    zero vel — the per-type gravity in R_DrawParticles' type switch will
+    accelerate the droplet downward.  PARTFL_STICK_ON_HIT is still set on
+    the particle, so the next collision re-runs the existing stick branch
+    and the droplet re-sticks on whatever it lands on.
 ================
 */
 static void R_SlideRelease (particle_t *p)
@@ -842,17 +839,10 @@ static void R_SlideRelease (particle_t *p)
 		p->vel[0] = p->vel[1] = p->vel[2] = 0;
 		p->flags &= ~PARTFL_WALL_STICK;
 		// STUCK stays set: droplet is at rest on the new surface.
-		return;
-	}
-
-	// Open air below — keep sliding at cvar speed.  Look farther down
-	// for the next surface and use it as the new release threshold.
-	below[2] = p->org[2] - 256.0f;
-	if (R_TraceParticle (p->org, below, &tr)) {
-		p->vel[2] = tr.endpos[2] + tr.plane.normal[2] * 0.5f;
 	} else {
-		// Nothing within 256 u — keep sliding indefinitely.
-		p->vel[2] = p->org[2] - 1024.0f;
+		// Open air below — release for free-fall.
+		p->vel[0] = p->vel[1] = p->vel[2] = 0;
+		p->flags &= ~(PARTFL_STUCK | PARTFL_WALL_STICK);
 	}
 }
 
