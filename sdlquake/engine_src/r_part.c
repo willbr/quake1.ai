@@ -840,6 +840,28 @@ when the actual probe geometry is 1 u.
 #define SLIDE_PROBE_OUT		2.0f
 #define SLIDE_PROBE_IN		2.0f
 
+// Probes register HIT only when the contact plane's normal matches the
+// stuck wall's normal (dot >= 0.9, ~25° tolerance).  Without this filter
+// a probe below the wall's bottom edge can hit an unrelated surface
+// (floor, ceiling, perpendicular wall) and trick the search into thinking
+// the wall continues there.
+#define SLIDE_PROBE_NORMAL_DOT	0.9f
+
+static int slide_probe_z (const vec3_t impact, const vec3_t n, float z, trace_t *out)
+{
+	vec3_t a, b;
+	float dot;
+	a[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
+	a[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
+	a[2] = z;
+	b[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
+	b[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
+	b[2] = z;
+	if (!R_TraceParticle (a, b, out)) return 0;
+	dot = out->plane.normal[0]*n[0] + out->plane.normal[1]*n[1] + out->plane.normal[2]*n[2];
+	return dot >= SLIDE_PROBE_NORMAL_DOT;
+}
+
 static void slide_debug_record_probe (const vec3_t impact, const vec3_t n, float z, int hit)
 {
 	vec3_t va, vb;
@@ -856,22 +878,13 @@ static void slide_debug_record_probe (const vec3_t impact, const vec3_t n, float
 static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 {
 	trace_t	tr;
-	vec3_t	a, b;
 	float	z_hit  = impact[2];
 	float	z_miss = impact[2] - 256.0f;
 	int		hit;
 
-	// Probe the search cap first.  If the wall is still there, the wall
-	// extends past our search range — return the cap and let the slide
-	// either reach it (rare: 64+ s at default 4 u/s, longer than blood
-	// lifetime) or hit the floor first via R_SlideRelease's disambig.
-	a[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
-	a[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
-	a[2] = z_miss;
-	b[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
-	b[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
-	b[2] = z_miss;
-	hit = R_TraceParticle (a, b, &tr);
+	// Probe the search cap first.  If THIS wall is still there (matching
+	// normal), the wall extends past our search range — return the cap.
+	hit = slide_probe_z (impact, n, z_miss, &tr);
 	slide_debug_record_probe (impact, n, z_miss, hit);
 	if (hit)
 		return z_miss;
@@ -879,9 +892,7 @@ static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 	// Bisect.  Invariant: probe(z_hit) HITs, probe(z_miss) MISSes.
 	while (z_hit - z_miss > 2.0f) {
 		float z_mid = (z_hit + z_miss) * 0.5f;
-		a[2] = z_mid;
-		b[2] = z_mid;
-		hit = R_TraceParticle (a, b, &tr);
+		hit = slide_probe_z (impact, n, z_mid, &tr);
 		slide_debug_record_probe (impact, n, z_mid, hit);
 		if (hit)
 			z_hit = z_mid;
