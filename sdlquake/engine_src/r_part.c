@@ -101,6 +101,11 @@ static void R_RainBuildSkyList (void)
 			zsum += v[2]; zcount++;
 		}
 		if (zcount == 0) continue;
+		// Reject small surfaces: slipgate door-tops are downward-facing
+		// sky-textured but only ~64x32 units. Real outdoor sky ceilings
+		// are hundreds of units on a side. Require min(width_x, width_y)
+		// >= 128 so we keep real sky and drop slipgate tops.
+		if ((xmax - xmin) < 128.0f || (ymax - ymin) < 128.0f) continue;
 		r_sky_bboxes[r_sky_bbox_count].xmin = xmin;
 		r_sky_bboxes[r_sky_bbox_count].xmax = xmax;
 		r_sky_bboxes[r_sky_bbox_count].ymin = ymin;
