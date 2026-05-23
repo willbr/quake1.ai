@@ -902,16 +902,16 @@ void R_SparkBurst (vec3_t origin, vec3_t normal, int count)
 
 		// Tight-cone direction: bias each sample heavily along the surface
 		// normal with a small random perturbation so sparks fly in a
-		// directional shower ~10° wide. 6.0 normal weight + ±1 perturbation
-		// gives cone half-angle arctan(1/6) ≈ 9.5°.
-		v[0] = normal[0] * 6.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
-		v[1] = normal[1] * 6.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
-		v[2] = normal[2] * 6.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
+		// directional shower ~5° wide. 12.0 normal weight + ±1 perturbation
+		// gives cone half-angle arctan(1/12) ≈ 4.8°.
+		v[0] = normal[0] * 12.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
+		v[1] = normal[1] * 12.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
+		v[2] = normal[2] * 12.0f + ((rand() & 1023) - 512) * (1.0f / 512.0f);
 		vlen = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
 
-		// Normalise then scale to a random speed in [500, 1000].
+		// Normalise then scale to a random speed in [1000, 2000].
 		vlen = 1.0f / sqrtf (vlen);
-		speed = 500.0f + (rand() & 255) * (500.0f / 256.0f);
+		speed = 1000.0f + (rand() & 255) * (1000.0f / 256.0f);
 		for (j = 0; j < 3; j++) p->vel[j] = v[j] * vlen * speed;
 
 		VectorCopy (base, p->org);
