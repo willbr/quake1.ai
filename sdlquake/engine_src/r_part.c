@@ -37,6 +37,11 @@ extern cvar_t r_smoke_ramp_min;
 extern cvar_t r_smoke_ramp_max;
 extern cvar_t r_smoke_emit_div;
 
+// Spark tunables — declared in r_main.c, registered in R_Init.
+extern cvar_t r_sparks_count_mul;
+extern cvar_t r_sparks_settle_dwell;
+extern cvar_t r_sparks_restitution;
+
 // Floor of free particles that R_AddSmokePuff refuses to dip below.
 // Smoke is a low-priority visualization re-emitted every frame; gameplay
 // FX (rocket trails, gibs, explosions) get clobbered if smoke drains the
