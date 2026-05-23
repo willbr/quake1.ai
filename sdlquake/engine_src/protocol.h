@@ -162,8 +162,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // PGM 01/21/97
 
 // Phase-8 water/slime/lava surface splash. Wire format:
-//   [coord*3 origin] [byte kind] where kind: 0=water 1=slime 2=lava
+//   [coord*3 origin] [byte kind] [byte strength_q4]
+// kind: 0=water 1=slime 2=lava. strength_q4 is fixed-point 1/16 (16=nominal
+// bullet splash, 32=2x, etc.) — scales particle count and upward velocity.
 #define TE_WATERSPLASH		16
+
+// Phase-8 blood spray with real gravity. Wire format:
+//   [coord*3 origin] [char*3 vel*16] [byte count]
+#define TE_BLOODSPRAY		17
 
 #ifdef QUAKE2
 #define TE_IMPLOSION		14

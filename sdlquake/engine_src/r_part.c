@@ -668,11 +668,15 @@ spray rises and falls under full gravity (no wind drag, no slow-grav float).
 kind: 0=water (light cyan), 1=slime (green-grey), 2=lava (orange).
 ===============
 */
-void R_WaterSplash (vec3_t org, int kind)
+void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 {
 	int			i, j;
 	particle_t	*p;
 	int			base_color;
+	float		s;
+	int			count;
+	float		vz_lo, vz_hi;
+	int			lat_range;
 
 	switch (kind) {
 	case 1:  base_color = 176; break; // slime: 176..183 green-grey
@@ -680,7 +684,16 @@ void R_WaterSplash (vec3_t org, int kind)
 	default: base_color = 244; break; // water: light cyan special-case
 	}
 
-	for (i = 0; i < 28; i++) {
+	if (strength_q4 < 4)   strength_q4 = 4;   // floor at 0.25x
+	if (strength_q4 > 128) strength_q4 = 128; // ceil at 8x
+	s = strength_q4 * (1.0f/16.0f);
+
+	count     = (int)(28 * s);
+	vz_lo     = 180.0f * s;
+	vz_hi     = 300.0f * s;
+	lat_range = (int)(160 * s); // total spread; halved to ±range/2
+
+	for (i = 0; i < count; i++) {
 		if (!free_particles) return;
 		p = free_particles;
 		free_particles = p->next;
@@ -696,10 +709,43 @@ void R_WaterSplash (vec3_t org, int kind)
 
 		for (j = 0; j < 2; j++) {
 			p->org[j] = org[j] + ((rand() & 7) - 4);
-			p->vel[j] = (rand() % 161) - 80;
+			p->vel[j] = (rand() % (lat_range + 1)) - (lat_range >> 1);
 		}
 		p->org[2] = org[2] + (rand() & 3);
-		p->vel[2] = 180 + (rand() % 121); // 180..300 ups up
+		p->vel[2] = vz_lo + (rand() % (int)(vz_hi - vz_lo + 1.0f));
+	}
+}
+
+/*
+===============
+R_BloodSpray
+
+Like R_RunParticleEffect for the blood-color ramp, but with pt_grav so droplets
+arc and fall instead of floating away on slow-grav + wind drag. dir is the same
+impulse vector svc_particle would carry (already scaled by the caller — see
+SpawnBlood); we add the usual jitter so the spray fans out.
+===============
+*/
+void R_BloodSpray (vec3_t org, vec3_t dir, int count)
+{
+	int			i, j;
+	particle_t	*p;
+
+	for (i = 0; i < count; i++) {
+		if (!free_particles) return;
+		p = free_particles;
+		free_particles = p->next;
+		p->next = active_particles;
+		active_particles = p;
+
+		p->die   = cl.time + 0.6f + (rand() & 31) * 0.02f;
+		p->type  = pt_grav;
+		p->color = (73 & ~7) + (rand() & 7); // blood ramp 72..79
+
+		for (j = 0; j < 3; j++) {
+			p->org[j] = org[j] + ((rand() & 15) - 8);
+			p->vel[j] = dir[j] * 15 + (rand() % 300) - 150;
+		}
 	}
 }
 

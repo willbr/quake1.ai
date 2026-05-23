@@ -290,8 +290,24 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord ();
 		{
 			int kind = MSG_ReadByte ();
-			R_WaterSplash (pos, kind);
+			int strength_q4 = MSG_ReadByte ();
+			R_WaterSplash (pos, kind, strength_q4);
 			S_StartSound (-1, 0, cl_sfx_h2ohit, pos, 1, 1);
+		}
+		break;
+
+	case TE_BLOODSPRAY:
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+		{
+			vec3_t bdir;
+			int count;
+			bdir[0] = MSG_ReadChar () * (1.0f/16.0f);
+			bdir[1] = MSG_ReadChar () * (1.0f/16.0f);
+			bdir[2] = MSG_ReadChar () * (1.0f/16.0f);
+			count = MSG_ReadByte ();
+			R_BloodSpray (pos, bdir, count);
 		}
 		break;
 	

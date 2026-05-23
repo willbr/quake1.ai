@@ -130,6 +130,7 @@
 #define TE_LAVASPLASH  10
 #define TE_TELEPORT    11
 #define TE_WATERSPLASH 16
+#define TE_BLOODSPRAY  17
 
 // sound channels
 #define CHAN_AUTO   0

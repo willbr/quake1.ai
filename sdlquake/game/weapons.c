@@ -344,8 +344,28 @@ void SpawnMeatSpray(vec3_t org, vec3_t vel) {
 // SpawnBlood / spawn_touchblood / SpawnChunk
 // ---------------------------------------------------------------------------
 void SpawnBlood(vec3_t org, vec3_t vel, float damage) {
-    vec3_t scaled = {vel[0]*0.1f, vel[1]*0.1f, vel[2]*0.1f};
-    eng->SV_Particle(org, scaled, 73, damage*2);
+    // Broadcast TE_BLOODSPRAY so the client spawns pt_grav blood that arcs and
+    // falls under real gravity. svc_particle would force pt_slowgrav (~5% of
+    // gravity) plus wind drag, which makes blood drift instead of falling.
+    int count = (int)(damage * 2.0f);
+    if (count < 1) count = 1;
+    if (count > 255) count = 255;
+    // Match svc_particle's vel encoding (dir*16 clamped to signed-char).
+    int cvx = (int)(vel[0] * 0.1f * 16.0f);
+    int cvy = (int)(vel[1] * 0.1f * 16.0f);
+    int cvz = (int)(vel[2] * 0.1f * 16.0f);
+    if (cvx >  127) cvx =  127; else if (cvx < -128) cvx = -128;
+    if (cvy >  127) cvy =  127; else if (cvy < -128) cvy = -128;
+    if (cvz >  127) cvz =  127; else if (cvz < -128) cvz = -128;
+    eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+    eng->MSG_WriteByte (MSG_BROADCAST, TE_BLOODSPRAY);
+    eng->MSG_WriteCoord(MSG_BROADCAST, org[0]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, org[1]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, org[2]);
+    eng->MSG_WriteChar (MSG_BROADCAST, cvx);
+    eng->MSG_WriteChar (MSG_BROADCAST, cvy);
+    eng->MSG_WriteChar (MSG_BROADCAST, cvz);
+    eng->MSG_WriteByte (MSG_BROADCAST, count);
 }
 
 static void spawn_touchblood(float damage) {
@@ -373,7 +393,7 @@ static int is_liquid(int c) {
     return c == CONTENT_WATER || c == CONTENT_SLIME || c == CONTENT_LAVA;
 }
 
-static int splash_at_water_entry(vec3_t start, vec3_t end) {
+static int splash_at_water_entry(vec3_t start, vec3_t end, int strength_q4) {
     if (is_liquid(eng->SV_PointContents(start))) return 0;
     int end_c = eng->SV_PointContents(end);
     if (!is_liquid(end_c)) return 0;
@@ -398,12 +418,15 @@ static int splash_at_water_entry(vec3_t start, vec3_t end) {
     int kind = 0;
     if (end_c == CONTENT_SLIME) kind = 1;
     if (end_c == CONTENT_LAVA)  kind = 2;
+    if (strength_q4 < 1)   strength_q4 = 1;
+    if (strength_q4 > 255) strength_q4 = 255;
     eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
     eng->MSG_WriteByte (MSG_BROADCAST, TE_WATERSPLASH);
     eng->MSG_WriteCoord(MSG_BROADCAST, hi[0]);
     eng->MSG_WriteCoord(MSG_BROADCAST, hi[1]);
     eng->MSG_WriteCoord(MSG_BROADCAST, hi[2]);
     eng->MSG_WriteByte (MSG_BROADCAST, kind);
+    eng->MSG_WriteByte (MSG_BROADCAST, strength_q4);
     return 1;
 }
 
@@ -412,7 +435,36 @@ static int splash_at_water_entry(vec3_t start, vec3_t end) {
 // projectile that punches through water before hitting solid still leaves a
 // surface splash. dist sets how far back to look (must exceed one frame of
 // travel, but not so far that we re-enter air on the other side of a wall).
-static void splash_projectile_entry(edict_t *self, float dist) {
+// Underwater explosion -> column-of-water splash at the surface above. Walks
+// straight up from `org` looking for the air boundary; bails if the surface is
+// further than 4096 units (deep submersion — no visible splash).
+static void splash_underwater_explosion(vec3_t org, int strength_q4) {
+    int c0 = eng->SV_PointContents(org);
+    if (!is_liquid(c0)) return;
+    vec3_t hi = {org[0], org[1], org[2] + 4096.0f};
+    if (is_liquid(eng->SV_PointContents(hi))) return;
+    float lo_z = org[2], hi_z = org[2] + 4096.0f;
+    for (int i = 0; i < 14; i++) {
+        float mid_z = (lo_z + hi_z) * 0.5f;
+        vec3_t mid = {org[0], org[1], mid_z};
+        if (is_liquid(eng->SV_PointContents(mid))) lo_z = mid_z;
+        else                                       hi_z = mid_z;
+    }
+    int kind = 0;
+    if (c0 == CONTENT_SLIME) kind = 1;
+    if (c0 == CONTENT_LAVA)  kind = 2;
+    if (strength_q4 < 1)   strength_q4 = 1;
+    if (strength_q4 > 255) strength_q4 = 255;
+    eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+    eng->MSG_WriteByte (MSG_BROADCAST, TE_WATERSPLASH);
+    eng->MSG_WriteCoord(MSG_BROADCAST, org[0]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, org[1]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, hi_z);
+    eng->MSG_WriteByte (MSG_BROADCAST, kind);
+    eng->MSG_WriteByte (MSG_BROADCAST, strength_q4);
+}
+
+static void splash_projectile_entry(edict_t *self, float dist, int strength_q4) {
     float vx = self->v.velocity[0], vy = self->v.velocity[1], vz = self->v.velocity[2];
     float vlen = (float)sqrt(vx*vx + vy*vy + vz*vz);
     if (vlen < 1.0f) return;
@@ -422,7 +474,7 @@ static void splash_projectile_entry(edict_t *self, float dist) {
     back[0] = here[0] - vx*s;
     back[1] = here[1] - vy*s;
     back[2] = here[2] - vz*s;
-    splash_at_water_entry(back, here);
+    splash_at_water_entry(back, here, strength_q4);
 }
 
 // ---------------------------------------------------------------------------
@@ -512,7 +564,7 @@ static void FireBullets(float shotcount, vec3_t dir, vec3_t spread) {
         end[2] = src[2] + direction[2]*2048;
         eng->SV_Traceline(src, end, 0, self);
         Corpse_BulletTrace(src, end, self);
-        splash_at_water_entry(src, g->trace_endpos);
+        splash_at_water_entry(src, g->trace_endpos, 16); // 1.0x bullet pellet
         if (g->trace_fraction != 1.0f)
             TraceAttack(4, direction);
 
@@ -579,7 +631,8 @@ static void T_MissileTouch(edict_t *self, edict_t *other) {
         eng->ED_Free(self);
         return;
     }
-    splash_projectile_entry(self, 4096.0f);
+    splash_projectile_entry(self, 4096.0f, 48); // 3.0x rocket entry
+    splash_underwater_explosion(self->v.origin, 64); // 4.0x detonation column
 
     float damg = 100 + eng->Random()*20;
     if (other->v.health) {
@@ -750,6 +803,7 @@ void W_FireLightning(void) {
 static void GrenadeExplode(edict_t *self) {
     g->self = self;
     T_RadiusDamage(self, self->v.owner, 120, g->world);
+    splash_underwater_explosion(self->v.origin, 64); // 4.0x — big column splash
     eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
     eng->MSG_WriteByte(MSG_BROADCAST, TE_EXPLOSION);
     eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
@@ -857,7 +911,7 @@ static void spike_touch(edict_t *self, edict_t *other) {
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;
     if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) { eng->ED_Free(self); return; }
-    splash_projectile_entry(self, 2048.0f);
+    splash_projectile_entry(self, 2048.0f, 32); // 2.0x nail
 
     if (other->v.takedamage) {
         spawn_touchblood(9);
@@ -883,7 +937,7 @@ void superspike_touch(edict_t *self, edict_t *other) {
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;
     if (eng->SV_PointContents(self->v.origin) == CONTENT_SKY) { eng->ED_Free(self); return; }
-    splash_projectile_entry(self, 2048.0f);
+    splash_projectile_entry(self, 2048.0f, 40); // 2.5x superspike
 
     if (other->v.takedamage) {
         spawn_touchblood(18);

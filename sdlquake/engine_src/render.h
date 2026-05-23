@@ -143,7 +143,8 @@ void R_BlobExplosion (vec3_t org);
 void R_ParticleExplosion (vec3_t org);
 void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength);
 void R_LavaSplash (vec3_t org);
-void R_WaterSplash (vec3_t org, int kind);
+void R_WaterSplash (vec3_t org, int kind, int strength_q4);
+void R_BloodSpray (vec3_t org, vec3_t dir, int count);
 void R_TeleportSplash (vec3_t org);
 
 void R_PushDlights (void);
