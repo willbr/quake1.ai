@@ -47,9 +47,9 @@ extern cvar_t r_rain;
 extern cvar_t r_rain_debug;
 
 // Cached sky-surface bboxes, rebuilt when cl.worldmodel changes.
-// Each entry is the XY bbox of one downward-facing SURF_DRAWSKY surface
-// plus its average z altitude. Used by R_RainSpawn to sample spawn
-// positions for falling rain.
+// Each entry is the XY bbox of one SURF_DRAWSKY surface (any orientation)
+// plus its average z altitude. Used by R_RainSpawn to check whether sky
+// is nearby the player.
 #define R_RAIN_MAX_SKY  256
 typedef struct {
 	float xmin, xmax, ymin, ymax;
@@ -69,8 +69,8 @@ static void R_RainBuildSkyList (void)
 	for (i = 0; i < m->numsurfaces && r_sky_bbox_count < R_RAIN_MAX_SKY; i++) {
 		msurface_t *s = &m->surfaces[i];
 		if (!(s->flags & SURF_DRAWSKY)) continue;
-		if (!s->plane) continue;
-		if (s->plane->normal[2] > -0.1f) continue;	// must be downward-facing (ceiling)
+		// Accept any orientation — vertical sky surfaces (e.g. slipgate
+		// backdrops on start.bsp) count just as much as ceiling sky.
 		float xmin =  1e30f, xmax = -1e30f;
 		float ymin =  1e30f, ymax = -1e30f;
 		float zsum = 0.0f;
@@ -96,7 +96,7 @@ static void R_RainBuildSkyList (void)
 		r_sky_bbox_count++;
 	}
 	if (r_rain_debug.value >= 1)
-		Con_Printf ("r_rain: cached %d downward-facing sky surfaces\n", r_sky_bbox_count);
+		Con_Printf ("r_rain: cached %d sky surfaces (any orientation)\n", r_sky_bbox_count);
 }
 
 // Floor of free particles that R_AddSmokePuff refuses to dip below.
@@ -668,23 +668,27 @@ static int R_TraceParticle (const vec3_t start, const vec3_t end, trace_t *trace
 ===============
 R_RainSpawn
 
-Spawn (r_rain.value * 8) rain droplets per frame by sampling randomly
-from the map's downward-facing sky surfaces (enumerated once per level
-load in R_RainBuildSkyList). For each attempt:
-  - pick a random sky surface from the cached list
-  - distance-cull if its XY centre is > 4096 units from the player
-  - pick a random point in the surface's XY bbox
-  - spawn the droplet at (x, y, sky_z - 16)
+Spawn (r_rain.value * 8) rain droplets per frame in a 512-unit radius
+disk around the player, provided at least one cached sky surface centre
+is within 4096 XY units of the player (any orientation).
 
-This correctly handles indoor maps where the sky exists somewhere in the
-level but not directly above the player.
+Steps each frame:
+  1. Rebuild the sky-surface cache if the worldmodel changed.
+  2. Walk the cached bbox list; if any centre is within 4096 XY units
+     of the player, mark sky_nearby = 1 and break.
+  3. If no sky nearby, skip (dry map / player deep indoors).
+  4. For each of n spawn attempts:
+       - pick a random angle and radius in a 512-unit disk around the player
+       - spawn altitude = player_z + 768
+       - skip if the point lands inside SOLID geometry
+       - emit a pt_grav droplet with PARTFL_STICK_ON_HIT
 
-r_rain_debug 1 logs every spawn/skip with surface index and position.
+r_rain_debug 1 logs every spawn/skip with position.
 ===============
 */
 static void R_RainSpawn (void)
 {
-	int    n, i;
+	int    n, i, j;
 	int    debug = (r_rain_debug.value >= 1);
 	vec3_t origin;
 
@@ -705,30 +709,36 @@ static void R_RainSpawn (void)
 	if (n <= 0) return;
 	if (n > 64) n = 64;	// hard cap so silly cvar values don't drain the pool
 
+	// Decide once per call whether any sky surface is near the player.
+	int sky_nearby = 0;
+	for (j = 0; j < r_sky_bbox_count; j++) {
+		float bcx = 0.5f * (r_sky_bboxes[j].xmin + r_sky_bboxes[j].xmax);
+		float bcy = 0.5f * (r_sky_bboxes[j].ymin + r_sky_bboxes[j].ymax);
+		float dx = bcx - origin[0];
+		float dy = bcy - origin[1];
+		if (dx*dx + dy*dy <= 4096.0f * 4096.0f) { sky_nearby = 1; break; }
+	}
+	if (!sky_nearby) {
+		if (debug) Con_Printf ("rain skip: no sky surfaces within 4096 of player\n");
+		return;
+	}
+
+	// Spawn drops in a disk around the player.
 	for (i = 0; i < n; i++) {
 		if (!free_particles) return;
 
-		// Pick a random sky surface, then a random XY within its bbox.
-		int   si = rand() % r_sky_bbox_count;
-		r_sky_bbox_t *b = &r_sky_bboxes[si];
+		float ang = (rand() & 1023) * (6.28318530718f / 1024.0f);
+		float r   = sqrtf((rand() & 1023) * (1.0f / 1023.0f)) * 512.0f;
+		vec3_t spawn;
+		spawn[0] = origin[0] + cosf(ang) * r;
+		spawn[1] = origin[1] + sinf(ang) * r;
+		spawn[2] = origin[2] + 768.0f;
 
-		// Distance cull: skip surfaces whose centre is far from the player
-		// in XY, so distant skybox squares don't waste spawns offscreen.
-		float bcx = 0.5f * (b->xmin + b->xmax);
-		float bcy = 0.5f * (b->ymin + b->ymax);
-		float dx = bcx - origin[0];
-		float dy = bcy - origin[1];
-		if (dx*dx + dy*dy > 4096.0f * 4096.0f) {
-			if (debug) Con_Printf ("rain skip: sky bbox %d too far (centre %.0f,%.0f)\n", si, bcx, bcy);
+		// Skip if spawn is inside solid (don't materialise inside walls).
+		if (SV_HullPointContents (&cl.worldmodel->hulls[0], 0, spawn) == CONTENTS_SOLID) {
+			if (debug) Con_Printf ("rain skip: in SOLID at (%.0f %.0f %.0f)\n", spawn[0], spawn[1], spawn[2]);
 			continue;
 		}
-
-		float u = (rand() & 1023) * (1.0f / 1023.0f);
-		float v = (rand() & 1023) * (1.0f / 1023.0f);
-		vec3_t spawn;
-		spawn[0] = b->xmin + (b->xmax - b->xmin) * u;
-		spawn[1] = b->ymin + (b->ymax - b->ymin) * v;
-		spawn[2] = b->z - 16.0f;
 
 		// Spawn the droplet.
 		particle_t *p = free_particles;
@@ -747,8 +757,7 @@ static void R_RainSpawn (void)
 		p->die    = cl.time + 10.0f;
 		p->flags  = PARTFL_STICK_ON_HIT;
 
-		if (debug) Con_Printf ("rain spawn at (%.0f %.0f %.0f) under sky bbox %d\n",
-		                       spawn[0], spawn[1], spawn[2], si);
+		if (debug) Con_Printf ("rain spawn at (%.0f %.0f %.0f)\n", spawn[0], spawn[1], spawn[2]);
 	}
 }
 
