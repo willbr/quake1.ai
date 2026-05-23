@@ -146,6 +146,7 @@ void R_LavaSplash (vec3_t org);
 void R_WaterSplash (vec3_t org, int kind, int strength_q4);
 void R_BloodSpray (vec3_t org, vec3_t dir, int count);
 void R_TeleportSplash (vec3_t org);
+void R_SparkBurst (vec3_t origin, vec3_t normal, int count);
 
 void R_PushDlights (void);
 
