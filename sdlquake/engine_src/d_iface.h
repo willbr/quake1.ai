@@ -48,6 +48,7 @@ typedef enum {
 #define PARTFL_RAMP_HOLD	0x10	// pt_spark: hold cyan flicker until first bounce
 #define PARTFL_DWELL		0x20	// pt_spark: in post-ramp dark-ember dwell
 #define PARTFL_LIQUID_SURF	0x40	// settle at p->birth (water surface Z) when falling past it; water/slime/lava is not solid so a normal trace would let the droplet plummet through
+#define PARTFL_WALL_STICK	0x80	// stuck on a wall-ish surface (|n.z|<0.7); slides downward each frame at r_particle_slide_speed
 
 // !!! if this is changed, it must be changed in d_ifacea.h too !!!
 //     (asm files aren't compiled in the SDL build, so the offsets there
