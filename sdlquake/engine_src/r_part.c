@@ -831,12 +831,14 @@ When r_particle_slide_debug is on, each probe is recorded for ~10 s with a
 when the actual probe geometry is 1 u.
 ================
 */
-// Start the down-trace several units into the wall (impact is 0.5 u off
-// the surface in +n).  Need enough offset to clear BSP-clipnode epsilon
-// — 1 u sometimes wasn't enough on id1 stone walls — but not so much
-// that thin brushes get skipped. 4 u is comfortably inside any wall
-// thicker than ~4.5 u (~all of id1) without being absurd.
-#define SLIDE_INSIDE_OFFSET	4.0f
+// Horizontal probe spans 4 u total (2 u outside the wall, 2 u inside)
+// so R_TraceParticle is guaranteed to register a hit when the wall
+// surface is present at this Z.  Walked down in 4 u steps; first MISS
+// is the wall's bottom edge.
+#define SLIDE_PROBE_OUT		2.0f
+#define SLIDE_PROBE_IN		2.0f
+#define SLIDE_PROBE_NORMAL_DOT	0.9f
+#define SLIDE_STEP			4.0f
 #define SLIDE_SEARCH_DEPTH	256.0f
 
 /*
@@ -845,53 +847,66 @@ R_FindWallBottom
 
 Find the bottom Z extent of the wall the particle just stuck to.
 
-Trace a single ray downward starting from a point 0.5 u inside the wall
-surface.  The BSP trace returns startsolid+allsolid flags and the
-fraction at which it exits solid:
+Walks straight down from the impact in SLIDE_STEP increments, doing one
+horizontal probe at each Z.  The probe traces perpendicular to the wall
+through the surface; it HITs if the wall is still there with a matching
+normal, MISSes otherwise.  First MISS = wall's bottom edge.
 
-  - startsolid && allsolid → wall extends past the search depth.  Return
-    the cap; the slide either reaches it or hits a floor via the disambig.
-  - startsolid && fraction < 1 → ray exited solid at the wall's bottom
-    edge.  Return the exit Z.
-  - !startsolid → starting point wasn't in solid — wall thinner than 1 u
-    or unusual geometry.  Bail out by returning impact_z so the slide
-    releases immediately and falls through to R_SlideRelease's disambig.
+This handles two tricky cases the inside-the-wall trace couldn't:
 
-One trace replaces the previous 7-probe binary search and dodges the
-"adjacent parallel wall below" problem: tracing INSIDE the wall sees
-only this brush's solid extent, not whatever else is on the same plane.
+  - Wall flush on floor: at floor_z the horizontal probe grazes the
+    floor's horizontal surface and does not penetrate, so MISS — the
+    walk returns floor_z, which is what we want.
+  - Wall above a doorway with another coplanar wall below: walking
+    downward, the FIRST MISS is at the doorway opening; the walk
+    returns there and never reaches the coplanar wall below.
+
+Cost: up to SLIDE_SEARCH_DEPTH/SLIDE_STEP probes (64) per stuck droplet,
+roughly an order of magnitude more than the previous attempts but still
+sub-millisecond at typical splatter counts.  The 4 u resolution is the
+visual quantisation; finer steps don't change what you see.
 ================
 */
+static void slide_debug_record_probe (const vec3_t impact, const vec3_t n, float z, int hit)
+{
+	vec3_t va, vb;
+	int color = hit ? 79 : 251;	// 79 = green, 251 = bright red
+	va[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
+	va[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
+	va[2] = z;
+	vb[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
+	vb[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
+	vb[2] = z;
+	SlideDebug_Push (va, vb, color, 10.0f);
+}
+
 static float R_FindWallBottom (const vec3_t impact, const vec3_t n)
 {
 	trace_t	tr;
 	vec3_t	a, b;
+	float	z;
+	int		hit;
 
-	a[0] = impact[0] - n[0] * SLIDE_INSIDE_OFFSET;
-	a[1] = impact[1] - n[1] * SLIDE_INSIDE_OFFSET;
-	a[2] = impact[2];
-	b[0] = a[0];
-	b[1] = a[1];
-	b[2] = a[2] - SLIDE_SEARCH_DEPTH;
+	a[0] = impact[0] + n[0] * SLIDE_PROBE_OUT;
+	a[1] = impact[1] + n[1] * SLIDE_PROBE_OUT;
+	b[0] = impact[0] - n[0] * SLIDE_PROBE_IN;
+	b[1] = impact[1] - n[1] * SLIDE_PROBE_IN;
 
-	memset (&tr, 0, sizeof(tr));
-	tr.fraction = 1.0f;
-	SV_RecursiveHullCheck (&cl.worldmodel->hulls[0],
-	                       cl.worldmodel->hulls[0].firstclipnode,
-	                       0.0f, 1.0f, a, b, &tr);
-
-	if (r_particle_slide_debug.value) {
-		// Green line: the trace from inside-wall down to where it
-		// exited solid (or to the cap if allsolid).  Red instead if
-		// the starting point wasn't actually in solid (bail-out).
-		int color = tr.startsolid ? 79 : 251;
-		vec3_t end = { a[0], a[1], tr.startsolid && !tr.allsolid ? tr.endpos[2] : b[2] };
-		SlideDebug_Push (a, end, color, 10.0f);
+	for (z = impact[2] - SLIDE_STEP; z > impact[2] - SLIDE_SEARCH_DEPTH; z -= SLIDE_STEP) {
+		a[2] = z;
+		b[2] = z;
+		if (R_TraceParticle (a, b, &tr)) {
+			float dot = tr.plane.normal[0]*n[0]
+			          + tr.plane.normal[1]*n[1]
+			          + tr.plane.normal[2]*n[2];
+			hit = dot >= SLIDE_PROBE_NORMAL_DOT;
+		} else {
+			hit = 0;
+		}
+		slide_debug_record_probe (impact, n, z, hit);
+		if (!hit) return z;
 	}
-
-	if (!tr.startsolid) return impact[2];
-	if (tr.allsolid)    return impact[2] - SLIDE_SEARCH_DEPTH;
-	return tr.endpos[2];
+	return impact[2] - SLIDE_SEARCH_DEPTH;
 }
 
 /*
