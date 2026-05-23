@@ -797,6 +797,74 @@ void R_BloodSpray (vec3_t org, vec3_t dir, int count)
 
 /*
 ===============
+R_SparkBurst
+
+Hemispherical spark burst at `origin`, biased along `normal` (so sparks
+fan away from the surface they spawn on). Used by TE_SPARKBURST (lightning
+gun impacts). Each spark: pt_spark, PARTFL_BOUNCE | PARTFL_RAMP_HOLD,
+cyan-white birth colour, lifetime ~0.8-1.2 s, speed 200-500 u/s.
+
+count is multiplied by r_sparks_count_mul.value (clamped >= 0) so the
+cvar gates spawns uniformly regardless of caller. Origin is nudged 1 unit
+along normal so the first integration step doesn't trace-immediately-back
+into the spawn surface.
+===============
+*/
+void R_SparkBurst (vec3_t origin, vec3_t normal, int count)
+{
+	int		i, j, scaled_count;
+	particle_t	*p;
+	float		mul, speed, vlen;
+	vec3_t		v, base;
+
+	mul = r_sparks_count_mul.value;
+	if (mul <= 0.0f) return;
+	scaled_count = (int)(count * mul);
+	if (scaled_count <= 0) return;
+
+	// 1-unit spawn offset along the surface normal.
+	base[0] = origin[0] + normal[0];
+	base[1] = origin[1] + normal[1];
+	base[2] = origin[2] + normal[2];
+
+	for (i = 0; i < scaled_count; i++) {
+		if (!free_particles) return;
+		p = free_particles;
+		free_particles = p->next;
+		p->next = active_particles;
+		active_particles = p;
+
+		// Hemisphere-oriented direction: sample inside unit cube, reject
+		// the obviously-bad zero vector, flip into +normal hemisphere.
+		do {
+			v[0] = ((rand() & 1023) - 512) * (1.0f / 512.0f);
+			v[1] = ((rand() & 1023) - 512) * (1.0f / 512.0f);
+			v[2] = ((rand() & 1023) - 512) * (1.0f / 512.0f);
+			vlen = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+		} while (vlen < 0.01f);
+
+		// Flip into the hemisphere defined by `normal`.
+		if (v[0]*normal[0] + v[1]*normal[1] + v[2]*normal[2] < 0.0f) {
+			v[0] = -v[0]; v[1] = -v[1]; v[2] = -v[2];
+		}
+
+		// Normalise then scale to a random speed in [200, 500].
+		vlen = 1.0f / sqrtf (vlen);
+		speed = 200.0f + (rand() & 255) * (300.0f / 256.0f);
+		for (j = 0; j < 3; j++) p->vel[j] = v[j] * vlen * speed;
+
+		VectorCopy (base, p->org);
+		p->color = 244 + (rand() % 3);		// cyan-white core: 244..246
+		p->ramp = 0;
+		p->birth = cl.time;
+		p->die = cl.time + 0.8f + (rand() & 31) * (0.4f / 31.0f);	// 0.8-1.2 s
+		p->type = pt_spark;
+		p->flags = PARTFL_BOUNCE | PARTFL_RAMP_HOLD;
+	}
+}
+
+/*
+===============
 R_TeleportSplash
 
 ===============
