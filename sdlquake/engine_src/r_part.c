@@ -743,7 +743,7 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
-		p->flags = 0;
+		p->flags = PARTFL_STICK_ON_HIT;
 
 		p->die  = cl.time + 0.9f + (rand() & 31) * 0.02f;
 		p->type = pt_grav;
@@ -782,7 +782,7 @@ void R_BloodSpray (vec3_t org, vec3_t dir, int count)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
-		p->flags = 0;
+		p->flags = PARTFL_STICK_ON_HIT;
 
 		p->die   = cl.time + 0.6f + (rand() & 31) * 0.02f;
 		p->type  = pt_grav;
