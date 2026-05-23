@@ -19,6 +19,7 @@ void  CopyToBodyQue(edict_t *); // world.c
 extern edict_t *lastspawn;      // world.c
 
 void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage); // combat.c
+extern void splash_underwater_explosion(vec3_t org, int strength_q4); // weapons.c
 
 // player.c (Task 12) — weak stubs until ported
 __attribute__((weak)) void player_pain(edict_t *self, edict_t *attacker, float damage)
@@ -611,6 +612,32 @@ static void WaterMove(void)
             eng->SV_StartSound(g->self, CHAN_BODY, "player/inh2o.wav", 1, ATTN_NORM);
         if (g->self->v.watertype == CONTENT_SLIME)
             eng->SV_StartSound(g->self, CHAN_BODY, "player/slimbrn2.wav", 1, ATTN_NORM);
+        // Person-sized plunk on entry. Strength 96 = 6.0x bullet for a
+        // dense droplet count; R_WaterSplash caps velocity/spread at 4x
+        // internally so the burst stays a thick ring rather than rocketing
+        // particles past the ceiling. Two bursts: one at the feet seed
+        // (visible from third person / for other clients) and one ~32
+        // units in front at foot height (visible from the player's own
+        // first-person view, which would otherwise occlude the feet burst).
+        {
+            vec3_t feet, ahead, fwd_h;
+            feet[0] = g->self->v.origin[0];
+            feet[1] = g->self->v.origin[1];
+            feet[2] = g->self->v.origin[2] + g->self->v.mins[2] + 1.0f;
+            splash_underwater_explosion(feet, 96);
+
+            fwd_h[0] = g->v_forward[0];
+            fwd_h[1] = g->v_forward[1];
+            fwd_h[2] = 0.0f;
+            eng->VectorNormalize(fwd_h, fwd_h);
+            ahead[0] = g->self->v.origin[0] + fwd_h[0] * 32.0f;
+            ahead[1] = g->self->v.origin[1] + fwd_h[1] * 32.0f;
+            ahead[2] = feet[2];
+            int ac = eng->SV_PointContents(ahead);
+            if (ac == CONTENT_WATER || ac == CONTENT_SLIME || ac == CONTENT_LAVA) {
+                splash_underwater_explosion(ahead, 96);
+            }
+        }
         g->self->v.flags = (float)((int)g->self->v.flags | FL_INWATER);
         g->self->v.dmgtime = 0;
     }

@@ -35,6 +35,11 @@ extern void SUB_Remove(edict_t *self);
 // Forward decls — used by Spike_GibPathScan below.
 void superspike_touch(edict_t *self, edict_t *other);
 void SpawnBlood(vec3_t org, vec3_t vel, float damage);
+// Splash helpers defined further down — also called externally by client.c.
+int  splash_at_water_entry(vec3_t start, vec3_t end, int strength_q4);
+void splash_underwater_explosion(vec3_t org, int strength_q4);
+int  splash_along_segment(vec3_t a, vec3_t b, int strength_q4);
+static int is_liquid(int c);
 
 // Apply hit-site impulse to a gib along `dir` (must be normalized). Used by
 // hitscan and direct-projectile hits — both have the actual shot direction
@@ -283,6 +288,42 @@ void W_FireAxe(void) {
     eng->SV_Traceline(source, end, 0, self);
     Corpse_BulletTrace(source, end, self);
 
+    // Axe sweep splashes when the swing touches a liquid surface — but
+    // only when the player's head is above water. If they're fully
+    // submerged (waterlevel 3, eyes underwater) any "surface splash" we
+    // emit would appear detached above them; the swing is happening in
+    // bulk water with no surface contact.
+    int swing_splashed = 0;
+    if (self->v.waterlevel < 3.0f) {
+        // Shore-side downward hit (air->water entry), wading swing exiting
+        // into air (water->air), or chest-deep swing with both ends in water
+        // (splash above the swing midpoint). Strength 24 = 1.5x bullet — a
+        // swing displaces more than a pellet.
+        swing_splashed = splash_along_segment(source, end, 24);
+    }
+    // Wading fallback: the player's feet are in water but the axe arc is
+    // entirely above the surface (waterlevel 1 with a horizontal swing).
+    // Place the splash ~32 units ahead at foot height so it appears where
+    // the player is looking (in front of them, visible) rather than under
+    // their feet (occluded by the body). If that point isn't in liquid
+    // (e.g. swinging toward the pool's edge from inside) fall back to the
+    // feet seed so we still get a splash.
+    if (!swing_splashed && self->v.waterlevel >= 1.0f && self->v.waterlevel < 3.0f) {
+        vec3_t fwd_h, seed;
+        fwd_h[0] = g->v_forward[0];
+        fwd_h[1] = g->v_forward[1];
+        fwd_h[2] = 0.0f;
+        eng->VectorNormalize(fwd_h, fwd_h);
+        seed[0] = self->v.origin[0] + fwd_h[0] * 32.0f;
+        seed[1] = self->v.origin[1] + fwd_h[1] * 32.0f;
+        seed[2] = self->v.origin[2] + self->v.mins[2] + 1.0f;
+        if (!is_liquid(eng->SV_PointContents(seed))) {
+            seed[0] = self->v.origin[0];
+            seed[1] = self->v.origin[1];
+        }
+        splash_underwater_explosion(seed, 16);
+    }
+
     if (g->trace_fraction == 1.0f) return;
 
     org[0] = g->trace_endpos[0] - g->v_forward[0]*4;
@@ -407,7 +448,7 @@ static int is_liquid(int c) {
     return c == CONTENT_WATER || c == CONTENT_SLIME || c == CONTENT_LAVA;
 }
 
-static int splash_at_water_entry(vec3_t start, vec3_t end, int strength_q4) {
+int splash_at_water_entry(vec3_t start, vec3_t end, int strength_q4) {
     if (is_liquid(eng->SV_PointContents(start))) return 0;
     int end_c = eng->SV_PointContents(end);
     if (!is_liquid(end_c)) return 0;
@@ -452,7 +493,7 @@ static int splash_at_water_entry(vec3_t start, vec3_t end, int strength_q4) {
 // Underwater explosion -> column-of-water splash at the surface above. Walks
 // straight up from `org` looking for the air boundary; bails if the surface is
 // further than 4096 units (deep submersion — no visible splash).
-static void splash_underwater_explosion(vec3_t org, int strength_q4) {
+void splash_underwater_explosion(vec3_t org, int strength_q4) {
     int c0 = eng->SV_PointContents(org);
     if (!is_liquid(c0)) return;
     vec3_t hi = {org[0], org[1], org[2] + 4096.0f};
@@ -476,6 +517,29 @@ static void splash_underwater_explosion(vec3_t org, int strength_q4) {
     eng->MSG_WriteCoord(MSG_BROADCAST, hi_z);
     eng->MSG_WriteByte (MSG_BROADCAST, kind);
     eng->MSG_WriteByte (MSG_BROADCAST, strength_q4);
+}
+
+// Generalised splash for an arbitrary line segment (e.g. an axe swing). Picks
+// the right helper for whatever water/air configuration the endpoints land in:
+//   - one end in air, other in liquid -> air->water entry crossing
+//   - both ends in liquid             -> player swinging while submerged;
+//                                         splash at the surface above the
+//                                         midpoint
+//   - both ends in air                -> no splash
+int splash_along_segment(vec3_t a, vec3_t b, int strength_q4) {
+    if (splash_at_water_entry(a, b, strength_q4)) return 1;
+    if (splash_at_water_entry(b, a, strength_q4)) return 1;
+    int ca = eng->SV_PointContents(a);
+    int cb = eng->SV_PointContents(b);
+    if (is_liquid(ca) && is_liquid(cb)) {
+        vec3_t mid;
+        mid[0] = (a[0] + b[0]) * 0.5f;
+        mid[1] = (a[1] + b[1]) * 0.5f;
+        mid[2] = (a[2] + b[2]) * 0.5f;
+        splash_underwater_explosion(mid, strength_q4);
+        return 1;
+    }
+    return 0;
 }
 
 static void splash_projectile_entry(edict_t *self, float dist, int strength_q4) {

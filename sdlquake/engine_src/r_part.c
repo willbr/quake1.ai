@@ -118,6 +118,80 @@ static void R_RainBuildSkyList (void)
 		Con_Printf ("r_rain: cached %d sky surfaces (any orientation)\n", r_sky_bbox_count);
 }
 
+// Cached horizontal liquid surfaces (water/slime/lava floors of pools),
+// rebuilt when cl.worldmodel changes. R_WaterSplash uses this to find the
+// surface under a splash point so it can sample the actual texture colour
+// (rather than using a hardcoded palette range that's typically too blue
+// for the muted greens/browns of id1 water textures).
+#define R_SPLASH_MAX_LIQ_SURFS  1024
+typedef struct {
+	msurface_t *surf;
+	float xmin, xmax, ymin, ymax;
+} r_liq_surf_t;
+static r_liq_surf_t r_liq_surfs[R_SPLASH_MAX_LIQ_SURFS];
+static int          r_liq_surf_count = 0;
+static model_t     *r_liq_surf_model = NULL;
+
+static void R_BuildLiquidSurfList (void)
+{
+	int i, j;
+	model_t *m = cl.worldmodel;
+	r_liq_surf_count = 0;
+	r_liq_surf_model = m;
+	if (!m) return;
+	for (i = 0; i < m->numsurfaces && r_liq_surf_count < R_SPLASH_MAX_LIQ_SURFS; i++) {
+		msurface_t *s = &m->surfaces[i];
+		if (!(s->flags & SURF_DRAWTURB)) continue;
+		if (!s->plane) continue;
+		// Restrict to roughly-horizontal faces — vertical waterfall sheets
+		// would mis-match an XY bbox test against a splash point on a
+		// neighbouring pool.
+		float nz = s->plane->normal[2];
+		if (s->flags & SURF_PLANEBACK) nz = -nz;
+		if (fabsf(nz) < 0.5f) continue;
+		float xmin =  1e30f, xmax = -1e30f;
+		float ymin =  1e30f, ymax = -1e30f;
+		int   any = 0;
+		for (j = 0; j < s->numedges; j++) {
+			int eidx = m->surfedges[s->firstedge + j];
+			int vidx = eidx > 0 ? m->edges[eidx].v[0] : m->edges[-eidx].v[1];
+			float *v = m->vertexes[vidx].position;
+			if (v[0] < xmin) xmin = v[0];
+			if (v[0] > xmax) xmax = v[0];
+			if (v[1] < ymin) ymin = v[1];
+			if (v[1] > ymax) ymax = v[1];
+			any = 1;
+		}
+		if (!any) continue;
+		r_liq_surfs[r_liq_surf_count].surf = s;
+		r_liq_surfs[r_liq_surf_count].xmin = xmin;
+		r_liq_surfs[r_liq_surf_count].xmax = xmax;
+		r_liq_surfs[r_liq_surf_count].ymin = ymin;
+		r_liq_surfs[r_liq_surf_count].ymax = ymax;
+		r_liq_surf_count++;
+	}
+}
+
+// Returns the liquid surface under `org` (within ~6u of its plane and
+// inside its XY bbox), or NULL if none. Used by R_WaterSplash to grab
+// the surface's texture for per-particle colour sampling.
+static msurface_t *R_FindLiquidSurface (vec3_t org)
+{
+	int i;
+	if (r_liq_surf_model != cl.worldmodel) R_BuildLiquidSurfList();
+	for (i = 0; i < r_liq_surf_count; i++) {
+		r_liq_surf_t *e = &r_liq_surfs[i];
+		if (org[0] < e->xmin - 1.0f || org[0] > e->xmax + 1.0f) continue;
+		if (org[1] < e->ymin - 1.0f || org[1] > e->ymax + 1.0f) continue;
+		msurface_t *s = e->surf;
+		float dist = DotProduct(org, s->plane->normal) - s->plane->dist;
+		if (s->flags & SURF_PLANEBACK) dist = -dist;
+		if (fabsf(dist) > 6.0f) continue;
+		return s;
+	}
+	return NULL;
+}
+
 // Floor of free particles that R_AddSmokePuff refuses to dip below.
 // Smoke is a low-priority visualization re-emitted every frame; gameplay
 // FX (rocket trails, gibs, explosions) get clobbered if smoke drains the
@@ -944,7 +1018,13 @@ R_WaterSplash
 
 Surface-splash burst for hitscan/projectile water impacts. Uses pt_grav so the
 spray rises and falls under full gravity (no wind drag, no slow-grav float).
-kind: 0=water (light cyan), 1=slime (green-grey), 2=lava (orange).
+kind: 0=water, 1=slime, 2=lava — fallback palette ranges if no liquid surface
+is found at `org`; otherwise the actual surface texture is sampled per particle
+so cyan splashes don't read incongruously against muted brown/green water.
+
+Droplets also remember `org[2]` as their settle plane (p->birth + PARTFL_LIQUID_SURF):
+when gravity pulls them back through that height they pin to the surface for a
+short dwell instead of plummeting through the (non-solid) water plane.
 ===============
 */
 void R_WaterSplash (vec3_t org, int kind, int strength_q4)
@@ -955,7 +1035,11 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 	float		s;
 	int			count;
 	float		vz_lo, vz_hi;
-	int			lat_range;
+	msurface_t	*liq_surf;
+	texture_t	*liq_tex = NULL;
+	byte		*liq_pixels = NULL;
+	int			liq_w = 0, liq_h = 0;
+	float		liq_s0 = 0.0f, liq_t0 = 0.0f;
 
 	switch (kind) {
 	case 1:  base_color = 176; break; // slime: 176..183 green-grey
@@ -963,14 +1047,53 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 	default: base_color = 244; break; // water: light cyan special-case
 	}
 
+	// Foam/highlight palette index per kind. A fraction of droplets pick a
+	// bright accent instead of the sampled texture colour, so the spray
+	// reads as splash and doesn't camouflage into the (typically muted)
+	// surface hue. Picked from the bright end of each kind's natural ramp:
+	// cyan-white for water, light green for slime, bright orange for lava.
+	int highlight_base;
+	switch (kind) {
+	case 1:  highlight_base = 180; break; // slime: brighter end of 176..183 ramp
+	case 2:  highlight_base = 236; break; // lava: brighter end of 232..239 ramp
+	default: highlight_base = 244; break; // water: light cyan (id1 foam idiom)
+	}
+
+	liq_surf = R_FindLiquidSurface (org);
+	if (liq_surf && liq_surf->texinfo && liq_surf->texinfo->texture &&
+	    liq_surf->texinfo->texture->offsets[0]) {
+		mtexinfo_t *tex = liq_surf->texinfo;
+		liq_tex    = tex->texture;
+		liq_w      = (int)liq_tex->width;
+		liq_h      = (int)liq_tex->height;
+		liq_pixels = (byte *)liq_tex + liq_tex->offsets[0];
+		liq_s0     = DotProduct(org, tex->vecs[0]) + tex->vecs[0][3];
+		liq_t0     = DotProduct(org, tex->vecs[1]) + tex->vecs[1][3];
+	}
+
 	if (strength_q4 < 4)   strength_q4 = 4;   // floor at 0.25x
 	if (strength_q4 > 128) strength_q4 = 128; // ceil at 8x
 	s = strength_q4 * (1.0f/16.0f);
 
+	// Velocity/spread cap: a person-sized splash (s = 6x) wants lots more
+	// droplets but not absurd 1800 ups arcs — clamp the velocity scale at
+	// 4x so big splashes read as "denser ring" rather than "fountain to
+	// the ceiling". Particle count keeps scaling with s.
+	float vs = s > 4.0f ? 4.0f : s;
 	count     = (int)(28 * s);
-	vz_lo     = 180.0f * s;
-	vz_hi     = 300.0f * s;
-	lat_range = (int)(160 * s); // total spread; halved to ±range/2
+	// Speed magnitude range — directions are picked per-particle from an
+	// upper hemisphere below.
+	vz_lo     = 180.0f * vs;
+	vz_hi     = 300.0f * vs;
+	// XY spawn radius scales with the full strength so big splashes
+	// emerge from a body-sized footprint instead of all spawning at a
+	// single ±4u point and then fanning out from there — that "single
+	// point with rays" look reads as a bullet hit, not a person plunking
+	// in. At s=1 (bullet) we get ±4u, at s=6 (player) we get ±24u which
+	// matches the player bbox half-width.
+	int   spawn_r     = (int)(4.0f * s);
+	if (spawn_r < 2) spawn_r = 2;
+	int   spawn_range = spawn_r * 2 + 1;
 
 	for (i = 0; i < count; i++) {
 		if (!free_particles) return;
@@ -978,21 +1101,57 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 		free_particles = p->next;
 		p->next = active_particles;
 		active_particles = p;
-		p->flags = PARTFL_STICK_ON_HIT;
+		p->flags = PARTFL_STICK_ON_HIT | PARTFL_LIQUID_SURF;
 
 		p->die  = cl.time + 0.9f + (rand() & 31) * 0.02f;
 		p->type = pt_grav;
-		if (base_color == 244)
+		// pt_grav ignores `birth` (only pt_smoke uses it for puff curve);
+		// repurpose it here as the settle plane for the integrator's
+		// PARTFL_LIQUID_SURF check.
+		p->birth = org[2];
+		// ~25% foam highlight — bright, kind-specific. The rest sample the
+		// actual surface texture so the splash still belongs to the pool
+		// it came from.
+		if ((rand() & 3) == 0) {
+			p->color = highlight_base + (rand() & 3);
+		} else if (liq_pixels) {
+			// Sample the actual surface texture with ±4 texel jitter so
+			// neighbouring droplets pick up natural texture variation
+			// rather than reading as a single flat hue.
+			int s_i = (int)(liq_s0 + ((rand() & 7) - 4));
+			int t_i = (int)(liq_t0 + ((rand() & 7) - 4));
+			s_i = ((s_i % liq_w) + liq_w) % liq_w;
+			t_i = ((t_i % liq_h) + liq_h) % liq_h;
+			p->color = liq_pixels[t_i * liq_w + s_i];
+		} else if (base_color == 244) {
 			p->color = 244 + (rand() % 3);
-		else
+		} else {
 			p->color = (base_color & ~7) + (rand() & 7);
-
-		for (j = 0; j < 2; j++) {
-			p->org[j] = org[j] + ((rand() & 7) - 4);
-			p->vel[j] = (rand() % (lat_range + 1)) - (lat_range >> 1);
 		}
+
+		for (j = 0; j < 2; j++)
+			p->org[j] = org[j] + (rand() % spawn_range) - spawn_r;
 		p->org[2] = org[2] + (rand() & 3);
-		p->vel[2] = vz_lo + (rand() % (int)(vz_hi - vz_lo + 1.0f));
+
+		// Velocity direction: pick uniformly within the upper hemisphere
+		// with a polar angle 20°–80° off vertical, so droplets fan out in
+		// a 360° dome around the impact rather than rocketing straight
+		// up. The narrow vertical cone of the old box-shaped distribution
+		// stacked all particles overhead, where a tall enough room let
+		// them embed in the ceiling. With this dome, lateral motion is
+		// always comparable to vertical, and the per-particle PARTFL_LIQUID_SURF
+		// settle pins them back on the water surface when they fall.
+		{
+			float speed = vz_lo + (float)(rand() % (int)(vz_hi - vz_lo + 1.0f));
+			float theta = ((float)(rand() & 4095) / 4096.0f) * 6.2831853f;
+			// phi in [0.35, 1.40] rad ≈ [20°, 80°] off vertical.
+			float phi   = 0.35f + ((float)(rand() & 4095) / 4096.0f) * 1.05f;
+			float sp    = (float)sin(phi);
+			float cp    = (float)cos(phi);
+			p->vel[0] = speed * sp * (float)cos(theta);
+			p->vel[1] = speed * sp * (float)sin(theta);
+			p->vel[2] = speed * cp;
+		}
 	}
 }
 
@@ -1465,7 +1624,20 @@ void R_DrawParticles (void)
 			newpos[1] = p->org[1] + p->vel[1] * frametime;
 			newpos[2] = p->org[2] + p->vel[2] * frametime;
 
-			if (R_TraceParticle (p->org, newpos, &tr)) {
+			// Liquid-surface settle: splash droplets pin to their origin
+			// water plane (p->birth) when gravity drags them back through
+			// it, then dwell briefly. R_TraceParticle only sees solids, so
+			// without this they'd fall through the water and either land
+			// on whatever's at the pool's bottom or fly off the world.
+			if ((p->flags & PARTFL_LIQUID_SURF) &&
+			    p->org[2] >= p->birth && newpos[2] <= p->birth) {
+				p->org[0] = newpos[0];
+				p->org[1] = newpos[1];
+				p->org[2] = p->birth;
+				p->vel[0] = p->vel[1] = p->vel[2] = 0;
+				p->flags |= PARTFL_STUCK;
+				if (p->die < cl.time + 0.45f) p->die = cl.time + 0.45f;
+			} else if (R_TraceParticle (p->org, newpos, &tr)) {
 				vec3_t n;
 				VectorCopy (tr.plane.normal, n);
 
