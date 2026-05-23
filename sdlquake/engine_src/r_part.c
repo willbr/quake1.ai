@@ -24,10 +24,25 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "debug_lines.h" // DebugLines_Add — debug overlay for r_particle_wind_debug
 #include <math.h>        // expf
 
-#define MAX_PARTICLES			8192	// default max # of particles at one
-										//  time (raised for sim_wind smoke)
+#define MAX_PARTICLES			32768	// default max # of particles at one
+										//  time (raised for sim_wind smoke;
+										//  smoke also yields to gameplay via
+										//  SMOKE_GAMEPLAY_RESERVE below)
 #define ABSOLUTE_MIN_PARTICLES	512		// no fewer than this no matter what's
 										//  on the command line
+
+// Smoke tunables — declared in r_main.c, registered in R_Init.
+extern cvar_t r_smoke_lifetime;
+extern cvar_t r_smoke_ramp_min;
+extern cvar_t r_smoke_ramp_max;
+extern cvar_t r_smoke_emit_div;
+
+// Floor of free particles that R_AddSmokePuff refuses to dip below.
+// Smoke is a low-priority visualization re-emitted every frame; gameplay
+// FX (rocket trails, gibs, explosions) get clobbered if smoke drains the
+// shared pool. When fewer than this many particles are free, smoke skips
+// the burst and lets the next frame's gameplay spawns succeed.
+#define SMOKE_GAMEPLAY_RESERVE	2048
 
 int		ramp1[8] = {0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61};
 int		ramp2[8] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66};
@@ -40,7 +55,7 @@ int		ramp3[8] = {0x6d, 0x6b, 6, 5, 4, 3};
 // blood from gibs should not billow).
 static const float wind_drag_k[] = {
     [pt_static]   = 3.0f,
-    [pt_smoke]    = 4.0f,
+    [pt_smoke]    = 1.5f,	// moderate drag -- puff holds its spawn impulse long enough to billow (~half a second), then drifts with the ambient wind
     [pt_fire]     = 0.4f,   // used by R_RocketTrail; spawns at zero vel,
                             // so any strong drag yanks the trail off the
                             // rocket's path. Keep this low.
@@ -58,6 +73,13 @@ particle_t	*particles;
 int			r_numparticles;
 
 vec3_t			r_pright, r_pup, r_ppn;
+
+// Smoke-cell voxel-haze rasteriser lives in d_part.c (D_DrawSmokeCells).
+// R_QueueSmokeCell is defined there alongside the queue + struct.
+// D_CompositeSmoke walks vid.buffer at end-of-frame and applies the fog
+// colormap to every pixel that got smoke density written into it.
+void D_DrawSmokeCells (void);
+void D_CompositeSmoke (void);
 
 
 /*
@@ -424,10 +446,78 @@ format clamps direction to ±8 units and lifetime to ≤0.4s, both of which
 are wrong for drifting smoke.
 ===============
 */
+/*
+===============
+R_PushSmokeTube
+
+Push every active pt_smoke particle that lies within `radius` perpendicular
+distance of the axis-line through `origin` outward, perpendicular to axis,
+with magnitude `mag * (1 - perp_dist/radius)`. Used by the game DLL's
+Missile_SmokeWake to carve a visible tunnel through a smoke cloud as a
+rocket flies; bypasses the wind grid because rockets cross a cloud in a
+few hundred ms -- too fast for wind-drag to transport particles visibly.
+Direct velocity kick gives the effect immediately.
+===============
+*/
+void R_PushSmokeTube (const float *origin, const float *axis,
+                     float mag, float radius)
+{
+	float alen2 = axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2];
+	if (alen2 < 1.0f) return;
+	float alen = sqrtf(alen2);
+	float ax = axis[0]/alen, ay = axis[1]/alen, az = axis[2]/alen;
+	float r2 = radius * radius;
+
+	// Per-particle target speed: SET radial velocity toward this each
+	// frame the particle is in range, rather than ADDing. Avoids the
+	// "particle picked up 600 u/s over 8 frames then drifts forever"
+	// problem -- once the rocket leaves, vel is just whatever the last
+	// touch set, which then decays via the normal wind-drag in
+	// R_DrawParticles. Knot: still kick the particle outward each frame
+	// it's in range, but don't accumulate.
+	for (particle_t *p = active_particles; p; p = p->next) {
+		if (p->type != pt_smoke) continue;
+		float rx = p->org[0] - origin[0];
+		float ry = p->org[1] - origin[1];
+		float rz = p->org[2] - origin[2];
+		float dot = rx*ax + ry*ay + rz*az;
+		rx -= dot * ax;
+		ry -= dot * ay;
+		rz -= dot * az;
+		float perp2 = rx*rx + ry*ry + rz*rz;
+		if (perp2 >= r2 || perp2 < 0.01f) continue;
+		float perp = sqrtf(perp2);
+		float falloff = 1.0f - (perp / radius);
+		float target = mag * falloff;
+		// Set the perpendicular component to `target` outward, preserve
+		// the along-axis component of velocity (rocket shouldn't kill
+		// natural updraft).
+		float vdot = p->vel[0]*ax + p->vel[1]*ay + p->vel[2]*az;
+		float axis_vx = vdot * ax;
+		float axis_vy = vdot * ay;
+		float axis_vz = vdot * az;
+		float unit_x = rx / perp;
+		float unit_y = ry / perp;
+		float unit_z = rz / perp;
+		p->vel[0] = axis_vx + unit_x * target;
+		p->vel[1] = axis_vy + unit_y * target;
+		p->vel[2] = axis_vz + unit_z * target;
+	}
+}
+
 void R_AddSmokePuff (vec3_t org, vec3_t dir, int color, int count)
 {
 	int			i, j;
 	particle_t	*p;
+
+	// Yield to gameplay particles when the pool is below the reserve.
+	// Walks the free list with early-bail at reserve+count nodes.
+	{
+		int need = SMOKE_GAMEPLAY_RESERVE + count;
+		particle_t *probe = free_particles;
+		while (need > 0 && probe) { probe = probe->next; need--; }
+		if (need > 0) return;
+	}
 
 	for (i=0 ; i<count ; i++)
 	{
@@ -438,13 +528,21 @@ void R_AddSmokePuff (vec3_t org, vec3_t dir, int color, int count)
 		p->next = active_particles;
 		active_particles = p;
 
-		p->die = cl.time + 1.5 + (rand() & 31) * 0.04;	// 1.5–2.8s
-		p->color = color;
-		p->type = pt_smoke;
-		// ramp is the per-particle size scale (1.0 small, ~3.5 big halo).
-		// Skewed toward bigger so most puffs are noticeable; the dither
-		// kicks in at >2.0 so the halos read as soft alpha falloff.
-		p->ramp = 1.0f + (rand() & 31) * (2.5f / 31.0f);
+		// Lifetime and ramp range are tunable via r_smoke_* cvars (F12
+		// "Smoke" panel). ramp is the puff's TARGET (peak) size scale;
+		// D_DrawSmokeParticle multiplies it by an age-driven growth curve
+		// so the puff starts small and reaches `ramp` near the end of
+		// its life. birth lets the draw side compute that age.
+		{
+			float ramp_min = r_smoke_ramp_min.value;
+			float ramp_max = r_smoke_ramp_max.value;
+			if (ramp_max < ramp_min) ramp_max = ramp_min;
+			p->birth = cl.time;
+			p->die = cl.time + r_smoke_lifetime.value + (rand() & 31) * 0.04;
+			p->color = color;
+			p->type = pt_smoke;
+			p->ramp = ramp_min + (rand() & 31) * ((ramp_max - ramp_min) / 31.0f);
+		}
 		for (j=0 ; j<3 ; j++)
 		{
 			p->org[j] = org[j] + ((rand() & 7) - 4);	// ±4 unit jitter
@@ -917,6 +1015,8 @@ void R_DrawParticles (void)
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 #else
 	D_EndParticles ();
+	D_DrawSmokeCells ();	// voxel-haze pass (Phase 8)
+	D_CompositeSmoke ();	// fog-tint composite over the framebuffer
 #endif
 }
 

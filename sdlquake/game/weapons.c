@@ -121,6 +121,61 @@ void Spike_GibPathScan(void) {
         }
     }
 }
+// ---------------------------------------------------------------------------
+// W_FireGust -- every weapon discharge punches a brief small tunnel
+// through any smoke crossing the muzzle's line of fire. Same mechanism
+// as the rocket wake (Particles_PushTube), just one-shot and tighter --
+// the hitscan beam isn't sustained, so particles get a single radial
+// kick and drift back to ambient over the usual ~1s drag bleed-off.
+//
+// Assumes the caller already ran eng->MakeVectors(self->v.v_angle) so
+// g->v_forward is populated. The tube is infinite along the axis, so
+// any smoke in front of the muzzle within radius gets the same kick.
+// ---------------------------------------------------------------------------
+static void W_FireGust(void) {
+    edict_t *self = g->self;
+    vec3_t muzzle = {
+        self->v.origin[0] + g->v_forward[0] * 16.0f,
+        self->v.origin[1] + g->v_forward[1] * 16.0f,
+        self->v.origin[2] + self->v.view_ofs[2] + g->v_forward[2] * 16.0f,
+    };
+    vec3_t axis = { g->v_forward[0], g->v_forward[1], g->v_forward[2] };
+    // Single-frame impulse, so the magnitude has to do all the work --
+    // unlike the rocket which kicks the same particles for many frames.
+    // Rocket settings (250 / 48) are too gentle here; bump to 350 / 32
+    // for a clearly visible one-shot punch that stays narrow.
+    eng->Particles_PushTube(muzzle, axis, 350.0f, 32.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Missile_SmokeWake -- per-frame: flying missiles directly kick pt_smoke
+// particles outward from their axis via Particles_PushTube. Bypasses the
+// wind grid because rockets cross a smoke cloud in ~300ms -- far faster
+// than wind-drag can transport particles visibly (k=1.5 + 0.85^tick velocity
+// damping). The direct impulse adds radial velocity each frame the rocket
+// is near a particle, so by the time the rocket exits the cloud particles
+// in its path have visibly flown outward, leaving a tunnel.
+// ---------------------------------------------------------------------------
+void Missile_SmokeWake(void) {
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        // FLYMISSILE covers rockets + nail spikes. Grenades are
+        // MOVETYPE_BOUNCE so we have to add them explicitly -- but only
+        // grenade-style projectiles (classname filter), otherwise every
+        // bouncing gib/backpack would also leave a smoke wake.
+        const char *cn = e->v.classname;
+        int is_grenade = (e->v.movetype == MOVETYPE_BOUNCE &&
+                          cn && strcmp(cn, "grenade") == 0);
+        if (e->v.movetype != MOVETYPE_FLYMISSILE && !is_grenade) continue;
+        vec3_t axis = { e->v.velocity[0], e->v.velocity[1], e->v.velocity[2] };
+        // Magnitude is now the *target* outward speed at the tube axis
+        // (R_PushSmokeTube SETs velocity rather than adding). Once the
+        // rocket has passed, the particle's vel is whatever the last
+        // frame set; wind-drag in R_DrawParticles bleeds that down to
+        // ambient over ~1s. No more "tunnel keeps widening forever".
+        eng->Particles_PushTube(e->v.origin, axis, 250.0f, 48.0f);
+    }
+}
+
 // player.c
 extern void player_run(edict_t *self);
 extern void player_axe1(edict_t *self);
@@ -589,6 +644,14 @@ void W_FireLightning(void) {
     vec3_t end = {org[0]+g->v_forward[0]*600, org[1]+g->v_forward[1]*600, org[2]+g->v_forward[2]*600};
     eng->SV_Traceline(org, end, 1, self);  // TRUE = nomonsters
 
+    // Push smoke aside along the bolt itself, not just via the W_Attack
+    // muzzle gust -- lightning re-fires at ~10 Hz from player_light1_think
+    // while W_Attack only runs ~5 Hz, and the grenade spawns 80 puffs/sec.
+    // Without this per-bolt push, fresh smoke refills the tunnel between
+    // muzzle gusts and the player sees no effect.
+    vec3_t axis = { g->v_forward[0], g->v_forward[1], g->v_forward[2] };
+    eng->Particles_PushTube(org, axis, 350.0f, 32.0f);
+
     eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
     eng->MSG_WriteByte(MSG_BROADCAST, TE_LIGHTNING2);
     eng->MSG_WriteEntity(MSG_BROADCAST, self);
@@ -948,6 +1011,7 @@ static void W_Attack(void) {
     if (self->v.weapon2 != 0) {
         eng->MakeVectors(self->v.v_angle);
         self->v.show_hostile = g->time + 1;
+        W_FireGust();
         W_Attack_Phase6();
         return;
     }
@@ -956,6 +1020,7 @@ static void W_Attack(void) {
 
     eng->MakeVectors(self->v.v_angle);
     self->v.show_hostile = g->time + 1;
+    W_FireGust();
 
     int w = (int)self->v.weapon;
     if (w == IT_AXE) {

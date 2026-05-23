@@ -775,6 +775,20 @@ static void engine_sv_smoke(float *org, float *dir, float color, float count)
     R_AddSmokePuff(org, dir, (int)color, (int)count);
 }
 
+void R_QueueSmokeCell(const float *org, float world_size, float density); // r_part.c
+static void engine_draw_smoke_cell(float *org, float world_size, float density)
+{
+    R_QueueSmokeCell(org, world_size, density);
+}
+
+void R_PushSmokeTube(const float *origin, const float *axis,
+                    float mag, float radius); // r_part.c
+static void engine_particles_push_tube(const float *origin, const float *axis,
+                                       float mag, float radius)
+{
+    R_PushSmokeTube(origin, axis, mag, radius);
+}
+
 static void engine_sv_makestatic(edict_t *e)
 {
     sizebuf_t *signon = svb_signon();
@@ -1003,6 +1017,8 @@ static engine_api_t engine_funcs = {
     Lightmap_AddDelta,
     Lightmap_ClearOwner,
     engine_sv_smoke,
+    engine_draw_smoke_cell,
+    engine_particles_push_tube,
 };
 
 // ---------------------------------------------------------------------------

@@ -149,6 +149,8 @@ float Wind_PathOcclusion(const vec3_t a, const vec3_t b);
 
 void  Wind_AddImpulse(const vec3_t origin, const vec3_t dir,
                       float magnitude, float radius);
+void  Wind_AddTubeImpulse(const vec3_t origin, const vec3_t axis,
+                          float magnitude, float radius);
 void  Wind_AddSmoke(const vec3_t origin, float amount, float radius);
 void  Wind_ClearSmoke(const vec3_t origin, float amount, float radius);
 void  Wind_RegisterSource(edict_t *e, const vec3_t velocity);

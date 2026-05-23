@@ -144,6 +144,21 @@ cvar_t	r_lightmap_dither = {"r_lightmap_dither", "1", true};	// archived
 cvar_t	r_particle_wind_scale   = {"r_particle_wind_scale",   "1"};
 cvar_t	r_particle_wind_disable = {"r_particle_wind_disable", "0"};
 cvar_t	r_particle_wind_debug   = {"r_particle_wind_debug",   "0"};
+
+// Smoke tuning — exposed on the F12 Debug Render panel under "Smoke".
+// Floor/ceiling are multipliers of d_pix_max (screen-relative pixel unit),
+// applied in D_DrawSmokeParticle. Ramp range bounds the per-puff size
+// scale picked in R_AddSmokePuff. Emit divisor scales sim_wind's per-cell
+// spawn probability (higher = sparser). Lifetime sets the base seconds
+// before a puff dies; R_AddSmokePuff adds up to +1.3s jitter on top.
+cvar_t	r_smoke_size_min  = {"r_smoke_size_min",  "2"};
+cvar_t	r_smoke_size_max  = {"r_smoke_size_max",  "64"};
+cvar_t	r_smoke_ramp_min  = {"r_smoke_ramp_min",  "16"};
+cvar_t	r_smoke_ramp_max  = {"r_smoke_ramp_max",  "32"};
+cvar_t	r_smoke_emit_div  = {"r_smoke_emit_div",  "8"};
+cvar_t	r_smoke_lifetime  = {"r_smoke_lifetime",  "2.5"};
+cvar_t	r_smoke_cell_mode = {"r_smoke_cell_mode", "0"};	// voxel-haze pass; off by default since the grenade drives puffs directly
+cvar_t	r_smoke_cell_threshold = {"r_smoke_cell_threshold", "0.02"};
 cvar_t	r_ambient = {"r_ambient", "0"};
 cvar_t	r_reportsurfout = {"r_reportsurfout", "0"};
 cvar_t	r_maxsurfs = {"r_maxsurfs", "0"};
@@ -238,6 +253,14 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_particle_wind_scale);
 	Cvar_RegisterVariable (&r_particle_wind_disable);
 	Cvar_RegisterVariable (&r_particle_wind_debug);
+	Cvar_RegisterVariable (&r_smoke_size_min);
+	Cvar_RegisterVariable (&r_smoke_size_max);
+	Cvar_RegisterVariable (&r_smoke_ramp_min);
+	Cvar_RegisterVariable (&r_smoke_ramp_max);
+	Cvar_RegisterVariable (&r_smoke_emit_div);
+	Cvar_RegisterVariable (&r_smoke_lifetime);
+	Cvar_RegisterVariable (&r_smoke_cell_mode);
+	Cvar_RegisterVariable (&r_smoke_cell_threshold);
 	Cvar_RegisterVariable (&r_ambient);
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_RegisterVariable (&r_waterwarp);

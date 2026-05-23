@@ -37,6 +37,8 @@ typedef enum {
 } ptype_t;
 
 // !!! if this is changed, it must be changed in d_ifacea.h too !!!
+//     (asm files aren't compiled in the SDL build, so the offsets there
+//      only matter if we ever re-enable id386. Update both if you do.)
 typedef struct particle_s
 {
 // driver-usable fields
@@ -48,6 +50,10 @@ typedef struct particle_s
 	float		ramp;
 	float		die;
 	ptype_t		type;
+	// pt_smoke uses birth to drive a "puff: small+dense -> big+faded"
+	// curve in D_DrawSmokeParticle. Other ptypes ignore it; R_AddSmokePuff
+	// is the only spawn path that sets it.
+	float		birth;
 } particle_t;
 
 #define PARTICLE_Z_CLIP	8.0

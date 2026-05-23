@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 23
+#define GAME_API_VERSION 25
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -197,6 +197,21 @@ typedef struct engine_api_s {
     // Bypasses the svc_particle wire format, which would otherwise clamp dir
     // to ±8 units and lifetime to ≤0.4s. Single-player only.
     void  (*SV_Smoke)(vec3_t origin, vec3_t dir, float color, float count);
+
+    // Queue one voxel-sized smoke billboard for this frame. Drained during
+    // R_DrawParticles. world_size is the cell side length in world units;
+    // density (0..1) modulates a screen-space dither hash. Use for cell-
+    // aligned haze rendering driven by sim_wind's smoke grid.
+    void  (*Draw_SmokeCell)(vec3_t origin, float world_size, float density);
+
+    // Push pt_smoke particles outward from a moving axis (rocket tunnel
+    // effect). For each pt_smoke whose perpendicular distance to the
+    // axis-line through `origin` is < radius, add an impulse velocity
+    // pointing radially away from the axis, scaled by mag * falloff.
+    // Bypasses the wind grid -- the rocket flies through too fast for
+    // wind-drag-mediated displacement to catch up. Cheap O(N_particles).
+    void  (*Particles_PushTube)(const vec3_t origin, const vec3_t axis,
+                                 float mag, float radius);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

@@ -138,6 +138,24 @@ static void draw_decals_section(void)
     slider_row("Max decals",  "r_decals_max",       0.0f, 4096.0f, "%.0f");
 }
 
+static void draw_smoke_section(void)
+{
+    // sim_wind smoke puff tuning. Size floor/ceiling are multiples of
+    // d_pix_max (screen-relative pixel unit) consumed in
+    // D_DrawSmokeParticle. Ramp range is the per-puff size scale picked
+    // in R_AddSmokePuff; emit divisor is the per-cell roll in sim_wind's
+    // emit_smoke_particles (higher = sparser).
+    if (!IG_CollapsingHeader("Smoke", 0))
+        return;
+
+    slider_row("Size min (x d_pix_max)", "r_smoke_size_min", 0.0f, 16.0f, "%.0f");
+    slider_row("Size max (x d_pix_max)", "r_smoke_size_max", 1.0f, 128.0f, "%.0f");
+    slider_row("Ramp min",               "r_smoke_ramp_min", 0.5f, 20.0f, "%.2f");
+    slider_row("Ramp max",               "r_smoke_ramp_max", 0.5f, 20.0f, "%.2f");
+    slider_row("Emit divisor",           "r_smoke_emit_div", 1.0f, 32.0f, "%.1f");
+    slider_row("Lifetime (s)",           "r_smoke_lifetime", 0.25f, 6.0f, "%.2f");
+}
+
 static void draw_hud_section(void)
 {
     if (!IG_CollapsingHeader("HUD", 0))
@@ -155,16 +173,18 @@ static void draw_hud_section(void)
 
 void DebugPanel_Draw(int x, int y, int w, int h)
 {
-    // Rect comes from imgui_layer.c's responsive grid so the panel resizes
-    // with the window. Cond_Always means a user drag snaps back — this is a
-    // dev overlay, not a user-facing UI.
-    IG_SetNextWindowPos ((float)x, (float)y, IG_Cond_Always);
-    IG_SetNextWindowSize((float)w, (float)h, IG_Cond_Always);
+    // Initial rect comes from imgui_layer.c's responsive grid; FirstUseEver
+    // means the user can drag and resize freely (and ImGui remembers it
+    // across frames). The Smoke section pushed content past the default
+    // bottom-right slot, so users need to be able to grow the panel.
+    IG_SetNextWindowPos ((float)x, (float)y, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize((float)w, (float)h, IG_Cond_FirstUseEver);
     if (!IG_Begin("Debug Render", NULL, IG_WF_None)) { IG_End(); return; }
 
     draw_ai_section();
     draw_renderer_section();
     draw_decals_section();
+    draw_smoke_section();
     draw_hud_section();
 
     IG_End();

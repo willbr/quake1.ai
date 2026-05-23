@@ -6,6 +6,7 @@
 #include "game_defs.h"
 #include "sim/sim.h"
 #include <string.h>
+#include <stdlib.h>	// rand
 
 extern game_globals_t *g;
 extern engine_api_t   *eng;
@@ -52,16 +53,40 @@ static void spawn_info_wind_source(edict_t *e) {
 
 // misc_smokegrenade -- M4 testing prop. A persistent smoke emitter at this
 // entity's origin. "amount" key sets per-tick injection (default 0.4),
-// "radius" sets affected cells (default 96). Visible as a grenade model
-// puffing grey particles upward so mappers can locate the source.
+// "radius" sets affected cells (default 96).
+//
+// Two channels feed off it:
+//   * Wind_AddSmoke seeds the sim_wind density grid, which AI LOS and the
+//     gust-extinguishes-lights logic both sample.
+//   * SV_Smoke spawns pt_smoke particles directly at the nozzle so the
+//     visible smoke "puffs out and dissipates" via the lifetime curve in
+//     D_DrawSmokeParticle (small + dense -> big + faded).
 static void smokegrenade_think(edict_t *self) {
     float amount = self->v.dmg > 0 ? self->v.dmg : 0.4f;
     float radius = self->v.distance > 0 ? self->v.distance : 96.0f;
     Wind_AddSmoke(self->v.origin, amount * 0.1f, radius);
-    vec3_t puff_org = { self->v.origin[0], self->v.origin[1], self->v.origin[2] + 16.0f };
-    vec3_t puff_dir = { 0.0f, 0.0f, 30.0f };
-    eng->SV_Particle(puff_org, puff_dir, 8, 6);
-    self->v.nextthink = g->time + 0.1f;
+
+    // Four puffs per think with wide horizontal spread and slow rise.
+    // Each puff's dir is randomised so the cloud fans outward as new
+    // puffs spawn; the rate (4 per 50ms = 80/s) keeps enough overlapping
+    // puffs alive that the cloud reads as one thick mass rather than a
+    // string of discrete balls. Vertical velocity is intentionally low
+    // (~10 u/s) so the puff billows for most of its life before drifting
+    // off; the ambient wind grid eventually lifts it via wind drag.
+    for (int i = 0; i < 3; i++) {
+        vec3_t puff_org = {
+            self->v.origin[0] + ((float)(rand() & 7) - 3.5f),
+            self->v.origin[1] + ((float)(rand() & 7) - 3.5f),
+            self->v.origin[2] + 16.0f,
+        };
+        vec3_t puff_dir = {
+            ((float)(rand() & 31) - 15.5f),
+            ((float)(rand() & 31) - 15.5f),
+            14.0f + ((float)(rand() & 7) - 3.5f),
+        };
+        eng->SV_Smoke(puff_org, puff_dir, 8, 1);
+    }
+    self->v.nextthink = g->time + 0.05f;
 }
 static void spawn_misc_smokegrenade(edict_t *e) {
     eng->PrecacheModel("progs/grenade.mdl");

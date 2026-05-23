@@ -242,26 +242,51 @@ static float rand_unit(void) {
     return ((float)rand() / (float)RAND_MAX) - 0.5f;
 }
 static void emit_smoke_particles(void) {
+    // Field-driven visual emit. Only runs when r_smoke_cell_mode is on --
+    // that's the path where the wind grid IS the renderer (cell billboards
+    // for haze + sparse hero puffs riding the field). In source-driven
+    // mode (cell_mode = 0) the grenade calls SV_Smoke itself, so this
+    // function does nothing and the wind grid stays a pure gameplay sim
+    // (AI LOS, light extinguishing). Without this guard, every cell the
+    // grid has diffused density into spawns its own puff, producing a
+    // wide rectangular cloud instead of a focused plume at the source.
+    int cell_mode = eng->Cvar_VariableValue("r_smoke_cell_mode") != 0.0f;
+    if (!cell_mode) return;
+
     int total = s_dim_x * s_dim_y * s_dim_z;
+    float haze_thr = eng->Cvar_VariableValue("r_smoke_cell_threshold");
+    if (haze_thr < 0.001f) haze_thr = 0.001f;
+    float emit_div = eng->Cvar_VariableValue("r_smoke_emit_div");
+    if (emit_div < 1.0f) emit_div = 1.0f;
+    const float HERO_DIV_BOOST = 4.0f;  // hero puffs ride on top of cell haze
+
     for (int i = 0; i < total; i++) {
         float d = s_cells[i].smoke;
-        if (d < 0.05f) continue;
+        if (d < haze_thr) continue;
         int z = i / (s_dim_x * s_dim_y);
         int r = i - z * s_dim_x * s_dim_y;
         int y = r / s_dim_x;
         int x = r - y * s_dim_x;
-        int bursts = 2 + (int)(d * 6.0f);   // 2..8 bursts/cell/frame
-        for (int b = 0; b < bursts; b++) {
-            vec3_t pos = {
-                s_origin[0] + (x + 0.5f) * s_cell_size + rand_unit() * s_cell_size,
-                s_origin[1] + (y + 0.5f) * s_cell_size + rand_unit() * s_cell_size,
-                s_origin[2] + (z + 0.5f) * s_cell_size + rand_unit() * s_cell_size,
-            };
-            vec3_t drift = { rand_unit() * 8.0f,
-                             rand_unit() * 8.0f,
-                             8.0f + rand_unit() * 4.0f };
-            eng->SV_Smoke(pos, drift, 8, 3);
-        }
+        vec3_t center = {
+            s_origin[0] + (x + 0.5f) * s_cell_size,
+            s_origin[1] + (y + 0.5f) * s_cell_size,
+            s_origin[2] + (z + 0.5f) * s_cell_size,
+        };
+        eng->Draw_SmokeCell(center, s_cell_size, d);
+
+        // Sparse hero puffs on top of the haze.
+        float div = emit_div * HERO_DIV_BOOST;
+        float roll = ((rand() & 4095) / 4095.0f) * div;
+        if (d < roll) continue;
+        vec3_t pos = {
+            center[0] + rand_unit() * s_cell_size,
+            center[1] + rand_unit() * s_cell_size,
+            center[2] + rand_unit() * s_cell_size,
+        };
+        vec3_t drift = { rand_unit() * 8.0f,
+                         rand_unit() * 8.0f,
+                         8.0f + rand_unit() * 4.0f };
+        eng->SV_Smoke(pos, drift, 8, 1);
     }
 }
 
@@ -408,6 +433,45 @@ void Wind_AddImpulse(const vec3_t origin, const vec3_t dir, float magnitude,
         s_cells[i].vx += dir[0] * magnitude * falloff;
         s_cells[i].vy += dir[1] * magnitude * falloff;
         s_cells[i].vz += dir[2] * magnitude * falloff;
+    }
+}
+
+// Push wind radially outward from a moving axis. Used by Missile_SmokeWake
+// to blow smoke out of a flying rocket's path -- a uniform-direction
+// impulse (Wind_AddImpulse) shoves the cloud forward as a slab, which
+// looks wrong; what reads as "rocket clears a tunnel" is each cell
+// getting velocity perpendicular to the missile axis, so the smoke
+// fans outward in all directions from the trajectory.
+void Wind_AddTubeImpulse(const vec3_t origin, const vec3_t axis,
+                         float magnitude, float radius)
+{
+    if (!s_ready) return;
+    float alen = sqrtf(axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]);
+    if (alen < 0.001f) return;
+    float ax = axis[0]/alen, ay = axis[1]/alen, az = axis[2]/alen;
+    int cx, cy, cz;
+    worldpos_to_cell(origin, &cx, &cy, &cz);
+    int crange = (int)ceilf(radius / s_cell_size);
+    for (int dz = -crange; dz <= crange; dz++)
+    for (int dy = -crange; dy <= crange; dy++)
+    for (int dx = -crange; dx <= crange; dx++) {
+        int i = idx_or_neg(cx+dx, cy+dy, cz+dz);
+        if (i < 0) continue;
+        float rx = dx * s_cell_size;
+        float ry = dy * s_cell_size;
+        float rz = dz * s_cell_size;
+        // Project out the axis component so the remaining vector is
+        // perpendicular to the missile direction.
+        float dot = rx*ax + ry*ay + rz*az;
+        rx -= dot * ax; ry -= dot * ay; rz -= dot * az;
+        float plen = sqrtf(rx*rx + ry*ry + rz*rz);
+        if (plen < 1.0f) continue;       // on-axis cell -- no defined "outward"
+        if (plen > radius) continue;
+        float falloff = 1.0f - (plen / radius);
+        float inv = 1.0f / plen;
+        s_cells[i].vx += rx * inv * magnitude * falloff;
+        s_cells[i].vy += ry * inv * magnitude * falloff;
+        s_cells[i].vz += rz * inv * magnitude * falloff;
     }
 }
 
