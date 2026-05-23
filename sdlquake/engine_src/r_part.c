@@ -61,6 +61,7 @@ int		ramp3[8] = {0x6d, 0x6b, 6, 5, 4, 3};
 static const float wind_drag_k[] = {
     [pt_static]   = 3.0f,
     [pt_smoke]    = 1.5f,	// moderate drag -- puff holds its spawn impulse long enough to billow (~half a second), then drifts with the ambient wind
+    [pt_spark]    = 0.0f,	// lightning-gun sparks bounce off geometry; ambient wind drift would fight that, so disable
     [pt_fire]     = 0.4f,   // used by R_RocketTrail; spawns at zero vel,
                             // so any strong drag yanks the trail off the
                             // rocket's path. Keep this low.
@@ -1109,7 +1110,7 @@ void R_DrawParticles (void)
 		// is byte-identical to legacy r_part.c.
 #if NATIVE_GAME
 		int wind_debug_color = -1;
-		if (!r_particle_wind_disable.value) {
+		if (!r_particle_wind_disable.value && !(p->flags & PARTFL_STUCK)) {
 			vec3_t wind = {0, 0, 0};
 			if (g_game_api && g_game_api->Wind_SampleVelocity)
 				g_game_api->Wind_SampleVelocity(p->org, wind);
@@ -1170,7 +1171,11 @@ void R_DrawParticles (void)
 					p->flags |= PARTFL_STUCK;
 				} else {
 					// First bounce: inline reflection at r_sparks_restitution.
+					// Clamp so the cvar can't be set super-elastic (>1) or
+					// negative (which would push through the wall).
 					float r = r_sparks_restitution.value;
+					if (r < 0.0f) r = 0.0f;
+					else if (r > 1.0f) r = 1.0f;
 					float d = p->vel[0]*n[0] + p->vel[1]*n[1] + p->vel[2]*n[2];
 					p->vel[0] = (p->vel[0] - 2.0f * d * n[0]) * r;
 					p->vel[1] = (p->vel[1] - 2.0f * d * n[1]) * r;
