@@ -280,6 +280,10 @@ void Weapons_RegisterCvars(void) {
     // bouncing gibs (with decal_on_bounce = 1) per shot instead of grenades,
     // with infinite ammo. Lets you spam blood decals without monster kills.
     eng->Cvar_Register("g_test_gibgrenades", "0");
+    // Test cvar: when >0, shotgun/super-shotgun pellets spawn blood at every
+    // impact (walls, doors, anywhere) in addition to the normal gunshot puff.
+    // Lets you splatter blood freely for tuning the wall-slide effect.
+    eng->Cvar_Register("g_test_shotgunblood", "0");
 }
 
 void W_Precache(void) {
@@ -639,6 +643,12 @@ static void TraceAttack(float damage, vec3_t dir) {
         // Shootable brushes still take damage.
         if (g->trace_ent->v.takedamage)
             AddMultiDamage(g->trace_ent, damage);
+        // Debug: spawn blood at every non-flesh hit so you can splatter walls
+        // freely while tuning the wall-slide effect.
+        if (eng->Cvar_VariableValue("g_test_shotgunblood") > 0) {
+            vec3_t sv = {vel[0]*0.2f, vel[1]*0.2f, vel[2]*0.2f};
+            SpawnBlood(org, sv, damage);
+        }
     }
 }
 
