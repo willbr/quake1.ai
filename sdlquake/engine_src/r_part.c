@@ -528,6 +528,7 @@ void R_PushSmokeTube (const float *origin, const float *axis,
 // list, no contents-flag handling.
 extern qboolean SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f,
                                        vec3_t p1, vec3_t p2, trace_t *trace);
+extern int SV_HullPointContents (hull_t *hull, int num, vec3_t p);
 
 /*
 ===============
@@ -1280,8 +1281,21 @@ void R_DrawParticles (void)
 			// Heavy droplet — full gravity (matches the original pt_grav
 			// blood path).  Stuck droplets keep gravity off so they don't
 			// "press into" the wall they splatted on.
-			if (!(p->flags & PARTFL_STUCK))
+			if (!(p->flags & PARTFL_STUCK)) {
 				p->vel[2] -= grav * 20;
+				// Liquid interaction: floating blood reads better than
+				// blood teleporting through the surface and falling forever
+				// out of sight.  Water/slime = float, lava = vaporise.
+				if (cl.worldmodel) {
+					int c = SV_HullPointContents (&cl.worldmodel->hulls[0], 0, p->org);
+					if (c == CONTENTS_WATER || c == CONTENTS_SLIME) {
+						p->vel[0] = p->vel[1] = p->vel[2] = 0;
+						p->flags |= PARTFL_STUCK;
+					} else if (c == CONTENTS_LAVA) {
+						p->die = -1;
+					}
+				}
+			}
 			// Walk the colour ramp toward black over ~16.0s of life
 			// (8 entries / (time1 * 0.1) = 8 / 0.5 = 16.0 s).
 			p->ramp += time1 * 0.1f;
