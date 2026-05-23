@@ -42,6 +42,9 @@ extern cvar_t r_sparks_count_mul;
 extern cvar_t r_sparks_settle_dwell;
 extern cvar_t r_sparks_restitution;
 
+// Rain — declared in r_main.c, registered in R_Init.
+extern cvar_t r_rain;
+
 // Floor of free particles that R_AddSmokePuff refuses to dip below.
 // Smoke is a low-priority visualization re-emitted every frame; gameplay
 // FX (rocket trails, gibs, explosions) get clobbered if smoke drains the
@@ -607,6 +610,80 @@ static int R_TraceParticle (const vec3_t start, const vec3_t end, trace_t *trace
 	return (best.fraction < 1.0f) ? 1 : 0;
 }
 
+/*
+===============
+R_RainSpawn
+
+Spawn (r_rain.value * 8) rain droplets per frame in a 512-unit-radius
+cylinder around the player at +256 alt. Each candidate is sky-tested:
+  - skip if the spawn position is inside SOLID (avoid spawning in walls)
+  - skip if a ceiling is within 1024 units overhead (indoor — no rain);
+    require trace fraction == 1.0 (open sky above the candidate point)
+Otherwise spawn a pt_grav droplet with PARTFL_STICK_ON_HIT so it falls
+and splats on the floor.
+===============
+*/
+static void R_RainSpawn (void)
+{
+	int    n, i;
+	float  radius = 512.0f;
+	vec3_t origin;
+
+	if (!cl.worldmodel) return;
+
+	// r_origin is the rendering eye position, set by R_SetupFrame each frame.
+	VectorCopy (r_origin, origin);
+
+	n = (int)(r_rain.value * 8.0f);
+	if (n <= 0) return;
+	if (n > 64) n = 64;	// hard cap so silly cvar values don't drain the pool
+
+	for (i = 0; i < n; i++) {
+		if (!free_particles) return;
+
+		// Random sample in a disk of radius 512 around player.
+		float ang = (rand() & 1023) * (6.28318530718f / 1024.0f);
+		float r   = sqrtf((rand() & 1023) * (1.0f / 1023.0f)) * radius;
+		vec3_t candidate;
+		candidate[0] = origin[0] + cosf(ang) * r;
+		candidate[1] = origin[1] + sinf(ang) * r;
+		candidate[2] = origin[2] + 256.0f;
+
+		// Skip if spawn is inside solid geometry.
+		if (SV_HullPointContents (&cl.worldmodel->hulls[0], 0, candidate) == CONTENTS_SOLID)
+			continue;
+
+		// Skip if there is a ceiling within 1024 units overhead — that means
+		// we're indoors. Require fraction == 1.0f (nothing above us = open sky).
+		{
+			trace_t tr;
+			vec3_t ceil_pt;
+			ceil_pt[0] = candidate[0];
+			ceil_pt[1] = candidate[1];
+			ceil_pt[2] = candidate[2] + 1024.0f;
+			if (R_TraceParticle (candidate, ceil_pt, &tr))
+				continue;	// ceiling found overhead — skip
+		}
+
+		// Spawn the rain droplet.
+		particle_t *p = free_particles;
+		free_particles = p->next;
+		p->next = active_particles;
+		active_particles = p;
+
+		VectorCopy (candidate, p->org);
+		p->vel[0] = ((rand() & 1023) - 512) * (1.0f / 1023.0f) * 50.0f;
+		p->vel[1] = ((rand() & 1023) - 512) * (1.0f / 1023.0f) * 50.0f;
+		p->vel[2] = -700.0f;
+		p->color  = 11;		// light gray droplet
+		p->type   = pt_grav;
+		p->ramp   = 0;
+		p->birth  = cl.time;
+		p->die    = cl.time + 5.0f;
+		p->flags  = PARTFL_STICK_ON_HIT;
+	}
+}
+
 void R_AddSmokePuff (vec3_t org, vec3_t dir, int color, int count)
 {
 	int			i, j;
@@ -1114,8 +1191,12 @@ void R_DrawParticles (void)
 	time1 = frametime * 5;
 	grav = frametime * sv_gravity.value * 0.05;
 	dvel = 4*frametime;
-	
-	for ( ;; ) 
+
+	// Rain spawner — gated by r_rain cvar; new drops integrate this frame.
+	if (r_rain.value > 0.0f)
+		R_RainSpawn ();
+
+	for ( ;; )
 	{
 		kill = active_particles;
 		if (kill && kill->die < cl.time)

@@ -162,6 +162,7 @@ cvar_t	r_smoke_cell_threshold = {"r_smoke_cell_threshold", "0.02"};
 cvar_t	r_sparks_count_mul     = {"r_sparks_count_mul",     "1"};	// 0 disables sparks; 2 doubles per-burst count
 cvar_t	r_sparks_settle_dwell  = {"r_sparks_settle_dwell",  "0.5"};	// seconds a dark ember lingers after cool-down ramp finishes
 cvar_t	r_sparks_restitution   = {"r_sparks_restitution",   "0.5"};	// energy retained on first bounce (clamped to [0,1])
+cvar_t	r_rain                 = {"r_rain",                 "0"};	// 0 = off; higher = heavier rainfall (spawns r_rain*8 drops/frame)
 cvar_t	r_ambient = {"r_ambient", "0"};
 cvar_t	r_reportsurfout = {"r_reportsurfout", "0"};
 cvar_t	r_maxsurfs = {"r_maxsurfs", "0"};
@@ -267,6 +268,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_sparks_count_mul);
 	Cvar_RegisterVariable (&r_sparks_settle_dwell);
 	Cvar_RegisterVariable (&r_sparks_restitution);
+	Cvar_RegisterVariable (&r_rain);
 	Cvar_RegisterVariable (&r_ambient);
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_RegisterVariable (&r_waterwarp);
