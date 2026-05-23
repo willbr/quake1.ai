@@ -66,9 +66,9 @@ static void apply_impulse(edict_t *e, vec3_t dir, float damage) {
     e->v.velocity[1] += dir[1] * damage * 6.0f;
     e->v.velocity[2] += dir[2] * damage * 6.0f + 50.0f;  // small upward pop
     clamp_vel(e->v.velocity);
-    e->v.avelocity[0] = (eng->Random()*2.0f - 1.0f) * 200.0f;
-    e->v.avelocity[1] = (eng->Random()*2.0f - 1.0f) * 200.0f;
-    e->v.avelocity[2] = (eng->Random()*2.0f - 1.0f) * 200.0f;
+    // No tumble: items keep their upright orientation, and any prior spin
+    // (e.g. DM rotating powerups) is killed on hit.
+    e->v.avelocity[0] = e->v.avelocity[1] = e->v.avelocity[2] = 0;
     e->v.flags = (float)((int)e->v.flags & ~FL_ONGROUND);
 }
 
