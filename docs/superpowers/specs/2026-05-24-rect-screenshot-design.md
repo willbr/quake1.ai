@@ -28,6 +28,7 @@ State (file-static):
 - `int frozen_w, frozen_h` — captured framebuffer dimensions.
 - `int rect_x0, rect_y0, rect_x1, rect_y1` — current drag endpoints in framebuffer (logical) coords.
 - `qboolean dragging, active`
+- `qboolean prev_paused` — `cl.paused` value at entry, restored on exit
 - `char out_path[MAX_OSPATH]`
 
 Public API:
@@ -40,7 +41,7 @@ void Crop_PresentOverlay(unsigned *argb, int pitch_bytes, int w, int h);
 void Crop_Exit(void);                            // frees frozen buffers, clears active
 ```
 
-`Crop_Enter` allocates both frozen buffers, `memcpy`s from `vid.buffer` and `vid_palette_id`, then sets `active = true`. `Crop_Exit` frees and resets.
+`Crop_Enter` allocates both frozen buffers, `memcpy`s from `vid.buffer` and `vid_palette_id`, saves `cl.paused` into a state field and sets `cl.paused = true`, then sets `active = true`. `Crop_Exit` restores `cl.paused`, frees the buffers, and clears `active`.
 
 ### Touch points
 
@@ -137,7 +138,12 @@ On success the console message becomes `"Wrote %s (also copied to clipboard)\n"`
 
 ## Pause behaviour
 
-Visual freeze only — simulation keeps ticking. `cl.paused` is **not** touched. The frozen appearance comes entirely from `VID_Update` substituting the frozen buffer for `vid.buffer` while active. This matches what the user sees pixel-for-pixel in the saved crop.
+Full pause for rect mode: both display and simulation freeze while composing.
+
+- **Display**: `VID_Update` substitutes the frozen buffer for `vid.buffer` while `Crop_Active()`, so the user sees the snapshot frame and the saved crop matches it pixel-for-pixel.
+- **Simulation**: `Crop_Enter` records the prior value of `cl.paused`, sets it to `true`, and `Crop_Exit` restores it. Monsters stop moving, projectiles freeze, lava can't kill you mid-selection. (Caveat: `cl.paused` only stops time when the local client is also the server — single-player or listen-server. In a remote-server multiplayer game the world keeps ticking, but this is acceptable — single-player + dev workflows are the target.)
+
+Fullscreen `screenshot` does not touch `cl.paused`; it's instantaneous so there's nothing to compose.
 
 ## File naming
 
@@ -162,7 +168,7 @@ Manual:
 
 1. `zig build run -- +map e1m1`
 2. Console: `screenshot` → confirm `screenshots/shot_NNNN.png` written and visually correct; Cmd/Ctrl-V into a chat client pastes the same image.
-3. Console: `screenshot rect` → confirm: cursor appears, world freezes, drag draws border + dims outside, release writes a smaller `shot_NNNN.png` matching the selected region exactly, and that image is on the clipboard. Esc cancels without writing or touching the clipboard.
+3. Console: `screenshot rect` → confirm: cursor appears, world freezes (both display and simulation — provoke a nailgrunt nearby and verify its nail doesn't land while you're dragging), drag draws border + dims outside, release writes a smaller `shot_NNNN.png` matching the selected region exactly, and that image is on the clipboard. Esc cancels without writing or touching the clipboard. After exit (commit or cancel), simulation resumes — verify by hearing the nail finally hit.
 4. Take a console screenshot, then an MCP screenshot, then another console screenshot → confirm the sequence numbers continue without collision (`shot_0007.png`, `shot_0008.png`, `shot_0009.png`).
 5. Repeat with a non-default palette active (e.g. inside a Doom-themed map area) to confirm colour fidelity.
 6. `scr_screenshot_clipboard 0` → both modes still write the file but no longer touch the clipboard.
