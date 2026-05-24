@@ -30,6 +30,12 @@ int  Crop_HandleEvent(const SDL_Event *ev);
    overlay onto the ARGB present buffer. */
 void Crop_PresentOverlay(unsigned *argb, int pitch_bytes, int w, int h);
 
+/* Returns the current rect endpoints in framebuffer-local coords,
+   normalised so (x0,y0) is top-left and (x1,y1) is bottom-right.
+   Values are not clamped to framebuffer bounds — callers should
+   clamp before use. Any of the out-params may be NULL. */
+void Crop_GetRect(int *x0, int *y0, int *x1, int *y1);
+
 /* Returns the cached frozen 8-bit framebuffer + matching palette-id
    plane so VID_Update can expand them instead of vid.buffer. Returns
    NULL if not active. */

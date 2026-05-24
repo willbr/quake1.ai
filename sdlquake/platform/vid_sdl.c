@@ -9,6 +9,7 @@
 #include "r_paths.h"
 #include "vid_palette.h"
 #include "debug_lines.h"
+#include "crop_screenshot.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
@@ -499,14 +500,28 @@ void VID_Update(vrect_t *rects)
         // Slot 0 (Quake) mirrors d_8to24table[]; slot 1 (Doom) filled on demand.
         unsigned (*lut)[256] = vid_lut;
 
+        int crop_w = 0, crop_h = 0;
+        const unsigned char *crop_src = Crop_FrozenBuffer(&crop_w, &crop_h);
+        const unsigned char *crop_pal = Crop_FrozenPalette();
+        /* Substitute the frozen frame only if its dimensions match the
+           live framebuffer — protects against a (very unlikely) mid-
+           session resolution change. */
+        int use_crop = (crop_src && crop_pal &&
+                        crop_w == vid_render_w && crop_h == vid_render_h);
+
         for (int y = 0; y < vid_render_h; y++)
         {
-            unsigned *dst     = (unsigned *)((byte *)pixels + y * pitch);
-            byte     *src     = vid.buffer     + y * vid.rowbytes;
-            byte     *pal_src = vid_palette_id + y * vid_render_w;
+            unsigned   *dst = (unsigned *)((byte *)pixels + y * pitch);
+            const byte *src = use_crop ? (crop_src + y * vid_render_w)
+                                       : (vid.buffer + y * vid.rowbytes);
+            const byte *pal = use_crop ? (crop_pal + y * vid_render_w)
+                                       : (vid_palette_id + y * vid_render_w);
             for (int x = 0; x < vid_render_w; x++)
-                dst[x] = lut[pal_src[x]][src[x]];
+                dst[x] = lut[pal[x]][src[x]];
         }
+
+        if (use_crop)
+            Crop_PresentOverlay((unsigned *)pixels, pitch, vid_render_w, vid_render_h);
 
         SDL_UnlockTexture(sdl_texture);
         SDL_RenderClear(sdl_renderer);
