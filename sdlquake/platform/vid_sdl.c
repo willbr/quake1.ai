@@ -89,12 +89,22 @@ static cvar_t vid_scanline_intensity = {"vid_scanline_intensity", "0.5", true};
 static cvar_t vid_scanline_size      = {"vid_scanline_size",      "1",   true};
 
 #define VID_NUM_SCALES 4
-// Cursor positions: 0-3 supersample, 4-7 render scale, 8-11 window scale, 12 = save.
-#define VID_MENU_ITEMS    (VID_NUM_SCALES * 3 + 1)
-#define VID_MENU_SS_BASE      0
-#define VID_MENU_RENDER_BASE  (VID_NUM_SCALES)
-#define VID_MENU_WINDOW_BASE  (VID_NUM_SCALES * 2)
-#define VID_MENU_SAVE_POS     (VID_NUM_SCALES * 3)
+// Cursor positions:
+//   0..3   supersample
+//   4..7   render scale
+//   8..11  window scale
+//   12     scanlines toggle
+//   13     scanline intensity
+//   14     scanline size
+//   15     save
+#define VID_MENU_SS_BASE          0
+#define VID_MENU_RENDER_BASE      (VID_NUM_SCALES)
+#define VID_MENU_WINDOW_BASE      (VID_NUM_SCALES * 2)
+#define VID_MENU_SCANLINES_POS    (VID_NUM_SCALES * 3)
+#define VID_MENU_SL_INTENSITY_POS (VID_NUM_SCALES * 3 + 1)
+#define VID_MENU_SL_SIZE_POS      (VID_NUM_SCALES * 3 + 2)
+#define VID_MENU_SAVE_POS         (VID_NUM_SCALES * 3 + 3)
+#define VID_MENU_ITEMS            (VID_MENU_SAVE_POS + 1)
 static const int    vid_scale_factors[VID_NUM_SCALES] = {1, 2, 3, 4};
 static const char  *vid_scale_labels[VID_NUM_SCALES]  = {
     "1x  320x200",
@@ -258,6 +268,30 @@ static void VID_SaveWindow(void)
 // Video Options menu
 // ---------------------------------------------------------------------------
 
+static const float vid_sl_intensity_buckets[4] = { 0.25f, 0.50f, 0.75f, 1.00f };
+static const char *vid_sl_intensity_labels[4]  = { "25%", "50%", "75%", "100%" };
+
+static int vid_sl_intensity_bucket(void)
+{
+    float v = vid_scanline_intensity.value;
+    int   best_i = 1;       // default bucket for 0.5
+    float best_d = 1e9f;
+    for (int i = 0; i < 4; i++) {
+        float d = v - vid_sl_intensity_buckets[i];
+        if (d < 0) d = -d;
+        if (d < best_d) { best_d = d; best_i = i; }
+    }
+    return best_i;
+}
+
+static int vid_sl_size_index(void)
+{
+    int s = (int)vid_scanline_size.value;
+    if (s < 1) s = 1;
+    if (s > 3) s = 3;
+    return s - 1;  // 0-based index for cycling
+}
+
 static void VID_MenuDraw(void)
 {
     qpic_t *p = Draw_CachePic("gfx/vidmodes.lmp");
@@ -299,7 +333,29 @@ static void VID_MenuDraw(void)
             M_DrawCharacter(72, window_y + i * 8, 12 + ((int)(realtime * 4) & 1));
     }
 
-    int save_y = 176;
+    // Compact scanline section — three single-line stepper rows.
+    int sl_y = 170;
+
+    M_Print(64, sl_y, "Scanlines");
+    M_Print(160, sl_y, vid_scanlines.value != 0.0f ? "On" : "Off");
+    if (vid_menu_cursor == VID_MENU_SCANLINES_POS)
+        M_DrawCharacter(56, sl_y, 12 + ((int)(realtime * 4) & 1));
+
+    M_Print(64, sl_y + 8, "Intensity");
+    M_Print(160, sl_y + 8, (char *)vid_sl_intensity_labels[vid_sl_intensity_bucket()]);
+    if (vid_menu_cursor == VID_MENU_SL_INTENSITY_POS)
+        M_DrawCharacter(56, sl_y + 8, 12 + ((int)(realtime * 4) & 1));
+
+    M_Print(64, sl_y + 16, "Size");
+    {
+        char sz[8];
+        snprintf(sz, sizeof sz, "%dpx", vid_sl_size_index() + 1);
+        M_Print(160, sl_y + 16, sz);
+    }
+    if (vid_menu_cursor == VID_MENU_SL_SIZE_POS)
+        M_DrawCharacter(56, sl_y + 16, 12 + ((int)(realtime * 4) & 1));
+
+    int save_y = sl_y + 24;
     M_Print(80, save_y, "Save Window Pos & Size");
     if (vid_menu_cursor == VID_MENU_SAVE_POS)
         M_DrawCharacter(72, save_y, 12 + ((int)(realtime * 4) & 1));
@@ -323,6 +379,28 @@ static void VID_MenuKey(int key)
         vid_menu_cursor = (vid_menu_cursor + 1) % VID_MENU_ITEMS;
         break;
 
+    case K_LEFTARROW:
+    case K_RIGHTARROW:
+    {
+        int dir = (key == K_RIGHTARROW) ? +1 : -1;
+        if (vid_menu_cursor == VID_MENU_SCANLINES_POS) {
+            float nv = (vid_scanlines.value != 0.0f) ? 0.0f : 1.0f;
+            Cvar_SetValue("vid_scanlines", nv);
+            S_LocalSound("misc/menu3.wav");
+        } else if (vid_menu_cursor == VID_MENU_SL_INTENSITY_POS) {
+            int b = vid_sl_intensity_bucket();
+            b = (b + dir + 4) % 4;
+            Cvar_SetValue("vid_scanline_intensity", vid_sl_intensity_buckets[b]);
+            S_LocalSound("misc/menu3.wav");
+        } else if (vid_menu_cursor == VID_MENU_SL_SIZE_POS) {
+            int s = vid_sl_size_index();
+            s = (s + dir + 3) % 3;
+            Cvar_SetValue("vid_scanline_size", (float)(s + 1));
+            S_LocalSound("misc/menu3.wav");
+        }
+        break;
+    }
+
     case K_ENTER:
     case K_SPACE:
         if (vid_menu_cursor < VID_MENU_RENDER_BASE)
@@ -339,7 +417,7 @@ static void VID_MenuKey(int key)
             Cvar_SetValue("vid_scale", (float)new_scale);
             VID_ApplyResolution(new_scale, vid_supersample_active);
         }
-        else if (vid_menu_cursor < VID_MENU_SAVE_POS)
+        else if (vid_menu_cursor < VID_MENU_WINDOW_BASE + VID_NUM_SCALES)
         {
             // Window-size row.
             int new_scale = vid_scale_factors[vid_menu_cursor - VID_MENU_WINDOW_BASE];
@@ -347,9 +425,24 @@ static void VID_MenuKey(int key)
             Cvar_SetValue("vid_window_scale", (float)new_scale);
             VID_ApplyWindowScale(new_scale);
         }
-        else
+        else if (vid_menu_cursor == VID_MENU_SAVE_POS)
         {
             VID_SaveWindow();
+        }
+        else
+        {
+            // Scanline rows: Enter mirrors right-arrow (cycle forward).
+            int dir = +1;
+            if (vid_menu_cursor == VID_MENU_SCANLINES_POS) {
+                float nv = (vid_scanlines.value != 0.0f) ? 0.0f : 1.0f;
+                Cvar_SetValue("vid_scanlines", nv);
+            } else if (vid_menu_cursor == VID_MENU_SL_INTENSITY_POS) {
+                int b = (vid_sl_intensity_bucket() + dir + 4) % 4;
+                Cvar_SetValue("vid_scanline_intensity", vid_sl_intensity_buckets[b]);
+            } else if (vid_menu_cursor == VID_MENU_SL_SIZE_POS) {
+                int s = (vid_sl_size_index() + dir + 3) % 3;
+                Cvar_SetValue("vid_scanline_size", (float)(s + 1));
+            }
         }
         S_LocalSound("misc/menu2.wav");
         break;
