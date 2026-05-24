@@ -427,6 +427,41 @@ static const int K5x5[25] = {
 /* Single-luxel solid used by r_decals_test to show the luxel grid resolution. */
 static const int K1x1_solid[1] = { 1 };
 
+// 2×2 solid: bullet hole at 8-unit footprint.
+static const int K2x2_solid[4] = { 1, 1, 1, 1 };  // norm 1; each cell gets the full centre delta
+
+// 7×7 Gaussian (sigma ≈ 1.5 cells); falls to zero at the corners.
+// Sum = 1259; knorm matches sum exactly so total-ink ≈ centre delta,
+// preserving the old K3x3 (sum=16, knorm=16) total intensity.
+static const int K7x7_gauss[49] = {
+	1,  3,  6,  7,  6,  3, 1,
+	3, 13, 30, 38, 30, 13, 3,
+	6, 30, 67, 84, 67, 30, 6,
+	7, 38, 84,107, 84, 38, 7,
+	6, 30, 67, 84, 67, 30, 6,
+	3, 13, 30, 38, 30, 13, 3,
+	1,  3,  6,  7,  6,  3, 1,
+};
+
+// 13×13 Gaussian (sigma ≈ 3.0 cells) for SCORCH; smooth falloff over 52-unit footprint.
+// Sum = 2316; knorm matches sum exactly so total-ink ≈ centre delta,
+// preserving the old K5x5 (sum=256, knorm=256) total intensity.
+static const int K13x13_gauss[169] = {
+	0,  0,  1,  1,  2,  2,  2,  2,  2,  1,  1,  0,  0,
+	0,  1,  2,  4,  5,  7,  7,  7,  5,  4,  2,  1,  0,
+	1,  2,  5,  9, 13, 16, 17, 16, 13,  9,  5,  2,  1,
+	1,  4,  9, 16, 23, 28, 30, 28, 23, 16,  9,  4,  1,
+	2,  5, 13, 23, 33, 41, 43, 41, 33, 23, 13,  5,  2,
+	2,  7, 16, 28, 41, 50, 53, 50, 41, 28, 16,  7,  2,
+	2,  7, 17, 30, 43, 53, 56, 53, 43, 30, 17,  7,  2,
+	2,  7, 16, 28, 41, 50, 53, 50, 41, 28, 16,  7,  2,
+	2,  5, 13, 23, 33, 41, 43, 41, 33, 23, 13,  5,  2,
+	1,  4,  9, 16, 23, 28, 30, 28, 23, 16,  9,  4,  1,
+	1,  2,  5,  9, 13, 16, 17, 16, 13,  9,  5,  2,  1,
+	0,  1,  2,  4,  5,  7,  7,  7,  5,  4,  2,  1,  0,
+	0,  0,  1,  1,  2,  2,  2,  2,  2,  1,  1,  0,  0,
+};
+
 typedef struct {
 	const int *k;
 	int        ksize;
@@ -435,11 +470,11 @@ typedef struct {
 } decal_kernel_t;
 
 static const decal_kernel_t decal_kernels[DECAL_NUM_TYPES] = {
-	/* DECAL_BULLET      */ { K1x1_solid, 1,  1, -150, -150, -150 },
-	/* DECAL_SPIKE       */ { K1x1_solid, 1,  1, -150, -150, -150 },
-	/* DECAL_BLOOD_SPLAT */ { K3x3, 3,  16, -200, -500, -500 },
-	/* DECAL_SCORCH      */ { K5x5, 5, 36, -200, -200, -200 },
-	/* DECAL_LIGHTNING   */ { K3x3, 3,  16, -50, -60, -40 },
+	/* DECAL_BULLET      */ { K2x2_solid,    2,    1, -150, -150, -150 },
+	/* DECAL_SPIKE       */ { K1x1_solid,    1,    1, -150, -150, -150 },
+	/* DECAL_BLOOD_SPLAT */ { K7x7_gauss,    7, 1259, -200, -500, -500 },
+	/* DECAL_SCORCH      */ { K13x13_gauss, 13, 2316, -200, -200, -200 },
+	/* DECAL_LIGHTNING   */ { K7x7_gauss,    7, 1259,  -50,  -60,  -40 },
 };
 
 // ---------------------------------------------------------------------------
