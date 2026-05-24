@@ -1902,6 +1902,13 @@ void R_DrawParticles (void)
 					p->org[2] = tr.endpos[2] + n[2] * 0.5f;
 					p->vel[0] = p->vel[1] = p->vel[2] = 0;
 					p->flags |= PARTFL_STUCK;
+					// Permanent decal: each stuck blood droplet paints one cell.
+					// Use tr.endpos (the impact-surface point), not p->org — p->org
+					// is offset by 0.5*normal so the particle sprite doesn't z-fight
+					// with the wall; we want the decal to project onto the wall plane.
+					if (p->type == pt_blood) {
+						R_SpawnBloodSpatter (tr.endpos, n);
+					}
 					// Wall-ish contact (|n.z|<0.7) → also flag for the
 					// slide step below so blood/water droplets droop
 					// downward instead of freezing flat on the wall.
