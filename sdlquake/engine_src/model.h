@@ -24,6 +24,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "modelgen.h"
 #include "spritegn.h"
 
+#ifndef NUM_DITHER_BUCKETS
+#define NUM_DITHER_BUCKETS 8
+#endif
+
 /*
 
 d*_t structures are on-disk representations
@@ -115,7 +119,7 @@ typedef struct msurface_s
 	int			numedges;	// are backwards edges
 	
 // surface generation data
-	struct surfcache_s	*cachespots[MIPLEVELS];
+	struct surfcache_s	*cachespots[MIPLEVELS][NUM_DITHER_BUCKETS];
 
 	// Per-surface mip hysteresis: remembers the mip level chosen last frame
 	// this surface was visible. d_edge.c uses it to apply a deadband around
@@ -124,6 +128,11 @@ typedef struct msurface_s
 	// when crossing happens once instead of repeatedly. -1 = no previous
 	// frame (freshly-visible surface uses raw D_MipLevelForScale result).
 	signed char	last_miplevel;
+	// Per-surface bucket hysteresis: remembers the dither bucket chosen last
+	// frame this surface was visible. Used together with last_miplevel to
+	// prevent cache thrash when standing still inside a dither transition
+	// band. -1 = no previous bucket (treat as fresh).
+	signed char	last_bucket;
 
 	short		texturemins[2];
 	short		extents[2];

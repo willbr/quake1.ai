@@ -853,6 +853,7 @@ void Mod_LoadFaces (lump_t *l)
 		out->numedges = LittleShort(in->numedges);
 		out->flags = 0;
 		out->last_miplevel = -1;	// sentinel: skip hysteresis on first visible frame
+		out->last_bucket   = -1;	// sentinel: no previous bucket
 
 		planenum = LittleShort(in->planenum);
 		side = LittleShort(in->side);

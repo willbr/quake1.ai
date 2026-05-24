@@ -34,6 +34,8 @@ cvar_t	d_mipcap = {"d_mipcap", "0"};
 // at the cost of slightly blurrier mid-range surfaces. Tune live in the
 // imgui cvar panel.
 cvar_t	d_mipscale = {"d_mipscale", "1.3"};
+cvar_t	r_mipdither      = {"r_mipdither", "1"};
+cvar_t	r_mipdither_band = {"r_mipdither_band", "0.3"};
 
 surfcache_t		*d_initial_rover;
 qboolean		d_roverwrapped;
@@ -60,6 +62,8 @@ void D_Init (void)
 	Cvar_RegisterVariable (&d_subdiv16);
 	Cvar_RegisterVariable (&d_mipcap);
 	Cvar_RegisterVariable (&d_mipscale);
+	Cvar_RegisterVariable (&r_mipdither);
+	Cvar_RegisterVariable (&r_mipdither_band);
 
 	r_drawpolys = false;
 	r_worldpolysbacktofront = false;

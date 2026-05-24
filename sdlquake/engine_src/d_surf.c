@@ -262,7 +262,7 @@ int D_log2 (int num)
 D_CacheSurface
 ================
 */
-surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel)
+surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel, int bucket)
 {
 	surfcache_t     *cache;
 
@@ -278,7 +278,7 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel)
 //
 // see if the cache holds apropriate data
 //
-	cache = surface->cachespots[miplevel];
+	cache = surface->cachespots[miplevel][bucket];
 
 	{
 		int cur_stain_gen = surface->stain ? surface->stain->generation : 0;
@@ -297,6 +297,7 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel)
 //
 	surfscale = 1.0 / (1<<miplevel);
 	r_drawsurf.surfmip = miplevel;
+	r_drawsurf.surf_bucket = bucket;
 	r_drawsurf.surfwidth = surface->extents[0] >> miplevel;
 	r_drawsurf.rowbytes = r_drawsurf.surfwidth;
 	r_drawsurf.surfheight = surface->extents[1] >> miplevel;
@@ -308,8 +309,8 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel)
 	{
 		cache = D_SCAlloc (r_drawsurf.surfwidth,
 						   r_drawsurf.surfwidth * r_drawsurf.surfheight);
-		surface->cachespots[miplevel] = cache;
-		cache->owner = &surface->cachespots[miplevel];
+		surface->cachespots[miplevel][bucket] = cache;
+		cache->owner = &surface->cachespots[miplevel][bucket];
 		cache->mipscale = surfscale;
 	}
 	
@@ -335,7 +336,7 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel)
 	c_surf++;
 	R_DrawSurface ();
 
-	return surface->cachespots[miplevel];
+	return surface->cachespots[miplevel][bucket];
 }
 
 

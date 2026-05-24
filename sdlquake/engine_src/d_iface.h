@@ -223,6 +223,7 @@ typedef struct
 	int			surfmip;	// mipmapped ratio of surface texels / world pixels
 	int			surfwidth;	// in mipmapped texels
 	int			surfheight;	// in mipmapped texels
+	int			surf_bucket;	// 0 = pure mip surfmip; >0 = dithered blend toward surfmip+1
 } drawsurf_t;
 
 extern drawsurf_t	r_drawsurf;
