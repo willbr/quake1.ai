@@ -80,6 +80,9 @@ static cvar_t vid_window_y = {"vid_window_y", "-1", true};
 static cvar_t vid_window_w = {"vid_window_w", "-1", true};
 static cvar_t vid_window_h = {"vid_window_h", "-1", true};
 
+static int vid_supersample_active = 1;
+static cvar_t vid_supersample = {"vid_supersample", "1", true};
+
 #define VID_NUM_SCALES 4
 // Cursor positions: 0-3 render scales, 4-7 window scales, 8 = save-position.
 #define VID_MENU_ITEMS (VID_NUM_SCALES * 2 + 1)
@@ -333,6 +336,7 @@ static void vid_preload_cvars_from_config(void)
         else if (sscanf(line, "vid_window_w \"%f", &v) == 1)     Cvar_SetValue("vid_window_w", v);
         else if (sscanf(line, "vid_window_h \"%f", &v) == 1)     Cvar_SetValue("vid_window_h", v);
         else if (sscanf(line, "vid_scale \"%f", &v) == 1)        Cvar_SetValue("vid_scale", v);
+        else if (sscanf(line, "vid_supersample \"%f", &v) == 1)  Cvar_SetValue("vid_supersample", v);
     }
     fclose(f);
 }
@@ -345,6 +349,7 @@ void VID_Init(unsigned char *palette)
     Cvar_RegisterVariable(&vid_window_y);
     Cvar_RegisterVariable(&vid_window_w);
     Cvar_RegisterVariable(&vid_window_h);
+    Cvar_RegisterVariable(&vid_supersample);
 
     vid_preload_cvars_from_config();
 
