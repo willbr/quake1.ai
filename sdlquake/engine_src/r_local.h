@@ -376,7 +376,7 @@ typedef enum {
 // Single source of truth shared between r_decals.c and r_surf.c.
 // STAIN_CELL_SHIFT == 4 → 16-unit cells (one cell per lightmap luxel; original behaviour).
 // STAIN_CELL_SHIFT == 2 → 4-unit cells  (4× linear, 16× memory; planned final value).
-#define STAIN_CELL_SHIFT 4
+#define STAIN_CELL_SHIFT 2
 
 typedef struct stain_s {
 	short		*rgb;             // [smax*tmax*3], signed cell deltas

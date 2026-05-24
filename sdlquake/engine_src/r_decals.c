@@ -55,11 +55,14 @@ static void R_DecalsTestPool_f (void)
 
 // ---------------------------------------------------------------------------
 // Stain pool: fixed-size slots allocated at map load, LRU-evicted on overflow.
-// Each slot holds a stain_t header plus an int16_t rgb[18*18*3] payload.
+// Each slot holds a stain_t header plus an int16_t rgb[STAIN_PAYLOAD_INT16] payload.
 // ---------------------------------------------------------------------------
 
 #define STAIN_CELL_SIZE      (1 << STAIN_CELL_SHIFT)   // game units per cell side
-#define STAIN_MAX_CELLS_DIM  18  // max cells per surface side; matches blocklights[18*18] cap when STAIN_CELL_SHIFT==4
+// Max cells per surface side. Derived from the upstream lightmap cap
+// (blocklights[18*18], i.e. 18 luxels per side × 16 game units = 288 units)
+// divided by the current cell size — auto-scales when STAIN_CELL_SHIFT changes.
+#define STAIN_MAX_CELLS_DIM  (18 << (4 - STAIN_CELL_SHIFT))
 #define STAIN_PAYLOAD_INT16  (STAIN_MAX_CELLS_DIM * STAIN_MAX_CELLS_DIM * 3)
 
 typedef struct stain_slot_s {
@@ -368,12 +371,18 @@ void R_DecalsFrame (void)
 					// at the bounce point reads as the most intense element
 					// and the streak tapers off.
 					float fall = 1.0f - (float)(k - 1) / (float)max_luxel;
-					int   dr_c = (int)(-40.0f  * fall);
-					int   dg_c = (int)(-100.0f * fall);
-					int   db_c = (int)(-100.0f * fall);
-					int   dr_s = (int)(-20.0f  * fall);
-					int   dg_s = (int)(-50.0f  * fall);
-					int   db_s = (int)(-50.0f  * fall);
+					// Per-cell delta scaled by (reference cell size) / (current cell size)
+					// so the drip's overall darkness stays the same even though we now
+					// paint more cells per unit length. The deltas below (-40, -100, …)
+					// were calibrated against a 16-unit luxel (1 << 4); divide by 16 to
+					// renormalise to the current STAIN_CELL_SIZE. At shift==2 this is 0.25.
+					float drip_scale = (float)STAIN_CELL_SIZE / 16.0f;
+					int   dr_c = (int)(-40.0f  * fall * drip_scale);
+					int   dg_c = (int)(-100.0f * fall * drip_scale);
+					int   db_c = (int)(-100.0f * fall * drip_scale);
+					int   dr_s = (int)(-20.0f  * fall * drip_scale);
+					int   dg_s = (int)(-50.0f  * fall * drip_scale);
+					int   db_s = (int)(-50.0f  * fall * drip_scale);
 					step_len = (float)k * (float)STAIN_CELL_SIZE;
 					for (si = -1; si <= 1; si++) {
 						dx_off = (float)si * (float)STAIN_CELL_SIZE;
