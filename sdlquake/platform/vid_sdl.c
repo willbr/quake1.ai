@@ -104,6 +104,8 @@ static int vid_menu_cursor = 0;
 
 static int vid_render_w = VID_WIDTH;
 static int vid_render_h = VID_HEIGHT;
+static int vid_super_w  = VID_WIDTH;   /* = vid_render_w * vid_supersample_active */
+static int vid_super_h  = VID_HEIGHT;
 
 static byte vid_buffer[VID_RENDER_MAX_W * VID_RENDER_MAX_H];
 byte vid_palette_id[VID_RENDER_MAX_W * VID_RENDER_MAX_H];  /* declared in vid_palette.h */
@@ -158,36 +160,54 @@ void VID_ShiftPalette(unsigned char *palette) { build_palette(palette); }
 // Live resolution switch
 // ---------------------------------------------------------------------------
 
-static void VID_ApplyScale(int scale)
+// Apply a (render_scale, supersample) pair. The framebuffer/engine state
+// (vid.width etc.) reflects render_scale * ss; the SDL texture and the
+// logical-presentation size stay at render_scale (chunky display grid).
+// `ss` is clamped so render_scale * ss <= 8.
+static void VID_ApplyResolution(int render_scale, int ss)
 {
     extern short *d_pzbuffer;
     extern int    D_SurfaceCacheForRes(int w, int h);
     extern void   D_InitCaches(void *buffer, int size);
 
-    int new_w = VID_WIDTH  * scale;
-    int new_h = VID_HEIGHT * scale;
+    if (render_scale < 1) render_scale = 1;
+    if (render_scale > 4) render_scale = 4;
+    if (ss < 1) ss = 1;
+    if (ss > 4) ss = 4;
+    while (render_scale * ss > 8 && ss > 1) ss--;
 
-    if (sdl_texture) { SDL_DestroyTexture(sdl_texture); sdl_texture = NULL; }
-    sdl_texture = SDL_CreateTexture(sdl_renderer,
-        SDL_PIXELFORMAT_ARGB8888,
-        SDL_TEXTUREACCESS_STREAMING,
-        new_w, new_h);
-    if (!sdl_texture)
-        Sys_Error("SDL_CreateTexture failed: %s", SDL_GetError());
-    SDL_SetTextureScaleMode(sdl_texture, SDL_SCALEMODE_NEAREST);
+    int render_w = VID_WIDTH  * render_scale;
+    int render_h = VID_HEIGHT * render_scale;
+    int super_w  = render_w * ss;
+    int super_h  = render_h * ss;
 
-    SDL_SetRenderLogicalPresentation(sdl_renderer, new_w, new_h,
-        SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+    if (sdl_renderer) {
+        if (sdl_texture) { SDL_DestroyTexture(sdl_texture); sdl_texture = NULL; }
+        sdl_texture = SDL_CreateTexture(sdl_renderer,
+            SDL_PIXELFORMAT_ARGB8888,
+            SDL_TEXTUREACCESS_STREAMING,
+            render_w, render_h);
+        if (!sdl_texture)
+            Sys_Error("SDL_CreateTexture failed: %s", SDL_GetError());
+        SDL_SetTextureScaleMode(sdl_texture, SDL_SCALEMODE_NEAREST);
 
-    vid_render_w = new_w;
-    vid_render_h = new_h;
+        SDL_SetRenderLogicalPresentation(sdl_renderer, render_w, render_h,
+            SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+    }
 
-    vid.width         = new_w;
-    vid.height        = new_h;
-    vid.rowbytes      = new_w;
-    vid.conwidth      = new_w;
-    vid.conheight     = new_h;
-    vid.conrowbytes   = new_w;
+    vid_render_w = render_w;
+    vid_render_h = render_h;
+    vid_super_w  = super_w;
+    vid_super_h  = super_h;
+    vid_scale_active       = render_scale;
+    vid_supersample_active = ss;
+
+    vid.width         = super_w;
+    vid.height        = super_h;
+    vid.rowbytes      = super_w;
+    vid.conwidth      = super_w;
+    vid.conheight     = super_h;
+    vid.conrowbytes   = super_w;
     vid.maxwarpwidth  = WARP_WIDTH;
     vid.maxwarpheight = WARP_HEIGHT;
     vid.recalc_refdef = 1;
@@ -196,8 +216,8 @@ static void VID_ApplyScale(int scale)
         extern void D_FlushCaches(void);
         D_FlushCaches();
     }
-    int zbuf_bytes  = new_w * new_h * sizeof(short);
-    int cache_bytes = D_SurfaceCacheForRes(new_w, new_h);
+    int zbuf_bytes  = super_w * super_h * sizeof(short);
+    int cache_bytes = D_SurfaceCacheForRes(super_w, super_h);
     D_InitCaches((byte *)d_pzbuffer + zbuf_bytes, cache_bytes);
 }
 
@@ -283,9 +303,8 @@ static void VID_MenuKey(int key)
         if (vid_menu_cursor < VID_NUM_SCALES)
         {
             int new_scale = vid_scale_factors[vid_menu_cursor];
-            vid_scale_active = new_scale;
             Cvar_SetValue("vid_scale", (float)new_scale);
-            VID_ApplyScale(new_scale);
+            VID_ApplyResolution(new_scale, vid_supersample_active);
         }
         else if (vid_menu_cursor < VID_MENU_SAVE_POS)
         {
@@ -377,10 +396,17 @@ void VID_Init(unsigned char *palette)
         int window_req = (int)vid_window_scale.value;
         int window_scale = (window_req >= 1 && window_req <= 4) ? window_req : auto_scale;
 
+        int ss_req = (int)vid_supersample.value;
+        int ss = (ss_req >= 1 && ss_req <= 4) ? ss_req : 1;
+        while (render_scale * ss > 8 && ss > 1) ss--;
+
         vid_scale_active        = render_scale;
+        vid_supersample_active  = ss;
         vid_window_scale_active = window_scale;
         vid_render_w            = VID_WIDTH  * render_scale;
         vid_render_h            = VID_HEIGHT * render_scale;
+        vid_super_w             = vid_render_w * ss;
+        vid_super_h             = vid_render_h * ss;
 
         {
             int wx = (int)vid_window_x.value;
@@ -425,9 +451,9 @@ void VID_Init(unsigned char *palette)
 
     // Fill in viddef
     memset(&vid, 0, sizeof(vid));
-    vid.width      = vid_render_w;
-    vid.height     = vid_render_h;
-    vid.rowbytes   = vid_render_w;
+    vid.width      = vid_super_w;
+    vid.height     = vid_super_h;
+    vid.rowbytes   = vid_super_w;
     // Pixel aspect for 4:3 CRT at 320x200 — scale-independent since w and h
     // scale by the same factor, preserving the ratio.
     vid.aspect     = ((float)VID_HEIGHT / (float)VID_WIDTH) * (320.0f / 240.0f);
@@ -436,9 +462,9 @@ void VID_Init(unsigned char *palette)
     vid.fullbright = 256 - LittleLong(*((int *)vid.colormap + 2048));
     vid.buffer     = vid_buffer;
     vid.conbuffer  = vid_buffer;
-    vid.conwidth   = vid_render_w;
-    vid.conheight  = vid_render_h;
-    vid.conrowbytes = vid_render_w;
+    vid.conwidth   = vid_super_w;
+    vid.conheight  = vid_super_h;
+    vid.conrowbytes = vid_super_w;
     vid.maxwarpwidth  = WARP_WIDTH;
     vid.maxwarpheight = WARP_HEIGHT;
     vid.recalc_refdef = 1;
@@ -460,13 +486,13 @@ void VID_Init(unsigned char *palette)
         extern void   D_InitCaches(void *buffer, int size);
         extern void  *Hunk_HighAllocName(int size, char *name);
 
-        // Pre-allocate for max resolution so VID_ApplyScale never needs hunk realloc.
+        // Pre-allocate for max resolution so VID_ApplyResolution never needs hunk realloc.
         int zbuf_bytes_max  = VID_RENDER_MAX_W * VID_RENDER_MAX_H * sizeof(short);
         int cache_bytes_max = D_SurfaceCacheForRes(VID_RENDER_MAX_W, VID_RENDER_MAX_H);
         d_pzbuffer = (short *)Hunk_HighAllocName(zbuf_bytes_max + cache_bytes_max, "video");
 
-        int zbuf_bytes  = vid_render_w * vid_render_h * sizeof(short);
-        int cache_bytes = D_SurfaceCacheForRes(vid_render_w, vid_render_h);
+        int zbuf_bytes  = vid_super_w * vid_super_h * sizeof(short);
+        int cache_bytes = D_SurfaceCacheForRes(vid_super_w, vid_super_h);
         D_InitCaches((byte *)d_pzbuffer + zbuf_bytes, cache_bytes);
     }
 
