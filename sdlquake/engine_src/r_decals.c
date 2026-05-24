@@ -25,6 +25,7 @@ cvar_t r_decals_blooddrip          = { "r_decals_blooddrip",          "1", true 
 cvar_t r_decals_blooddrip_length   = { "r_decals_blooddrip_length",   "48", true };
 cvar_t r_decals_blooddrip_growtime = { "r_decals_blooddrip_growtime", "1.5", true };
 cvar_t r_decals_debug              = { "r_decals_debug",              "0", false };
+cvar_t r_decals_blood_spatter      = { "r_decals_blood_spatter",      "1", true };
 
 void R_DecalsInit (void)
 {
@@ -39,6 +40,7 @@ void R_DecalsInit (void)
 	Cvar_RegisterVariable (&r_decals_blooddrip_length);
 	Cvar_RegisterVariable (&r_decals_blooddrip_growtime);
 	Cvar_RegisterVariable (&r_decals_debug);
+	Cvar_RegisterVariable (&r_decals_blood_spatter);
 	Cmd_AddCommand ("r_decals_test", R_DecalsTest_f);
 	Cmd_AddCommand ("r_decals_test_grid", R_DecalsTestGrid_f);
 	Cmd_AddCommand ("r_decals_test_pool", R_DecalsTestPool_f);
@@ -470,11 +472,12 @@ typedef struct {
 } decal_kernel_t;
 
 static const decal_kernel_t decal_kernels[DECAL_NUM_TYPES] = {
-	/* DECAL_BULLET      */ { K2x2_solid,    2,    1, -150, -150, -150 },
-	/* DECAL_SPIKE       */ { K1x1_solid,    1,    1, -150, -150, -150 },
-	/* DECAL_BLOOD_SPLAT */ { K7x7_gauss,    7, 1259, -200, -500, -500 },
-	/* DECAL_SCORCH      */ { K13x13_gauss, 13, 2316, -200, -200, -200 },
-	/* DECAL_LIGHTNING   */ { K7x7_gauss,    7, 1259,  -50,  -60,  -40 },
+	/* DECAL_BULLET        */ { K2x2_solid,    2,    1, -150, -150, -150 },
+	/* DECAL_SPIKE         */ { K1x1_solid,    1,    1, -150, -150, -150 },
+	/* DECAL_BLOOD_SPLAT   */ { K7x7_gauss,    7, 1259, -200, -500, -500 },
+	/* DECAL_SCORCH        */ { K13x13_gauss, 13, 2316, -200, -200, -200 },
+	/* DECAL_LIGHTNING     */ { K7x7_gauss,    7, 1259,  -50,  -60,  -40 },
+	/* DECAL_BLOOD_SPATTER */ { K1x1_solid,    1,    1, -300, -600, -600 },
 };
 
 // ---------------------------------------------------------------------------
@@ -887,6 +890,28 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 		Con_Printf ("  painted kernel %d (dr=%d dg=%d db=%d)\n",
 			dk->ksize, dk->dr, dk->dg, dk->db);
 	}
+}
+
+/* Paint a single-cell blood dot at `pos` on the surface near `normal`.
+   Called from r_part.c when a pt_blood particle enters PARTFL_STICK_ON_HIT.
+   Bails silently if decals are disabled, the spatter cvar is off, the
+   server is inactive (demo playback), or no nearby world surface is found. */
+void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal)
+{
+	msurface_t           *surf;
+	const decal_kernel_t *dk;
+	extern server_t       sv;
+
+	if (!r_decals.value)               return;
+	if (!r_decals_blood_spatter.value) return;
+	if (!sv.active)                    return;  // demo playback safety
+
+	surf = R_PointOnSurface_World (pos, normal, 4.0f);
+	if (!surf) return;
+
+	dk = &decal_kernels[DECAL_BLOOD_SPATTER];
+	Stain_PaintKernel_World (pos, surf, dk->dr, dk->dg, dk->db,
+	                          dk->k, dk->ksize, dk->knorm);
 }
 
 void R_SpawnBloodPool (vec3_t origin)

@@ -369,6 +369,7 @@ typedef enum {
 	DECAL_BLOOD_SPLAT,
 	DECAL_SCORCH,
 	DECAL_LIGHTNING,
+	DECAL_BLOOD_SPATTER,   // single-cell blood dot left by a stuck pt_blood particle
 	DECAL_NUM_TYPES
 } decal_type_t;
 
@@ -398,6 +399,7 @@ extern cvar_t r_decals_blooddrip;
 extern cvar_t r_decals_blooddrip_length;
 extern cvar_t r_decals_blooddrip_growtime;
 extern cvar_t r_decals_debug;
+extern cvar_t r_decals_blood_spatter;
 
 void R_DecalsInit (void);          // called once from R_Init (registers cvars + commands)
 void R_DecalsClear (void);         // called from R_NewMap (zero stain pool, reset bloodpools)
@@ -415,5 +417,9 @@ void R_SpawnGunshotChips (vec3_t pos);
 // Brass shell casing ejected from a shotgun. Single pt_grav particle, bounces
 // once, brass-coloured, ~3.5 s lifetime.
 void R_SpawnShell (vec3_t origin, vec3_t vel);
+
+// Single-cell blood dot painted into the decal map when a pt_blood particle
+// sticks to a surface. Hooked from r_part.c on PARTFL_STICK_ON_HIT.
+void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal);
 
 #endif
