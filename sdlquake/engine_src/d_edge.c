@@ -366,11 +366,26 @@ void D_DrawSurfaces (void)
 							float lo   = t_lo * (1.0f - band);
 							if (mipscale < hi && mipscale > lo)
 							{
-								float t = (hi - mipscale) / (hi - lo);
-								int   q = (int)(t * (NUM_DITHER_BUCKETS - 1) + 0.5f);
-								if (q < 0) q = 0;
-								if (q > NUM_DITHER_BUCKETS - 1)
-									q = NUM_DITHER_BUCKETS - 1;
+								float t   = (hi - mipscale) / (hi - lo);
+								float tn  = t * (NUM_DITHER_BUCKETS - 1);
+								int   q;
+								// Bucket hysteresis: hold prev_bucket while we're within 0.75 of it
+								// (vs. the natural round() boundary at 0.5). Only applies when the
+								// previous frame's surface was on the same (miplevel, raw_mip) pair.
+								if (pface->last_miplevel == raw_mip
+									&& pface->last_bucket   >= 0
+									&& pface->last_bucket   <= NUM_DITHER_BUCKETS - 1
+									&& fabsf(tn - (float)pface->last_bucket) < 0.75f)
+								{
+									q = pface->last_bucket;
+								}
+								else
+								{
+									q = (int)(tn + 0.5f);
+									if (q < 0) q = 0;
+									if (q > NUM_DITHER_BUCKETS - 1)
+										q = NUM_DITHER_BUCKETS - 1;
+								}
 								miplevel = raw_mip;
 								bucket   = q;
 							}
@@ -386,11 +401,23 @@ void D_DrawSurfaces (void)
 							float lo   = t_hi * (1.0f - band);
 							if (mipscale < hi && mipscale > lo)
 							{
-								float t = (hi - mipscale) / (hi - lo);
-								int   q = (int)(t * (NUM_DITHER_BUCKETS - 1) + 0.5f);
-								if (q < 0) q = 0;
-								if (q > NUM_DITHER_BUCKETS - 1)
-									q = NUM_DITHER_BUCKETS - 1;
+								float t   = (hi - mipscale) / (hi - lo);
+								float tn  = t * (NUM_DITHER_BUCKETS - 1);
+								int   q;
+								if (pface->last_miplevel == raw_mip - 1
+									&& pface->last_bucket   >= 0
+									&& pface->last_bucket   <= NUM_DITHER_BUCKETS - 1
+									&& fabsf(tn - (float)pface->last_bucket) < 0.75f)
+								{
+									q = pface->last_bucket;
+								}
+								else
+								{
+									q = (int)(tn + 0.5f);
+									if (q < 0) q = 0;
+									if (q > NUM_DITHER_BUCKETS - 1)
+										q = NUM_DITHER_BUCKETS - 1;
+								}
 								miplevel = raw_mip - 1;
 								bucket   = q;
 							}
