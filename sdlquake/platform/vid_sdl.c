@@ -486,6 +486,11 @@ void VID_Update(vrect_t *rects)
 {
     if (!sdl_texture) return;
 
+    /* If a rect-screenshot was requested last frame, take its snapshot
+       now — by this point vid.buffer reflects the post-Crop_Enter
+       render, which already excluded the console/menu. */
+    Crop_FrameStart();
+
     RPaths_Draw();
     RBBox_Draw();
     // DebugLines_Draw() moved into R_RenderView_ (between world and entities)

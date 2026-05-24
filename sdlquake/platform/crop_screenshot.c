@@ -11,6 +11,7 @@
 extern int           Clipboard_SetPNG(const void *bytes, size_t size);
 extern cvar_t        scr_screenshot_clipboard;
 extern SDL_Renderer *VID_GetRenderer(void);
+extern float         scr_con_current;   /* defined in screen.c, no header */
 
 typedef struct {
     unsigned char *frozen;       /* w*h bytes */
@@ -19,66 +20,97 @@ typedef struct {
     int            x0, y0, x1, y1;
     int            dragging;
     int            active;
+    int            pending;      /* request received; snapshot on next VID_Update */
     qboolean       prev_paused;
     char           out_path[256];
 } crop_state_t;
 
 static crop_state_t g;
 
+/* The command-time entry point only requests a session: it hides the
+   console/menu and pauses simulation, but defers the framebuffer
+   snapshot until the next VID_Update via Crop_FrameStart. Snapshotting
+   here would capture the previous frame, which still has the console
+   pulled down — by deferring one frame the engine gets a chance to
+   redraw the world without the console first. */
 void Crop_Enter(const char *out_path)
+{
+    if (g.active || g.pending) return;   /* already in a session — ignore */
+    if (!out_path || !out_path[0]) return;
+
+    /* Force the console (or menu) off the screen for the next render
+       so the snapshot is clean. Switching key_dest is enough on its
+       own — SCR_UpdateScreen sets scr_conlines = 0 when key_dest is
+       key_game — but scr_con_current animates down over several
+       frames, so zero it directly. */
+    key_dest        = key_game;
+    scr_con_current = 0;
+
+    g.prev_paused = cl.paused;
+    cl.paused     = true;
+
+    strncpy(g.out_path, out_path, sizeof(g.out_path) - 1);
+    g.out_path[sizeof(g.out_path) - 1] = '\0';
+    g.pending = 1;
+}
+
+/* Called at the top of VID_Update each frame. Performs the deferred
+   framebuffer snapshot the frame after Crop_Enter, so vid.buffer
+   already reflects a render that excluded the console. */
+static int crop_do_snapshot(void)
 {
     int w, h, rowbytes, y;
 
-    if (g.active) return;                /* already in a session — ignore */
-    if (!out_path || !out_path[0]) return;
-    if (!vid.buffer) return;
-
+    if (!vid.buffer) return 0;
     w        = (int)vid.width;
     h        = (int)vid.height;
     rowbytes = (int)vid.rowbytes;
-    if (w <= 0 || h <= 0 || rowbytes < w) return;
+    if (w <= 0 || h <= 0 || rowbytes < w) return 0;
 
     g.frozen     = (unsigned char *)malloc((size_t)w * (size_t)h);
     g.frozen_pal = (unsigned char *)malloc((size_t)w * (size_t)h);
     if (!g.frozen || !g.frozen_pal) {
         free(g.frozen);     g.frozen     = NULL;
         free(g.frozen_pal); g.frozen_pal = NULL;
-        return;
+        return 0;
     }
 
-    /* Match the convention of fullscreen SCR_ScreenShot_f: wrap the
-       framebuffer read in D_Enable/DisableBackBufferAccess so vid.buffer
-       is guaranteed readable. */
     D_EnableBackBufferAccess();
     for (y = 0; y < h; y++) {
         memcpy(g.frozen + (size_t)y * w,
                vid.buffer + (size_t)y * rowbytes,
                (size_t)w);
     }
-    /* vid_palette_id is tight (w bytes per row) already. */
     memcpy(g.frozen_pal, vid_palette_id, (size_t)w * (size_t)h);
     D_DisableBackBufferAccess();
 
     g.w  = w;  g.h  = h;
     g.x0 = 0;  g.y0 = 0;
     g.x1 = w - 1; g.y1 = h - 1;
-    g.dragging   = 0;
-    g.active     = 1;
-    g.prev_paused = cl.paused;
-    cl.paused     = true;
+    g.dragging = 0;
+    g.active   = 1;
+    return 1;
+}
 
-    strncpy(g.out_path, out_path, sizeof(g.out_path) - 1);
-    g.out_path[sizeof(g.out_path) - 1] = '\0';
+void Crop_FrameStart(void)
+{
+    if (!g.pending) return;
+    g.pending = 0;
+    if (!crop_do_snapshot()) {
+        /* Snapshot failed — restore pause state and bail. */
+        cl.paused = g.prev_paused;
+    }
 }
 
 void Crop_Exit(void)
 {
-    if (!g.active) return;
+    if (!g.active && !g.pending) return;
     cl.paused = g.prev_paused;
     free(g.frozen);     g.frozen     = NULL;
     free(g.frozen_pal); g.frozen_pal = NULL;
     g.active   = 0;
     g.dragging = 0;
+    g.pending  = 0;
 }
 
 int Crop_Active(void) { return g.active; }

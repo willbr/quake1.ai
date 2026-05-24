@@ -7,20 +7,28 @@
 extern "C" {
 #endif
 
-/* Enter modal rect-selection. Snapshots the current framebuffer,
-   pauses simulation (cl.paused = true), and shows the OS cursor
-   (handled indirectly by the input layer via Crop_Active()).
-   `out_path` is the destination filename the eventual commit will
-   write to. No-op if `out_path` is NULL/empty or if a session is
-   already active. */
+/* Request modal rect-selection. Hides the console/menu, pauses
+   simulation (cl.paused = true), and defers the actual framebuffer
+   snapshot to the next VID_Update via Crop_FrameStart — that way
+   the captured frame reflects a render without the console still
+   pulled down. `out_path` is the destination filename the eventual
+   commit will write to. No-op if `out_path` is NULL/empty or if a
+   session is already active or pending. */
 void Crop_Enter(const char *out_path);
 
 /* Restore cl.paused, free internal buffers, clear active. Safe to
    call when not active (no-op). */
 void Crop_Exit(void);
 
-/* 1 while modal selection is active, 0 otherwise. */
+/* 1 once Crop_FrameStart has taken the snapshot; 0 otherwise. The
+   one-frame window between Crop_Enter and the first Crop_FrameStart
+   reports 0 — the modal isn't yet capturing input. */
 int  Crop_Active(void);
+
+/* Called once per frame from VID_Update. Performs the deferred
+   framebuffer snapshot one frame after Crop_Enter so the captured
+   pixels reflect a render with the console/menu already dismissed. */
+void Crop_FrameStart(void);
 
 /* Stub for now — Task 7 fills this in. Returns 1 if the event was
    consumed (don't dispatch further). */
