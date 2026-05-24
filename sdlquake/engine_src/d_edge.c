@@ -325,11 +325,10 @@ void D_DrawSurfaces (void)
 						* pface->texinfo->mipadjust;
 					int raw_mip = D_MipLevelForScale (mipscale);
 					int prev    = pface->last_miplevel;
-					// Hysteresis: hold prev mip while scale sits within a
-					// 15% deadband of the threshold that separates prev
-					// from raw. d_scalemip[k] is the boundary between mip k
-					// (above) and mip k+1 (below); the boundary between any
-					// two mips prev,raw is at min(prev,raw).
+					int bucket  = 0;
+
+					// Existing mip-level hysteresis: hold prev mip while scale
+					// sits within a 15% deadband of the boundary.
 					if (prev >= 0 && prev != raw_mip)
 					{
 						int b = (prev < raw_mip) ? prev : raw_mip;
@@ -341,11 +340,61 @@ void D_DrawSurfaces (void)
 								raw_mip = prev;
 						}
 					}
-					pface->last_miplevel = (signed char)raw_mip;
-					miplevel = raw_mip;
-				}
 
-				pcurrentcache = D_CacheSurface (pface, miplevel, 0);
+					miplevel = raw_mip;
+
+					// Mip-dither bucket selection. Two boundary bands can apply:
+					// the one below raw_mip (between raw_mip and raw_mip+1) and
+					// the one above (between raw_mip-1 and raw_mip). They cannot
+					// overlap because bands are 2 * r_mipdither_band of threshold
+					// and thresholds are ~2x apart in mipscale.
+					if (r_mipdither.value)
+					{
+						float band = r_mipdither_band.value;
+						if (band > 0.0f)
+						{
+							// Lower boundary: dither toward raw_mip+1.
+							if (raw_mip + 1 <= MIPLEVELS - 1)
+							{
+								float t_lo = d_scalemip[raw_mip];
+								float hi   = t_lo * (1.0f + band);
+								float lo   = t_lo * (1.0f - band);
+								if (mipscale < hi && mipscale > lo)
+								{
+									float t = (hi - mipscale) / (hi - lo);
+									int   q = (int)(t * (NUM_DITHER_BUCKETS - 1) + 0.5f);
+									if (q < 0) q = 0;
+									if (q > NUM_DITHER_BUCKETS - 1)
+										q = NUM_DITHER_BUCKETS - 1;
+									miplevel = raw_mip;
+									bucket   = q;
+								}
+							}
+							// Upper boundary: dither toward raw_mip-1 (sharper).
+							else if (raw_mip - 1 >= d_minmip && raw_mip >= 1)
+							{
+								float t_hi = d_scalemip[raw_mip - 1];
+								float hi   = t_hi * (1.0f + band);
+								float lo   = t_hi * (1.0f - band);
+								if (mipscale < hi && mipscale > lo)
+								{
+									float t = (hi - mipscale) / (hi - lo);
+									int   q = (int)(t * (NUM_DITHER_BUCKETS - 1) + 0.5f);
+									if (q < 0) q = 0;
+									if (q > NUM_DITHER_BUCKETS - 1)
+										q = NUM_DITHER_BUCKETS - 1;
+									miplevel = raw_mip - 1;
+									bucket   = q;
+								}
+							}
+						}
+					}
+
+					pface->last_miplevel = (signed char)miplevel;
+					pface->last_bucket   = (signed char)bucket;
+
+					pcurrentcache = D_CacheSurface (pface, miplevel, bucket);
+				}
 
 				cacheblock = (pixel_t *)pcurrentcache->data;
 				cachewidth = pcurrentcache->width;
