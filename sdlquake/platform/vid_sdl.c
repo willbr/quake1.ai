@@ -590,21 +590,24 @@ static void Scanline_Ensure(void)
 
     void *pixels;
     int   pitch;
-    if (SDL_LockTexture(sdl_scanline_tex, NULL, &pixels, &pitch) >= 0) {
-        unsigned char dark = (unsigned char)((1.0f - intensity) * 255.0f + 0.5f);
-        for (int y = 0; y < out_h; y++) {
-            int band = (y / size) % 2;  // 0 = dark, 1 = bright
-            unsigned char *row = (unsigned char *)pixels + y * pitch;
-            unsigned char v = (band == 0) ? dark : 255;
-            // SDL_PIXELFORMAT_RGBA8888: byte order R,G,B,A on big-endian
-            // semantics; SDL handles host endianness when locking.
-            row[0] = v;
-            row[1] = v;
-            row[2] = v;
-            row[3] = 255;
-        }
-        SDL_UnlockTexture(sdl_scanline_tex);
+    if (SDL_LockTexture(sdl_scanline_tex, NULL, &pixels, &pitch) < 0) {
+        Con_Printf("Scanline_Ensure: SDL_LockTexture failed: %s\n", SDL_GetError());
+        SDL_DestroyTexture(sdl_scanline_tex);
+        sdl_scanline_tex = NULL;
+        return;  // cache statics unchanged so we'll retry next frame
     }
+
+    unsigned char dark = (unsigned char)((1.0f - intensity) * 255.0f + 0.5f);
+    for (int y = 0; y < out_h; y++) {
+        int band = (y / size) % 2;  // 0 = dark, 1 = bright
+        unsigned char *row = (unsigned char *)pixels + y * pitch;
+        unsigned char v = (band == 0) ? dark : 255;
+        row[0] = v;
+        row[1] = v;
+        row[2] = v;
+        row[3] = 255;
+    }
+    SDL_UnlockTexture(sdl_scanline_tex);
 
     scanline_cached_h         = out_h;
     scanline_cached_size      = size;
