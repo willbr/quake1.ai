@@ -2,9 +2,15 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "../engine_src/quakedef.h"   /* cl.paused, vid, byte, d_8to24table */
 #include "vid_palette.h"              /* extern byte vid_palette_id[] */
+#include "../vendor/stb/stb_image_write.h"   /* prototypes only; impl in vid_sdl.c */
+
+extern int           Clipboard_SetPNG(const void *bytes, size_t size);
+extern cvar_t        scr_screenshot_clipboard;
+extern SDL_Renderer *VID_GetRenderer(void);
 
 typedef struct {
     unsigned char *frozen;       /* w*h bytes */
@@ -77,11 +83,148 @@ void Crop_Exit(void)
 
 int Crop_Active(void) { return g.active; }
 
+/* Growable buffer for stbi_write_png_to_func — duplicates the same shape
+   as png_buf_t in vid_sdl.c, kept file-local here to avoid a header. */
+typedef struct {
+    unsigned char *data;
+    size_t         size;
+    size_t         cap;
+} crop_png_buf_t;
+
+static void crop_png_append(void *ctx, void *data, int len)
+{
+    crop_png_buf_t *b = (crop_png_buf_t *)ctx;
+    size_t need;
+    unsigned char *p;
+    size_t new_cap;
+    if (len <= 0) return;
+    need = b->size + (size_t)len;
+    if (need > b->cap) {
+        new_cap = b->cap ? b->cap * 2 : 4096;
+        while (new_cap < need) new_cap *= 2;
+        p = (unsigned char *)realloc(b->data, new_cap);
+        if (!p) return;
+        b->data = p;
+        b->cap  = new_cap;
+    }
+    memcpy(b->data + b->size, data, (size_t)len);
+    b->size = need;
+}
+
+static void crop_commit(void)
+{
+    int x0, y0, x1, y1;
+    int rw, rh, x, y;
+    unsigned char *rgb;
+    crop_png_buf_t buf;
+    int ok;
+    FILE *fp;
+    int wrote;
+    int do_clip;
+    int clipped;
+
+    Crop_GetRect(&x0, &y0, &x1, &y1);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= g.w) x1 = g.w - 1;
+    if (y1 >= g.h) y1 = g.h - 1;
+    rw = x1 - x0 + 1;
+    rh = y1 - y0 + 1;
+    if (rw <= 0 || rh <= 0) { Con_Printf("screenshot rect: empty selection\n"); return; }
+
+    rgb = (unsigned char *)malloc((size_t)rw * (size_t)rh * 3);
+    if (!rgb) { Con_Printf("screenshot rect: out of memory\n"); return; }
+    for (y = 0; y < rh; y++) {
+        const unsigned char *src = g.frozen + (size_t)(y0 + y) * g.w + x0;
+        unsigned char       *dst = rgb       + (size_t)y * rw * 3;
+        for (x = 0; x < rw; x++) {
+            unsigned c = d_8to24table[src[x]];
+            dst[x*3 + 0] = (unsigned char)(c >> 16);
+            dst[x*3 + 1] = (unsigned char)(c >>  8);
+            dst[x*3 + 2] = (unsigned char)(c >>  0);
+        }
+    }
+
+    memset(&buf, 0, sizeof(buf));
+    ok = stbi_write_png_to_func(crop_png_append, &buf, rw, rh, 3, rgb, rw * 3);
+    free(rgb);
+    if (!ok || !buf.data) {
+        free(buf.data);
+        Con_Printf("screenshot rect: PNG encode failed\n");
+        return;
+    }
+
+    wrote = 0;
+    fp = fopen(g.out_path, "wb");
+    if (fp) {
+        wrote = (fwrite(buf.data, 1, buf.size, fp) == buf.size);
+        fclose(fp);
+    }
+
+    do_clip = (int)scr_screenshot_clipboard.value;
+    clipped = (do_clip && Clipboard_SetPNG(buf.data, buf.size));
+    free(buf.data);
+
+    if (!wrote)
+        Con_Printf("screenshot rect: write failed (%s)\n", g.out_path);
+    else if (do_clip && clipped)
+        Con_Printf("Wrote %s (also copied to clipboard)\n", g.out_path);
+    else if (do_clip)
+        Con_Printf("Wrote %s (clipboard copy failed)\n", g.out_path);
+    else
+        Con_Printf("Wrote %s\n", g.out_path);
+}
+
+/* Map a window-pixel mouse coordinate into framebuffer-local coords,
+   clamp to [0, g.w/g.h - 1], and store as either the start endpoint
+   (idx == 0) or the drag endpoint (idx != 0). */
+static void crop_set_endpoint(int idx, float wx, float wy)
+{
+    SDL_Renderer *r = VID_GetRenderer();
+    float lx = wx, ly = wy;
+    int ix, iy;
+    if (r) SDL_RenderCoordinatesFromWindow(r, wx, wy, &lx, &ly);
+    ix = (int)lx;
+    iy = (int)ly;
+    if (ix < 0) ix = 0; else if (ix >= g.w) ix = g.w - 1;
+    if (iy < 0) iy = 0; else if (iy >= g.h) iy = g.h - 1;
+    if (idx == 0) { g.x0 = g.x1 = ix; g.y0 = g.y1 = iy; }
+    else          { g.x1 = ix;        g.y1 = iy; }
+}
+
 int Crop_HandleEvent(const SDL_Event *ev)
 {
-    (void)ev;
-    /* Filled in by Task 7. */
-    return 0;
+    if (!g.active || !ev) return 0;
+
+    switch (ev->type) {
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        if (ev->button.button == SDL_BUTTON_LEFT) {
+            g.dragging = 1;
+            crop_set_endpoint(0, ev->button.x, ev->button.y);
+        }
+        return 1;  /* swallow all button events while active */
+    case SDL_EVENT_MOUSE_MOTION:
+        if (g.dragging)
+            crop_set_endpoint(1, ev->motion.x, ev->motion.y);
+        return 1;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (ev->button.button == SDL_BUTTON_LEFT && g.dragging) {
+            crop_set_endpoint(1, ev->button.x, ev->button.y);
+            g.dragging = 0;
+            crop_commit();
+            Crop_Exit();
+        }
+        return 1;
+    case SDL_EVENT_KEY_DOWN:
+        if (ev->key.scancode == SDL_SCANCODE_ESCAPE) {
+            Con_Printf("screenshot rect: cancelled\n");
+            Crop_Exit();
+            return 1;
+        }
+        return 0;
+    default:
+        return 0;
+    }
 }
 
 void Crop_PresentOverlay(unsigned *argb, int pitch_bytes, int w, int h)

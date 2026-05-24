@@ -6,6 +6,7 @@
 #include "imgui_layer.h"
 #include "imgui_bridge.h"
 #include "editor.h"
+#include "crop_screenshot.h"
 
 // Winsock lib is not used in our SDL net layer
 qboolean winsock_lib_initialized = false;
@@ -69,6 +70,8 @@ static int sdl_scancode_to_quake(SDL_Scancode sc)
 // for the dev overlay (unless editor look-mode is active), and on focus loss.
 static qboolean IN_WantRelativeMouse(void)
 {
+    if (Crop_Active())
+        return false;
     if (!mouse_active)
         return false;
     if (key_dest != key_game)
@@ -122,6 +125,9 @@ void IN_ProcessEvents(void)
             // doesn't see a release without a press and latch on.
             continue;
         }
+
+        if (Crop_HandleEvent(&ev))
+            continue;
 
         // Feed every event to ImGui before Quake sees it. We pass through
         // even during editor look-mode so ImGui's tracked cursor position
