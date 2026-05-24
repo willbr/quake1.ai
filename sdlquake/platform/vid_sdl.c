@@ -96,8 +96,8 @@ static int vid_menu_cursor = 0;
 
 #define VID_WIDTH  320
 #define VID_HEIGHT 200
-#define VID_RENDER_MAX_W (VID_WIDTH  * 4)  /* 1280 */
-#define VID_RENDER_MAX_H (VID_HEIGHT * 4)  /* 800  */
+#define VID_RENDER_MAX_W (VID_WIDTH  * 8)  /* 2560 — render_scale·SS up to 8 */
+#define VID_RENDER_MAX_H (VID_HEIGHT * 8)  /* 1600 */
 
 static int vid_render_w = VID_WIDTH;
 static int vid_render_h = VID_HEIGHT;
