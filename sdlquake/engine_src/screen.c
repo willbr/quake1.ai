@@ -1111,8 +1111,3 @@ void SCR_UpdateWholeScreen (void)
 	scr_fullupdate = 0;
 	SCR_UpdateScreen ();
 }
-
-/* Temporary stub — real implementation lands in Task 5. Delete this
-   stub and the `extern void Crop_Enter` declaration in SCR_ScreenShot_f
-   together when Task 5 ships the real symbol. */
-void Crop_Enter(const char *out_path) { (void)out_path; }
