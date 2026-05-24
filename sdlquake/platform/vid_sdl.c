@@ -596,51 +596,98 @@ static void png_buf_append(void *ctx, void *data, int len)
 }
 
 // ---------------------------------------------------------------------------
+// vid_encode_screenshot_png -- palette-expand vid.buffer to RGB, encode as
+// PNG bytes into heap memory. On success, *out_bytes / *out_size are filled
+// and the caller is responsible for free()ing *out_bytes. Returns 1 on ok.
+// ---------------------------------------------------------------------------
+/* Encode the current vid.buffer (palette-indexed) as PNG bytes into
+   *out_bytes / *out_size. Caller frees with free(). Returns 1 on ok. */
+static int vid_encode_screenshot_png(unsigned char **out_bytes, size_t *out_size)
+{
+    int w, h, rowbytes, y, x, ok;
+    unsigned char *rgb;
+    png_buf_t buf;
+
+    *out_bytes = NULL;
+    *out_size  = 0;
+    if (!vid.buffer) return 0;
+
+    w        = (int)vid.width;
+    h        = (int)vid.height;
+    rowbytes = (int)vid.rowbytes;
+    if (w <= 0 || h <= 0 || rowbytes < w) return 0;
+
+    rgb = (unsigned char *)malloc((size_t)w * (size_t)h * 3);
+    if (!rgb) return 0;
+    for (y = 0; y < h; y++) {
+        const byte    *src = vid.buffer + y * rowbytes;
+        unsigned char *dst = rgb        + y * w * 3;
+        for (x = 0; x < w; x++) {
+            unsigned c = d_8to24table[src[x]];
+            dst[x*3 + 0] = (unsigned char)(c >> 16);
+            dst[x*3 + 1] = (unsigned char)(c >>  8);
+            dst[x*3 + 2] = (unsigned char)(c >>  0);
+        }
+    }
+
+    memset(&buf, 0, sizeof(buf));
+    ok = stbi_write_png_to_func(png_buf_append, &buf, w, h, 3, rgb, w * 3);
+    free(rgb);
+    if (!ok || !buf.data) { free(buf.data); return 0; }
+    *out_bytes = buf.data;
+    *out_size  = buf.size;
+    return 1;
+}
+
+static int vid_write_file(const char *path, const unsigned char *bytes, size_t size)
+{
+    FILE *fp;
+    size_t wrote;
+    fp = fopen(path, "wb");
+    if (!fp) return 0;
+    wrote = fwrite(bytes, 1, size, fp);
+    fclose(fp);
+    return wrote == size;
+}
+
+// ---------------------------------------------------------------------------
 // VID_SaveScreenshotPNG -- write the current 8-bit framebuffer as a 24-bit
 // PNG. Returns 1 on success, 0 on failure. Caller is responsible for the
 // destination directory existing.
 // ---------------------------------------------------------------------------
 int VID_SaveScreenshotPNG(const char *path)
 {
+    unsigned char *bytes = NULL;
+    size_t size = 0;
+    int ok;
     if (!path || !path[0]) return 0;
-    if (!vid.buffer) return 0;
+    if (!vid_encode_screenshot_png(&bytes, &size)) return 0;
+    ok = vid_write_file(path, bytes, size);
+    free(bytes);
+    return ok;
+}
 
-    int w = (int)vid.width;
-    int h = (int)vid.height;
-    int rowbytes = (int)vid.rowbytes;
-    if (w <= 0 || h <= 0 || rowbytes < w) return 0;
-
-    unsigned char *rgb = (unsigned char *)malloc((size_t)w * (size_t)h * 3);
-    if (!rgb) return 0;
-
-    /* d_8to24table is packed as 0xAARRGGBB (see build_palette_slot); so the
-       red byte sits at bits 16..23, green at 8..15, blue at 0..7. Earlier
-       this routine wrote (c>>0) into R and (c>>16) into B, silently
-       swapping R/B in every screenshot. */
-    for (int y = 0; y < h; y++) {
-        const byte    *src = vid.buffer + y * rowbytes;
-        unsigned char *dst = rgb        + y * w * 3;
-        for (int x = 0; x < w; x++) {
-            unsigned c = d_8to24table[src[x]];
-            dst[x*3 + 0] = (unsigned char)(c >> 16);  /* R */
-            dst[x*3 + 1] = (unsigned char)(c >>  8);  /* G */
-            dst[x*3 + 2] = (unsigned char)(c >>  0);  /* B */
-        }
-    }
-
-    png_buf_t buf = {0};
-    int ok = stbi_write_png_to_func(png_buf_append, &buf, w, h, 3, rgb, w * 3);
-    free(rgb);
-    if (!ok || !buf.data) { free(buf.data); return 0; }
-
-    FILE *fp = fopen(path, "wb");
-    if (!fp) { free(buf.data); return 0; }
-    size_t wrote = fwrite(buf.data, 1, buf.size, fp);
-    fclose(fp);
-    if (wrote != buf.size) { free(buf.data); return 0; }
-
-    free(buf.data);
-    return 1;
+// ---------------------------------------------------------------------------
+// VID_SaveScreenshotPNG_AndClip -- write the current framebuffer to `path`
+// and, if `also_clipboard` is nonzero, push the same PNG bytes to the system
+// clipboard. Returns a bitfield: bit 0 = file write ok, bit 1 = clipboard ok
+// (only set when also_clipboard was nonzero).
+// ---------------------------------------------------------------------------
+/* Write the current framebuffer to `path` and, if `also_clipboard`,
+   also push the same PNG bytes onto the system clipboard.
+   Returns bitfield: bit 0 = file write ok, bit 1 = clipboard ok
+   (only set when also_clipboard was nonzero). */
+int VID_SaveScreenshotPNG_AndClip(const char *path, int also_clipboard)
+{
+    unsigned char *bytes = NULL;
+    size_t size = 0;
+    int result = 0;
+    if (!path || !path[0]) return 0;
+    if (!vid_encode_screenshot_png(&bytes, &size)) return 0;
+    if (vid_write_file(path, bytes, size)) result |= 1;
+    if (also_clipboard && Clipboard_SetPNG(bytes, size)) result |= 2;
+    free(bytes);
+    return result;
 }
 
 // ---------------------------------------------------------------------------

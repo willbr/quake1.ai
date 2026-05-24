@@ -40,6 +40,7 @@ cvar_t		scr_showturtle = {"showturtle","0"};
 cvar_t		scr_showpause = {"showpause","1"};
 cvar_t		scr_showfps = {"showfps", "0", true};
 cvar_t		scr_printspeed = {"scr_printspeed","8"};
+cvar_t		scr_screenshot_clipboard = {"scr_screenshot_clipboard", "1", true};
 
 qboolean	scr_initialized;		// ready to draw
 
@@ -457,6 +458,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showfps);
 	Cvar_RegisterVariable (&scr_centertime);
 	Cvar_RegisterVariable (&scr_printspeed);
+	Cvar_RegisterVariable (&scr_screenshot_clipboard);
 
 //
 // register our commands
@@ -721,28 +723,42 @@ via stb_image_write — there is no longer any PCX path.
 */
 void SCR_ScreenShot_f (void)
 {
-	extern int VID_SaveScreenshotPNG(const char *path);
-	int  i;
-	char pngname[80];
-	char checkname[MAX_OSPATH];
+	extern int  VID_SaveScreenshotPNG_AndClip(const char *path, int also_clipboard);
+	extern void Crop_Enter(const char *out_path);
+	extern int  Screenshot_NextPath(char *out, size_t outsz);
 
-	strcpy(pngname, "quake00.png");
-	for (i = 0; i <= 99; i++) {
-		pngname[5] = i/10 + '0';
-		pngname[6] = i%10 + '0';
-		sprintf(checkname, "%s/%s", com_gamedir, pngname);
-		if (Sys_FileTime(checkname) == -1) break;
-	}
-	if (i == 100) {
-		Con_Printf("SCR_ScreenShot_f: couldn't create a PNG file\n");
+	char path[256];
+	int  clip;
+	int  rc;
+
+	if (!Screenshot_NextPath(path, sizeof(path))) {
+		Con_Printf("SCR_ScreenShot_f: screenshots/ is full (10000 slots)\n");
 		return;
 	}
+
+	/* `screenshot rect` enters modal selection; commit/cancel happens
+	   later from the platform layer. The path we computed is reserved
+	   for that crop. */
+	if (Cmd_Argc() > 1 && !strcmp(Cmd_Argv(1), "rect")) {
+		Crop_Enter(path);
+		return;
+	}
+
 	D_EnableBackBufferAccess();
-	if (VID_SaveScreenshotPNG(checkname))
-		Con_Printf("Wrote %s\n", checkname);
-	else
-		Con_Printf("SCR_ScreenShot_f: VID_SaveScreenshotPNG failed\n");
+	clip = (int)scr_screenshot_clipboard.value;
+	rc   = VID_SaveScreenshotPNG_AndClip(path, clip);
 	D_DisableBackBufferAccess();
+
+	if (!(rc & 1)) {
+		Con_Printf("SCR_ScreenShot_f: write failed\n");
+		return;
+	}
+	if (clip && (rc & 2))
+		Con_Printf("Wrote %s (also copied to clipboard)\n", path);
+	else if (clip)
+		Con_Printf("Wrote %s (clipboard copy failed)\n", path);
+	else
+		Con_Printf("Wrote %s\n", path);
 }
 
 
@@ -1093,3 +1109,8 @@ void SCR_UpdateWholeScreen (void)
 	scr_fullupdate = 0;
 	SCR_UpdateScreen ();
 }
+
+/* Temporary stub — real implementation lands in Task 5. Delete this
+   stub and the `extern void Crop_Enter` declaration in SCR_ScreenShot_f
+   together when Task 5 ships the real symbol. */
+void Crop_Enter(const char *out_path) { (void)out_path; }
