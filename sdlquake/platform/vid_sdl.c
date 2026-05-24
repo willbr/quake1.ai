@@ -84,9 +84,12 @@ static int vid_supersample_active = 1;
 static cvar_t vid_supersample = {"vid_supersample", "1", true};
 
 #define VID_NUM_SCALES 4
-// Cursor positions: 0-3 render scales, 4-7 window scales, 8 = save-position.
-#define VID_MENU_ITEMS (VID_NUM_SCALES * 2 + 1)
-#define VID_MENU_SAVE_POS (VID_NUM_SCALES * 2)
+// Cursor positions: 0-3 supersample, 4-7 render scale, 8-11 window scale, 12 = save.
+#define VID_MENU_ITEMS    (VID_NUM_SCALES * 3 + 1)
+#define VID_MENU_SS_BASE      0
+#define VID_MENU_RENDER_BASE  (VID_NUM_SCALES)
+#define VID_MENU_WINDOW_BASE  (VID_NUM_SCALES * 2)
+#define VID_MENU_SAVE_POS     (VID_NUM_SCALES * 3)
 static const int    vid_scale_factors[VID_NUM_SCALES] = {1, 2, 3, 4};
 static const char  *vid_scale_labels[VID_NUM_SCALES]  = {
     "1x  320x200",
@@ -94,7 +97,12 @@ static const char  *vid_scale_labels[VID_NUM_SCALES]  = {
     "3x  960x600",
     "4x  1280x800"
 };
-// 0-3: render-resolution rows, 4-7: window-size rows.
+static const char  *vid_ss_labels[VID_NUM_SCALES] = {
+    "1x  (off)",
+    "2x",
+    "3x",
+    "4x"
+};
 static int vid_menu_cursor = 0;
 
 #define VID_WIDTH  320
@@ -250,31 +258,43 @@ static void VID_MenuDraw(void)
     qpic_t *p = Draw_CachePic("gfx/vidmodes.lmp");
     M_DrawPic((320 - p->width) / 2, 4, p);
 
-    M_Print(64, 40, "Render Resolution");
-    int render_y = 56;
+    M_Print(64, 30, "Supersample");
+    int ss_y = 42;
+    for (int i = 0; i < VID_NUM_SCALES; i++)
+    {
+        if (vid_scale_factors[i] == vid_supersample_active)
+            M_PrintWhite(80, ss_y + i * 8, (char *)vid_ss_labels[i]);
+        else
+            M_Print(80, ss_y + i * 8, (char *)vid_ss_labels[i]);
+        if (vid_menu_cursor == VID_MENU_SS_BASE + i)
+            M_DrawCharacter(72, ss_y + i * 8, 12 + ((int)(realtime * 4) & 1));
+    }
+
+    M_Print(64, 78, "Render Resolution");
+    int render_y = 90;
     for (int i = 0; i < VID_NUM_SCALES; i++)
     {
         if (vid_scale_factors[i] == vid_scale_active)
             M_PrintWhite(80, render_y + i * 8, (char *)vid_scale_labels[i]);
         else
             M_Print(80, render_y + i * 8, (char *)vid_scale_labels[i]);
-        if (vid_menu_cursor == i)
+        if (vid_menu_cursor == VID_MENU_RENDER_BASE + i)
             M_DrawCharacter(72, render_y + i * 8, 12 + ((int)(realtime * 4) & 1));
     }
 
-    M_Print(64, 100, "Window Size");
-    int window_y = 116;
+    M_Print(64, 126, "Window Size");
+    int window_y = 138;
     for (int i = 0; i < VID_NUM_SCALES; i++)
     {
         if (vid_scale_factors[i] == vid_window_scale_active)
             M_PrintWhite(80, window_y + i * 8, (char *)vid_scale_labels[i]);
         else
             M_Print(80, window_y + i * 8, (char *)vid_scale_labels[i]);
-        if (vid_menu_cursor == VID_NUM_SCALES + i)
+        if (vid_menu_cursor == VID_MENU_WINDOW_BASE + i)
             M_DrawCharacter(72, window_y + i * 8, 12 + ((int)(realtime * 4) & 1));
     }
 
-    int save_y = 160;
+    int save_y = 176;
     M_Print(80, save_y, "Save Window Pos & Size");
     if (vid_menu_cursor == VID_MENU_SAVE_POS)
         M_DrawCharacter(72, save_y, 12 + ((int)(realtime * 4) & 1));
@@ -300,15 +320,24 @@ static void VID_MenuKey(int key)
 
     case K_ENTER:
     case K_SPACE:
-        if (vid_menu_cursor < VID_NUM_SCALES)
+        if (vid_menu_cursor < VID_MENU_RENDER_BASE)
         {
-            int new_scale = vid_scale_factors[vid_menu_cursor];
+            // Supersample row.
+            int new_ss = vid_scale_factors[vid_menu_cursor - VID_MENU_SS_BASE];
+            Cvar_SetValue("vid_supersample", (float)new_ss);
+            VID_ApplyResolution(vid_scale_active, new_ss);
+        }
+        else if (vid_menu_cursor < VID_MENU_WINDOW_BASE)
+        {
+            // Render-resolution row.
+            int new_scale = vid_scale_factors[vid_menu_cursor - VID_MENU_RENDER_BASE];
             Cvar_SetValue("vid_scale", (float)new_scale);
             VID_ApplyResolution(new_scale, vid_supersample_active);
         }
         else if (vid_menu_cursor < VID_MENU_SAVE_POS)
         {
-            int new_scale = vid_scale_factors[vid_menu_cursor - VID_NUM_SCALES];
+            // Window-size row.
+            int new_scale = vid_scale_factors[vid_menu_cursor - VID_MENU_WINDOW_BASE];
             vid_window_scale_active = new_scale;
             Cvar_SetValue("vid_window_scale", (float)new_scale);
             VID_ApplyWindowScale(new_scale);
@@ -496,7 +525,7 @@ void VID_Init(unsigned char *palette)
         D_InitCaches((byte *)d_pzbuffer + zbuf_bytes, cache_bytes);
     }
 
-    vid_menu_cursor = vid_scale_active - 1;
+    vid_menu_cursor = VID_MENU_RENDER_BASE + (vid_scale_active - 1);
     vid_menudrawfn  = VID_MenuDraw;
     vid_menukeyfn   = VID_MenuKey;
 }
