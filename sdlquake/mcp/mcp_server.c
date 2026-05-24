@@ -56,6 +56,7 @@ typedef int mcp_raw_sock_t;
 
 #include "quakedef.h"
 #include "mcp_server.h"
+#include "../platform/screenshot_path.h"
 #include "edit_scene.h"        /* editor scene API for Phase 7 self-drive tools */
 #include "editor.h"            /* Editor_IsOpen */
 #include "edit_history.h"      /* History_Push */
@@ -826,35 +827,23 @@ static void tool_console_tail(const char *id_json, int lines)
 // Tool: screenshot -- save the current framebuffer as a PNG
 // ---------------------------------------------------------------------------
 
-static int mcp_next_screenshot_index(void)
-{
-    // Find the lowest free NNNN such that screenshots/shot_NNNN.png does
-    // not exist. Linear scan from 1, cap at 9999.
-    for (int i = 1; i <= 9999; i++) {
-        char path[256];
-        snprintf(path, sizeof(path), "screenshots/shot_%04d.png", i);
-        struct stat st;
-        if (stat(path, &st) != 0) return i;
-    }
-    return 0;
-}
-
 static void tool_screenshot(const char *id_json, const char *args)
 {
     char input[512] = {0};
     if (args) json_str(args, "path", input, sizeof(input));
 
     char path[512] = {0};
-    mcp_mkdir("screenshots");   /* ignore errors -- may already exist */
 
     if (!input[0])
     {
-        int n = mcp_next_screenshot_index();
-        if (n == 0) { mcp_error(id_json, -32603, "screenshot dir full"); return; }
-        snprintf(path, sizeof(path), "screenshots/shot_%04d.png", n);
+        if (!Screenshot_NextPath(path, sizeof(path))) {
+            mcp_error(id_json, -32603, "screenshot dir full");
+            return;
+        }
     }
     else
     {
+        (void)mcp_mkdir("screenshots");
         /* Constrain every caller-supplied path to live inside screenshots/.
            Strip directory components (any '/' or '\\' on Windows) so neither
            absolute paths, drive letters, nor '..' traversals can escape. */

@@ -81,6 +81,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/platform/in_sdl.c",
         "sdlquake/platform/snd_sdl.c",
         "sdlquake/platform/net_sdl.c",
+        "sdlquake/platform/screenshot_path.c",
         "sdlquake/mcp/mcp_server.c",
         "sdlquake/engine/hotreload.c",
         "sdlquake/engine/sv_bridge.c",
