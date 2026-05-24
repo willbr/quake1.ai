@@ -596,12 +596,11 @@ static void png_buf_append(void *ctx, void *data, int len)
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // vid_encode_screenshot_png -- palette-expand vid.buffer to RGB, encode as
 // PNG bytes into heap memory. On success, *out_bytes / *out_size are filled
 // and the caller is responsible for free()ing *out_bytes. Returns 1 on ok.
 // ---------------------------------------------------------------------------
-/* Encode the current vid.buffer (palette-indexed) as PNG bytes into
-   *out_bytes / *out_size. Caller frees with free(). Returns 1 on ok. */
 static int vid_encode_screenshot_png(unsigned char **out_bytes, size_t *out_size)
 {
     int w, h, rowbytes, y, x, ok;
@@ -673,10 +672,6 @@ int VID_SaveScreenshotPNG(const char *path)
 // clipboard. Returns a bitfield: bit 0 = file write ok, bit 1 = clipboard ok
 // (only set when also_clipboard was nonzero).
 // ---------------------------------------------------------------------------
-/* Write the current framebuffer to `path` and, if `also_clipboard`,
-   also push the same PNG bytes onto the system clipboard.
-   Returns bitfield: bit 0 = file write ok, bit 1 = clipboard ok
-   (only set when also_clipboard was nonzero). */
 int VID_SaveScreenshotPNG_AndClip(const char *path, int also_clipboard)
 {
     unsigned char *bytes = NULL;

@@ -716,9 +716,11 @@ void SCR_DrawConsole (void)
 ==================
 SCR_ScreenShot_f
 
-Writes a PNG of the current framebuffer to com_gamedir/quakeNN.png with an
-auto-incrementing index (00..99). PNG encoding lives in platform/vid_sdl.c
-via stb_image_write — there is no longer any PCX path.
+Writes a PNG of the current framebuffer to screenshots/shot_NNNN.png
+(0000..9999, shared counter with the MCP screenshot tool). With
+"screenshot rect" as the argument, enters modal rect-selection
+instead. When scr_screenshot_clipboard is set (default 1), the PNG
+is also pushed onto the system clipboard.
 ==================
 */
 void SCR_ScreenShot_f (void)
