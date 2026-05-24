@@ -9,6 +9,8 @@ typedef struct {
     size_t  size;
 } clip_payload_t;
 
+/* SDL invokes this with mime_type=NULL when the clipboard is cleared
+   or replaced; return NULL with *size=0 in that case. */
 static const void *clip_provide(void *userdata, const char *mime_type, size_t *size)
 {
     clip_payload_t *p = (clip_payload_t *)userdata;
