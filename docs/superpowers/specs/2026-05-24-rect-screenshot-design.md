@@ -8,10 +8,12 @@ The `screenshot` console command already writes PNG (see `screen.c:722` and `vid
 
 Two modes:
 
-1. **Fullscreen** — `screenshot` → next free `id1/quakeNN.png`. Now also copies the PNG to the system clipboard.
+1. **Fullscreen** — `screenshot` → next free `screenshots/shot_NNNN.png`. Now also copies the PNG to the system clipboard.
 2. **Rect** — new. `screenshot rect` enters a modal selection state: the current frame freezes visually, the OS cursor appears, mouse drag defines the crop, release saves the cropped PNG and copies it to the clipboard, Esc cancels.
 
-Both modes share the same `quakeNN.png` filename counter and write into `com_gamedir` (`id1/`). Both also push the encoded PNG bytes onto the system clipboard with MIME type `image/png` so Cmd/Ctrl-V into Slack, Discord, Claude Code, etc. pastes the image directly. Clipboard copy is gated on a new cvar `scr_screenshot_clipboard` (default 1).
+Both modes share the same `screenshots/shot_NNNN.png` filename pattern (4-digit, zero-padded, 0000..9999), matching what the MCP `screenshot` tool already writes. The folder is relative to cwd — the repo root when running via `zig build run`, the same location MCP uses. The fullscreen path's previous home (`com_gamedir/quakeNN.png`) is dropped; both console and MCP screenshots now coexist in one place and share the counter scan, so there is one continuous numbered sequence regardless of which tool produced each file.
+
+Both modes also push the encoded PNG bytes onto the system clipboard with MIME type `image/png` so Cmd/Ctrl-V into Slack, Discord, Claude Code, etc. pastes the image directly. Clipboard copy is gated on a new cvar `scr_screenshot_clipboard` (default 1).
 
 ## Architecture
 
@@ -44,7 +46,7 @@ void Crop_Exit(void);                            // frees frozen buffers, clears
 
 | File | Change |
 |---|---|
-| `sdlquake/engine_src/screen.c` (`SCR_ScreenShot_f`) | If `Cmd_Argv(1)` equals `"rect"`, find next free `quakeNN.png` using the existing 00..99 loop, then call `Crop_Enter(checkname)` (declared `extern`). Otherwise existing fullscreen path. |
+| `sdlquake/engine_src/screen.c` (`SCR_ScreenShot_f`) | Ensure `screenshots/` exists, find next free `screenshots/shot_NNNN.png` (0000..9999 scan). If `Cmd_Argv(1)` equals `"rect"`, call `Crop_Enter(checkname)` (declared `extern`); otherwise call the fullscreen save. The directory-create + index-scan helpers live in a shared spot — see "Filename helper" below. |
 | `sdlquake/platform/vid_sdl.c` (`VID_Update`) | If `Crop_Active()`, expand the **frozen** buffer into the SDL texture instead of `vid.buffer`, then call `Crop_PresentOverlay()` to dim outside the rect and stamp the border. Imgui/present remain unchanged. |
 | `sdlquake/platform/in_sdl.c` (`IN_ProcessEvents`, `IN_WantRelativeMouse`) | Before existing dispatch: `if (Crop_Active() && Crop_HandleEvent(&ev)) continue;`. Also extend `IN_WantRelativeMouse()` to return `false` when crop is active, so the OS cursor reappears. |
 
@@ -106,6 +108,19 @@ if (scr_screenshot_clipboard.value)
 
 The fullscreen path in `VID_SaveScreenshotPNG` mirrors the same shape: encode to memory once, write file, optionally copy to clipboard.
 
+### Filename helper
+
+A single helper, exposed from the platform layer, generates the next free path so `screen.c` and `mcp_server.c` produce the same continuous sequence:
+
+```c
+/* Ensures screenshots/ exists, fills `out` (size `outsz`) with the next free
+   screenshots/shot_NNNN.png. Returns 1 on success, 0 if all 10000 slots are
+   taken or the path won't fit. */
+int Screenshot_NextPath(char *out, size_t outsz);
+```
+
+`mcp_server.c` switches its `mcp_next_screenshot_index` + `mkdir` call to use this helper, so the existing MCP behaviour stays identical while console screenshots fall into the same numbered sequence. No more divergence between the two.
+
 ### Clipboard (`Clipboard_SetPNG`)
 
 New thin wrapper in `sdlquake/platform/clipboard.{c,h}`:
@@ -126,7 +141,7 @@ Visual freeze only — simulation keeps ticking. `cl.paused` is **not** touched.
 
 ## File naming
 
-Identical 00..99 scan to the existing fullscreen path, both modes share the counter. The decision to also share the directory (`com_gamedir`, i.e. `id1/`) was explicit — no `screenshots/` subdir, no `crop_NN.png` prefix.
+Both console modes and the MCP tool share one helper (`Screenshot_NextPath`) that writes `screenshots/shot_NNNN.png` (0000..9999) relative to cwd. One continuous numbered sequence per working directory; no separate counters, no per-tool prefix.
 
 ## Build
 
@@ -146,7 +161,8 @@ Identical 00..99 scan to the existing fullscreen path, both modes share the coun
 Manual:
 
 1. `zig build run -- +map e1m1`
-2. Console: `screenshot` → confirm `id1/quakeNN.png` written and visually correct; Cmd/Ctrl-V into a chat client pastes the same image.
-3. Console: `screenshot rect` → confirm: cursor appears, world freezes, drag draws border + dims outside, release writes a smaller `quakeNN.png` matching the selected region exactly, and that image is on the clipboard. Esc cancels without writing or touching the clipboard.
-4. Repeat with a non-default palette active (e.g. inside a Doom-themed map area) to confirm colour fidelity.
-5. `scr_screenshot_clipboard 0` → both modes still write the file but no longer touch the clipboard.
+2. Console: `screenshot` → confirm `screenshots/shot_NNNN.png` written and visually correct; Cmd/Ctrl-V into a chat client pastes the same image.
+3. Console: `screenshot rect` → confirm: cursor appears, world freezes, drag draws border + dims outside, release writes a smaller `shot_NNNN.png` matching the selected region exactly, and that image is on the clipboard. Esc cancels without writing or touching the clipboard.
+4. Take a console screenshot, then an MCP screenshot, then another console screenshot → confirm the sequence numbers continue without collision (`shot_0007.png`, `shot_0008.png`, `shot_0009.png`).
+5. Repeat with a non-default palette active (e.g. inside a Doom-themed map area) to confirm colour fidelity.
+6. `scr_screenshot_clipboard 0` → both modes still write the file but no longer touch the clipboard.
