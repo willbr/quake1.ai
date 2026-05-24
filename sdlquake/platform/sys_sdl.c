@@ -349,8 +349,9 @@ int main(int argc, char **argv)
 
     parms.memsize = MINIMUM_MEMORY;
     {
-        // give it 16 MB by default, or whatever -heapsize says
-        parms.memsize = 16 * 1024 * 1024;
+        // 64 MB default: VID alone now reserves ~20 MB at the bumped
+        // VID_RENDER_MAX (2560x1600 for SSAA headroom). Override with -heapsize.
+        parms.memsize = 64 * 1024 * 1024;
         int t = COM_CheckParm("-heapsize");
         if (t && t + 1 < com_argc)
             parms.memsize = Q_atoi(com_argv[t+1]) * 1024;
