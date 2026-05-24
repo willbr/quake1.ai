@@ -345,7 +345,6 @@ void D_DrawSurfaces (void)
 					miplevel = raw_mip;
 				}
 
-			// FIXME: make this passed in to D_CacheSurface
 				pcurrentcache = D_CacheSurface (pface, miplevel, 0);
 
 				cacheblock = (pixel_t *)pcurrentcache->data;

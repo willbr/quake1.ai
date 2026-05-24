@@ -83,7 +83,11 @@ void D_DrawSkyScans16 (espan_t *pspan);
 void R_ShowSubDiv (void);
 void (*prealspandrawer)(void);
 
+// Mirrored in model.h with a matching guard so model.c can size
+// msurface_t.cachespots[][] without including d_local.h.
+#ifndef NUM_DITHER_BUCKETS
 #define NUM_DITHER_BUCKETS 8
+#endif
 
 extern cvar_t	r_mipdither;
 extern cvar_t	r_mipdither_band;

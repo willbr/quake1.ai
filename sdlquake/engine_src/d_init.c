@@ -34,7 +34,13 @@ cvar_t	d_mipcap = {"d_mipcap", "0"};
 // at the cost of slightly blurrier mid-range surfaces. Tune live in the
 // imgui cvar panel.
 cvar_t	d_mipscale = {"d_mipscale", "1.3"};
+// r_mipdither toggles the Bayer-blend between adjacent mips for surfaces
+// sitting in a transition band around d_scalemip[]. 0 = behaviour
+// identical to bare per-surface mip selection.
 cvar_t	r_mipdither      = {"r_mipdither", "1"};
+// Half-width of the dither transition band as a fraction of the
+// d_scalemip[] threshold value. 0.3 = band spans [0.7*t, 1.3*t].
+// Bands cannot overlap because d_scalemip[] thresholds are ~2x apart.
 cvar_t	r_mipdither_band = {"r_mipdither_band", "0.3"};
 
 surfcache_t		*d_initial_rover;
