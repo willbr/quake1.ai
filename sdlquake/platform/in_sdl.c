@@ -151,9 +151,10 @@ void IN_ProcessEvents(void)
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP:
         {
-            // F12 toggles the dev overlay; F2 toggles the in-game .map editor.
-            // Neither key reaches the game.
-            if (ev.key.scancode == SDL_SCANCODE_F12)
+            // F3 toggles the dev overlay; F2 toggles the in-game .map editor.
+            // Neither key reaches the game. (F12 stays bindable — defaults to
+            // the fullscreen `screenshot` command in id1/default.cfg.)
+            if (ev.key.scancode == SDL_SCANCODE_F3)
             {
                 if (ev.key.type == SDL_EVENT_KEY_DOWN)
                     ImguiLayer_Toggle();
