@@ -32,6 +32,24 @@ surfcache_t                     *sc_rover, *sc_base;
 
 #define GUARDSIZE       4
 
+int r_mipdither_generation = 0;
+static float r_mipdither_band_last = -1.0f;
+static int   r_mipdither_last      = -1;
+
+// Called by D_CacheSurface before each lookup. Bumps the generation
+// counter whenever an r_mipdither* cvar changes so stale cache entries
+// can be detected via the cached dither_gen field.
+static void D_MipDither_CheckCvars (void)
+{
+	if (r_mipdither.value      != (float)r_mipdither_last
+	 || r_mipdither_band.value != r_mipdither_band_last)
+	{
+		r_mipdither_generation++;
+		r_mipdither_last      = (int)r_mipdither.value;
+		r_mipdither_band_last = r_mipdither_band.value;
+	}
+}
+
 
 int     D_SurfaceCacheForRes (int width, int height)
 {
@@ -266,6 +284,8 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel, int bucket)
 {
 	surfcache_t     *cache;
 
+	D_MipDither_CheckCvars();
+
 //
 // if the surface is animating or flashing, flush the cache
 //
@@ -288,7 +308,8 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel, int bucket)
 				&& cache->lightadj[1] == r_drawsurf.lightadj[1]
 				&& cache->lightadj[2] == r_drawsurf.lightadj[2]
 				&& cache->lightadj[3] == r_drawsurf.lightadj[3]
-				&& cache->stain_gen == cur_stain_gen )
+				&& cache->stain_gen == cur_stain_gen
+				&& (bucket == 0 || cache->dither_gen == r_mipdither_generation) )
 			return cache;
 	}
 
@@ -327,6 +348,7 @@ surfcache_t *D_CacheSurface (msurface_t *surface, int miplevel, int bucket)
 	cache->lightadj[2] = r_drawsurf.lightadj[2];
 	cache->lightadj[3] = r_drawsurf.lightadj[3];
 	cache->stain_gen = surface->stain ? surface->stain->generation : 0;
+	cache->dither_gen = r_mipdither_generation;
 
 //
 // draw and light the surface texture

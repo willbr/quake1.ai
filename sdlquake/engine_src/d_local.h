@@ -46,6 +46,9 @@ typedef struct surfcache_s
 	unsigned			height;		// DEBUG only needed for debug
 	float				mipscale;
 	struct texture_s	*texture;	// checked for animating textures
+	// Snapshot of r_mipdither_generation at build time. Mismatched
+	// generations invalidate the cached blend for bucket>0 entries.
+	int					dither_gen;
 	byte				data[4];	// width*height elements
 } surfcache_t;
 
@@ -91,6 +94,7 @@ void (*prealspandrawer)(void);
 
 extern cvar_t	r_mipdither;
 extern cvar_t	r_mipdither_band;
+extern int		r_mipdither_generation;
 
 surfcache_t	*D_CacheSurface (msurface_t *surface, int miplevel, int bucket);
 
