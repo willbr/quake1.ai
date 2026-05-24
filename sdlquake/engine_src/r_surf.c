@@ -442,7 +442,10 @@ static void R_OverlayStain (void)
 	w     = r_drawsurf.surfwidth;
 	h     = r_drawsurf.surfheight;
 	mip   = r_drawsurf.surfmip;
-	shift = 4 - mip;
+	// shift = surface-cache-pixel-per-stain-cell exponent. At mip 0 there is
+	// 1 surface pixel per game unit, so each cell spans STAIN_CELL_SIZE
+	// surface pixels = 1 << STAIN_CELL_SHIFT. Mip n halves surface resolution.
+	shift = STAIN_CELL_SHIFT - mip;
 	if (shift < 1) shift = 1;
 	mask  = (1 << shift) - 1;
 

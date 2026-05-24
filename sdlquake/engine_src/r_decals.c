@@ -58,8 +58,9 @@ static void R_DecalsTestPool_f (void)
 // Each slot holds a stain_t header plus an int16_t rgb[18*18*3] payload.
 // ---------------------------------------------------------------------------
 
-#define STAIN_MAX_LUXELS_DIM 18  // matches blocklights[18*18] cap in r_surf.c
-#define STAIN_PAYLOAD_INT16  (STAIN_MAX_LUXELS_DIM * STAIN_MAX_LUXELS_DIM * 3)
+#define STAIN_CELL_SIZE      (1 << STAIN_CELL_SHIFT)   // game units per cell side
+#define STAIN_MAX_CELLS_DIM  18  // max cells per surface side; matches blocklights[18*18] cap when STAIN_CELL_SHIFT==4
+#define STAIN_PAYLOAD_INT16  (STAIN_MAX_CELLS_DIM * STAIN_MAX_CELLS_DIM * 3)
 
 typedef struct stain_slot_s {
 	stain_t          header;
@@ -135,9 +136,9 @@ static stain_slot_t *Stain_AllocSlot (msurface_t *surf)
 	r_stain_count++;
 
 	{
-		int smax = (surf->extents[0] >> 4) + 1;
-		int tmax = (surf->extents[1] >> 4) + 1;
-		if (smax > STAIN_MAX_LUXELS_DIM || tmax > STAIN_MAX_LUXELS_DIM) {
+		int smax = (surf->extents[0] >> STAIN_CELL_SHIFT) + 1;
+		int tmax = (surf->extents[1] >> STAIN_CELL_SHIFT) + 1;
+		if (smax > STAIN_MAX_CELLS_DIM || tmax > STAIN_MAX_CELLS_DIM) {
 			// Surface lightmap exceeds the engine's blocklights cap — already
 			// undefined behaviour upstream. Refuse to stain rather than overflow
 			// our payload.
@@ -276,12 +277,12 @@ void R_DecalsFrame (void)
 		tex = surf->texinfo;
 		ou  = DotProduct(bp->origin, tex->vecs[0]) + tex->vecs[0][3];
 		ov  = DotProduct(bp->origin, tex->vecs[1]) + tex->vecs[1][3];
-		olu = ((int)floor(ou) - surf->texturemins[0]) >> 4;
-		olv = ((int)floor(ov) - surf->texturemins[1]) >> 4;
-		smax = (surf->extents[0] >> 4) + 1;
-		tmax = (surf->extents[1] >> 4) + 1;
+		olu = ((int)floor(ou) - surf->texturemins[0]) >> STAIN_CELL_SHIFT;
+		olv = ((int)floor(ov) - surf->texturemins[1]) >> STAIN_CELL_SHIFT;
+		smax = (surf->extents[0] >> STAIN_CELL_SHIFT) + 1;
+		tmax = (surf->extents[1] >> STAIN_CELL_SHIFT) + 1;
 
-		luxel_radius = (int)((target / 16.0f) + 1.0f);
+		luxel_radius = (int)((target / (float)STAIN_CELL_SIZE) + 1.0f);
 		st = Stain_GetOrAlloc (surf);
 		if (!st) { bp->alive = false; continue; }
 
@@ -294,8 +295,8 @@ void R_DecalsFrame (void)
 			for (dx = -luxel_radius; dx <= luxel_radius; dx++) {
 				u = olu + dx;
 				if (u < 0 || u >= smax) continue;
-				gx  = dx * 16.0f;
-				gy  = dy * 16.0f;
+				gx  = dx * (float)STAIN_CELL_SIZE;
+				gy  = dy * (float)STAIN_CELL_SIZE;
 				dsq = gx*gx + gy*gy;
 				if (dsq < r_inner_sq || dsq > r_outer_sq) continue;
 				idx = (v * smax + u) * 3;
@@ -357,9 +358,9 @@ void R_DecalsFrame (void)
 			// paint the same luxel ~30 times per drip and saturate the
 			// lightmap to flat red.
 			{
-				int   from_luxel = (int)(bd->length_painted / 16.0f);
-				int   to_luxel   = (int)(drip_target          / 16.0f);
-				int   max_luxel  = (int)(bd->length_max       / 16.0f);
+				int   from_luxel = (int)(bd->length_painted / (float)STAIN_CELL_SIZE);
+				int   to_luxel   = (int)(drip_target          / (float)STAIN_CELL_SIZE);
+				int   max_luxel  = (int)(bd->length_max       / (float)STAIN_CELL_SIZE);
 				int   k;
 				if (max_luxel < 1) max_luxel = 1;
 				for (k = from_luxel + 1; k <= to_luxel; k++) {
@@ -373,9 +374,9 @@ void R_DecalsFrame (void)
 					int   dr_s = (int)(-20.0f  * fall);
 					int   dg_s = (int)(-50.0f  * fall);
 					int   db_s = (int)(-50.0f  * fall);
-					step_len = (float)k * 16.0f;
+					step_len = (float)k * (float)STAIN_CELL_SIZE;
 					for (si = -1; si <= 1; si++) {
-						dx_off = (float)si * 16.0f;
+						dx_off = (float)si * (float)STAIN_CELL_SIZE;
 						cell[0] = bd->origin[0]
 						        + step_len * bd->down_dir[0]
 						        + dx_off   * bd->right_dir[0];
@@ -488,10 +489,10 @@ static void Stain_AddCell (msurface_t *target, vec3_t cell_world,
 	ttex = target->texinfo;
 	u = DotProduct(cell_world, ttex->vecs[0]) + ttex->vecs[0][3];
 	v = DotProduct(cell_world, ttex->vecs[1]) + ttex->vecs[1][3];
-	tlu = ((int)floor(u) - target->texturemins[0]) >> 4;
-	tlv = ((int)floor(v) - target->texturemins[1]) >> 4;
-	tsmax = (target->extents[0] >> 4) + 1;
-	ttmax = (target->extents[1] >> 4) + 1;
+	tlu = ((int)floor(u) - target->texturemins[0]) >> STAIN_CELL_SHIFT;
+	tlv = ((int)floor(v) - target->texturemins[1]) >> STAIN_CELL_SHIFT;
+	tsmax = (target->extents[0] >> STAIN_CELL_SHIFT) + 1;
+	ttmax = (target->extents[1] >> STAIN_CELL_SHIFT) + 1;
 	if (r_decals_debug.value >= 2) {
 		Con_Printf ("    -> surf=%p uv=%.1f %.1f tlu=%d tlv=%d sz=%dx%d tmins=%d %d ext=%d %d\n",
 			(void*)target, u, v, tlu, tlv, tsmax, ttmax,
@@ -544,8 +545,8 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 
 	// Inverse of the world→UV projection: world step per 16-UV-unit (luxel).
 	for (i = 0; i < 3; i++) {
-		step_u[i] = tex->vecs[0][i] * (16.0f / ulen2);
-		step_v[i] = tex->vecs[1][i] * (16.0f / vlen2);
+		step_u[i] = tex->vecs[0][i] * ((float)STAIN_CELL_SIZE / ulen2);
+		step_v[i] = tex->vecs[1][i] * ((float)STAIN_CELL_SIZE / vlen2);
 	}
 
 	{
@@ -691,10 +692,10 @@ static void R_DecalsTest_f (void)
 	tex = surf->texinfo;
 	u = DotProduct(tr.endpos, tex->vecs[0]) + tex->vecs[0][3];
 	v = DotProduct(tr.endpos, tex->vecs[1]) + tex->vecs[1][3];
-	lu = ((int)floor(u) - surf->texturemins[0]) >> 4;
-	lv = ((int)floor(v) - surf->texturemins[1]) >> 4;
-	smax = (surf->extents[0] >> 4) + 1;
-	tmax = (surf->extents[1] >> 4) + 1;
+	lu = ((int)floor(u) - surf->texturemins[0]) >> STAIN_CELL_SHIFT;
+	lv = ((int)floor(v) - surf->texturemins[1]) >> STAIN_CELL_SHIFT;
+	smax = (surf->extents[0] >> STAIN_CELL_SHIFT) + 1;
+	tmax = (surf->extents[1] >> STAIN_CELL_SHIFT) + 1;
 	if (lu < 0 || lu >= smax || lv < 0 || lv >= tmax) {
 		Con_Printf ("r_decals_test: luxel out of bounds (%d,%d) of %dx%d\n",
 			lu, lv, smax, tmax);
@@ -742,8 +743,8 @@ static void R_DecalsTestGrid_f (void)
 	vlen2 = tex->vecs[1][0]*tex->vecs[1][0] + tex->vecs[1][1]*tex->vecs[1][1] + tex->vecs[1][2]*tex->vecs[1][2];
 	if (ulen2 < 1e-6f || vlen2 < 1e-6f) return;
 	for (i = 0; i < 3; i++) {
-		step_u[i] = tex->vecs[0][i] * (16.0f / ulen2);
-		step_v[i] = tex->vecs[1][i] * (16.0f / vlen2);
+		step_u[i] = tex->vecs[0][i] * ((float)STAIN_CELL_SIZE / ulen2);
+		step_v[i] = tex->vecs[1][i] * ((float)STAIN_CELL_SIZE / vlen2);
 	}
 
 	Con_Printf ("r_decals_test_grid: primary surf=%p rgb_samples=%s\n",
