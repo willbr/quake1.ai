@@ -75,29 +75,40 @@ struct cache_user_s *cachespots[MIPLEVELS][NUM_DITHER_BUCKETS];
 
 Pointer-table memory cost: 4 × 8 − 7 = 25 pointers per surface (vs 4 today). At ~8 bytes each on x64 and ~1500 surfaces in a busy map, that's ~250 KB additional pointer overhead. The dithered cache *entries themselves* live in the existing surface-cache arena (`D_SCAlloc`); they consume the same kind of slot a single-mip entry would. Walking through a transition zone fills 3–4 bucket entries before they age out via the existing LRU. No new arena needed; if pressure becomes visible, bump `D_SurfaceCacheForRes`.
 
-### Dithered cache build (`r_surf.c` / `d_surf.c`)
+### Dithered cache build (`r_surf.c`)
 
-`R_DrawSurface` currently picks a per-mip render function from `surfmiptable[]` and uses `r_source = (byte *)mt + mt->offsets[r_drawsurf.surfmip]`. For bucket > 0:
+`R_DrawSurface` currently picks a per-mip block writer from `surfmiptable[]` (and `surfmiptable_rgb[]` for stained surfaces) and feeds it texel data via `r_source = (byte *)mt + mt->offsets[r_drawsurf.surfmip]`. The block writers read `r_source[s + t * texwidth]` and apply the lightmap to produce the lit cache entry.
 
-1. Set up as if rendering at mip N (`r_drawsurf.surfmip = N`, `r_source = mt + mt->offsets[N]`, surfwidth/height at mip N).
-2. Also stash a pointer to mip N+1's texels: `r_source_next = mt + mt->offsets[N+1]`.
-3. Write a new variant of the inner block render (mirror of `R_DrawSurfaceBlock8_mip0`) that, per output texel at texture coords `(s, t)`:
-   - `b = bayer4x4[s & 3][t & 3]` (values 0..15)
-   - threshold = `(bucket * 16) / NUM_DITHER_BUCKETS` — bucket 0 → 0 (all mip N), bucket 7 → 14 (mostly mip N+1)
-   - if `b < threshold`, sample mip N+1 at `(s >> 1, t >> 1)` from `r_source_next` with stride `mt->width >> (N+1)`
-   - else sample mip N at `(s, t)` from `r_source` with stride `mt->width >> N`
-   - apply lightmap as the normal per-mip block render does
+**For bucket > 0, substitute `r_source` with a pre-blended scratch buffer**; the block writers (mono *and* RGB) stay unchanged. This avoids forking 6 hot block-writer variants.
 
-Implementation note: `r_surf.c` already maintains a `surfmiptable[]` (`R_DrawSurfaceBlock8_mip0..3`) plus the RGB variants in `surfmiptable_rgb[]` for stained surfaces. Add a parallel `surfmiptable_dither[]` indexed by mip N (3 entries; no entry for mip 3 since it has no N+1). Stained dithered surfaces use `surfmiptable_rgb_dither[]`.
-
-`bayer4x4` is a 16-byte `static const byte` table in `d_surf.c`. Standard ordered-dither pattern:
+Scratch fill, run inside `R_DrawSurface` once per cache-miss build when `bucket > 0`:
 
 ```
- 0  8  2 10
-12  4 14  6
- 3 11  1  9
-15  7 13  5
+static byte r_mipdither_scratch[256 * 256];   // file-scope; largest possible mip-0 texture
+
+src_N      = (byte *)mt + mt->offsets[N];        // sharper mip's raw texels
+src_Nplus1 = (byte *)mt + mt->offsets[N + 1];    // coarser mip's raw texels
+w_N        = mt->width  >> N
+h_N        = mt->height >> N
+w_Nplus1   = mt->width  >> (N + 1)
+threshold  = (bucket * 16) / NUM_DITHER_BUCKETS  // bucket 1→2, 7→14
+
+for t in [0, h_N):
+    for s in [0, w_N):
+        b = r_bayer4x4[((t & 3) << 2) | (s & 3)]
+        if b < threshold:
+            r_mipdither_scratch[t * w_N + s] = src_Nplus1[(t >> 1) * w_Nplus1 + (s >> 1)]
+        else:
+            r_mipdither_scratch[t * w_N + s] = src_N[t * w_N + s]
+
+r_source = r_mipdither_scratch
 ```
+
+After this substitution, the existing `surfmiptable[N]` or `surfmiptable_rgb[N]` runs unchanged and applies the lightmap to the dithered palette indices. Output looks like mip-N-resolution texels where bucket-1 has a few mip-N+1 texels scattered through and bucket-7 is mostly mip-N+1 texels upsampled to mip-N density.
+
+`r_bayer4x4` is already defined at `r_surf.c:61` (16-byte const array, row-major, identical Bayer 4×4 pattern). Reuse it — no new table needed.
+
+The substitution must come *after* the existing `r_lightmap` and `r_drawflat == 2` overrides (which also stomp `r_source`) so that those debug modes still work correctly when dither is enabled. If `r_lightmap` or `r_drawflat == 2` is active, skip the dither fill — the override texture is what should display.
 
 ### Cvars (`d_init.c`)
 
