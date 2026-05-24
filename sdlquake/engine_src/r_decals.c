@@ -472,12 +472,16 @@ typedef struct {
 } decal_kernel_t;
 
 static const decal_kernel_t decal_kernels[DECAL_NUM_TYPES] = {
-	/* DECAL_BULLET        */ { K2x2_solid,    2,    1, -150, -150, -150 },
+	/* DECAL_BULLET        */ { K1x1_solid,    1,    1, -150, -150, -150 },
 	/* DECAL_SPIKE         */ { K1x1_solid,    1,    1, -150, -150, -150 },
 	/* DECAL_BLOOD_SPLAT   */ { K7x7_gauss,    7, 1259, -200, -500, -500 },
 	/* DECAL_SCORCH        */ { K13x13_gauss, 13, 2316, -200, -200, -200 },
 	/* DECAL_LIGHTNING     */ { K7x7_gauss,    7, 1259,  -50,  -60,  -40 },
-	/* DECAL_BLOOD_SPATTER */ { K1x1_solid,    1,    1, -300, -600, -600 },
+	// Spatter delta calibrated so a single droplet darkens green/blue without
+	// punching past the basepal clamp. Old K3x3 BLOOD_SPLAT centre cell
+	// applied (-50, -125, -125) and reads as dark red on typical textures;
+	// match that here so each 4u dot is a red dot, not a black square.
+	/* DECAL_BLOOD_SPATTER */ { K1x1_solid,    1,    1,  -50, -125, -125 },
 };
 
 // ---------------------------------------------------------------------------
