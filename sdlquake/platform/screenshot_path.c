@@ -20,7 +20,7 @@ int Screenshot_NextPath(char *out, size_t outsz)
        read-only cwd surfaces later as a stbi_write_png failure. */
     (void)ss_mkdir("screenshots");
 
-    for (int i = 1; i <= 9999; i++) {
+    for (int i = 0; i <= 9999; i++) {
         snprintf(out, outsz, "screenshots/shot_%04d.png", i);
         struct stat st;
         if (stat(out, &st) != 0)
