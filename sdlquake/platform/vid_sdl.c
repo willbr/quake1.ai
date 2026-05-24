@@ -12,6 +12,11 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+/* Defined in clipboard.c — copy a PNG to the system clipboard.
+   We forward-declare rather than #include to keep vid_sdl.c's
+   header surface small. */
+extern int  Clipboard_SetPNG(const void *bytes, size_t size);
+
 // Menu helpers from menu.c (no shared header)
 extern void M_Print(int cx, int cy, char *str);
 extern void M_PrintWhite(int cx, int cy, char *str);
@@ -563,6 +568,34 @@ void D_EndDirectRect(int x, int y, int width, int height)
     { (void)x; (void)y; (void)width; (void)height; }
 
 // ---------------------------------------------------------------------------
+// png_buf_t / png_buf_append -- growable byte buffer used as the write target
+// for stbi_write_png_to_func so that we hold the encoded PNG in memory before
+// deciding what to do with it (write file, copy to clipboard, etc.).
+// ---------------------------------------------------------------------------
+typedef struct {
+    unsigned char *data;
+    size_t         size;
+    size_t         cap;
+} png_buf_t;
+
+static void png_buf_append(void *ctx, void *data, int len)
+{
+    png_buf_t *b = (png_buf_t *)ctx;
+    if (len <= 0) return;
+    size_t need = b->size + (size_t)len;
+    if (need > b->cap) {
+        size_t new_cap = b->cap ? b->cap * 2 : 4096;
+        while (new_cap < need) new_cap *= 2;
+        unsigned char *p = (unsigned char *)realloc(b->data, new_cap);
+        if (!p) return;   /* writing stops; final size != need will be caught */
+        b->data = p;
+        b->cap  = new_cap;
+    }
+    memcpy(b->data + b->size, data, (size_t)len);
+    b->size = need;
+}
+
+// ---------------------------------------------------------------------------
 // VID_SaveScreenshotPNG -- write the current 8-bit framebuffer as a 24-bit
 // PNG. Returns 1 on success, 0 on failure. Caller is responsible for the
 // destination directory existing.
@@ -595,9 +628,19 @@ int VID_SaveScreenshotPNG(const char *path)
         }
     }
 
-    int ok = stbi_write_png(path, w, h, 3, rgb, w * 3);
+    png_buf_t buf = {0};
+    int ok = stbi_write_png_to_func(png_buf_append, &buf, w, h, 3, rgb, w * 3);
     free(rgb);
-    return ok ? 1 : 0;
+    if (!ok || !buf.data) { free(buf.data); return 0; }
+
+    FILE *fp = fopen(path, "wb");
+    if (!fp) { free(buf.data); return 0; }
+    size_t wrote = fwrite(buf.data, 1, buf.size, fp);
+    fclose(fp);
+    if (wrote != buf.size) { free(buf.data); return 0; }
+
+    free(buf.data);
+    return 1;
 }
 
 // ---------------------------------------------------------------------------
