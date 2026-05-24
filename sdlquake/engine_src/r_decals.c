@@ -351,11 +351,11 @@ void R_DecalsFrame (void)
 
 			if (!bd->surf) { bd->alive = false; continue; }
 
-			// Paint each crossed 16-unit luxel boundary exactly once.
-			// length_painted advances continuously per frame (sub-luxel);
-			// we paint the integer luxel range we've newly crossed since
+			// Paint each crossed cell boundary (STAIN_CELL_SIZE units) exactly once.
+			// length_painted advances continuously per frame (sub-cell);
+			// we paint the integer cell range we've newly crossed since
 			// last frame. Without this quantization a 60fps tick would
-			// paint the same luxel ~30 times per drip and saturate the
+			// paint the same cell ~30 times per drip and saturate the
 			// lightmap to flat red.
 			{
 				int   from_luxel = (int)(bd->length_painted / (float)STAIN_CELL_SIZE);
@@ -543,7 +543,7 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 	      + tex->vecs[1][2]*tex->vecs[1][2];
 	if (ulen2 < 1e-6f || vlen2 < 1e-6f) return;
 
-	// Inverse of the world→UV projection: world step per 16-UV-unit (luxel).
+	// Inverse of the world→UV projection: world step per cell (STAIN_CELL_SIZE UV units).
 	for (i = 0; i < 3; i++) {
 		step_u[i] = tex->vecs[0][i] * ((float)STAIN_CELL_SIZE / ulen2);
 		step_v[i] = tex->vecs[1][i] * ((float)STAIN_CELL_SIZE / vlen2);

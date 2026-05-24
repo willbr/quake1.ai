@@ -379,7 +379,7 @@ typedef enum {
 #define STAIN_CELL_SHIFT 4
 
 typedef struct stain_s {
-	short		*rgb;             // [smax*tmax*3], signed luxel deltas
+	short		*rgb;             // [smax*tmax*3], signed cell deltas
 	int			smax, tmax;
 	int			generation;
 	int			last_touched_frame;
