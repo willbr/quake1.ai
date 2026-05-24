@@ -25,6 +25,12 @@ void Crop_Exit(void);
    reports 0 — the modal isn't yet capturing input. */
 int  Crop_Active(void);
 
+/* 1 during the one-frame window after Crop_Enter and before
+   Crop_FrameStart performs the snapshot. Used by chrome drawers
+   (e.g. SCR_DrawPause) to skip themselves so the captured frame
+   doesn't include them. */
+int  Crop_Pending(void);
+
 /* Called once per frame from VID_Update. Performs the deferred
    framebuffer snapshot one frame after Crop_Enter so the captured
    pixels reflect a render with the console/menu already dismissed. */

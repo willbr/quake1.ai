@@ -113,7 +113,8 @@ void Crop_Exit(void)
     g.pending  = 0;
 }
 
-int Crop_Active(void) { return g.active; }
+int Crop_Active(void)  { return g.active; }
+int Crop_Pending(void) { return g.pending; }
 
 /* Growable buffer for stbi_write_png_to_func — duplicates the same shape
    as png_buf_t in vid_sdl.c, kept file-local here to avoid a header. */

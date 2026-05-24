@@ -581,6 +581,8 @@ DrawPause
 */
 void SCR_DrawPause (void)
 {
+	extern int Crop_Active(void);
+	extern int Crop_Pending(void);
 	qpic_t	*pic;
 	int		s, x, y;
 
@@ -588,6 +590,11 @@ void SCR_DrawPause (void)
 		return;
 
 	if (!cl.paused)
+		return;
+
+	// Suppress while a rect-screenshot session is being set up or running —
+	// the paused state is ours and the PAUSE gfx would land in the snapshot.
+	if (Crop_Active() || Crop_Pending())
 		return;
 
 	pic = Draw_CachePic ("gfx/pause.lmp");
