@@ -541,9 +541,102 @@ void VID_Init(unsigned char *palette)
     vid_menukeyfn   = VID_MenuKey;
 }
 
+// ---------------------------------------------------------------------------
+// Scanlines: CRT-style horizontal-line overlay
+// ---------------------------------------------------------------------------
+
+static SDL_Texture *sdl_scanline_tex = NULL;
+static int   scanline_cached_h        = -1;
+static int   scanline_cached_size     = -1;
+static float scanline_cached_intensity = -1.0f;
+
+// Rebuild the 1xH scanline column if window output height, size, or intensity
+// changed. Width is fixed at 1; SDL stretches it horizontally on draw.
+static void Scanline_Ensure(void)
+{
+    int out_w = 0, out_h = 0;
+    SDL_GetRenderOutputSize(sdl_renderer, &out_w, &out_h);
+    if (out_h <= 0) return;
+
+    int   size      = (int)vid_scanline_size.value;
+    if (size < 1) size = 1;
+    if (size > 3) size = 3;
+    float intensity = vid_scanline_intensity.value;
+    if (intensity < 0.0f) intensity = 0.0f;
+    if (intensity > 1.0f) intensity = 1.0f;
+
+    if (sdl_scanline_tex &&
+        scanline_cached_h        == out_h &&
+        scanline_cached_size     == size &&
+        scanline_cached_intensity == intensity)
+        return;
+
+    if (sdl_scanline_tex) {
+        SDL_DestroyTexture(sdl_scanline_tex);
+        sdl_scanline_tex = NULL;
+    }
+
+    sdl_scanline_tex = SDL_CreateTexture(sdl_renderer,
+        SDL_PIXELFORMAT_RGBA8888,
+        SDL_TEXTUREACCESS_STREAMING,
+        1, out_h);
+    if (!sdl_scanline_tex) {
+        Con_Printf("Scanline_Ensure: SDL_CreateTexture failed: %s\n",
+                   SDL_GetError());
+        return;
+    }
+    SDL_SetTextureBlendMode(sdl_scanline_tex, SDL_BLENDMODE_MOD);
+    SDL_SetTextureScaleMode(sdl_scanline_tex, SDL_SCALEMODE_NEAREST);
+
+    void *pixels;
+    int   pitch;
+    if (SDL_LockTexture(sdl_scanline_tex, NULL, &pixels, &pitch) >= 0) {
+        unsigned char dark = (unsigned char)((1.0f - intensity) * 255.0f + 0.5f);
+        for (int y = 0; y < out_h; y++) {
+            int band = (y / size) % 2;  // 0 = dark, 1 = bright
+            unsigned char *row = (unsigned char *)pixels + y * pitch;
+            unsigned char v = (band == 0) ? dark : 255;
+            // SDL_PIXELFORMAT_RGBA8888: byte order R,G,B,A on big-endian
+            // semantics; SDL handles host endianness when locking.
+            row[0] = v;
+            row[1] = v;
+            row[2] = v;
+            row[3] = 255;
+        }
+        SDL_UnlockTexture(sdl_scanline_tex);
+    }
+
+    scanline_cached_h         = out_h;
+    scanline_cached_size      = size;
+    scanline_cached_intensity = intensity;
+}
+
+// Draw the scanline overlay full-screen at physical-pixel scale.
+// Must be called between the framebuffer SDL_RenderTexture and ImguiLayer_Render
+// so the dev overlay stays crisp.
+static void Scanline_Draw(void)
+{
+    if (vid_scanlines.value == 0.0f) return;
+    Scanline_Ensure();
+    if (!sdl_scanline_tex) return;
+
+    // Drop logical presentation so the 1-column texture stretches across the
+    // entire physical render output (not the 320x200-equivalent logical area).
+    SDL_SetRenderLogicalPresentation(sdl_renderer, 0, 0,
+                                     SDL_LOGICAL_PRESENTATION_DISABLED);
+    SDL_RenderTexture(sdl_renderer, sdl_scanline_tex, NULL, NULL);
+    SDL_SetRenderLogicalPresentation(sdl_renderer,
+                                     vid_render_w, vid_render_h,
+                                     SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+}
+
 void VID_Shutdown(void)
 {
     ImguiLayer_Shutdown();
+    if (sdl_scanline_tex) { SDL_DestroyTexture(sdl_scanline_tex); sdl_scanline_tex = NULL; }
+    scanline_cached_h = -1;
+    scanline_cached_size = -1;
+    scanline_cached_intensity = -1.0f;
     if (sdl_texture)  { SDL_DestroyTexture(sdl_texture);   sdl_texture  = NULL; }
     if (sdl_renderer) { SDL_DestroyRenderer(sdl_renderer); sdl_renderer = NULL; }
     if (sdl_window)   { SDL_DestroyWindow(sdl_window);     sdl_window   = NULL; }
@@ -659,6 +752,7 @@ void VID_Update(vrect_t *rects)
         SDL_UnlockTexture(sdl_texture);
         SDL_RenderClear(sdl_renderer);
         SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
+        Scanline_Draw();
         ImguiLayer_Render();
         SDL_RenderPresent(sdl_renderer);
     }
