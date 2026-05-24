@@ -8,10 +8,10 @@ The `screenshot` console command already writes PNG (see `screen.c:722` and `vid
 
 Two modes:
 
-1. **Fullscreen** — unchanged. `screenshot` → next free `id1/quakeNN.png`.
-2. **Rect** — new. `screenshot rect` enters a modal selection state: the current frame freezes visually, the OS cursor appears, mouse drag defines the crop, release saves, Esc cancels.
+1. **Fullscreen** — `screenshot` → next free `id1/quakeNN.png`. Now also copies the PNG to the system clipboard.
+2. **Rect** — new. `screenshot rect` enters a modal selection state: the current frame freezes visually, the OS cursor appears, mouse drag defines the crop, release saves the cropped PNG and copies it to the clipboard, Esc cancels.
 
-Both modes share the same `quakeNN.png` filename counter and write into `com_gamedir` (`id1/`).
+Both modes share the same `quakeNN.png` filename counter and write into `com_gamedir` (`id1/`). Both also push the encoded PNG bytes onto the system clipboard with MIME type `image/png` so Cmd/Ctrl-V into Slack, Discord, Claude Code, etc. pastes the image directly. Clipboard copy is gated on a new cvar `scr_screenshot_clipboard` (default 1).
 
 ## Architecture
 
@@ -58,7 +58,7 @@ Mouse events arrive in window pixels. The framebuffer is logical 320×200 (or wh
 |---|---|
 | `SDL_EVENT_MOUSE_BUTTON_DOWN` (left) | `dragging = true`, `rect_x0 = rect_x1 = clamped_x`, same for y. |
 | `SDL_EVENT_MOUSE_MOTION` (while dragging) | Update `rect_x1, rect_y1`. |
-| `SDL_EVENT_MOUSE_BUTTON_UP` (left) | Commit: normalise (min/max), enforce min size 1×1, encode + write PNG, `Con_Printf("Wrote %s\n", out_path)`, `Crop_Exit()`. |
+| `SDL_EVENT_MOUSE_BUTTON_UP` (left) | Commit: normalise (min/max), enforce min size 1×1, encode + write PNG, push to clipboard (gated on cvar), print result (see clipboard section), `Crop_Exit()`. |
 | `SDL_EVENT_KEY_DOWN` with `SDL_SCANCODE_ESCAPE` | `Con_Printf("screenshot rect: cancelled\n")`, `Crop_Exit()`. |
 | Anything else | Return 0 — pass through. |
 
@@ -74,7 +74,7 @@ Walks the ARGB destination after the frozen-frame expand. For each pixel `(x, y)
 
 ### Save path
 
-Reuses the palette → RGB conversion already in `VID_SaveScreenshotPNG` but operates on a subrect of the **frozen** 8-bit buffer:
+Reuses the palette → RGB conversion already in `VID_SaveScreenshotPNG` but operates on a subrect of the **frozen** 8-bit buffer. The encoder runs once into a memory buffer so the same PNG bytes feed both the file and the clipboard:
 
 ```c
 int rw = rect_x1 - rect_x0 + 1;
@@ -90,11 +90,35 @@ for (int y = 0; y < rh; y++) {
         dst[x*3 + 2] = (unsigned char)(c >>  0);
     }
 }
-stbi_write_png(out_path, rw, rh, 3, rgb, rw * 3);
+/* Encode once to memory via stbi_write_png_to_func; the callback appends to
+   a growable buffer. Then write the buffer to disk and hand the same bytes
+   to the clipboard. */
+png_buffer_t buf = {0};
+stbi_write_png_to_func(png_buffer_append, &buf, rw, rh, 3, rgb, rw * 3);
 free(rgb);
+
+write_file(out_path, buf.data, buf.size);
+if (scr_screenshot_clipboard.value)
+    Clipboard_SetPNG(buf.data, buf.size);   /* takes ownership or copies */
 ```
 
 (If a saved frame uses non-default palettes via `vid_lut`, swap `d_8to24table` for the per-pixel `vid_lut[frozen_pal[i]][src[i]]` lookup to match what the user saw.)
+
+The fullscreen path in `VID_SaveScreenshotPNG` mirrors the same shape: encode to memory once, write file, optionally copy to clipboard.
+
+### Clipboard (`Clipboard_SetPNG`)
+
+New thin wrapper in `sdlquake/platform/clipboard.{c,h}`:
+
+```c
+void Clipboard_SetPNG(const void *png_bytes, size_t size);
+```
+
+Implementation calls `SDL_SetClipboardData(callback, cleanup, userdata, mime_types, 1)` with `mime_types = {"image/png"}`. The callback returns the stored buffer pointer + size; cleanup `free`s it. Userdata is a heap-allocated struct holding a `memcpy`'d copy of the PNG bytes — we don't trust the caller's buffer to outlive the clipboard's lifetime, and SDL3 may re-invoke the callback later when another app actually requests the data.
+
+The `scr_screenshot_clipboard` cvar (registered in `screen.c` next to existing screenshot bits, default `1`) gates whether `Clipboard_SetPNG` gets called at all — `Con_Printf` should still report the file write either way.
+
+On success the console message becomes `"Wrote %s (also copied to clipboard)\n"`; on cvar-off it stays `"Wrote %s\n"`; on `SDL_SetClipboardData` failure we print the file message plus a `"clipboard copy failed: %s\n"` warning but don't fail the screenshot.
 
 ## Pause behaviour
 
@@ -106,7 +130,7 @@ Identical 00..99 scan to the existing fullscreen path, both modes share the coun
 
 ## Build
 
-`crop_screenshot.c` joins `platform_files` in `build.zig` (Platform list, around line 80). No new dependencies; `stb_image_write.h` is already vendored and `<<>>` SDL3 headers are on the include path.
+`crop_screenshot.c` and `clipboard.c` join `platform_files` in `build.zig` (Platform list, around line 80). No new dependencies; `stb_image_write.h` is already vendored and SDL3 headers are on the include path.
 
 ## YAGNI
 
@@ -122,6 +146,7 @@ Identical 00..99 scan to the existing fullscreen path, both modes share the coun
 Manual:
 
 1. `zig build run -- +map e1m1`
-2. Console: `screenshot` → confirm `id1/quakeNN.png` written and visually correct.
-3. Console: `screenshot rect` → confirm: cursor appears, world freezes, drag draws border + dims outside, release writes a smaller `quakeNN.png` matching the selected region exactly, Esc cancels without writing.
+2. Console: `screenshot` → confirm `id1/quakeNN.png` written and visually correct; Cmd/Ctrl-V into a chat client pastes the same image.
+3. Console: `screenshot rect` → confirm: cursor appears, world freezes, drag draws border + dims outside, release writes a smaller `quakeNN.png` matching the selected region exactly, and that image is on the clipboard. Esc cancels without writing or touching the clipboard.
 4. Repeat with a non-default palette active (e.g. inside a Doom-themed map area) to confirm colour fidelity.
+5. `scr_screenshot_clipboard 0` → both modes still write the file but no longer touch the clipboard.
