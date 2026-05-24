@@ -574,39 +574,52 @@ void R_DrawSurface (void)
 	}
 
 	// Mip-dither blend: when surf_bucket > 0, build a pre-blended scratch
-	// texture mixing mip N and mip N+1 via Bayer ordered dither, then have
-	// r_source point at it. The per-mip block writers (surfmiptable[] and
+	// texture mixing mip N and mip N+1 via Bayer ordered dither, then point
+	// r_source at it. The per-mip block writers (surfmiptable[] and
 	// surfmiptable_rgb[]) are unchanged - they apply the lightmap to the
 	// dithered palette indices as if it were a normal texture.
 	//
-	// Skip when r_lightmap or r_drawflat==2 active so those debug overrides
-	// keep stomping r_source themselves.
-	if (r_drawsurf.surf_bucket > 0
-		&& !r_lightmap.value
-		&& r_drawflat.value != 2)
+	// Guards:
+	//  - bucket > 0:           bucket 0 is the pure single-mip path
+	//  - surfmip < MIPLEVELS-1: need mip N+1 to blend toward
+	//  - mip-N size fits scratch: scratch is sized for id1's 256x256
+	//    cap; oversized mod textures silently fall back to bucket-0
+	//    rendering rather than stomping memory
+	//  - !r_lightmap, !r_drawflat==2: don't clobber the debug overrides
+	//    that set r_source themselves a few lines above
 	{
-		static byte r_mipdither_scratch[256 * 256];   // largest mip-0 texture
-		int N        = r_drawsurf.surfmip;
-		int w_N      = mt->width  >> N;
-		int h_N      = mt->height >> N;
-		int w_N1     = mt->width  >> (N + 1);
-		byte *src_N  = (byte *)mt + mt->offsets[N];
-		byte *src_N1 = (byte *)mt + mt->offsets[N + 1];
-		int threshold = (r_drawsurf.surf_bucket * 16) / NUM_DITHER_BUCKETS;
-		int s, t;
+		static byte r_mipdither_scratch[256 * 256];
 
-		for (t = 0; t < h_N; t++)
+		if (r_drawsurf.surf_bucket > 0
+			&& r_drawsurf.surfmip < MIPLEVELS - 1
+			&& (size_t)(mt->width  >> r_drawsurf.surfmip)
+			 * (size_t)(mt->height >> r_drawsurf.surfmip)
+			   <= sizeof(r_mipdither_scratch)
+			&& !r_lightmap.value
+			&& r_drawflat.value != 2)
 		{
-			int t_n1 = t >> 1;
-			for (s = 0; s < w_N; s++)
+			int mip       = r_drawsurf.surfmip;
+			int w         = mt->width  >> mip;
+			int h         = mt->height >> mip;
+			int w_next    = mt->width  >> (mip + 1);
+			byte *src     = (byte *)mt + mt->offsets[mip];
+			byte *src_next = (byte *)mt + mt->offsets[mip + 1];
+			int threshold = (r_drawsurf.surf_bucket * 16) / NUM_DITHER_BUCKETS;
+			int s, t;
+
+			for (t = 0; t < h; t++)
 			{
-				int b = r_bayer4x4[((t & 3) << 2) | (s & 3)];
-				r_mipdither_scratch[t * w_N + s] = (b < threshold)
-					? src_N1[t_n1 * w_N1 + (s >> 1)]
-					: src_N[t * w_N + s];
+				int t_next = t >> 1;
+				for (s = 0; s < w; s++)
+				{
+					int b = r_bayer4x4[((t & 3) << 2) | (s & 3)];
+					r_mipdither_scratch[t * w + s] = (b < threshold)
+						? src_next[t_next * w_next + (s >> 1)]
+						: src[t * w + s];
+				}
 			}
+			r_source = r_mipdither_scratch;
 		}
-		r_source = r_mipdither_scratch;
 	}
 
 // the fractional light values should range from 0 to (VID_GRADES - 1) << 16
