@@ -83,6 +83,11 @@ static cvar_t vid_window_h = {"vid_window_h", "-1", true};
 static int vid_supersample_active = 1;
 static cvar_t vid_supersample = {"vid_supersample", "1", true};
 
+// Scanlines (CRT overlay). All three are persisted to config.cfg.
+static cvar_t vid_scanlines          = {"vid_scanlines",          "0",   true};
+static cvar_t vid_scanline_intensity = {"vid_scanline_intensity", "0.5", true};
+static cvar_t vid_scanline_size      = {"vid_scanline_size",      "1",   true};
+
 #define VID_NUM_SCALES 4
 // Cursor positions: 0-3 supersample, 4-7 render scale, 8-11 window scale, 12 = save.
 #define VID_MENU_ITEMS    (VID_NUM_SCALES * 3 + 1)
@@ -384,7 +389,10 @@ static void vid_preload_cvars_from_config(void)
         else if (sscanf(line, "vid_window_w \"%f", &v) == 1)     Cvar_SetValue("vid_window_w", v);
         else if (sscanf(line, "vid_window_h \"%f", &v) == 1)     Cvar_SetValue("vid_window_h", v);
         else if (sscanf(line, "vid_scale \"%f", &v) == 1)        Cvar_SetValue("vid_scale", v);
-        else if (sscanf(line, "vid_supersample \"%f", &v) == 1)  Cvar_SetValue("vid_supersample", v);
+        else if (sscanf(line, "vid_supersample \"%f", &v) == 1)         Cvar_SetValue("vid_supersample", v);
+        else if (sscanf(line, "vid_scanlines \"%f", &v) == 1)           Cvar_SetValue("vid_scanlines", v);
+        else if (sscanf(line, "vid_scanline_intensity \"%f", &v) == 1)  Cvar_SetValue("vid_scanline_intensity", v);
+        else if (sscanf(line, "vid_scanline_size \"%f", &v) == 1)       Cvar_SetValue("vid_scanline_size", v);
     }
     fclose(f);
 }
@@ -398,6 +406,9 @@ void VID_Init(unsigned char *palette)
     Cvar_RegisterVariable(&vid_window_w);
     Cvar_RegisterVariable(&vid_window_h);
     Cvar_RegisterVariable(&vid_supersample);
+    Cvar_RegisterVariable(&vid_scanlines);
+    Cvar_RegisterVariable(&vid_scanline_intensity);
+    Cvar_RegisterVariable(&vid_scanline_size);
 
     vid_preload_cvars_from_config();
 
