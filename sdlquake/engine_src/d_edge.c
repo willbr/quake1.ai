@@ -345,47 +345,54 @@ void D_DrawSurfaces (void)
 
 					// Mip-dither bucket selection. Two boundary bands can apply:
 					// the one below raw_mip (between raw_mip and raw_mip+1) and
-					// the one above (between raw_mip-1 and raw_mip). They cannot
-					// overlap because bands are 2 * r_mipdither_band of threshold
-					// and thresholds are ~2x apart in mipscale.
-					if (r_mipdither.value)
+					// the one above (between raw_mip-1 and raw_mip). They are
+					// independent `if` blocks because raw_mip+1 existing tells
+					// us nothing about raw_mip-1 existing - both can be true.
+					// At default cvar settings the mipscale bands themselves
+					// cannot overlap (thresholds are ~2x apart in mipscale,
+					// band is 2*r_mipdither_band = 0.6), so only one inner
+					// mipscale-in-band test fires. If a user dials the band
+					// width up enough to overlap, the upper-band assignment
+					// runs second and wins, biasing toward the sharper mip.
+					if (r_mipdither.value && r_mipdither_band.value > 0.0f)
 					{
 						float band = r_mipdither_band.value;
-						if (band > 0.0f)
+
+						// Lower boundary: dither toward raw_mip+1 (coarser).
+						if (raw_mip + 1 <= MIPLEVELS - 1)
 						{
-							// Lower boundary: dither toward raw_mip+1.
-							if (raw_mip + 1 <= MIPLEVELS - 1)
+							float t_lo = d_scalemip[raw_mip];
+							float hi   = t_lo * (1.0f + band);
+							float lo   = t_lo * (1.0f - band);
+							if (mipscale < hi && mipscale > lo)
 							{
-								float t_lo = d_scalemip[raw_mip];
-								float hi   = t_lo * (1.0f + band);
-								float lo   = t_lo * (1.0f - band);
-								if (mipscale < hi && mipscale > lo)
-								{
-									float t = (hi - mipscale) / (hi - lo);
-									int   q = (int)(t * (NUM_DITHER_BUCKETS - 1) + 0.5f);
-									if (q < 0) q = 0;
-									if (q > NUM_DITHER_BUCKETS - 1)
-										q = NUM_DITHER_BUCKETS - 1;
-									miplevel = raw_mip;
-									bucket   = q;
-								}
+								float t = (hi - mipscale) / (hi - lo);
+								int   q = (int)(t * (NUM_DITHER_BUCKETS - 1) + 0.5f);
+								if (q < 0) q = 0;
+								if (q > NUM_DITHER_BUCKETS - 1)
+									q = NUM_DITHER_BUCKETS - 1;
+								miplevel = raw_mip;
+								bucket   = q;
 							}
-							// Upper boundary: dither toward raw_mip-1 (sharper).
-							else if (raw_mip - 1 >= d_minmip && raw_mip >= 1)
+						}
+
+						// Upper boundary: dither toward raw_mip-1 (sharper).
+						// d_minmip is the floor (higher number = stricter
+						// floor); raw_mip-1 must be at-or-above it AND >= 0.
+						if (raw_mip - 1 >= d_minmip && raw_mip >= 1)
+						{
+							float t_hi = d_scalemip[raw_mip - 1];
+							float hi   = t_hi * (1.0f + band);
+							float lo   = t_hi * (1.0f - band);
+							if (mipscale < hi && mipscale > lo)
 							{
-								float t_hi = d_scalemip[raw_mip - 1];
-								float hi   = t_hi * (1.0f + band);
-								float lo   = t_hi * (1.0f - band);
-								if (mipscale < hi && mipscale > lo)
-								{
-									float t = (hi - mipscale) / (hi - lo);
-									int   q = (int)(t * (NUM_DITHER_BUCKETS - 1) + 0.5f);
-									if (q < 0) q = 0;
-									if (q > NUM_DITHER_BUCKETS - 1)
-										q = NUM_DITHER_BUCKETS - 1;
-									miplevel = raw_mip - 1;
-									bucket   = q;
-								}
+								float t = (hi - mipscale) / (hi - lo);
+								int   q = (int)(t * (NUM_DITHER_BUCKETS - 1) + 0.5f);
+								if (q < 0) q = 0;
+								if (q > NUM_DITHER_BUCKETS - 1)
+									q = NUM_DITHER_BUCKETS - 1;
+								miplevel = raw_mip - 1;
+								bucket   = q;
 							}
 						}
 					}

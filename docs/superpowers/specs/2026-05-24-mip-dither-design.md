@@ -44,7 +44,11 @@ if r_mipdither is on:
 
     // --- Upper boundary: dither between raw_mip-1 (sharper) and raw_mip (coarser).
     // Requires raw_mip-1 to exist AND be allowed by d_mipcap floor.
-    elif raw_mip - 1 >= d_minmip AND raw_mip >= 1:
+    // Independent `if` from the lower boundary above - both eligibility
+    // conditions can be true (e.g. raw_mip = 1), so guarding with `elif`
+    // on the eligibility test would silently disable upward dithering
+    // for raw_mip in {1, 2}.
+    if raw_mip - 1 >= d_minmip AND raw_mip >= 1:
         t_hi = d_scalemip[raw_mip - 1]
         if mipscale < t_hi * (1 + r_mipdither_band)
            AND mipscale > t_hi * (1 - r_mipdither_band):
@@ -56,7 +60,7 @@ if r_mipdither is on:
 where quantize(t) = clamp(round(t * (NUM_DITHER_BUCKETS - 1)), 0, NUM_DITHER_BUCKETS - 1)
 ```
 
-The two boundary checks are written as `if`/`elif` because the bands cannot overlap — if the surface is inside the lower band of `raw_mip`, it's safely far from the upper band, and vice versa. `miplevel` always refers to the *sharper* of the two mips being blended; the cache entry is built at that mip's resolution.
+The two boundary checks are separate `if` blocks (not `if`/`elif`), because the eligibility conditions (`raw_mip+1` exists; `raw_mip-1` exists and is above `d_minmip`) can both be true at the same time — for example at `raw_mip = 1`, both `raw_mip+1 = 2` and `raw_mip-1 = 0` exist. The *mipscale* bands themselves cannot overlap at default cvar settings (thresholds are ~2× apart in mipscale, band is 2 × `r_mipdither_band` = 0.6 of the threshold), so only one inner `mipscale < hi AND mipscale > lo` test fires per surface. If the user dials `r_mipdither_band` up enough to make the bands overlap, the upper boundary's assignment runs second and wins, biasing toward the sharper mip. `miplevel` always refers to the *sharper* of the two mips being blended; the cache entry is built at that mip's resolution.
 
 **Bucket hysteresis.** Standing nearly stationary at a bucket seam would otherwise rebuild the cache every frame. Store the previous `(miplevel, bucket)` pair in `msurface_t` (re-using or extending `last_miplevel`). Hold the previous bucket if `mipscale` stays within ±25% of the bucket's slot width. This is the same hysteresis idea already used at the mip-level boundary, scoped down to bucket boundaries.
 
