@@ -354,7 +354,11 @@ void D_DrawSurfaces (void)
 					// mipscale-in-band test fires. If a user dials the band
 					// width up enough to overlap, the upper-band assignment
 					// runs second and wins, biasing toward the sharper mip.
-					if (r_mipdither.value && r_mipdither_band.value > 0.0f)
+					// Dlit surfaces rebuild cache every frame; skip dither to keep that
+					// path cheap. Coloured dlight intensity masks mip-step pop anyway.
+					if (r_mipdither.value
+						&& r_mipdither_band.value > 0.0f
+						&& pface->dlightframe != r_framecount)
 					{
 						float band = r_mipdither_band.value;
 
