@@ -545,15 +545,72 @@ void VID_Update(vrect_t *rects)
         int use_crop = (crop_src && crop_pal &&
                         crop_w == vid_render_w && crop_h == vid_render_h);
 
-        for (int y = 0; y < vid_render_h; y++)
+        int ss = vid_supersample_active;
+        /* Source stride: crop snapshots store at their own dims; live frame
+           uses vid.rowbytes (= vid_super_w). vid_palette_id is sized to the
+           max super-res and is written by the engine at vid_super_w stride
+           alongside vid.buffer, so it uses the same stride. */
+        int src_stride = use_crop ? crop_w : (int)vid.rowbytes;
+        const byte *src_base = use_crop ? crop_src     : vid.buffer;
+        const byte *pal_base = use_crop ? crop_pal     : vid_palette_id;
+
+        if (ss == 1)
         {
-            unsigned   *dst = (unsigned *)((byte *)pixels + y * pitch);
-            const byte *src = use_crop ? (crop_src + y * vid_render_w)
-                                       : (vid.buffer + y * vid.rowbytes);
-            const byte *pal = use_crop ? (crop_pal + y * vid_render_w)
-                                       : (vid_palette_id + y * vid_render_w);
-            for (int x = 0; x < vid_render_w; x++)
-                dst[x] = lut[pal[x]][src[x]];
+            /* Fast path: 1:1 palette expand, identical to pre-SSAA code. */
+            for (int y = 0; y < vid_render_h; y++)
+            {
+                unsigned   *dst = (unsigned *)((byte *)pixels + y * pitch);
+                const byte *src = src_base + y * src_stride;
+                const byte *pal = pal_base + y * src_stride;
+                for (int x = 0; x < vid_render_w; x++)
+                    dst[x] = lut[pal[x]][src[x]];
+            }
+        }
+        else
+        {
+            /* SSAA path: average SS*SS source samples per output pixel.
+               Mixed palette slots within a block fall back to the top-left
+               sample (mixing across palettes would produce nonsense colors). */
+            int ss2 = ss * ss;
+            for (int ry = 0; ry < vid_render_h; ry++)
+            {
+                unsigned *dst = (unsigned *)((byte *)pixels + ry * pitch);
+                for (int rx = 0; rx < vid_render_w; rx++)
+                {
+                    int sx0 = rx * ss;
+                    int sy0 = ry * ss;
+                    int tl_off = sy0 * src_stride + sx0;
+                    byte tl_slot = pal_base[tl_off];
+
+                    int mixed = 0;
+                    for (int sy = 0; sy < ss && !mixed; sy++)
+                        for (int sx = 0; sx < ss; sx++)
+                            if (pal_base[(sy0 + sy) * src_stride + (sx0 + sx)] != tl_slot)
+                            { mixed = 1; break; }
+
+                    if (mixed)
+                    {
+                        dst[rx] = lut[tl_slot][src_base[tl_off]];
+                    }
+                    else
+                    {
+                        unsigned ar = 0, ag = 0, ab = 0;
+                        for (int sy = 0; sy < ss; sy++)
+                            for (int sx = 0; sx < ss; sx++)
+                            {
+                                unsigned c = lut[tl_slot]
+                                    [src_base[(sy0 + sy) * src_stride + (sx0 + sx)]];
+                                ar += (c >> 16) & 0xff;
+                                ag += (c >>  8) & 0xff;
+                                ab += (c >>  0) & 0xff;
+                            }
+                        dst[rx] = 0xFF000000u
+                                | ((ar / ss2) << 16)
+                                | ((ag / ss2) <<  8)
+                                |  (ab / ss2);
+                    }
+                }
+            }
         }
 
         if (use_crop)
@@ -572,7 +629,7 @@ void VID_Update(vrect_t *rects)
     // renderer pipeline. Must run AFTER the expand step (above) which
     // reads the tags this frame's renderer wrote — clearing earlier
     // would wipe those tags before expand sees them.
-    memset(vid_palette_id, 0, vid_render_w * vid_render_h);
+    memset(vid_palette_id, 0, vid_super_w * vid_super_h);
 
     // Force the sbar to redraw on the next SCR_UpdateScreen. Stock Quake
     // uses sb_updates / vid.numpages to skip Sbar_Draw once each VRAM page
