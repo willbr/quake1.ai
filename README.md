@@ -9,10 +9,10 @@ WinQuake (1996 software renderer) ported to SDL3 + Zig, with a hot-reloading gam
 | 1 | done | SDL3 port + Zig build |
 | 2 | done | MCP server |
 | 3 | done | Hot-reload (`game_api_t` ABI, `game.dll`) |
-| 4 | done | Dear ImGui dev overlay (F12) |
+| 4 | done | Dear ImGui dev overlay (F3) |
 | 5 | done | QuakeC → C (progs ported to hot-reloadable game.dll) |
 | 6 | done | Wolf3D + Doom1 guns (sprites, sounds, fire rates) |
-| 7 | done | In-game 3D map editor |
+| 7 | done | In-game 3D map editor (F2) |
 | 8 | M3–M6 done, M7 stub | Immersive-sim systems (stimulus bus, FSM AI + navmesh, Blink + Gust, wind/smoke, light tier) |
 
 ## Build
