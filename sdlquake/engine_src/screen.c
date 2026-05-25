@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "editor.h"
+#include "perf.h"
 
 // only the refresh window will be updated unless these variables are flagged 
 int			scr_copytop;
@@ -1011,7 +1012,7 @@ void SCR_UpdateScreen (void)
 
 	VID_LockBuffer ();
 
-	V_RenderView ();
+	PERF_SCOPE("V_RenderView") V_RenderView ();
 
 	VID_UnlockBuffer ();
 
@@ -1082,8 +1083,8 @@ void SCR_UpdateScreen (void)
 		vrect.width = vid.width;
 		vrect.height = vid.height;
 		vrect.pnext = 0;
-	
-		VID_Update (&vrect);
+
+		PERF_SCOPE("VID_Update") VID_Update (&vrect);
 	}
 	else if (scr_copytop)
 	{

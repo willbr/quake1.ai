@@ -10,6 +10,7 @@
 #include "vid_palette.h"
 #include "debug_lines.h"
 #include "crop_screenshot.h"
+#include "perf.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
@@ -32,18 +33,10 @@ HINSTANCE global_hInstance = NULL;
 int       global_nCmdShow  = 0;
 HWND      mainwindow       = NULL;
 
-qboolean DDActive    = false;
 qboolean ActiveApp   = true;
 qboolean Minimized   = false;
 qboolean WinNT       = false;
 qboolean block_drawing = false;
-
-LPDIRECTDRAW        lpDD        = NULL;
-LPDIRECTDRAWSURFACE lpPrimary   = NULL;
-LPDIRECTDRAWSURFACE lpFrontBuffer = NULL;
-LPDIRECTDRAWSURFACE lpBackBuffer  = NULL;
-LPDIRECTDRAWPALETTE lpDDPal     = NULL;
-LPDIRECTSOUND       pDS         = NULL;
 
 modestate_t modestate = MS_WINDOWED;
 
@@ -761,6 +754,7 @@ void VID_Update(vrect_t *rects)
     int pitch;
     if (SDL_LockTexture(sdl_texture, NULL, &pixels, &pitch) >= 0)
     {
+        Perf_PushScope("palette_expand");
         // vid_lut[slot][index]: per-pixel palette dispatch.
         // Slot 0 (Quake) mirrors d_8to24table[]; slot 1 (Doom) filled on demand.
         unsigned (*lut)[256] = vid_lut;
@@ -846,11 +840,15 @@ void VID_Update(vrect_t *rects)
             Crop_PresentOverlay((unsigned *)pixels, pitch, vid_render_w, vid_render_h);
 
         SDL_UnlockTexture(sdl_texture);
+        Perf_PopScope();  // palette_expand
+
+        Perf_PushScope("SDL_present");
         SDL_RenderClear(sdl_renderer);
         SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
         Scanline_Draw();
         ImguiLayer_Render();
         SDL_RenderPresent(sdl_renderer);
+        Perf_PopScope();
     }
 
     // Reset palette tags so the next frame's renderer starts clean. Runs

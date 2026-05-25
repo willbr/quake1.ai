@@ -1838,7 +1838,6 @@ void R_DrawParticles (void)
 		// wind velocity.  Pre-integration so the kick takes effect
 		// this same frame.  Guarded so still-air or no-DLL behaviour
 		// is byte-identical to legacy r_part.c.
-#if NATIVE_GAME
 		int wind_debug_color = -1;
 		if (!r_particle_wind_disable.value && !(p->flags & PARTFL_STUCK)) {
 			vec3_t wind = {0, 0, 0};
@@ -1874,7 +1873,6 @@ void R_DrawParticles (void)
 				}
 			}
 		}
-#endif
 		// Stuck particles freeze position and skip integration entirely.
 		// They still tick through the type switch below so the ramp/dwell
 		// timer (and p->die) progresses normally.
@@ -2160,11 +2158,9 @@ void R_DrawParticles (void)
 			}
 		}
 
-#if NATIVE_GAME
 		// Apply wind-debug bucket colour after the type switch so it
 		// wins against ramp3/ramp1/ramp2 reassignments above.
 		if (wind_debug_color >= 0) p->color = wind_debug_color;
-#endif
 	}
 
 #ifdef GLQUAKE

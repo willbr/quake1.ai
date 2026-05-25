@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_local.h"
 #include "r_fog.h"
 #include "r_drawflat.h"
+#include "perf.h"
 
 //define	PASSAGES
 
@@ -1063,10 +1064,10 @@ void R_EdgeDrawing (void)
 		rw_time1 = Sys_FloatTime ();
 	}
 
-	R_RenderWorld ();
+	PERF_SCOPE("R_RenderWorld") R_RenderWorld ();
 
 	if (r_drawculledpolys)
-		R_ScanEdges ();
+		PERF_SCOPE("R_ScanEdges.dbg") R_ScanEdges ();
 
 // only the world can be drawn back to front with no z reads or compares, just
 // z writes, so have the driver turn z compares on now
@@ -1078,7 +1079,7 @@ void R_EdgeDrawing (void)
 		db_time1 = rw_time2;
 	}
 
-	R_DrawBEntitiesOnList ();
+	PERF_SCOPE("R_DrawBEntities") R_DrawBEntitiesOnList ();
 
 	if (!r_dspeeds.value)
 	{
@@ -1089,7 +1090,7 @@ void R_EdgeDrawing (void)
 
 	if (!(r_drawpolys | r_drawculledpolys))
 	{
-		R_ScanEdges ();
+		PERF_SCOPE("R_ScanEdges") R_ScanEdges ();
 	}
 }
 
@@ -1117,14 +1118,14 @@ void R_RenderView_ (void)
 		Editor_PreRender();
 	}
 
-	R_SetupFrame ();
-	R_DecalsFrame ();
-	R_Fog_Update ();
+	PERF_SCOPE("R_SetupFrame")   R_SetupFrame ();
+	PERF_SCOPE("R_DecalsFrame")  R_DecalsFrame ();
+	PERF_SCOPE("R_Fog_Update")   R_Fog_Update ();
 
 #ifdef PASSAGES
 SetVisibilityByPassages ();
 #else
-	R_MarkLeaves ();	// done here so we know if we're in water
+	PERF_SCOPE("R_MarkLeaves")   R_MarkLeaves ();	// done here so we know if we're in water
 #endif
 
 // make FDIV fast. This reduces timing precision after we've been running for a
@@ -1143,7 +1144,7 @@ SetVisibilityByPassages ();
 		VID_LockBuffer ();
 	}
 
-	R_EdgeDrawing ();
+	PERF_SCOPE("R_EdgeDrawing") R_EdgeDrawing ();
 
 	if (!r_dspeeds.value)
 	{
@@ -1168,7 +1169,7 @@ SetVisibilityByPassages ();
 		DebugLines_Draw();
 	}
 
-	R_DrawEntitiesOnList ();
+	PERF_SCOPE("R_DrawEntitiesOnList") R_DrawEntitiesOnList ();
 
 	// Phase 7 editor: wireframe brush overlay + gizmo, drawn after world+
 	// entities so edits are always visible regardless of underlying geometry.
@@ -1194,13 +1195,13 @@ SetVisibilityByPassages ();
 	{
 		extern int Editor_HideTransientFX(void);
 		if (!Editor_HideTransientFX())
-			R_DrawParticles ();
+			PERF_SCOPE("R_DrawParticles") R_DrawParticles ();
 	}
 
 	// PHASE 6: 2D sprite viewmodel pass. Runs after particles so they sit on
 	// top of the world (vanilla feel) but never overdraw the gun -- and never
 	// inherit the gun's Doom-palette tag.
-	R_DrawViewModel_2DPass ();
+	PERF_SCOPE("R_DrawViewModel_2D") R_DrawViewModel_2DPass ();
 
 	if (r_dspeeds.value)
 		dp_time2 = Sys_FloatTime ();

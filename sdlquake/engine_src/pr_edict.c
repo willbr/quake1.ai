@@ -22,33 +22,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "hotreload.h"
 
-#if NATIVE_GAME
 /* In NATIVE_GAME=1 only these are needed; VM types not present */
 char			*pr_strings;
 globalvars_t	*pr_global_struct;
 float			*pr_globals;
 int				pr_edict_size;
 unsigned short	pr_crc;
-#else
-dprograms_t		*progs;
-dfunction_t		*pr_functions;
-char			*pr_strings;
-ddef_t			*pr_fielddefs;
-ddef_t			*pr_globaldefs;
-dstatement_t	*pr_statements;
-globalvars_t	*pr_global_struct;
-float			*pr_globals;			// same as pr_global_struct
-int				pr_edict_size;	// in bytes
 
-unsigned short		pr_crc;
-
-int		type_size[8] = {1,sizeof(string_t)/4,1,3,1,1,sizeof(func_t)/4,sizeof(void *)/4};
-#endif
-
-#if !NATIVE_GAME
-ddef_t *ED_FieldAtOfs (int ofs);
-qboolean	ED_ParseEpair (void *base, ddef_t *key, char *s);
-#endif
 
 cvar_t	nomonsters = {"nomonsters", "0"};
 cvar_t	gamecfg = {"gamecfg", "0"};
@@ -62,17 +42,6 @@ cvar_t	saved2 = {"saved2", "0", true};
 cvar_t	saved3 = {"saved3", "0", true};
 cvar_t	saved4 = {"saved4", "0", true};
 
-#if !NATIVE_GAME
-#define	MAX_FIELD_LEN	64
-#define GEFV_CACHESIZE	2
-
-typedef struct {
-	ddef_t	*pcache;
-	char	field[MAX_FIELD_LEN];
-} gefv_cache;
-
-static gefv_cache	gefvCache[GEFV_CACHESIZE] = {{NULL, ""}, {NULL, ""}};
-#endif /* !NATIVE_GAME */
 
 /*
 =================
@@ -83,11 +52,7 @@ Sets everything to NULL
 */
 void ED_ClearEdict (edict_t *e)
 {
-#if NATIVE_GAME
 	memset (&e->v, 0, sizeof(entvars_t));
-#else
-	memset (&e->v, 0, progs->entityfields * 4);
-#endif
 	e->free = false;
 }
 
@@ -142,11 +107,7 @@ void ED_Free (edict_t *ed)
 	SV_UnlinkEdict (ed);		// unlink from world bsp
 
 	ed->free = true;
-#if NATIVE_GAME
 	ed->v.model = NULL;
-#else
-	ed->v.model = 0;
-#endif
 	ed->v.takedamage = 0;
 	ed->v.modelindex = 0;
 	ed->v.colormap = 0;
@@ -162,551 +123,6 @@ void ED_Free (edict_t *ed)
 
 //===========================================================================
 
-#if !NATIVE_GAME  /* VM-era progs inspection/debug functions */
-
-/*
-============
-ED_GlobalAtOfs
-============
-*/
-ddef_t *ED_GlobalAtOfs (int ofs)
-{
-	ddef_t		*def;
-	int			i;
-	
-	for (i=0 ; i<progs->numglobaldefs ; i++)
-	{
-		def = &pr_globaldefs[i];
-		if (def->ofs == ofs)
-			return def;
-	}
-	return NULL;
-}
-
-/*
-============
-ED_FieldAtOfs
-============
-*/
-ddef_t *ED_FieldAtOfs (int ofs)
-{
-	ddef_t		*def;
-	int			i;
-	
-	for (i=0 ; i<progs->numfielddefs ; i++)
-	{
-		def = &pr_fielddefs[i];
-		if (def->ofs == ofs)
-			return def;
-	}
-	return NULL;
-}
-
-/*
-============
-ED_FindField
-============
-*/
-ddef_t *ED_FindField (char *name)
-{
-	ddef_t		*def;
-	int			i;
-	
-	for (i=0 ; i<progs->numfielddefs ; i++)
-	{
-		def = &pr_fielddefs[i];
-		if (!strcmp(pr_strings + def->s_name,name) )
-			return def;
-	}
-	return NULL;
-}
-
-
-/*
-============
-ED_FindGlobal
-============
-*/
-ddef_t *ED_FindGlobal (char *name)
-{
-	ddef_t		*def;
-	int			i;
-	
-	for (i=0 ; i<progs->numglobaldefs ; i++)
-	{
-		def = &pr_globaldefs[i];
-		if (!strcmp(pr_strings + def->s_name,name) )
-			return def;
-	}
-	return NULL;
-}
-
-
-/*
-============
-ED_FindFunction
-============
-*/
-dfunction_t *ED_FindFunction (char *name)
-{
-	dfunction_t		*func;
-	int				i;
-	
-	for (i=0 ; i<progs->numfunctions ; i++)
-	{
-		func = &pr_functions[i];
-		if (!strcmp(pr_strings + func->s_name,name) )
-			return func;
-	}
-	return NULL;
-}
-
-
-eval_t *GetEdictFieldValue(edict_t *ed, char *field)
-{
-	ddef_t			*def = NULL;
-	int				i;
-	static int		rep = 0;
-
-	for (i=0 ; i<GEFV_CACHESIZE ; i++)
-	{
-		if (!strcmp(field, gefvCache[i].field))
-		{
-			def = gefvCache[i].pcache;
-			goto Done;
-		}
-	}
-
-	def = ED_FindField (field);
-
-	if (strlen(field) < MAX_FIELD_LEN)
-	{
-		gefvCache[rep].pcache = def;
-		strcpy (gefvCache[rep].field, field);
-		rep ^= 1;
-	}
-
-Done:
-	if (!def)
-		return NULL;
-
-	return (eval_t *)((char *)&ed->v + def->ofs*4);
-}
-
-
-/*
-============
-PR_ValueString
-
-Returns a string describing *data in a type specific manner
-=============
-*/
-char *PR_ValueString (etype_t type, eval_t *val)
-{
-	static char	line[256];
-	ddef_t		*def;
-	dfunction_t	*f;
-	
-	type &= ~DEF_SAVEGLOBAL;
-
-	switch (type)
-	{
-	case ev_string:
-		sprintf (line, "%s", pr_strings + val->string);
-		break;
-	case ev_entity:	
-		sprintf (line, "entity %i", NUM_FOR_EDICT(PROG_TO_EDICT(val->edict)) );
-		break;
-	case ev_function:
-		f = pr_functions + val->function;
-		sprintf (line, "%s()", pr_strings + f->s_name);
-		break;
-	case ev_field:
-		def = ED_FieldAtOfs ( val->_int );
-		sprintf (line, ".%s", pr_strings + def->s_name);
-		break;
-	case ev_void:
-		sprintf (line, "void");
-		break;
-	case ev_float:
-		sprintf (line, "%5.1f", val->_float);
-		break;
-	case ev_vector:
-		sprintf (line, "'%5.1f %5.1f %5.1f'", val->vector[0], val->vector[1], val->vector[2]);
-		break;
-	case ev_pointer:
-		sprintf (line, "pointer");
-		break;
-	default:
-		sprintf (line, "bad type %i", type);
-		break;
-	}
-	
-	return line;
-}
-
-/*
-============
-PR_UglyValueString
-
-Returns a string describing *data in a type specific manner
-Easier to parse than PR_ValueString
-=============
-*/
-char *PR_UglyValueString (etype_t type, eval_t *val)
-{
-	static char	line[256];
-	ddef_t		*def;
-	dfunction_t	*f;
-	
-	type &= ~DEF_SAVEGLOBAL;
-
-	switch (type)
-	{
-	case ev_string:
-		sprintf (line, "%s", pr_strings + val->string);
-		break;
-	case ev_entity:	
-		sprintf (line, "%i", NUM_FOR_EDICT(PROG_TO_EDICT(val->edict)));
-		break;
-	case ev_function:
-		f = pr_functions + val->function;
-		sprintf (line, "%s", pr_strings + f->s_name);
-		break;
-	case ev_field:
-		def = ED_FieldAtOfs ( val->_int );
-		sprintf (line, "%s", pr_strings + def->s_name);
-		break;
-	case ev_void:
-		sprintf (line, "void");
-		break;
-	case ev_float:
-		sprintf (line, "%f", val->_float);
-		break;
-	case ev_vector:
-		sprintf (line, "%f %f %f", val->vector[0], val->vector[1], val->vector[2]);
-		break;
-	default:
-		sprintf (line, "bad type %i", type);
-		break;
-	}
-	
-	return line;
-}
-
-/*
-============
-PR_GlobalString
-
-Returns a string with a description and the contents of a global,
-padded to 20 field width
-============
-*/
-char *PR_GlobalString (int ofs)
-{
-	char	*s;
-	int		i;
-	ddef_t	*def;
-	void	*val;
-	static char	line[128];
-	
-	val = (void *)&pr_globals[ofs];
-	def = ED_GlobalAtOfs(ofs);
-	if (!def)
-		sprintf (line,"%i(???)", ofs);
-	else
-	{
-		s = PR_ValueString (def->type, val);
-		sprintf (line,"%i(%s)%s", ofs, pr_strings + def->s_name, s);
-	}
-	
-	i = strlen(line);
-	for ( ; i<20 ; i++)
-		strcat (line," ");
-	strcat (line," ");
-		
-	return line;
-}
-
-char *PR_GlobalStringNoContents (int ofs)
-{
-	int		i;
-	ddef_t	*def;
-	static char	line[128];
-	
-	def = ED_GlobalAtOfs(ofs);
-	if (!def)
-		sprintf (line,"%i(???)", ofs);
-	else
-		sprintf (line,"%i(%s)", ofs, pr_strings + def->s_name);
-	
-	i = strlen(line);
-	for ( ; i<20 ; i++)
-		strcat (line," ");
-	strcat (line," ");
-		
-	return line;
-}
-
-
-/*
-=============
-ED_Print
-
-For debugging
-=============
-*/
-void ED_Print (edict_t *ed)
-{
-	int		l;
-	ddef_t	*d;
-	int		*v;
-	int		i, j;
-	char	*name;
-	int		type;
-
-	if (ed->free)
-	{
-		Con_Printf ("FREE\n");
-		return;
-	}
-
-	Con_Printf("\nEDICT %i:\n", NUM_FOR_EDICT(ed));
-	for (i=1 ; i<progs->numfielddefs ; i++)
-	{
-		d = &pr_fielddefs[i];
-		name = pr_strings + d->s_name;
-		if (name[strlen(name)-2] == '_')
-			continue;	// skip _x, _y, _z vars
-			
-		v = (int *)((char *)&ed->v + d->ofs*4);
-
-	// if the value is still all 0, skip the field
-		type = d->type & ~DEF_SAVEGLOBAL;
-		
-		for (j=0 ; j<type_size[type] ; j++)
-			if (v[j])
-				break;
-		if (j == type_size[type])
-			continue;
-	
-		Con_Printf ("%s",name);
-		l = strlen (name);
-		while (l++ < 15)
-			Con_Printf (" ");
-
-		Con_Printf ("%s\n", PR_ValueString(d->type, (eval_t *)v));		
-	}
-}
-
-/*
-=============
-ED_Write
-
-For savegames
-=============
-*/
-void ED_Write (FILE *f, edict_t *ed)
-{
-	ddef_t	*d;
-	int		*v;
-	int		i, j;
-	char	*name;
-	int		type;
-
-	fprintf (f, "{\n");
-
-	if (ed->free)
-	{
-		fprintf (f, "}\n");
-		return;
-	}
-	
-	for (i=1 ; i<progs->numfielddefs ; i++)
-	{
-		d = &pr_fielddefs[i];
-		name = pr_strings + d->s_name;
-		if (name[strlen(name)-2] == '_')
-			continue;	// skip _x, _y, _z vars
-			
-		v = (int *)((char *)&ed->v + d->ofs*4);
-
-	// if the value is still all 0, skip the field
-		type = d->type & ~DEF_SAVEGLOBAL;
-		for (j=0 ; j<type_size[type] ; j++)
-			if (v[j])
-				break;
-		if (j == type_size[type])
-			continue;
-	
-		fprintf (f,"\"%s\" ",name);
-		fprintf (f,"\"%s\"\n", PR_UglyValueString(d->type, (eval_t *)v));		
-	}
-
-	fprintf (f, "}\n");
-}
-
-void ED_PrintNum (int ent)
-{
-	ED_Print (EDICT_NUM(ent));
-}
-
-/*
-=============
-ED_PrintEdicts
-
-For debugging, prints all the entities in the current server
-=============
-*/
-void ED_PrintEdicts (void)
-{
-	int		i;
-	
-	Con_Printf ("%i entities\n", sv.num_edicts);
-	for (i=0 ; i<sv.num_edicts ; i++)
-		ED_PrintNum (i);
-}
-
-/*
-=============
-ED_PrintEdict_f
-
-For debugging, prints a single edicy
-=============
-*/
-void ED_PrintEdict_f (void)
-{
-	int		i;
-	
-	i = Q_atoi (Cmd_Argv(1));
-	if (i >= sv.num_edicts)
-	{
-		Con_Printf("Bad edict number\n");
-		return;
-	}
-	ED_PrintNum (i);
-}
-
-/*
-=============
-ED_Count
-
-For debugging
-=============
-*/
-void ED_Count (void)
-{
-	int		i;
-	edict_t	*ent;
-	int		active, models, solid, step;
-
-	active = models = solid = step = 0;
-	for (i=0 ; i<sv.num_edicts ; i++)
-	{
-		ent = EDICT_NUM(i);
-		if (ent->free)
-			continue;
-		active++;
-		if (ent->v.solid)
-			solid++;
-		if (ent->v.model)
-			models++;
-		if (ent->v.movetype == MOVETYPE_STEP)
-			step++;
-	}
-
-	Con_Printf ("num_edicts:%3i\n", sv.num_edicts);
-	Con_Printf ("active    :%3i\n", active);
-	Con_Printf ("view      :%3i\n", models);
-	Con_Printf ("touch     :%3i\n", solid);
-	Con_Printf ("step      :%3i\n", step);
-
-}
-
-/*
-==============================================================================
-
-					ARCHIVING GLOBALS
-
-FIXME: need to tag constants, doesn't really work
-==============================================================================
-*/
-
-/*
-=============
-ED_WriteGlobals
-=============
-*/
-void ED_WriteGlobals (FILE *f)
-{
-	ddef_t		*def;
-	int			i;
-	char		*name;
-	int			type;
-
-	fprintf (f,"{\n");
-	for (i=0 ; i<progs->numglobaldefs ; i++)
-	{
-		def = &pr_globaldefs[i];
-		type = def->type;
-		if ( !(def->type & DEF_SAVEGLOBAL) )
-			continue;
-		type &= ~DEF_SAVEGLOBAL;
-
-		if (type != ev_string
-		&& type != ev_float
-		&& type != ev_entity)
-			continue;
-
-		name = pr_strings + def->s_name;		
-		fprintf (f,"\"%s\" ", name);
-		fprintf (f,"\"%s\"\n", PR_UglyValueString(type, (eval_t *)&pr_globals[def->ofs]));		
-	}
-	fprintf (f,"}\n");
-}
-
-/*
-=============
-ED_ParseGlobals
-=============
-*/
-void ED_ParseGlobals (char *data)
-{
-	char	keyname[64];
-	ddef_t	*key;
-
-	while (1)
-	{	
-	// parse key
-		data = COM_Parse (data);
-		if (com_token[0] == '}')
-			break;
-		if (!data)
-			Sys_Error ("ED_ParseEntity: EOF without closing brace");
-
-		strcpy (keyname, com_token);
-
-	// parse value	
-		data = COM_Parse (data);
-		if (!data)
-			Sys_Error ("ED_ParseEntity: EOF without closing brace");
-
-		if (com_token[0] == '}')
-			Sys_Error ("ED_ParseEntity: closing brace without data");
-
-		key = ED_FindGlobal (keyname);
-		if (!key)
-		{
-			Con_Printf ("'%s' is not a global\n", keyname);
-			continue;
-		}
-
-		if (!ED_ParseEpair ((void *)pr_globals, key, com_token))
-			Host_Error ("ED_ParseGlobals: parse error");
-	}
-}
-
-#endif  /* !NATIVE_GAME — end of VM-era progs inspection functions */
 
 //============================================================================
 
@@ -716,11 +132,7 @@ void ED_ParseGlobals (char *data)
 ED_NewString
 =============
 */
-#if NATIVE_GAME
 char *ED_NewString (const char *string)
-#else
-char *ED_NewString (char *string)
-#endif
 {
 	char	*new, *new_p;
 	int		i,l;
@@ -747,80 +159,6 @@ char *ED_NewString (char *string)
 }
 
 
-#if !NATIVE_GAME
-/*
-=============
-ED_ParseEval
-
-Can parse either fields or globals
-returns false if error
-=============
-*/
-qboolean	ED_ParseEpair (void *base, ddef_t *key, char *s)
-{
-	int		i;
-	char	string[128];
-	ddef_t	*def;
-	char	*v, *w;
-	void	*d;
-	dfunction_t	*func;
-	
-	d = (void *)((int *)base + key->ofs);
-	
-	switch (key->type & ~DEF_SAVEGLOBAL)
-	{
-	case ev_string:
-		*(string_t *)d = ED_NewString (s) - pr_strings;
-		break;
-
-	case ev_float:
-		*(float *)d = atof (s);
-		break;
-		
-	case ev_vector:
-		strcpy (string, s);
-		v = string;
-		w = string;
-		for (i=0 ; i<3 ; i++)
-		{
-			while (*v && *v != ' ')
-				v++;
-			*v = 0;
-			((float *)d)[i] = atof (w);
-			w = v = v+1;
-		}
-		break;
-		
-	case ev_entity:
-		*(int *)d = EDICT_TO_PROG(EDICT_NUM(atoi (s)));
-		break;
-		
-	case ev_field:
-		def = ED_FindField (s);
-		if (!def)
-		{
-			Con_Printf ("Can't find field %s\n", s);
-			return false;
-		}
-		*(int *)d = G_INT(def->ofs);
-		break;
-	
-	case ev_function:
-		func = ED_FindFunction (s);
-		if (!func)
-		{
-			Con_Printf ("Can't find function %s\n", s);
-			return false;
-		}
-		*(func_t *)d = func - pr_functions;
-		break;
-		
-	default:
-		break;
-	}
-	return true;
-}
-#endif /* !NATIVE_GAME */
 
 /*
 ====================
@@ -831,7 +169,6 @@ ed should be a properly initialized empty edict.
 Used for initial level load and for savegames.
 ====================
 */
-#if NATIVE_GAME
 /* Native field table: maps keyname string → offset+type in entvars_t */
 typedef enum { FT_FLOAT, FT_VECTOR, FT_STRING } native_ftype_t;
 typedef struct { const char *name; size_t off; native_ftype_t type; } native_field_t;
@@ -957,98 +294,6 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 
 	return data;
 }
-#else /* !NATIVE_GAME */
-char *ED_ParseEdict (char *data, edict_t *ent)
-{
-	ddef_t		*key;
-	qboolean	anglehack;
-	qboolean	init;
-	char		keyname[256];
-	int			n;
-
-	init = false;
-
-// clear it
-	if (ent != sv.edicts)	// hack
-#if NATIVE_GAME
-		memset (&ent->v, 0, sizeof(entvars_t));
-#else
-		memset (&ent->v, 0, progs->entityfields * 4);
-#endif
-
-// go through all the dictionary pairs
-	while (1)
-	{	
-	// parse key
-		data = COM_Parse (data);
-		if (com_token[0] == '}')
-			break;
-		if (!data)
-			Sys_Error ("ED_ParseEntity: EOF without closing brace");
-		
-// anglehack is to allow QuakeEd to write single scalar angles
-// and allow them to be turned into vectors. (FIXME...)
-if (!strcmp(com_token, "angle"))
-{
-	strcpy (com_token, "angles");
-	anglehack = true;
-}
-else
-	anglehack = false;
-
-// FIXME: change light to _light to get rid of this hack
-if (!strcmp(com_token, "light"))
-	strcpy (com_token, "light_lev");	// hack for single light def
-
-		strcpy (keyname, com_token);
-
-		// another hack to fix heynames with trailing spaces
-		n = strlen(keyname);
-		while (n && keyname[n-1] == ' ')
-		{
-			keyname[n-1] = 0;
-			n--;
-		}
-
-	// parse value	
-		data = COM_Parse (data);
-		if (!data)
-			Sys_Error ("ED_ParseEntity: EOF without closing brace");
-
-		if (com_token[0] == '}')
-			Sys_Error ("ED_ParseEntity: closing brace without data");
-
-		init = true;	
-
-// keynames with a leading underscore are used for utility comments,
-// and are immediately discarded by quake
-		if (keyname[0] == '_')
-			continue;
-		
-		key = ED_FindField (keyname);
-		if (!key)
-		{
-			Con_Printf ("'%s' is not a field\n", keyname);
-			continue;
-		}
-
-if (anglehack)
-{
-char	temp[32];
-strcpy (temp, com_token);
-sprintf (com_token, "0 %s 0", temp);
-}
-
-		if (!ED_ParseEpair ((void *)&ent->v, key, com_token))
-			Host_Error ("ED_ParseEdict: parse error");
-	}
-
-	if (!init)
-		ent->free = true;
-
-	return data;
-}
-#endif /* NATIVE_GAME / !NATIVE_GAME for ED_ParseEdict */
 
 
 /*
@@ -1070,9 +315,6 @@ void ED_LoadFromFile (char *data)
 {
 	edict_t		*ent;
 	int			inhibit;
-#if !NATIVE_GAME
-	dfunction_t	*func;
-#endif
 
 	ent = NULL;
 	inhibit = 0;
@@ -1125,24 +367,9 @@ void ED_LoadFromFile (char *data)
 		}
 
 	// look for the spawn function
-#if NATIVE_GAME
 		pr_global_struct->self = EDICT_TO_PROG(ent);
 		if (g_game_api)
 			g_game_api->entity_spawn(ent, ent->v.classname);
-#else
-		func = ED_FindFunction ( pr_strings + ent->v.classname );
-
-		if (!func)
-		{
-			Con_Printf ("No spawn function for:\n");
-			ED_Print (ent);
-			ED_Free (ent);
-			continue;
-		}
-
-		pr_global_struct->self = EDICT_TO_PROG(ent);
-		PR_ExecuteProgram (func - pr_functions);
-#endif
 	}
 
 	Con_DPrintf ("%i entities inhibited\n", inhibit);
@@ -1158,7 +385,6 @@ void PR_LoadProgs (void)
 {
 	int		i;
 
-#if NATIVE_GAME
 	// For NATIVE_GAME=1, skip loading progs.dat.
 	// Set pr_edict_size to the native edict_t layout and set up a
 	// minimal pr_global_struct stub (some engine code still reads it).
@@ -1168,87 +394,6 @@ void PR_LoadProgs (void)
 	pr_edict_size = sizeof(edict_t);
 	pr_global_struct = (globalvars_t *)Hunk_AllocName(sizeof(globalvars_t), "pr_globals");
 	pr_strings       = Hunk_AllocName(1, "pr_strings");
-#else /* !NATIVE_GAME — load the QC VM progs.dat */
-
-// flush the non-C variable lookup cache
-	for (i=0 ; i<GEFV_CACHESIZE ; i++)
-		gefvCache[i].field[0] = 0;
-
-	CRC_Init (&pr_crc);
-
-	progs = (dprograms_t *)COM_LoadHunkFile ("progs.dat");
-	if (!progs)
-		Sys_Error ("PR_LoadProgs: couldn't load progs.dat");
-	Con_DPrintf ("Programs occupy %iK.\n", com_filesize/1024);
-
-	for (i=0 ; i<com_filesize ; i++)
-		CRC_ProcessByte (&pr_crc, ((byte *)progs)[i]);
-
-// byte swap the header
-	for (i=0 ; i<sizeof(*progs)/4 ; i++)
-		((int *)progs)[i] = LittleLong ( ((int *)progs)[i] );		
-
-	if (progs->version != PROG_VERSION)
-		Sys_Error ("progs.dat has wrong version number (%i should be %i)", progs->version, PROG_VERSION);
-	if (progs->crc != PROGHEADER_CRC)
-		Sys_Error ("progs.dat system vars have been modified, progdefs.h is out of date");
-
-	pr_functions = (dfunction_t *)((byte *)progs + progs->ofs_functions);
-	pr_strings = (char *)progs + progs->ofs_strings;
-	pr_globaldefs = (ddef_t *)((byte *)progs + progs->ofs_globaldefs);
-	pr_fielddefs = (ddef_t *)((byte *)progs + progs->ofs_fielddefs);
-	pr_statements = (dstatement_t *)((byte *)progs + progs->ofs_statements);
-
-	pr_global_struct = (globalvars_t *)((byte *)progs + progs->ofs_globals);
-	pr_globals = (float *)pr_global_struct;
-	
-	pr_edict_size = progs->entityfields * 4 + sizeof (edict_t) - sizeof(entvars_t);
-	
-// byte swap the lumps
-	for (i=0 ; i<progs->numstatements ; i++)
-	{
-		pr_statements[i].op = LittleShort(pr_statements[i].op);
-		pr_statements[i].a = LittleShort(pr_statements[i].a);
-		pr_statements[i].b = LittleShort(pr_statements[i].b);
-		pr_statements[i].c = LittleShort(pr_statements[i].c);
-	}
-
-	for (i=0 ; i<progs->numfunctions; i++)
-	{
-	pr_functions[i].first_statement = LittleLong (pr_functions[i].first_statement);
-	pr_functions[i].parm_start = LittleLong (pr_functions[i].parm_start);
-	pr_functions[i].s_name = LittleLong (pr_functions[i].s_name);
-	pr_functions[i].s_file = LittleLong (pr_functions[i].s_file);
-	pr_functions[i].numparms = LittleLong (pr_functions[i].numparms);
-	pr_functions[i].locals = LittleLong (pr_functions[i].locals);
-	}	
-
-	for (i=0 ; i<progs->numglobaldefs ; i++)
-	{
-		pr_globaldefs[i].type = LittleShort (pr_globaldefs[i].type);
-		pr_globaldefs[i].ofs = LittleShort (pr_globaldefs[i].ofs);
-		pr_globaldefs[i].s_name = LittleLong (pr_globaldefs[i].s_name);
-	}
-
-	for (i=0 ; i<progs->numfielddefs ; i++)
-	{
-		pr_fielddefs[i].type = LittleShort (pr_fielddefs[i].type);
-		if (pr_fielddefs[i].type & DEF_SAVEGLOBAL)
-			Sys_Error ("PR_LoadProgs: pr_fielddefs[i].type & DEF_SAVEGLOBAL");
-		pr_fielddefs[i].ofs = LittleShort (pr_fielddefs[i].ofs);
-		pr_fielddefs[i].s_name = LittleLong (pr_fielddefs[i].s_name);
-	}
-
-	for (i=0 ; i<progs->numglobals ; i++)
-		((int *)pr_globals)[i] = LittleLong (((int *)pr_globals)[i]);
-
-	// Allocate temp string buffer inside hunk so pr_string_temp - pr_strings
-	// fits in a 32-bit string_t on x64 (static BSS addresses would not).
-	{
-		extern char *pr_string_temp;
-		pr_string_temp = Hunk_AllocName (128, "strtmp");
-	}
-#endif /* NATIVE_GAME */
 }
 
 
@@ -1259,13 +404,7 @@ PR_Init
 */
 void PR_Init (void)
 {
-#if !NATIVE_GAME
-	Cmd_AddCommand ("edict", ED_PrintEdict_f);
-#endif
 	Cmd_AddCommand ("edicts", ED_PrintEdicts);
-#if !NATIVE_GAME
-	Cmd_AddCommand ("edictcount", ED_Count);
-#endif
 	Cmd_AddCommand ("profile", PR_Profile_f);
 	Cvar_RegisterVariable (&nomonsters);
 	Cvar_RegisterVariable (&gamecfg);
@@ -1316,7 +455,6 @@ int NUM_FOR_EDICT(edict_t *e)
 	return b;
 }
 
-#if NATIVE_GAME
 /* ---------------------------------------------------------------------------
  * Stubs for VM-era functions that are compiled away with NATIVE_GAME=1 but
  * still referenced from engine code that we haven't fully guarded yet.
@@ -1335,4 +473,3 @@ void ED_Write (FILE *f, edict_t *ed) { (void)f; (void)ed; }
 void ED_ParseGlobals (char *data) { (void)data; }
 void PR_Profile_f (void) { Con_Printf ("<PR_Profile_f: no VM in NATIVE_GAME=1>\n"); }
 void PR_RunError (char *error, ...) { Sys_Error(error); }
-#endif /* NATIVE_GAME */

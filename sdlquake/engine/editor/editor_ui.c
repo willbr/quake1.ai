@@ -1799,6 +1799,22 @@ static void draw_inspector(void)
     if (is_light_entity(e))
         draw_light_inspector_panel(e);
 
+    // Resolved engine model: what cl_entities[].model->name actually points
+    // at right now. Differs from the authored "model" kv when the engine
+    // substituted a brush model ("*N") or precache redirected the path.
+    {
+        const char *mname = NULL;
+        if (e->live_ent && Editor_LiveEntInRange(e->live_ent)
+            && !e->live_ent->free)
+        {
+            int en = NUM_FOR_EDICT(e->live_ent);
+            if (en > 0 && en < cl.num_entities && cl_entities[en].model)
+                mname = cl_entities[en].model->name;
+        }
+        snprintf(buf, sizeof(buf), "model: %s", mname ? mname : "(none)");
+        IG_TextUnformatted(buf);
+    }
+
     IG_TextUnformatted("entity keys");
     IG_Separator();
 

@@ -5,10 +5,6 @@
 #include "quakedef.h"
 #include "winquake.h"
 
-// DirectSound globals — always NULL/0 in SDL build; guards in snd_dma/mix prevent access.
-LPDIRECTSOUNDBUFFER pDSBuf    = NULL;
-DWORD               gSndBufSize = 0;
-
 static SDL_AudioDeviceID sdl_audio_dev  = 0;
 static SDL_AudioStream  *sdl_audio_stream = NULL;
 

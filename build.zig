@@ -3,7 +3,6 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target      = b.standardTargetOptions(.{});
     const optimize    = b.standardOptimizeOption(.{});
-    const native_game = b.option(bool, "native_game", "Route game logic through game.dll instead of VM") orelse true;
 
     const os_tag = target.result.os.tag;
     const is_windows = os_tag == .windows;
@@ -68,12 +67,6 @@ pub fn build(b: *std.Build) void {
         "cd_null.c",
     };
 
-    // QC VM interpreter and builtins — only needed for NATIVE_GAME=0
-    const pr_vm_files: []const []const u8 = &.{
-        "pr_cmds.c",
-        "pr_exec.c",
-    };
-
     const platform_files: []const []const u8 = &.{
         "sdlquake/platform/sys_sdl.c",
         "sdlquake/platform/sys_crash.c",
@@ -94,6 +87,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/r_bbox.c",
         "sdlquake/engine/r_paths.c",
         "sdlquake/engine/virtual_fs.c",
+        "sdlquake/engine/perf.c",
         // Phase 7 in-game .map editor
         "sdlquake/engine/editor/editor.c",
         "sdlquake/engine/editor/edit_scene.c",
@@ -127,20 +121,11 @@ pub fn build(b: *std.Build) void {
         .link_libc   = true,
         .link_libcpp = true,
     });
-    mod.addCMacro("NATIVE_GAME", if (native_game) "1" else "0");
-
     mod.addCSourceFiles(.{
         .root  = b.path(wq_dir),
         .files = engine_files,
         .flags = engine_c_flags,
     });
-    if (!native_game) {
-        mod.addCSourceFiles(.{
-            .root  = b.path(wq_dir),
-            .files = pr_vm_files,
-            .flags = engine_c_flags,
-        });
-    }
     mod.addCSourceFiles(.{
         .files = platform_files,
         .flags = platform_c_flags,

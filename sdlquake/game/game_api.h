@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 25
+#define GAME_API_VERSION 26
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -212,6 +212,13 @@ typedef struct engine_api_s {
     // wind-drag-mediated displacement to catch up. Cheap O(N_particles).
     void  (*Particles_PushTube)(const vec3_t origin, const vec3_t axis,
                                  float mag, float radius);
+
+    // Scoped per-frame profiler — push/pop pairs nest under the engine's
+    // PERF_SCOPE tree. `name` must outlive the next frame (use string
+    // literals). Safe to call any time on the main thread; a no-op when
+    // not in a tracked frame.
+    void  (*Perf_PushScope)(const char *name);
+    void  (*Perf_PopScope) (void);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

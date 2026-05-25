@@ -27,10 +27,8 @@ server_static_t	svs;
 
 char	localmodels[MAX_MODELS][5];			// inline model names for precache
 
-#if NATIVE_GAME
 /* In NATIVE_GAME=1, pr_cmds.c is not compiled, so sv_aim is defined here. */
 cvar_t  sv_aim = {"sv_aim", "1"};  // 1 = no autoaim (default disabled)
-#endif
 
 //============================================================================
 
@@ -210,11 +208,7 @@ void SV_SendServerinfo (client_t *client)
 	else
 		MSG_WriteByte (&client->message, GAME_COOP);
 
-#if NATIVE_GAME
 	sprintf (message, "%s", sv.edicts->v.message ? sv.edicts->v.message : "");
-#else
-	sprintf (message, pr_strings+sv.edicts->v.message);
-#endif
 
 	MSG_WriteString (&client->message,message);
 
@@ -294,12 +288,8 @@ void SV_ConnectClient (int clientnum)
 	else
 	{
 	// call the progs to get default spawn parms for the new client
-#if NATIVE_GAME
 		if (g_game_api)
 			g_game_api->set_new_parms();
-#else
-		PR_ExecuteProgram (pr_global_struct->SetNewParms);
-#endif
 		for (i=0 ; i<NUM_SPAWN_PARMS ; i++)
 			client->spawn_parms[i] = (&pr_global_struct->parm1)[i];
 	}
@@ -466,11 +456,7 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 		if (ent != clent)	// clent is ALLWAYS sent
 		{
 // ignore ents without visible models
-	#if NATIVE_GAME
 		if (!ent->v.modelindex || !ent->v.model || !ent->v.model[0])
-#else
-		if (!ent->v.modelindex || !pr_strings[ent->v.model])
-#endif
 				continue;
 
 			// Phase 7 editor free-fly: the camera detaches from the player,
@@ -715,11 +701,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	if (bits & SU_ARMOR)
 		MSG_WriteByte (msg, ent->v.armorvalue);
 	if (bits & SU_WEAPON)
-	#if NATIVE_GAME
 	MSG_WriteByte (msg, SV_ModelIndex((char *)ent->v.weaponmodel));
-#else
-	MSG_WriteByte (msg, SV_ModelIndex(pr_strings+ent->v.weaponmodel));
-#endif
 	
 	MSG_WriteShort (msg, ent->v.health);
 	MSG_WriteByte (msg, ent->v.currentammo);
@@ -985,13 +967,8 @@ void SV_CreateBaseline (void)
 		else
 		{
 			svent->baseline.colormap = 0;
-#if NATIVE_GAME
 			svent->baseline.modelindex =
 				SV_ModelIndex((char *)svent->v.model);
-#else
-			svent->baseline.modelindex =
-				SV_ModelIndex(pr_strings + svent->v.model);
-#endif
 		}
 		
 	//
@@ -1063,12 +1040,8 @@ void SV_SaveSpawnparms (void)
 
 	// call the progs to get default spawn parms for the new client
 		pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
-#if NATIVE_GAME
 		if (g_game_api)
 			g_game_api->set_change_parms(host_client->edict);
-#else
-		PR_ExecuteProgram (pr_global_struct->SetChangeParms);
-#endif
 		for (j=0 ; j<NUM_SPAWN_PARMS ; j++)
 			host_client->spawn_parms[j] = (&pr_global_struct->parm1)[j];
 	}
@@ -1198,13 +1171,8 @@ void SV_SpawnServer (char *server)
 //
 	SV_ClearWorld ();
 
-#if NATIVE_GAME
 	sv.sound_precache[0] = "";
 	sv.model_precache[0] = "";
-#else
-	sv.sound_precache[0] = pr_strings;
-	sv.model_precache[0] = pr_strings;
-#endif
 	sv.model_precache[1] = sv.modelname;
 	for (i=1 ; i<sv.worldmodel->numsubmodels ; i++)
 	{
@@ -1216,22 +1184,13 @@ void SV_SpawnServer (char *server)
 // load the rest of the entities
 //
 	ent = EDICT_NUM(0);
-#if NATIVE_GAME
 	memset (&ent->v, 0, sizeof(entvars_t));
-#else
-	memset (&ent->v, 0, progs->entityfields * 4);
-#endif
 	ent->free = false;
-#if NATIVE_GAME
 	ent->v.model = ED_NewString(sv.worldmodel->name);
-#else
-	ent->v.model = ED_NewString(sv.worldmodel->name) - pr_strings;
-#endif
 	ent->v.modelindex = 1;		// world model
 	ent->v.solid = SOLID_BSP;
 	ent->v.movetype = MOVETYPE_PUSH;
 
-#if NATIVE_GAME
 	// Reset per-map state. Unlike pr_global_struct (hunk-allocated, fresh
 	// every spawn), game_globals is a static struct that persists across
 	// map loads. Without this, g->time stays at the previous game's last
@@ -1255,20 +1214,6 @@ void SV_SpawnServer (char *server)
 	game_globals.serverflags = svs.serverflags;
 	game_globals.world       = sv.edicts;
 	pr_global_struct->serverflags = svs.serverflags;
-#else
-	if (coop.value)
-		pr_global_struct->coop = coop.value;
-	else
-		pr_global_struct->deathmatch = deathmatch.value;
-
-	pr_global_struct->mapname = ED_NewString(sv.name) - pr_strings;
-#ifdef QUAKE2
-	pr_global_struct->startspot = sv.startspot - pr_strings;
-#endif
-
-// serverflags are for cross level information (sigils)
-	pr_global_struct->serverflags = svs.serverflags;
-#endif
 
 	ED_LoadFromFile (sv.worldmodel->entities);
 

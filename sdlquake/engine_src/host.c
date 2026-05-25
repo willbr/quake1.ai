@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "hotreload.h"
 #include "r_local.h"
+#include "perf.h"
 
 // Pause single-player physics while the ImGui dev overlay is open,
 // mirroring the existing key_dest != key_game pause for the console/menu.
@@ -379,12 +380,8 @@ void SV_DropClient (qboolean crash)
 		// this will set the body to a dead frame, among other things
 			saveSelf = pr_global_struct->self;
 			pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
-#if NATIVE_GAME
 			if (g_game_api)
 				g_game_api->client_disconnect(host_client->edict);
-#else
-			PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
-#endif
 			pr_global_struct->self = saveSelf;
 		}
 
@@ -671,26 +668,33 @@ void _Host_Frame (float time)
 
 // keep the random time dependent
 	rand ();
-	
+
 // decide the simulation time
 	if (!Host_FilterTime (time))
 		return;			// don't run too fast, or packets will flood out
-		
-// get new key events
-	Sys_SendKeyEvents ();
 
-// allow mice or other external controllers to add commands
-	IN_Commands ();
+// Frametime + scope tree start here — earlier returns are no-op polls
+// (Host_FilterTime gate while we're running ahead of host_maxfps) and
+// shouldn't count as frames.
+	Perf_BeginFrame();
+
+// get new key events
+	PERF_SCOPE("input") {
+		Sys_SendKeyEvents ();
+
+	// allow mice or other external controllers to add commands
+		IN_Commands ();
+	}
 
 // process console commands
-	Cbuf_Execute ();
+	PERF_SCOPE("Cbuf_Execute") Cbuf_Execute ();
 
 	NET_Poll();
 
 // if running the server locally, make intentions now
 	if (sv.active)
 		CL_SendCmd ();
-	
+
 //-------------------
 //
 // server operations
@@ -699,9 +703,9 @@ void _Host_Frame (float time)
 
 // check for commands typed to the host
 	Host_GetConsoleCommands ();
-	
+
 	if (sv.active)
-		Host_ServerFrame ();
+		PERF_SCOPE("server") Host_ServerFrame ();
 
 //-------------------
 //
@@ -719,7 +723,7 @@ void _Host_Frame (float time)
 // fetch results from server
 	if (cls.state == ca_connected)
 	{
-		CL_ReadFromServer ();
+		PERF_SCOPE("CL_ReadFromServer") CL_ReadFromServer ();
 	}
 
 	// Flush any cli/stuffcmds commands that needed the client to be
@@ -739,22 +743,24 @@ void _Host_Frame (float time)
 	// / Editor_IsPaused has frozen SV_Physics, so overlays stay visible
 	// while the editor is open.
 	if (g_game_api && g_game_api->debug_draw_overlays)
-		g_game_api->debug_draw_overlays();
+		PERF_SCOPE("dll_overlays") g_game_api->debug_draw_overlays();
 
-	SCR_UpdateScreen ();
+	PERF_SCOPE("SCR_UpdateScreen") SCR_UpdateScreen ();
 
 	if (host_speeds.value)
 		time2 = Sys_FloatTime ();
 		
 // update audio
-	if (cls.signon == SIGNONS)
-	{
-		S_Update (r_origin, vpn, vright, vup);
-		CL_DecayLights ();
+	PERF_SCOPE("S_Update") {
+		if (cls.signon == SIGNONS)
+		{
+			S_Update (r_origin, vpn, vright, vup);
+			CL_DecayLights ();
+		}
+		else
+			S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
 	}
-	else
-		S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
-	
+
 	CDAudio_Update();
 
 	if (host_speeds.value)
@@ -766,8 +772,9 @@ void _Host_Frame (float time)
 		Con_Printf ("%3i tot %3i server %3i gfx %3i snd\n",
 					pass1+pass2+pass3, pass1, pass2, pass3);
 	}
-	
+
 	host_framecount++;
+	Perf_EndFrame();
 }
 
 void Host_Frame (float time)
@@ -782,10 +789,10 @@ void Host_Frame (float time)
 		_Host_Frame (time);
 		return;
 	}
-	
+
 	time1 = Sys_FloatTime ();
 	_Host_Frame (time);
-	time2 = Sys_FloatTime ();	
+	time2 = Sys_FloatTime ();
 	
 	timetotal += time2 - time1;
 	timecount++;
@@ -897,7 +904,13 @@ void Host_Init (quakeparms_t *parms)
 
 	Memory_Init (parms->membase, parms->memsize);
 	Cbuf_Init ();
-	Cmd_Init ();	
+	Cmd_Init ();
+	{
+		extern void Perf_Init(void);
+		extern void Perf_RegisterCommands(void);
+		Perf_Init();
+		Perf_RegisterCommands();
+	}
 	V_Init ();
 	Chase_Init ();
 	Host_InitVCR (parms);
@@ -907,20 +920,13 @@ void Host_Init (quakeparms_t *parms)
 	Key_Init ();
 	Con_Init ();	
 	M_Init ();	
-#if !NATIVE_GAME
-	PR_Init ();
-#endif
 	Mod_Init ();
 	NET_Init ();
 	SV_Init ();
 
 	Con_Printf ("Exe: "__TIME__" "__DATE__"\n");
 	Con_Printf ("%4.1f megabyte heap\n",parms->memsize/ (1024*1024.0));
-#if NATIVE_GAME
 	Con_Printf ("Game: native C (game.dll)\n");
-#else
-	Con_Printf ("Game: QuakeC VM (progs.dat)\n");
-#endif
 	
 	R_InitTextures ();		// needed even for dedicated servers
  

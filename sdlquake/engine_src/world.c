@@ -303,16 +303,12 @@ void SV_TouchLinks ( edict_t *ent, areanode_t *node )
 		pr_global_struct->self = EDICT_TO_PROG(touch);
 		pr_global_struct->other = EDICT_TO_PROG(ent);
 		pr_global_struct->time = sv.time;
-#if NATIVE_GAME
 		if (g_game_api) {
 			game_globals.self  = touch;
 			game_globals.other = ent;
 			game_globals.time  = sv.time;
 			if (touch->v.touch) touch->v.touch(touch, ent);
 		}
-#else
-		PR_ExecuteProgram (touch->v.touch);
-#endif
 
 		pr_global_struct->self = old_self;
 		pr_global_struct->other = old_other;

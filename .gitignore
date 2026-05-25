@@ -31,3 +31,6 @@ id1/maps/m7_skeleton.bsp
 id1/maps/*.lit
 id1/rgbtable.lmp
 screenshots/
+
+# Perf captures (from the `profile <n>` console command)
+profiles/

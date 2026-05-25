@@ -51,7 +51,13 @@ void SetChangeParms(edict_t *);
 
 void Spike_GibPathScan(void);                       // weapons.c
 void Missile_SmokeWake(void);                       // weapons.c
-static void game_start_frame(void)                 { Sim_Frame(); Spike_GibPathScan(); Missile_SmokeWake(); StartFrame(); }
+extern engine_api_t *eng;                           // shared with sim/* through SIM_PERF
+static void game_start_frame(void) {
+    SIM_PERF("Sim_Frame")          Sim_Frame();
+    SIM_PERF("Spike_GibPathScan")  Spike_GibPathScan();
+    SIM_PERF("Missile_SmokeWake")  Missile_SmokeWake();
+    SIM_PERF("StartFrame")         StartFrame();
+}
 static void game_client_connect(edict_t *c)        { ClientConnect(c); }
 static void game_client_disconnect(edict_t *c)     { ClientDisconnect(c); }
 static void game_put_client_in_server(edict_t *c)  { PutClientInServer(c); }

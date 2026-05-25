@@ -12,6 +12,17 @@
 #define SIM_STIM_MAX_AGE_S     5.0f
 #define SIM_AI_TICK_HZ         10.0f
 
+// Scoped per-frame profiler — push/pop pairs are visible in the engine's
+// PERF_SCOPE flame graph. `eng` is the engine_api_t pointer every sim file
+// already has via `extern engine_api_t *eng;`. `name` must be a literal so
+// the pointer stays valid across the capture window.
+#define SIM_PERF_CONCAT_(a,b) a##b
+#define SIM_PERF_CONCAT(a,b)  SIM_PERF_CONCAT_(a,b)
+#define SIM_PERF(name) \
+    for (int SIM_PERF_CONCAT(_p_, __LINE__) = (eng->Perf_PushScope(name), 1); \
+         SIM_PERF_CONCAT(_p_, __LINE__); \
+         SIM_PERF_CONCAT(_p_, __LINE__) = 0, eng->Perf_PopScope())
+
 // ---------------------------------------------------------------------------
 // Stimulus bus
 // ---------------------------------------------------------------------------

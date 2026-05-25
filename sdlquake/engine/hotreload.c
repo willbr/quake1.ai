@@ -23,8 +23,8 @@
 #include "sv_bridge.h"
 #include "imgui_support.h"
 #include "debug_lines.h"
+#include "perf.h"
 
-#if NATIVE_GAME
 // Bring in the full edict_t / entvars_s definitions so offsetof works.
 // We need link_t and entity_state_t first; define them here so game_types.h
 // skips its own definitions via the guard macros.
@@ -33,7 +33,6 @@ typedef struct link_s { struct link_s *prev, *next; } link_t;
 #define ENTITY_STATE_T_DEFINED
 typedef struct { float origin[3], angles[3]; int modelindex, frame, colormap, skin, effects; } entity_state_t;
 #include "game_types.h"
-#endif
 
 // r_livelight.c entries, exposed to the DLL via engine_api_t. Forward-declare
 // here rather than including r_livelight.h to keep hotreload.c free of the
@@ -169,11 +168,7 @@ int      SV_ModelIndex(char *name);
 int      SV_PointContents(float *p);
 qboolean SV_CheckBottom(edict_t *ent);
 qboolean SV_movestep(edict_t *ent, float *move, qboolean relink);
-#if NATIVE_GAME
 void     SV_MoveToGoal(edict_t *ent, float dist);
-#else
-void     SV_MoveToGoal(void);
-#endif
 
 // pr_global_struct forward decl (the minimal globalvars_t lives in progs.h)
 // We need EDICT_TO_PROG which uses sv.edicts and pr_edict_size.
@@ -188,7 +183,6 @@ void     SV_MoveToGoal(void);
 // ---------------------------------------------------------------------------
 game_globals_t game_globals = {0};
 
-#if NATIVE_GAME
 // ---------------------------------------------------------------------------
 // Engine API passed into game DLL — only compiled for NATIVE_GAME=1
 // ---------------------------------------------------------------------------
@@ -224,7 +218,6 @@ static void     engine_ed_free(edict_t *ed) { ED_Free(ed); }
 
 static edict_t *engine_ed_find(edict_t *start, const char *field, const char *value)
 {
-#if NATIVE_GAME
     // Iterate edicts searching string field by name
     edict_t *e   = start ? _NEXT_EDICT(start) : svb_edicts();
     edict_t *end = _EDICT_NUM(svb_num_edicts());
@@ -245,10 +238,6 @@ static edict_t *engine_ed_find(edict_t *start, const char *field, const char *va
         e = _NEXT_EDICT(e);
     }
     return svb_edicts();
-#else
-    (void)start; (void)field; (void)value;
-    return svb_edicts();
-#endif
 }
 
 static edict_t *engine_ed_findradius(float *origin, float radius)
@@ -1019,6 +1008,8 @@ static engine_api_t engine_funcs = {
     engine_sv_smoke,
     engine_draw_smoke_cell,
     engine_particles_push_tube,
+    Perf_PushScope,
+    Perf_PopScope,
 };
 
 // ---------------------------------------------------------------------------
@@ -1134,13 +1125,3 @@ void MCP_DamageEntity(edict_t *targ, float damage)
         g_game_api->mcp_damage(targ, damage);
 }
 
-#else /* !NATIVE_GAME — game DLL not used */
-
-game_api_t *g_game_api = NULL;
-
-void HotReload_Init(void)     {}
-void HotReload_Frame(float dt) { (void)dt; }
-void HotReload_Shutdown(void) {}
-void HotReload_EnablePolling(void) {}
-
-#endif /* NATIVE_GAME */

@@ -8,7 +8,6 @@
  */
 #ifndef SV_BRIDGE_H
 #define SV_BRIDGE_H
-#if NATIVE_GAME
 
 struct edict_s;
 struct sizebuf_s;
@@ -50,5 +49,4 @@ void              svb_sv_centerprint(struct edict_s *e, const char *msg);
 void              svb_sv_stuffcmd(struct edict_s *e, const char *cmd);
 void              svb_sv_lightstyle(int style, const char *val);
 
-#endif /* NATIVE_GAME */
 #endif /* SV_BRIDGE_H */

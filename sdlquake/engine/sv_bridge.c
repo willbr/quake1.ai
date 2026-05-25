@@ -5,7 +5,6 @@
  * quakedef.h (its minimal hand-rolled type stubs would conflict), so any
  * access to sv.xxx or svs.clients[i].xxx goes through these functions.
  */
-#if NATIVE_GAME
 
 #include "quakedef.h"   /* server_t sv, server_static_t svs, client_t, sizebuf_t, MSG_* */
 #include "sv_bridge.h"
@@ -125,4 +124,3 @@ void svb_sv_lightstyle(int style, const char *val)
     }
 }
 
-#endif /* NATIVE_GAME */

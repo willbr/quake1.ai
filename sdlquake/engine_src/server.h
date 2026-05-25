@@ -252,11 +252,7 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink);
 
 void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg);
 
-#if NATIVE_GAME
 void SV_MoveToGoal (edict_t *ent, float dist);
-#else
-void SV_MoveToGoal (void);
-#endif
 
 void SV_CheckForNewClients (void);
 void SV_RunClients (void);

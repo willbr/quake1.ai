@@ -52,11 +52,11 @@ void Sim_Frame(void) {
         Sim_LevelInit(s_current_map);
     }
 
-    Sim_Retrofit_Frame();
-    Sim_AI_Frame();
-    Wind_Frame();
+    SIM_PERF("Sim_Retrofit") Sim_Retrofit_Frame();
+    SIM_PERF("Sim_AI")       Sim_AI_Frame();
+    SIM_PERF("Wind")         Wind_Frame();
     // Sim_Nav_Frame is now driven by game_api->debug_draw_overlays so the
     // navmesh overlay stays visible while the editor / engine has paused
     // the sim.
-    Sim_Arena_Poll();
+    SIM_PERF("Sim_Arena")    Sim_Arena_Poll();
 }

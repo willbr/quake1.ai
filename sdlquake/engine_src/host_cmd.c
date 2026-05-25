@@ -766,11 +766,7 @@ void Host_Loadgame_f (void)
 		{	// parse an edict
 
 			ent = EDICT_NUM(entnum);
-#if NATIVE_GAME
 			memset (&ent->v, 0, sizeof(entvars_t));
-#else
-			memset (&ent->v, 0, progs->entityfields * 4);
-#endif
 			ent->free = false;
 			ED_ParseEdict (start, ent);
 	
@@ -1027,11 +1023,7 @@ void Host_Name_f (void)
 		if (Q_strcmp(host_client->name, newName) != 0)
 			Con_Printf ("%s renamed to %s\n", host_client->name, newName);
 	Q_strcpy (host_client->name, newName);
-#if NATIVE_GAME
 	host_client->edict->v.netname = host_client->name;
-#else
-	host_client->edict->v.netname = ED_NewString(host_client->name) - pr_strings;
-#endif
 	
 // send notification to all clients
 	
@@ -1300,12 +1292,8 @@ void Host_Kill_f (void)
 	
 	pr_global_struct->time = sv.time;
 	pr_global_struct->self = EDICT_TO_PROG(sv_player);
-#if NATIVE_GAME
 	if (g_game_api)
 		g_game_api->client_kill(sv_player);
-#else
-	PR_ExecuteProgram (pr_global_struct->ClientKill);
-#endif
 }
 
 
@@ -1330,19 +1318,11 @@ void Host_Pause_f (void)
 
 		if (sv.paused)
 		{
-	#if NATIVE_GAME
 		SV_BroadcastPrintf ("%s paused the game\n", sv_player->v.netname ? sv_player->v.netname : "");
-#else
-		SV_BroadcastPrintf ("%s paused the game\n", pr_strings + sv_player->v.netname);
-#endif
 		}
 		else
 		{
-	#if NATIVE_GAME
 		SV_BroadcastPrintf ("%s unpaused the game\n", sv_player->v.netname ? sv_player->v.netname : "");
-#else
-		SV_BroadcastPrintf ("%s unpaused the game\n",pr_strings + sv_player->v.netname);
-#endif
 		}
 
 	// send notification to all clients
@@ -1413,18 +1393,10 @@ void Host_Spawn_f (void)
 		// set up the edict
 		ent = host_client->edict;
 
-#if NATIVE_GAME
 		memset (&ent->v, 0, sizeof(entvars_t));
-#else
-		memset (&ent->v, 0, progs->entityfields * 4);
-#endif
 		ent->v.colormap = NUM_FOR_EDICT(ent);
 		ent->v.team = (host_client->colors & 15) + 1;
-#if NATIVE_GAME
 		ent->v.netname = host_client->name;
-#else
-		ent->v.netname = ED_NewString(host_client->name) - pr_strings;
-#endif
 
 		// copy spawn parms out of the client_t
 
@@ -1435,22 +1407,14 @@ void Host_Spawn_f (void)
 
 		pr_global_struct->time = sv.time;
 		pr_global_struct->self = EDICT_TO_PROG(sv_player);
-#if NATIVE_GAME
 		if (g_game_api)
 			g_game_api->client_connect(sv_player);
-#else
-		PR_ExecuteProgram (pr_global_struct->ClientConnect);
-#endif
 
 		if ((Sys_FloatTime() - host_client->netconnection->connecttime) <= sv.time)
 			Sys_Printf ("%s entered the game\n", host_client->name);
 
-#if NATIVE_GAME
 		if (g_game_api)
 			g_game_api->put_client_in_server(sv_player);
-#else
-		PR_ExecuteProgram (pr_global_struct->PutClientInServer);
-#endif
 	}
 
 
@@ -1485,7 +1449,6 @@ void Host_Spawn_f (void)
 //
 // send some stats
 //
-#if NATIVE_GAME
 	// pr_global_struct is a zeroed stub in NATIVE_GAME mode — entity spawn
 	// bumps game_globals, not pr_global_struct, so reading from the stub
 	// here gave "kills:40/0, secrets:1/0" at the intermission.
@@ -1504,23 +1467,6 @@ void Host_Spawn_f (void)
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_MONSTERS);
 	MSG_WriteLong (&host_client->message, (int)game_globals.killed_monsters);
-#else
-	MSG_WriteByte (&host_client->message, svc_updatestat);
-	MSG_WriteByte (&host_client->message, STAT_TOTALSECRETS);
-	MSG_WriteLong (&host_client->message, pr_global_struct->total_secrets);
-
-	MSG_WriteByte (&host_client->message, svc_updatestat);
-	MSG_WriteByte (&host_client->message, STAT_TOTALMONSTERS);
-	MSG_WriteLong (&host_client->message, pr_global_struct->total_monsters);
-
-	MSG_WriteByte (&host_client->message, svc_updatestat);
-	MSG_WriteByte (&host_client->message, STAT_SECRETS);
-	MSG_WriteLong (&host_client->message, pr_global_struct->found_secrets);
-
-	MSG_WriteByte (&host_client->message, svc_updatestat);
-	MSG_WriteByte (&host_client->message, STAT_MONSTERS);
-	MSG_WriteLong (&host_client->message, pr_global_struct->killed_monsters);
-#endif
 
 	
 //
@@ -1822,11 +1768,7 @@ edict_t	*FindViewthing (void)
 	for (i=0 ; i<sv.num_edicts ; i++)
 	{
 		e = EDICT_NUM(i);
-#if NATIVE_GAME
 		if (!strcmp (e->v.classname ? e->v.classname : "", "viewthing") )
-#else
-		if ( !strcmp (pr_strings + e->v.classname, "viewthing") )
-#endif
 			return e;
 	}
 	Con_Printf ("No viewthing on map\n");

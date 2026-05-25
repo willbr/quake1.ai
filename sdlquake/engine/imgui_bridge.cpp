@@ -161,6 +161,7 @@ void IG_EndDisabled  (void)         { ImGui::EndDisabled(); }
 int  IG_IsItemActivated(void)            { return ImGui::IsItemActivated() ? 1 : 0; }
 int  IG_IsItemDeactivatedAfterEdit(void) { return ImGui::IsItemDeactivatedAfterEdit() ? 1 : 0; }
 int  IG_IsItemHovered(void)              { return ImGui::IsItemHovered() ? 1 : 0; }
+int  IG_IsItemActive(void)               { return ImGui::IsItemActive()  ? 1 : 0; }
 void IG_Image(IG_TextureID tex, float w, float h)
 {
     ImGui::Image(ImTextureRef((ImTextureID)tex), ImVec2(w, h));
@@ -203,13 +204,18 @@ void IG_TableHeadersRow(void)                             { ImGui::TableHeadersR
 void IG_TableNextRow(void)                                { ImGui::TableNextRow(); }
 int  IG_TableSetColumnIndex(int col)  { return ImGui::TableSetColumnIndex(col) ? 1 : 0; }
 
-// Canvas drawing (backed by ImDrawList)
+// Canvas drawing (backed by ImDrawList). The InvisibleButton in BeginCanvas
+// gives us a hit-testable widget so callers can check IG_IsItemHoveredEx().
 static ImVec2 s_canvas_origin;
+static ImVec2 s_canvas_size;
+static bool   s_canvas_hovered;
 
 void IG_BeginCanvas(const char *id, float w, float h)
 {
     s_canvas_origin = ImGui::GetCursorScreenPos();
+    s_canvas_size   = ImVec2(w, h);
     ImGui::InvisibleButton(id, ImVec2(w, h));
+    s_canvas_hovered = ImGui::IsItemHovered();
 }
 
 void IG_CanvasLine(float x0, float y0, float x1, float y1, unsigned int col)
@@ -220,9 +226,56 @@ void IG_CanvasLine(float x0, float y0, float x1, float y1, unsigned int col)
                 (ImU32)col, 1.0f);
 }
 
+void IG_CanvasRectFilled(float x0, float y0, float x1, float y1, unsigned int col)
+{
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(ImVec2(s_canvas_origin.x + x0, s_canvas_origin.y + y0),
+                      ImVec2(s_canvas_origin.x + x1, s_canvas_origin.y + y1),
+                      (ImU32)col);
+}
+
+void IG_CanvasRect(float x0, float y0, float x1, float y1, unsigned int col)
+{
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    dl->AddRect(ImVec2(s_canvas_origin.x + x0, s_canvas_origin.y + y0),
+                ImVec2(s_canvas_origin.x + x1, s_canvas_origin.y + y1),
+                (ImU32)col);
+}
+
+void IG_CanvasText(float x, float y, unsigned int col, const char *text)
+{
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    dl->AddText(ImVec2(s_canvas_origin.x + x, s_canvas_origin.y + y),
+                (ImU32)col, text);
+}
+
+void IG_CanvasMousePos(float *x, float *y)
+{
+    ImVec2 m = ImGui::GetIO().MousePos;
+    float lx = m.x - s_canvas_origin.x;
+    float ly = m.y - s_canvas_origin.y;
+    if (lx < 0 || ly < 0 || lx > s_canvas_size.x || ly > s_canvas_size.y) {
+        if (x) *x = -1; if (y) *y = -1;
+        return;
+    }
+    if (x) *x = lx;
+    if (y) *y = ly;
+}
+
+int IG_IsItemHoveredEx(void) { return s_canvas_hovered ? 1 : 0; }
+
 void IG_EndCanvas(void)
 {
     // Space already reserved by InvisibleButton; nothing to do.
+}
+
+void IG_PlotLines(const char *label, const float *values, int count,
+                  int offset, const char *overlay,
+                  float scale_min, float scale_max,
+                  float w, float h)
+{
+    ImGui::PlotLines(label, values, count, offset, overlay,
+                     scale_min, scale_max, ImVec2(w, h));
 }
 
 // SDL3 input backend

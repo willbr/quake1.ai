@@ -700,11 +700,7 @@ static void tool_list_entities(const char *id_json)
         {
             edict_t *e = (edict_t *)((byte *)sv.edicts + i * pr_edict_size);
             if (e->free) continue;
-#if NATIVE_GAME
             const char *cn = e->v.classname;
-#else
-            const char *cn = pr_strings + e->v.classname;
-#endif
             if (!cn || !cn[0]) continue;
 
             if (!first) { if (p < end) *p++ = ','; }
@@ -1025,13 +1021,8 @@ static void tool_inspect_entity(const char *id_json, const char *args)
         mcp_error(id_json, -32602, "edict is free");
         return;
     }
-#if NATIVE_GAME
     const char *cn    = e->v.classname ? e->v.classname : "";
     const char *model = e->v.model ? e->v.model : "";
-#else
-    const char *cn    = pr_strings + e->v.classname;
-    const char *model = pr_strings + e->v.model;
-#endif
 
     char raw[1536];
     int onground = ((int)e->v.flags & FL_ONGROUND) ? 1 : 0;

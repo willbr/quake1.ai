@@ -2,7 +2,6 @@
 // Single-player works through net_loop.c; UDP multiplayer is disabled for now.
 
 #include "quakedef.h"
-#include "net_udp.h"
 
 int  UDP_Init(void)                                    { return -1; }
 void UDP_Shutdown(void)                                {}

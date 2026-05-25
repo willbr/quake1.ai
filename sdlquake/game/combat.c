@@ -207,7 +207,7 @@ int CanDamage(edict_t *targ, edict_t *inflictor)
     return 0;
 }
 
-static void Killed(edict_t *targ, edict_t *attacker)
+static void Killed_impl(edict_t *targ, edict_t *attacker)
 {
     edict_t *oself = g->self;
     g->self = targ;
@@ -284,8 +284,11 @@ static void Killed(edict_t *targ, edict_t *attacker)
 
     g->self = oself;
 }
+static void Killed(edict_t *targ, edict_t *attacker) {
+    SIM_PERF("Killed") Killed_impl(targ, attacker);
+}
 
-void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage)
+static void T_Damage_impl(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage)
 {
     vec3_t   dir;
     edict_t *oldself;
@@ -421,9 +424,13 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage
 
     g->self = oldself;
 }
+void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage) {
+    SIM_PERF("T_Damage") T_Damage_impl(targ, inflictor, attacker, damage);
+}
 
 void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t *ignore)
 {
+    SIM_PERF("T_RadiusDamage") {
     float    points;
     edict_t *head;
     vec3_t   org, diff;
@@ -448,6 +455,7 @@ void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t
             }
         }
         head = head->v.chain;
+    }
     }
 }
 

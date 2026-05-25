@@ -13,6 +13,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "sim/sim.h"
 #include <math.h>
 
 extern engine_api_t   *eng;
@@ -94,6 +95,7 @@ void Items_BulletSweep(vec3_t start, vec3_t end, vec3_t dir, float damage, edict
 // is bbox-centre-minus-origin so a rocket landing next to a stack of items
 // fans them outward instead of all in one direction.
 void Items_RadiusPush(vec3_t origin, float radius, float base_impulse, edict_t *ignore) {
+    SIM_PERF("Items_RadiusPush")
     for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
         if (e == ignore) continue;
         if (!is_pushable_item(e)) continue;

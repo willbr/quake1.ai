@@ -130,6 +130,10 @@ void  IG_EndDisabled  (void);
 int   IG_IsItemActivated(void);
 int   IG_IsItemDeactivatedAfterEdit(void);
 int   IG_IsItemHovered(void);
+// True while the mouse is held down after starting a click on the last
+// submitted item. Used by the Profile histogram to support click-and-drag
+// scrubbing across the frame strip.
+int   IG_IsItemActive(void);
 
 // Image / image button. `tex` is an SDL_Texture* on the SDLRenderer3
 // backend (cast through ImTextureID). Caller owns the texture lifetime;
@@ -169,10 +173,24 @@ void  IG_TableHeadersRow(void);
 void  IG_TableNextRow(void);
 int   IG_TableSetColumnIndex(int col);
 
-// Canvas drawing (backed by ImDrawList)
+// Canvas drawing (backed by ImDrawList). Coordinates are canvas-relative;
+// IG_BeginCanvas reserves the rectangle and stashes its screen origin.
 void  IG_BeginCanvas(const char *id, float w, float h);
 void  IG_CanvasLine(float x0, float y0, float x1, float y1, unsigned int col);
+void  IG_CanvasRectFilled(float x0, float y0, float x1, float y1, unsigned int col);
+void  IG_CanvasRect      (float x0, float y0, float x1, float y1, unsigned int col);
+void  IG_CanvasText      (float x, float y, unsigned int col, const char *text);
+// Mouse position relative to the active canvas. Sentinel (-1,-1) if outside.
+void  IG_CanvasMousePos  (float *x, float *y);
+int   IG_IsItemHoveredEx (void);  // alias used by perf panel
 void  IG_EndCanvas(void);
+
+// Built-in plot — handy for the FPS / frametime mini-graphs. `values` is a
+// circular buffer; `offset` is the index of the oldest sample.
+void  IG_PlotLines(const char *label, const float *values, int count,
+                   int offset, const char *overlay,
+                   float scale_min, float scale_max,
+                   float w, float h);
 
 // SDL3 input backend
 int   IG_ImplSDL3_InitForSDLRenderer(SDL_Window *w, SDL_Renderer *r);

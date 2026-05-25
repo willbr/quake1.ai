@@ -74,11 +74,7 @@ void ImguiSupport_GetEdict(int i, const char **classname,
     if (!e || e->free)
         return;
 
-#if NATIVE_GAME
     *classname = e->v.classname ? e->v.classname : "";
-#else
-    *classname = pr_strings + e->v.classname;
-#endif
     *x = e->v.origin[0];
     *y = e->v.origin[1];
     *z = e->v.origin[2];

@@ -803,7 +803,7 @@ void BecomeExplosion(void) {
 // ---------------------------------------------------------------------------
 // Rocket missile
 // ---------------------------------------------------------------------------
-static void T_MissileTouch(edict_t *self, edict_t *other) {
+static void T_MissileTouch_impl(edict_t *self, edict_t *other) {
     g->self = self; g->other = other;
     if (other == self->v.owner) return;
 
@@ -837,6 +837,9 @@ static void T_MissileTouch(edict_t *self, edict_t *other) {
     eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
 
     BecomeExplosion();
+}
+static void T_MissileTouch(edict_t *self, edict_t *other) {
+    SIM_PERF("T_MissileTouch") T_MissileTouch_impl(self, other);
 }
 
 static void W_FireRocket(void) {
@@ -994,7 +997,7 @@ void W_FireLightning(void) {
 // ---------------------------------------------------------------------------
 // Grenade launcher
 // ---------------------------------------------------------------------------
-static void GrenadeExplode(edict_t *self) {
+static void GrenadeExplode_impl(edict_t *self) {
     g->self = self;
     T_RadiusDamage(self, self->v.owner, 120, g->world);
     Items_RadiusPush(self->v.origin, 160.0f, 120.0f, NULL);
@@ -1006,8 +1009,11 @@ static void GrenadeExplode(edict_t *self) {
     eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
     BecomeExplosion();
 }
+static void GrenadeExplode(edict_t *self) {
+    SIM_PERF("GrenadeExplode") GrenadeExplode_impl(self);
+}
 
-static void GrenadeTouch(edict_t *self, edict_t *other) {
+static void GrenadeTouch_impl(edict_t *self, edict_t *other) {
     g->self = self; g->other = other;
     if (other == self->v.owner) return;
     // Entry splash handled engine-side by SV_CheckWaterTransition.
@@ -1015,6 +1021,9 @@ static void GrenadeTouch(edict_t *self, edict_t *other) {
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/bounce.wav", 1, ATTN_NORM);
     if (self->v.velocity[0] == 0 && self->v.velocity[1] == 0 && self->v.velocity[2] == 0)
         self->v.avelocity[0] = self->v.avelocity[1] = self->v.avelocity[2] = 0;
+}
+static void GrenadeTouch(edict_t *self, edict_t *other) {
+    SIM_PERF("GrenadeTouch") GrenadeTouch_impl(self, other);
 }
 
 static void W_FireGrenade(void) {
@@ -1102,7 +1111,7 @@ static void W_FireGrenade(void) {
 // ---------------------------------------------------------------------------
 // Spike projectiles
 // ---------------------------------------------------------------------------
-static void spike_touch(edict_t *self, edict_t *other) {
+static void spike_touch_impl(edict_t *self, edict_t *other) {
     g->self = self; g->other = other;
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;
@@ -1176,8 +1185,11 @@ static void spike_touch(edict_t *self, edict_t *other) {
     }
     eng->ED_Free(self);
 }
+static void spike_touch(edict_t *self, edict_t *other) {
+    SIM_PERF("spike_touch") spike_touch_impl(self, other);
+}
 
-void superspike_touch(edict_t *self, edict_t *other) {
+static void superspike_touch_impl(edict_t *self, edict_t *other) {
     g->self = self; g->other = other;
     if (other == self->v.owner) return;
     if (other->v.solid == SOLID_TRIGGER) return;
@@ -1237,6 +1249,9 @@ void superspike_touch(edict_t *self, edict_t *other) {
             T_Damage(other, self, self->v.owner, 18);
     }
     eng->ED_Free(self);
+}
+void superspike_touch(edict_t *self, edict_t *other) {
+    SIM_PERF("superspike_touch") superspike_touch_impl(self, other);
 }
 
 void launch_spike(vec3_t org, vec3_t dir) {
