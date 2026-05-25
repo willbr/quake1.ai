@@ -40,10 +40,6 @@ void Crop_FrameStart(void);
    consumed (don't dispatch further). */
 int  Crop_HandleEvent(const SDL_Event *ev);
 
-/* Stub for now — Task 6 fills this in. Composites dim + border
-   overlay onto the ARGB present buffer. */
-void Crop_PresentOverlay(unsigned *argb, int pitch_bytes, int w, int h);
-
 /* Returns the current rect endpoints in framebuffer-local coords,
    normalised so (x0,y0) is top-left and (x1,y1) is bottom-right.
    Values are not clamped to framebuffer bounds — callers should

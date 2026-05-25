@@ -11,6 +11,7 @@
 extern int    Clipboard_SetPNG(const void *bytes, size_t size);
 extern cvar_t scr_screenshot_clipboard;
 extern void   VID_WindowToLogical(float wx, float wy, float *lx, float *ly);
+extern int    VID_SupersampleActive(void);
 extern float  scr_con_current;   /* defined in screen.c, no header */
 
 typedef struct {
@@ -210,14 +211,19 @@ static void crop_commit(void)
 
 /* Map a window-pixel mouse coordinate into framebuffer-local coords,
    clamp to [0, g.w/g.h - 1], and store as either the start endpoint
-   (idx == 0) or the drag endpoint (idx != 0). */
+   (idx == 0) or the drag endpoint (idx != 0).
+   VID_WindowToLogical returns coords in render (vid_render_w/h) space, but
+   g.frozen / g.w / g.h are in super space — scale by the active supersample
+   factor so a drag in the visible window selects the right slab of pixels. */
 static void crop_set_endpoint(int idx, float wx, float wy)
 {
     float lx = wx, ly = wy;
-    int ix, iy;
+    int ix, iy, ss;
     VID_WindowToLogical(wx, wy, &lx, &ly);
-    ix = (int)lx;
-    iy = (int)ly;
+    ss = VID_SupersampleActive();
+    if (ss < 1) ss = 1;
+    ix = (int)(lx * (float)ss);
+    iy = (int)(ly * (float)ss);
     if (ix < 0) ix = 0; else if (ix >= g.w) ix = g.w - 1;
     if (iy < 0) iy = 0; else if (iy >= g.h) iy = g.h - 1;
     if (idx == 0) { g.x0 = g.x1 = ix; g.y0 = g.y1 = iy; }
@@ -259,32 +265,10 @@ int Crop_HandleEvent(const SDL_Event *ev)
     }
 }
 
-void Crop_PresentOverlay(unsigned *argb, int pitch_bytes, int w, int h)
-{
-    int x0, y0, x1, y1;
-    int pitch_px;
-    int x, y;
-
-    if (!g.active || !argb) return;
-
-    Crop_GetRect(&x0, &y0, &x1, &y1);
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (x1 >= w) x1 = w - 1;
-    if (y1 >= h) y1 = h - 1;
-
-    pitch_px = pitch_bytes / 4;
-    for (y = 0; y < h; y++) {
-        unsigned *row = argb + (size_t)y * pitch_px;
-        for (x = 0; x < w; x++) {
-            int inside    = (x >= x0 && x <= x1 && y >= y0 && y <= y1);
-            int on_border = inside && (x == x0 || x == x1 || y == y0 || y == y1);
-            if (on_border)      row[x] = 0xFFFFFFFFu;
-            else if (!inside)   row[x] = (row[x] >> 1) & 0x7F7F7Fu;
-            /* else: inside, leave untouched */
-        }
-    }
-}
+/* Crop_PresentOverlay was a CPU-side ARGB overlay writer used when present
+   went through SDL_Renderer. After the SDL_GPU migration, the dim+border
+   overlay is drawn by a dedicated GPU pipeline in vid_sdl.c (see
+   gpu_rect_pipeline / rect_overlay shaders), so the CPU function is gone. */
 
 const unsigned char *Crop_FrozenBuffer(int *w, int *h)
 {

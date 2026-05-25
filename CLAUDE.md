@@ -86,8 +86,15 @@ fragment UBO at set=3 binding=0 carries `(intensity, size)`, and the
 shader darkens every other `size`-pixel band of `gl_FragCoord.y`
 (swapchain space, so bands stay locked to the physical pixel grid).
 
-Known migration TODOs: crop-screenshot's Crop_PresentOverlay still
-writes CPU-side and is a no-op now, DXIL bytecode for Windows.
+The crop-screenshot dim+border overlay is drawn by a second SDL_GPU
+pipeline (`gpu_rect_pipeline` + `shaders/rect_overlay.{vert,frag}.glsl`)
+inside the same render pass, with standard alpha blending; the rect
+fragment shader emits border / discard / dim per pixel from a UBO at
+set=3 binding=0. Rect coords are stored in super-pixel space (g.w/g.h)
+and scaled by `vid_supersample_active` during mouse-event handling so
+ss>1 selects the correct slab of the frozen framebuffer.
+
+Known migration TODOs: DXIL bytecode for Windows D3D12.
 
 ### MCP server (Phase 2)
 

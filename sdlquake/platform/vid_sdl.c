@@ -90,6 +90,7 @@ static SDL_Window    *sdl_window  = NULL;
 // slot changes (vid_load_aux_palette / build_palette_slot mark gpu_lut_dirty).
 static SDL_GPUDevice           *gpu_device        = NULL;
 static SDL_GPUGraphicsPipeline *gpu_pipeline      = NULL;
+static SDL_GPUGraphicsPipeline *gpu_rect_pipeline = NULL;  // crop-screenshot overlay
 static SDL_GPUSampler          *gpu_sampler       = NULL;
 static SDL_GPUTexture          *gpu_fb_tex        = NULL;
 static SDL_GPUTexture          *gpu_palette_id_tex = NULL;
@@ -367,6 +368,67 @@ static int gpu_init(SDL_Window *win) {
         return 0;
     }
 
+    // Second pipeline: crop-screenshot overlay (rect_overlay shaders) with
+    // standard alpha blending so the fragment shader can dim, discard, or
+    // draw white border pixels by tweaking output alpha.
+    SDL_GPUShaderCreateInfo rvs_info = {0};
+    SDL_GPUShaderCreateInfo rfs_info = {0};
+    rvs_info.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    rfs_info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    rfs_info.num_uniform_buffers = 1;
+    if (active & SDL_GPU_SHADERFORMAT_MSL) {
+        rvs_info.code = (const Uint8 *)rect_overlay_vert_msl;
+        rvs_info.code_size = strlen(rect_overlay_vert_msl);
+        rvs_info.entrypoint = "main0";
+        rvs_info.format = SDL_GPU_SHADERFORMAT_MSL;
+        rfs_info.code = (const Uint8 *)rect_overlay_frag_msl;
+        rfs_info.code_size = strlen(rect_overlay_frag_msl);
+        rfs_info.entrypoint = "main0";
+        rfs_info.format = SDL_GPU_SHADERFORMAT_MSL;
+    } else {
+        rvs_info.code = rect_overlay_vert_spv;
+        rvs_info.code_size = rect_overlay_vert_spv_size;
+        rvs_info.entrypoint = "main";
+        rvs_info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+        rfs_info.code = rect_overlay_frag_spv;
+        rfs_info.code_size = rect_overlay_frag_spv_size;
+        rfs_info.entrypoint = "main";
+        rfs_info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    }
+    SDL_GPUShader *rvs = SDL_CreateGPUShader(gpu_device, &rvs_info);
+    SDL_GPUShader *rfs = SDL_CreateGPUShader(gpu_device, &rfs_info);
+    if (!rvs || !rfs) {
+        Sys_Error("SDL_CreateGPUShader (rect_overlay) failed: %s", SDL_GetError());
+        return 0;
+    }
+    SDL_GPUColorTargetDescription rect_target = {0};
+    rect_target.format = gpu_swapchain_format;
+    rect_target.blend_state.enable_blend          = true;
+    rect_target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    rect_target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    rect_target.blend_state.color_blend_op        = SDL_GPU_BLENDOP_ADD;
+    rect_target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    rect_target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    rect_target.blend_state.alpha_blend_op        = SDL_GPU_BLENDOP_ADD;
+    SDL_GPUGraphicsPipelineCreateInfo rpipe_info = {0};
+    rpipe_info.vertex_shader   = rvs;
+    rpipe_info.fragment_shader = rfs;
+    rpipe_info.primitive_type  = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    rpipe_info.rasterizer_state.fill_mode  = SDL_GPU_FILLMODE_FILL;
+    rpipe_info.rasterizer_state.cull_mode  = SDL_GPU_CULLMODE_NONE;
+    rpipe_info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+    rpipe_info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    rpipe_info.target_info.num_color_targets  = 1;
+    rpipe_info.target_info.color_target_descriptions = &rect_target;
+    gpu_rect_pipeline = SDL_CreateGPUGraphicsPipeline(gpu_device, &rpipe_info);
+    SDL_ReleaseGPUShader(gpu_device, rvs);
+    SDL_ReleaseGPUShader(gpu_device, rfs);
+    if (!gpu_rect_pipeline) {
+        Sys_Error("SDL_CreateGPUGraphicsPipeline (rect_overlay) failed: %s",
+                  SDL_GetError());
+        return 0;
+    }
+
     SDL_GPUSamplerCreateInfo samp_info = {0};
     samp_info.min_filter     = SDL_GPU_FILTER_NEAREST;
     samp_info.mag_filter     = SDL_GPU_FILTER_NEAREST;
@@ -399,6 +461,7 @@ static int gpu_init(SDL_Window *win) {
 static void gpu_shutdown(void) {
     if (!gpu_device) return;
     if (gpu_pipeline)       SDL_ReleaseGPUGraphicsPipeline(gpu_device, gpu_pipeline);
+    if (gpu_rect_pipeline)  SDL_ReleaseGPUGraphicsPipeline(gpu_device, gpu_rect_pipeline);
     if (gpu_sampler)        SDL_ReleaseGPUSampler         (gpu_device, gpu_sampler);
     if (gpu_fb_tex)         SDL_ReleaseGPUTexture         (gpu_device, gpu_fb_tex);
     if (gpu_palette_id_tex) SDL_ReleaseGPUTexture         (gpu_device, gpu_palette_id_tex);
@@ -407,7 +470,8 @@ static void gpu_shutdown(void) {
     if (gpu_palette_xfer)   SDL_ReleaseGPUTransferBuffer  (gpu_device, gpu_palette_xfer);
     SDL_ReleaseWindowFromGPUDevice(gpu_device, sdl_window);
     SDL_DestroyGPUDevice(gpu_device);
-    gpu_device = NULL; gpu_pipeline = NULL; gpu_sampler = NULL;
+    gpu_device = NULL; gpu_pipeline = NULL; gpu_rect_pipeline = NULL;
+    gpu_sampler = NULL;
     gpu_fb_tex = NULL; gpu_palette_id_tex = NULL; gpu_palette_tex = NULL;
     gpu_frame_xfer = NULL; gpu_palette_xfer = NULL;
 }
@@ -544,6 +608,40 @@ static void gpu_render_frame(void) {
     SDL_PushGPUFragmentUniformData(cmd, 0, &scan_params, sizeof(scan_params));
 
     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+
+    // Crop-screenshot selection overlay: draws after the palette pass and
+    // before ImGui, so it overlays the framebuffer but the dev overlay still
+    // sits on top.
+    if (Crop_Active()) {
+        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        Crop_GetRect(&x0, &y0, &x1, &y1);
+        // Rect is in super-pixel space; map super → viewport-local swapchain
+        // pixels. The palette pass already scaled (vid_super_w × vid_super_h)
+        // into (vp_w × vp_h), so use that ratio.
+        float sx = (float)vp_w / (float)vid_super_w;
+        float sy = (float)vp_h / (float)vid_super_h;
+        struct {
+            float rect[4];      // x0, y0, x1_excl, y1_excl
+            float viewport[4];  // origin_x, origin_y, w, h (swap-pixels)
+            float border_w;
+            float dim_alpha;
+            float pad0, pad1;
+        } rp;
+        rp.rect[0] = (float)x0       * sx;
+        rp.rect[1] = (float)y0       * sy;
+        rp.rect[2] = (float)(x1 + 1) * sx;
+        rp.rect[3] = (float)(y1 + 1) * sy;
+        rp.viewport[0] = vp.x;
+        rp.viewport[1] = vp.y;
+        rp.viewport[2] = vp.w;
+        rp.viewport[3] = vp.h;
+        rp.border_w  = (float)int_scale;  // one logical pixel
+        rp.dim_alpha = 0.5f;
+        rp.pad0 = rp.pad1 = 0.0f;
+        SDL_BindGPUGraphicsPipeline(pass, gpu_rect_pipeline);
+        SDL_PushGPUFragmentUniformData(cmd, 0, &rp, sizeof(rp));
+        SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+    }
 
     ImguiLayer_RenderGPU(cmd, pass);
 
@@ -1116,6 +1214,7 @@ void VID_UnlockBuffer(void) {}
 
 SDL_Window    *VID_GetWindow   (void) { return sdl_window; }
 SDL_GPUDevice *VID_GetGPUDevice(void) { return gpu_device; }
+int            VID_SupersampleActive(void) { return vid_supersample_active; }
 // VID_GetRenderer kept as a no-op stub during transition for any stragglers
 // that still expect the old SDL_Renderer-returning API. New code should use
 // VID_GetGPUDevice() instead.

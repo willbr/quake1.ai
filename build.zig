@@ -322,6 +322,8 @@ pub fn build(b: *std.Build) void {
     shader_step.addFileInput(b.path("scripts/build_shaders.sh"));
     shader_step.addFileInput(b.path("shaders/palette.vert.glsl"));
     shader_step.addFileInput(b.path("shaders/palette.frag.glsl"));
+    shader_step.addFileInput(b.path("shaders/rect_overlay.vert.glsl"));
+    shader_step.addFileInput(b.path("shaders/rect_overlay.frag.glsl"));
     const shader_header = shader_step.addOutputFileArg("palette_shaders.h");
     mod.addIncludePath(shader_header.dirname());
 
