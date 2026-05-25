@@ -1019,6 +1019,7 @@ static engine_api_t engine_funcs = {
 static SDL_SharedObject *game_so    = NULL;
 game_api_t              *g_game_api = NULL;  // exposed for NATIVE_GAME dispatch guards
 static SDL_Time          dll_mtime  = 0;
+static SDL_Time          dll_pending_mtime = 0;  // newer mtime deferred while sv.active
 
 static SDL_Time get_mtime(const char *path)
 {
@@ -1101,7 +1102,26 @@ void HotReload_Frame(float dt)
         counter = 0;
         SDL_Time t = get_mtime(GAME_DLL_SRC);
         if (t != 0 && t != dll_mtime)
-            do_load();
+        {
+            // Don't reload during a live server: ~217 v.think/touch/use/blocked
+            // function pointers live inside sv.edicts, all pointing into the
+            // currently-loaded game.dll's .text. Unloading would dangle them.
+            // Stash the new mtime and apply it the next poll after sv goes
+            // inactive (disconnect / map change / main menu).
+            if (svb_active())
+            {
+                if (t != dll_pending_mtime)
+                {
+                    Con_Printf("hotreload: deferring reload until server idle\n");
+                    dll_pending_mtime = t;
+                }
+            }
+            else
+            {
+                do_load();
+                dll_pending_mtime = 0;
+            }
+        }
     }
     // Note: start_frame is now called from sv_phys.c SV_Physics() with proper
     // game_globals sync, not here. HotReload_Frame is just for reload polling.
