@@ -507,10 +507,12 @@ static void DecalKernels_Init (void)
 	decal_kernels[DECAL_BLOOD_SPLAT]   = (decal_kernel_t){ K_blood_splat, K_GAUSS28_DIM, K_blood_splat_norm, -200, -500, -500 };
 	decal_kernels[DECAL_SCORCH]        = (decal_kernel_t){ K_scorch,      K_GAUSS52_DIM, K_scorch_norm,      -200, -200, -200 };
 	decal_kernels[DECAL_LIGHTNING]     = (decal_kernel_t){ K_lightning,   K_GAUSS28_DIM, K_lightning_norm,    -50,  -60,  -40 };
-	/* Spatter centre delta matches the old K3x3 splat centre-cell
-	   contribution: small enough to keep red > 0 on a typical wall (so the
-	   dot reads as dark-red, not pure black after channel clamp). */
-	decal_kernels[DECAL_BLOOD_SPATTER] = (decal_kernel_t){ K1x1_solid,    1,             1,                   -50, -125, -125 };
+	/* Spatter delta is mixed-sign: ADDITIVE on red, subtractive on G/B.
+	   This forces the cell toward pure-red regardless of the base texture
+	   colour. Pure subtractive deltas clamped to black on dark textures
+	   (e.g. base r=20 minus delta -50 = 0). With +50 to R the cell stays
+	   visibly red even on the darkest wall pixels. */
+	decal_kernels[DECAL_BLOOD_SPATTER] = (decal_kernel_t){ K1x1_solid,    1,             1,                   +50, -100, -100 };
 }
 
 // ---------------------------------------------------------------------------
@@ -966,13 +968,20 @@ void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal)
 
 	dk  = &decal_kernels[DECAL_BLOOD_SPATTER];
 	idx = (lv * st->smax + lu) * 3;
-	/* Saturating: keep whichever delta is more negative. Existing stain
-	   from a darker decal (splat, scorch) stays unchanged; an empty cell
-	   takes the spatter delta. Subsequent spatter into the same cell
-	   compares equal and skips, capping the darkness at one paint. */
-	if (st->rgb[idx + 0] > dk->dr) st->rgb[idx + 0] = (short)dk->dr;
-	if (st->rgb[idx + 1] > dk->dg) st->rgb[idx + 1] = (short)dk->dg;
-	if (st->rgb[idx + 2] > dk->db) st->rgb[idx + 2] = (short)dk->db;
+	/* Saturating per channel: a brighten-delta (>0) takes the max value,
+	   a darken-delta (<0) takes the min. Spatter pushes red UP (+50) and
+	   G/B DOWN (-100 each); each channel saturates at one spatter's worth
+	   so repeated paints into the same cell don't compound. Existing
+	   stronger stains (splat, scorch) win in the direction they already lead. */
+	#define SAT_BRIGHTEN(channel, delta)  \
+		do { if (st->rgb[idx + (channel)] < (delta)) st->rgb[idx + (channel)] = (short)(delta); } while (0)
+	#define SAT_DARKEN(channel, delta)    \
+		do { if (st->rgb[idx + (channel)] > (delta)) st->rgb[idx + (channel)] = (short)(delta); } while (0)
+	if (dk->dr >= 0) SAT_BRIGHTEN (0, dk->dr); else SAT_DARKEN (0, dk->dr);
+	if (dk->dg >= 0) SAT_BRIGHTEN (1, dk->dg); else SAT_DARKEN (1, dk->dg);
+	if (dk->db >= 0) SAT_BRIGHTEN (2, dk->db); else SAT_DARKEN (2, dk->db);
+	#undef SAT_BRIGHTEN
+	#undef SAT_DARKEN
 	st->generation++;
 	st->last_touched_frame = r_framecount;
 }
