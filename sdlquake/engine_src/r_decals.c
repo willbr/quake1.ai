@@ -27,8 +27,12 @@ cvar_t r_decals_blooddrip_growtime = { "r_decals_blooddrip_growtime", "1.5", tru
 cvar_t r_decals_debug              = { "r_decals_debug",              "0", false };
 cvar_t r_decals_blood_spatter      = { "r_decals_blood_spatter",      "1", true };
 
+/* Forward decl: defined in the kernel section below. */
+static void DecalKernels_Init (void);
+
 void R_DecalsInit (void)
 {
+	DecalKernels_Init ();
 	Cvar_RegisterVariable (&r_decals);
 	Cvar_RegisterVariable (&r_decals_max);
 	Cvar_RegisterVariable (&r_decals_intensity);
@@ -413,56 +417,28 @@ void R_DecalsFrame (void)
 
 // ---------------------------------------------------------------------------
 // Per-decal-type kernels and centre deltas. Indexed by decal_type_t.
-// 3x3 falloff [1 2 1 / 2 4 2 / 1 2 1], norm 16.
-// 5x5 wider falloff for scorch, norm 256.
+// Kernel sizes are now in stain cells (= game units at STAIN_CELL_SHIFT==0).
+// Footprints: BULLET 4u solid, SPIKE 1u pinprick, SPATTER 1u (matches
+// particle), BLOOD_SPLAT/LIGHTNING 28u Gaussian, SCORCH 52u Gaussian.
 // ---------------------------------------------------------------------------
 
-static const int K3x3[9]  = { 1, 2, 1, 2, 4, 2, 1, 2, 1 };
-static const int K5x5[25] = {
-	 1,  4,  6,  4,  1,
-	 4, 16, 24, 16,  4,
-	 6, 24, 36, 24,  6,
-	 4, 16, 24, 16,  4,
-	 1,  4,  6,  4,  1,
-};
-
-/* Single-luxel solid used by r_decals_test to show the luxel grid resolution. */
+/* Single-cell solid used by SPIKE, SPATTER, and the r_decals_test dev cmds. */
 static const int K1x1_solid[1] = { 1 };
 
-// 2×2 solid: bullet hole at 8-unit footprint.
-static const int K2x2_solid[4] = { 1, 1, 1, 1 };  // norm 1; each cell gets the full centre delta
+/* Runtime-filled kernel arrays. Sized for the maximum footprint at 1u cells. */
+#define K_BULLET_DIM   4
+#define K_GAUSS28_DIM  28
+#define K_GAUSS52_DIM  52
 
-// 7×7 Gaussian (sigma ≈ 1.5 cells); falls to zero at the corners.
-// Sum = 1259; knorm matches sum exactly so total-ink ≈ centre delta,
-// preserving the old K3x3 (sum=16, knorm=16) total intensity.
-static const int K7x7_gauss[49] = {
-	1,  3,  6,  7,  6,  3, 1,
-	3, 13, 30, 38, 30, 13, 3,
-	6, 30, 67, 84, 67, 30, 6,
-	7, 38, 84,107, 84, 38, 7,
-	6, 30, 67, 84, 67, 30, 6,
-	3, 13, 30, 38, 30, 13, 3,
-	1,  3,  6,  7,  6,  3, 1,
-};
+static int K_bullet      [K_BULLET_DIM  * K_BULLET_DIM ];  /* 4×4 solid square */
+static int K_blood_splat [K_GAUSS28_DIM * K_GAUSS28_DIM];  /* 28u Gaussian */
+static int K_scorch      [K_GAUSS52_DIM * K_GAUSS52_DIM];  /* 52u Gaussian */
+static int K_lightning   [K_GAUSS28_DIM * K_GAUSS28_DIM];  /* 28u Gaussian (same shape as splat) */
 
-// 13×13 Gaussian (sigma ≈ 3.0 cells) for SCORCH; smooth falloff over 52-unit footprint.
-// Sum = 2316; knorm matches sum exactly so total-ink ≈ centre delta,
-// preserving the old K5x5 (sum=256, knorm=256) total intensity.
-static const int K13x13_gauss[169] = {
-	0,  0,  1,  1,  2,  2,  2,  2,  2,  1,  1,  0,  0,
-	0,  1,  2,  4,  5,  7,  7,  7,  5,  4,  2,  1,  0,
-	1,  2,  5,  9, 13, 16, 17, 16, 13,  9,  5,  2,  1,
-	1,  4,  9, 16, 23, 28, 30, 28, 23, 16,  9,  4,  1,
-	2,  5, 13, 23, 33, 41, 43, 41, 33, 23, 13,  5,  2,
-	2,  7, 16, 28, 41, 50, 53, 50, 41, 28, 16,  7,  2,
-	2,  7, 17, 30, 43, 53, 56, 53, 43, 30, 17,  7,  2,
-	2,  7, 16, 28, 41, 50, 53, 50, 41, 28, 16,  7,  2,
-	2,  5, 13, 23, 33, 41, 43, 41, 33, 23, 13,  5,  2,
-	1,  4,  9, 16, 23, 28, 30, 28, 23, 16,  9,  4,  1,
-	1,  2,  5,  9, 13, 16, 17, 16, 13,  9,  5,  2,  1,
-	0,  1,  2,  4,  5,  7,  7,  7,  5,  4,  2,  1,  0,
-	0,  0,  1,  1,  2,  2,  2,  2,  2,  1,  1,  0,  0,
-};
+static int K_bullet_norm;
+static int K_blood_splat_norm;
+static int K_scorch_norm;
+static int K_lightning_norm;
 
 typedef struct {
 	const int *k;
@@ -471,18 +447,71 @@ typedef struct {
 	int        dr, dg, db;
 } decal_kernel_t;
 
-static const decal_kernel_t decal_kernels[DECAL_NUM_TYPES] = {
-	/* DECAL_BULLET        */ { K1x1_solid,    1,    1, -150, -150, -150 },
-	/* DECAL_SPIKE         */ { K1x1_solid,    1,    1, -150, -150, -150 },
-	/* DECAL_BLOOD_SPLAT   */ { K7x7_gauss,    7, 1259, -200, -500, -500 },
-	/* DECAL_SCORCH        */ { K13x13_gauss, 13, 2316, -200, -200, -200 },
-	/* DECAL_LIGHTNING     */ { K7x7_gauss,    7, 1259,  -50,  -60,  -40 },
-	// Spatter delta calibrated so a single droplet darkens green/blue without
-	// punching past the basepal clamp. Old K3x3 BLOOD_SPLAT centre cell
-	// applied (-50, -125, -125) and reads as dark red on typical textures;
-	// match that here so each 4u dot is a red dot, not a black square.
-	/* DECAL_BLOOD_SPATTER */ { K1x1_solid,    1,    1,  -50, -125, -125 },
-};
+/* Non-const: populated at startup by DecalKernels_Init via R_DecalsInit. */
+static decal_kernel_t decal_kernels[DECAL_NUM_TYPES];
+
+static void Kernel_Init_Solid (int *k, int n)
+{
+	int i;
+	for (i = 0; i < n * n; i++) k[i] = 1;
+}
+
+/* Fill an n×n Gaussian with peak value ~256 at the centre. */
+static void Kernel_Init_Gauss (int *k, int n, float sigma)
+{
+	int   i, j;
+	float c = (n - 1) * 0.5f;
+	float two_s2 = 2.0f * sigma * sigma;
+	for (j = 0; j < n; j++) {
+		for (i = 0; i < n; i++) {
+			float dx = (float)i - c;
+			float dy = (float)j - c;
+			float w  = expf (-(dx*dx + dy*dy) / two_s2);
+			int   wi = (int)(w * 256.0f + 0.5f);
+			/* Tiny cells (corner of a wide kernel) round to 0; force ≥1 so
+			   they still contribute a faint edge instead of disappearing. */
+			if (wi < 1 && w > 0.002f) wi = 1;
+			k[j * n + i] = wi;
+		}
+	}
+}
+
+static int Kernel_Sum (const int *k, int n)
+{
+	int sum = 0, i;
+	for (i = 0; i < n * n; i++) sum += k[i];
+	return sum;
+}
+
+static void DecalKernels_Init (void)
+{
+	Kernel_Init_Solid (K_bullet, K_BULLET_DIM);
+	K_bullet_norm = Kernel_Sum (K_bullet, K_BULLET_DIM);
+
+	/* sigma ≈ 6 for a 28-cell kernel: peak holds, edges fade smoothly. */
+	Kernel_Init_Gauss (K_blood_splat, K_GAUSS28_DIM, 6.0f);
+	K_blood_splat_norm = Kernel_Sum (K_blood_splat, K_GAUSS28_DIM);
+
+	/* sigma ≈ 11 for the 52-cell scorch — wider falloff matching the explosion radius. */
+	Kernel_Init_Gauss (K_scorch, K_GAUSS52_DIM, 11.0f);
+	K_scorch_norm = Kernel_Sum (K_scorch, K_GAUSS52_DIM);
+
+	Kernel_Init_Gauss (K_lightning, K_GAUSS28_DIM, 6.0f);
+	K_lightning_norm = Kernel_Sum (K_lightning, K_GAUSS28_DIM);
+
+	/* knorm == sum gives total-ink ≈ centre delta (the centre cell receives
+	   delta × peak / sum, much less than the centre delta itself; the kernel
+	   spreads ink over many cells preserving aggregate darkness). */
+	decal_kernels[DECAL_BULLET]        = (decal_kernel_t){ K_bullet,      K_BULLET_DIM,  K_bullet_norm,      -150, -150, -150 };
+	decal_kernels[DECAL_SPIKE]         = (decal_kernel_t){ K1x1_solid,    1,             1,                  -150, -150, -150 };
+	decal_kernels[DECAL_BLOOD_SPLAT]   = (decal_kernel_t){ K_blood_splat, K_GAUSS28_DIM, K_blood_splat_norm, -200, -500, -500 };
+	decal_kernels[DECAL_SCORCH]        = (decal_kernel_t){ K_scorch,      K_GAUSS52_DIM, K_scorch_norm,      -200, -200, -200 };
+	decal_kernels[DECAL_LIGHTNING]     = (decal_kernel_t){ K_lightning,   K_GAUSS28_DIM, K_lightning_norm,    -50,  -60,  -40 };
+	/* Spatter centre delta matches the old K3x3 splat centre-cell
+	   contribution: small enough to keep red > 0 on a typical wall (so the
+	   dot reads as dark-red, not pure black after channel clamp). */
+	decal_kernels[DECAL_BLOOD_SPATTER] = (decal_kernel_t){ K1x1_solid,    1,             1,                   -50, -125, -125 };
+}
 
 // ---------------------------------------------------------------------------
 // Internal: paint a single luxel kernel into a surface's stain buffer.

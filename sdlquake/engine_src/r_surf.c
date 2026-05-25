@@ -445,8 +445,12 @@ static void R_OverlayStain (void)
 	// shift = surface-cache-pixel-per-stain-cell exponent. At mip 0 there is
 	// 1 surface pixel per game unit, so each cell spans STAIN_CELL_SIZE
 	// surface pixels = 1 << STAIN_CELL_SHIFT. Mip n halves surface resolution.
+	// At shift==0 (1u cells at mip 0) the bilinear degenerates cleanly:
+	// mask=0, fx=fy=0, so the interp formula collapses to nearest-neighbour
+	// — each surface pixel samples exactly its own cell, no halo. Negative
+	// shift (cells smaller than the surface pixel at this mip) clamps to 0.
 	shift = STAIN_CELL_SHIFT - mip;
-	if (shift < 1) shift = 1;
+	if (shift < 0) shift = 0;
 	mask  = (1 << shift) - 1;
 
 	for (py = 0; py < h; py++)

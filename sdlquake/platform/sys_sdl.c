@@ -349,9 +349,10 @@ int main(int argc, char **argv)
 
     parms.memsize = MINIMUM_MEMORY;
     {
-        // 64 MB default: VID alone now reserves ~20 MB at the bumped
-        // VID_RENDER_MAX (2560x1600 for SSAA headroom). Override with -heapsize.
-        parms.memsize = 64 * 1024 * 1024;
+        // 512 MB default. VID reserves ~20 MB (SSAA headroom). The stain
+        // pool at STAIN_CELL_SHIFT==0 can reach ~243 MB at default r_decals_max=512
+        // (1u cells × 288² × 3 × int16 × 512 slots). Override with -heapsize.
+        parms.memsize = 512 * 1024 * 1024;
         int t = COM_CheckParm("-heapsize");
         if (t && t + 1 < com_argc)
             parms.memsize = Q_atoi(com_argv[t+1]) * 1024;

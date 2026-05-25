@@ -376,8 +376,11 @@ typedef enum {
 // Stain (decal) cell size exponent. Cell side in game units = 1 << STAIN_CELL_SHIFT.
 // Single source of truth shared between r_decals.c and r_surf.c.
 // STAIN_CELL_SHIFT == 4 → 16-unit cells (one cell per lightmap luxel; original behaviour).
-// STAIN_CELL_SHIFT == 2 → 4-unit cells  (4× linear, 16× memory; planned final value).
-#define STAIN_CELL_SHIFT 2
+// STAIN_CELL_SHIFT == 2 → 4-unit cells  (4× linear, 16× memory).
+// STAIN_CELL_SHIFT == 0 → 1-unit cells (16× linear, 256× memory; matches surface
+//                          pixel size at mip 0 so spatter dots render true 1u with
+//                          no bilinear halo). Pool grows to ~255 MB at default slots.
+#define STAIN_CELL_SHIFT 0
 
 typedef struct stain_s {
 	short		*rgb;             // [smax*tmax*3], signed cell deltas
