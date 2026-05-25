@@ -1034,8 +1034,33 @@ static void do_unload(void)
     if (game_so)    { SDL_UnloadObject(game_so); game_so = NULL; }
 }
 
+// Poll the source DLL until its (size, mtime) pair is unchanged across a
+// ~100 ms window, so we don't copy a half-written file the linker is still
+// flushing.  Returns 0 if the file never settled.
+static int wait_for_settled_dll(void)
+{
+    SDL_PathInfo prev;
+    if (!SDL_GetPathInfo(GAME_DLL_SRC, &prev)) return 0;
+    for (int i = 0; i < 20; ++i)
+    {
+        SDL_Delay(100);
+        SDL_PathInfo now;
+        if (!SDL_GetPathInfo(GAME_DLL_SRC, &now)) return 0;
+        if (now.size == prev.size && now.modify_time == prev.modify_time && now.size > 0)
+            return 1;
+        prev = now;
+    }
+    Con_Printf("hotreload: source DLL never settled, giving up\n");
+    return 0;
+}
+
 static void do_load(void)
 {
+    // Wait for the linker to finish writing BEFORE we unload the running
+    // copy — otherwise a failed settle leaves the engine with no game DLL.
+    if (!wait_for_settled_dll())
+        return;
+
     do_unload();
 
     // Copy so zig can overwrite game.dll while game_loaded.dll stays mapped.
