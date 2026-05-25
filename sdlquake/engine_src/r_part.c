@@ -1819,7 +1819,17 @@ void R_DrawParticles (void)
 		glTexCoord2f (0,1);
 		glVertex3f (p->org[0] + right[0]*scale, p->org[1] + right[1]*scale, p->org[2] + right[2]*scale);
 #else
-		if (p->type == pt_smoke)
+		/* Wall-stuck sliding blood: the decal trail painted by
+		   R_SpawnBloodSpatter per cell crossing conveys the slide
+		   visually. Drawing the particle sprite on top would just
+		   duplicate the same red dot and clutter the wall. */
+		if (p->type == pt_blood &&
+		    (p->flags & (PARTFL_STUCK | PARTFL_WALL_STICK))
+		     == (PARTFL_STUCK | PARTFL_WALL_STICK))
+		{
+			/* skip draw */
+		}
+		else if (p->type == pt_smoke)
 			D_DrawSmokeParticle (p);
 		else
 			D_DrawParticle (p);
