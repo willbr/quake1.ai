@@ -3,7 +3,7 @@
 
 #include "imgui.h"
 #include "backends/imgui_impl_sdl3.h"
-#include "backends/imgui_impl_sdlrenderer3.h"
+#include "backends/imgui_impl_sdlgpu3.h"
 #include "imgui_bridge.h"
 
 extern "C" {
@@ -279,19 +279,27 @@ void IG_PlotLines(const char *label, const float *values, int count,
 }
 
 // SDL3 input backend
-int  IG_ImplSDL3_InitForSDLRenderer(SDL_Window *w, SDL_Renderer *r)
-    { return ImGui_ImplSDL3_InitForSDLRenderer(w, r) ? 1 : 0; }
+int  IG_ImplSDL3_InitForOther(SDL_Window *w)
+    { return ImGui_ImplSDL3_InitForOther(w) ? 1 : 0; }
 void IG_ImplSDL3_Shutdown(void)         { ImGui_ImplSDL3_Shutdown(); }
 void IG_ImplSDL3_NewFrame(void)         { ImGui_ImplSDL3_NewFrame(); }
 int  IG_ImplSDL3_ProcessEvent(const SDL_Event *ev)
     { return ImGui_ImplSDL3_ProcessEvent(ev) ? 1 : 0; }
 
-// SDL_Renderer3 rendering backend
-int  IG_ImplSDLRenderer3_Init(SDL_Renderer *r)
-    { return ImGui_ImplSDLRenderer3_Init(r) ? 1 : 0; }
-void IG_ImplSDLRenderer3_Shutdown(void) { ImGui_ImplSDLRenderer3_Shutdown(); }
-void IG_ImplSDLRenderer3_NewFrame(void) { ImGui_ImplSDLRenderer3_NewFrame(); }
-void IG_ImplSDLRenderer3_RenderDrawData(SDL_Renderer *r)
-    { ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), r); }
+// SDL_GPU3 rendering backend
+int  IG_ImplSDLGPU3_Init(SDL_GPUDevice *device, SDL_GPUTextureFormat color_format)
+{
+    ImGui_ImplSDLGPU3_InitInfo info = {};
+    info.Device            = device;
+    info.ColorTargetFormat = color_format;
+    info.MSAASamples       = SDL_GPU_SAMPLECOUNT_1;
+    return ImGui_ImplSDLGPU3_Init(&info) ? 1 : 0;
+}
+void IG_ImplSDLGPU3_Shutdown(void)  { ImGui_ImplSDLGPU3_Shutdown(); }
+void IG_ImplSDLGPU3_NewFrame(void)  { ImGui_ImplSDLGPU3_NewFrame(); }
+void IG_ImplSDLGPU3_PrepareDrawData(SDL_GPUCommandBuffer *cmd)
+    { ImGui_ImplSDLGPU3_PrepareDrawData(ImGui::GetDrawData(), cmd); }
+void IG_ImplSDLGPU3_RenderDrawData(SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *pass)
+    { ImGui_ImplSDLGPU3_RenderDrawData(ImGui::GetDrawData(), cmd, pass); }
 
 } // extern "C"

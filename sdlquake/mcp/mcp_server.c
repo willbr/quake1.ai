@@ -63,6 +63,8 @@ typedef int mcp_raw_sock_t;
 
 // From platform/vid_sdl.c — defined alongside the other VID helpers.
 extern int VID_SaveScreenshotPNG(const char *path);
+extern int VID_RequestGPUScreenshot(const char *path);
+extern int VID_GPUScreenshotPending(void);
 extern int VID_SamplePixel(int x, int y, byte *r, byte *g, byte *b, byte *idx);
 
 int mcp_active = 0;
@@ -901,6 +903,76 @@ static void tool_screenshot(const char *id_json, const char *args)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: screenshot_gpu -- capture the actual swapchain output (post-shader)
+// rather than vid.buffer (CPU-side palette indices). Useful for debugging
+// the GPU pipeline because it shows exactly what the user sees on screen.
+// ---------------------------------------------------------------------------
+
+static void tool_screenshot_gpu(const char *id_json, const char *args)
+{
+    char input[512] = {0};
+    if (args) json_str(args, "path", input, sizeof(input));
+
+    char path[512] = {0};
+    if (!input[0]) {
+        if (!Screenshot_NextPath(path, sizeof(path))) {
+            mcp_error(id_json, -32603, "screenshot dir full");
+            return;
+        }
+    } else {
+        (void)mcp_mkdir("screenshots");
+        const char *base = input;
+        for (const char *p = input; *p; p++)
+            if (*p == '/' || *p == '\\') base = p + 1;
+        if (!base[0] || base[0] == '.') {
+            mcp_error(id_json, -32602, "invalid screenshot filename");
+            return;
+        }
+        for (const char *p = base; *p; p++) {
+            unsigned char c = (unsigned char)*p;
+            int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                     (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+            if (!ok) {
+                mcp_error(id_json, -32602, "invalid screenshot filename");
+                return;
+            }
+        }
+        snprintf(path, sizeof(path), "screenshots/%s", base);
+    }
+
+    if (!VID_RequestGPUScreenshot(path)) {
+        mcp_error(id_json, -32603, "gpu screenshot request rejected");
+        return;
+    }
+    // Wait up to ~1s for the main thread to pick up the request and write.
+    for (int i = 0; i < 100 && VID_GPUScreenshotPending(); i++)
+        SDL_Delay(10);
+
+    char abspath[1024];
+#ifdef _WIN32
+    if (!_fullpath(abspath, path, sizeof(abspath)))
+        strncpy(abspath, path, sizeof(abspath) - 1);
+#else
+    if (!realpath(path, abspath))
+        strncpy(abspath, path, sizeof(abspath) - 1);
+#endif
+    abspath[sizeof(abspath) - 1] = '\0';
+
+    char raw[1024];
+    snprintf(raw, sizeof(raw), "{\"path\":\"%s\",\"source\":\"gpu_swapchain\"}", abspath);
+    char escaped[2048];
+    char *d = escaped, *end = escaped + sizeof(escaped) - 1;
+    const char *s = raw;
+    while (*s && d < end - 2) {
+        if (*s == '\\')      { *d++ = '\\'; *d++ = '\\'; s++; }
+        else if (*s == '"')  { *d++ = '\\'; *d++ = '"';  s++; }
+        else                 { *d++ = *s++; }
+    }
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
 // Tool: sample_pixel -- read one pixel from the current framebuffer
 // ---------------------------------------------------------------------------
 
@@ -1552,6 +1624,11 @@ static void mcp_dispatch(const char *line)
         {
             const char *args = strstr(line, "\"arguments\":");
             tool_editor_select(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "screenshot_gpu") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_screenshot_gpu(id_json, args ? args : "");
         }
         else if (strcmp(tool_name, "screenshot") == 0)
         {

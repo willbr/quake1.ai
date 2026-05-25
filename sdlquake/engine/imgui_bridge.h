@@ -6,6 +6,7 @@
 #define IMGUI_BRIDGE_H
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_gpu.h>
 
 // ---------------------------------------------------------------------------
 // ImGuiWindowFlags subset
@@ -193,16 +194,20 @@ void  IG_PlotLines(const char *label, const float *values, int count,
                    float w, float h);
 
 // SDL3 input backend
-int   IG_ImplSDL3_InitForSDLRenderer(SDL_Window *w, SDL_Renderer *r);
+int   IG_ImplSDL3_InitForOther(SDL_Window *w);
 void  IG_ImplSDL3_Shutdown(void);
 void  IG_ImplSDL3_NewFrame(void);
 int   IG_ImplSDL3_ProcessEvent(const SDL_Event *ev);
 
-// SDL_Renderer3 rendering backend
-int   IG_ImplSDLRenderer3_Init(SDL_Renderer *r);
-void  IG_ImplSDLRenderer3_Shutdown(void);
-void  IG_ImplSDLRenderer3_NewFrame(void);
-void  IG_ImplSDLRenderer3_RenderDrawData(SDL_Renderer *r);
+// SDL_GPU3 rendering backend.
+// PrepareDrawData must run BEFORE opening the swapchain render pass — it
+// uploads the vertex/index buffers via a transfer pass on the same command
+// buffer. RenderDrawData runs inside the render pass and emits draw calls.
+int   IG_ImplSDLGPU3_Init(SDL_GPUDevice *device, SDL_GPUTextureFormat color_format);
+void  IG_ImplSDLGPU3_Shutdown(void);
+void  IG_ImplSDLGPU3_NewFrame(void);
+void  IG_ImplSDLGPU3_PrepareDrawData(SDL_GPUCommandBuffer *cmd);
+void  IG_ImplSDLGPU3_RenderDrawData (SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *pass);
 
 #ifdef __cplusplus
 }

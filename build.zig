@@ -319,6 +319,10 @@ pub fn build(b: *std.Build) void {
         "scripts/build_shaders.sh",
         "shaders",
     });
+    // Declare input files so Zig invalidates the cache when shaders change.
+    shader_step.addFileInput(b.path("scripts/build_shaders.sh"));
+    shader_step.addFileInput(b.path("shaders/palette.vert.glsl"));
+    shader_step.addFileInput(b.path("shaders/palette.frag.glsl"));
     const shader_header = shader_step.addOutputFileArg("palette_shaders.h");
     mod.addIncludePath(shader_header.dirname());
 

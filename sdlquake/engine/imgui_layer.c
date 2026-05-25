@@ -14,10 +14,15 @@
 #include "imgui_support.h"
 #include "perf.h"
 
-static SDL_Window   *s_window   = NULL;
-static SDL_Renderer *s_renderer = NULL;
-static int           s_open     = 0;
-static int           s_inited   = 0;
+static SDL_Window    *s_window  = NULL;
+static SDL_GPUDevice *s_gpu     = NULL;
+static int            s_open    = 0;
+static int            s_inited  = 0;
+
+// Set during PrepareGPU. Drives whether RenderGPU emits draw calls inside the
+// swapchain render pass — skip both if nothing to display so the cost of
+// NewFrame/Render goes to zero when dev overlay is closed.
+static int            s_should_render = 0;
 
 int imgui_ai_panel_open = 1;
 
@@ -723,17 +728,17 @@ static void draw_entities(void)
 // Public interface (declared in imgui_layer.h)
 // ---------------------------------------------------------------------------
 
-void ImguiLayer_Init(SDL_Window *w, SDL_Renderer *r)
+void ImguiLayer_Init(SDL_Window *w, SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchain_fmt)
 {
-    s_window   = w;
-    s_renderer = r;
+    s_window = w;
+    s_gpu    = gpu;
 
     IG_CreateContext();
     IG_SetIniFilename(NULL);
     IG_StyleColorsDark();
 
-    IG_ImplSDL3_InitForSDLRenderer(w, r);
-    IG_ImplSDLRenderer3_Init(r);
+    IG_ImplSDL3_InitForOther(w);
+    IG_ImplSDLGPU3_Init(gpu, swapchain_fmt);
 
     s_inited = 1;
 }
@@ -741,7 +746,7 @@ void ImguiLayer_Init(SDL_Window *w, SDL_Renderer *r)
 void ImguiLayer_Shutdown(void)
 {
     if (!s_inited) return;
-    IG_ImplSDLRenderer3_Shutdown();
+    IG_ImplSDLGPU3_Shutdown();
     IG_ImplSDL3_Shutdown();
     IG_DestroyContext();
     s_inited = 0;
@@ -778,40 +783,32 @@ void ImguiLayer_Toggle(void)
 int ImguiLayer_IsOpen(void)    { return s_open; }
 int ImguiLayer_WantsMouse(void){ return s_open; }
 
-void ImguiLayer_Render(void)
+// PrepareGPU: build ImGui's draw lists and stage vertex/index buffers via the
+// command buffer's transfer queue. Must run BEFORE the swapchain render pass.
+void ImguiLayer_PrepareGPU(SDL_GPUCommandBuffer *cmd)
 {
+    s_should_render = 0;
     if (!s_inited) return;
 
-    // Three rendering modes:
+    // Render modes:
     //   1. Dev overlay open (F3) — full panel set, game already paused upstream.
-    //   2. Overlay closed, `showperf` cvar set — render ONLY the Perf panel as
-    //      a HUD over the live game; game stays unpaused, no input capture.
-    //   3. Neither — skip rendering entirely.
+    //   2. Overlay closed, `showperf` cvar set — Perf panel only, as HUD.
+    //   3. Neither — skip entirely (s_should_render stays 0).
     int perf_only = !s_open && Perf_ShowOverlay();
     if (!s_open && !perf_only) return;
+    s_should_render = 1;
 
     Perf_PushScope("ImguiLayer_Render");
 
-    // Render at native window resolution, bypassing the 320x200 logical scale.
-    SDL_SetRenderLogicalPresentation(s_renderer, 0, 0,
-        SDL_LOGICAL_PRESENTATION_DISABLED);
-
-    IG_ImplSDLRenderer3_NewFrame();
+    IG_ImplSDLGPU3_NewFrame();
     IG_ImplSDL3_NewFrame();
     IG_NewFrame();
 
-    // Editor mode replaces the dev panels with editor-specific panels so the
-    // 320x200 viewport stays readable. F3-only (no F2) shows the dev set;
-    // F2 (editor) shows just the editor toolbar / brush list / inspector.
     {
         extern int  Editor_IsOpen(void);
         extern void Editor_DrawUI(void);
         if (perf_only)
         {
-            // HUD-style: FPS top-left, Profile bottom-full-width over the
-            // game HUD. No input is forwarded to ImGui (ProcessEvent gates
-            // on s_open) so both windows are non-interactive — read-only is
-            // fine because both panels only display perf state.
             compute_layout();
             draw_fps();
             draw_profile();
@@ -834,11 +831,14 @@ void ImguiLayer_Render(void)
     }
 
     IG_Render();
-    IG_ImplSDLRenderer3_RenderDrawData(s_renderer);
-
-    // Restore game's integer-scale presentation for the next frame.
-    SDL_SetRenderLogicalPresentation(s_renderer, 320, 200,
-        SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+    IG_ImplSDLGPU3_PrepareDrawData(cmd);
 
     Perf_PopScope();
+}
+
+// RenderGPU: emit ImGui's draw calls into an already-open render pass.
+void ImguiLayer_RenderGPU(SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *pass)
+{
+    if (!s_should_render) return;
+    IG_ImplSDLGPU3_RenderDrawData(cmd, pass);
 }

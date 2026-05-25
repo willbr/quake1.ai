@@ -8,10 +8,10 @@
 #include "vid_palette.h"              /* extern byte vid_palette_id[] */
 #include "../vendor/stb/stb_image_write.h"   /* prototypes only; impl in vid_sdl.c */
 
-extern int           Clipboard_SetPNG(const void *bytes, size_t size);
-extern cvar_t        scr_screenshot_clipboard;
-extern SDL_Renderer *VID_GetRenderer(void);
-extern float         scr_con_current;   /* defined in screen.c, no header */
+extern int    Clipboard_SetPNG(const void *bytes, size_t size);
+extern cvar_t scr_screenshot_clipboard;
+extern void   VID_WindowToLogical(float wx, float wy, float *lx, float *ly);
+extern float  scr_con_current;   /* defined in screen.c, no header */
 
 typedef struct {
     unsigned char *frozen;       /* w*h bytes */
@@ -213,10 +213,9 @@ static void crop_commit(void)
    (idx == 0) or the drag endpoint (idx != 0). */
 static void crop_set_endpoint(int idx, float wx, float wy)
 {
-    SDL_Renderer *r = VID_GetRenderer();
     float lx = wx, ly = wy;
     int ix, iy;
-    if (r) SDL_RenderCoordinatesFromWindow(r, wx, wy, &lx, &ly);
+    VID_WindowToLogical(wx, wy, &lx, &ly);
     ix = (int)lx;
     iy = (int)ly;
     if (ix < 0) ix = 0; else if (ix >= g.w) ix = g.w - 1;

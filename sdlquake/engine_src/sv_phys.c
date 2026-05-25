@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "hotreload.h"
 #include "r_local.h"
+#include "perf.h"
 
 // Per-edict next-allowed time for spawning a blood decal on bounce. Indexed
 // by NUM_FOR_EDICT(ent). Reset to all-zero on map load via
@@ -1734,7 +1735,7 @@ void SV_Physics (void)
 		game_globals.world     = sv.edicts;
 		game_globals.self      = sv.edicts;
 		game_globals.other     = sv.edicts;
-		g_game_api->start_frame();
+		PERF_SCOPE("game_dll.start_frame") g_game_api->start_frame();
 	}
 
 //SV_CheckAllEnts ();
@@ -1742,6 +1743,7 @@ void SV_Physics (void)
 //
 // treat each object in turn
 //
+	PERF_SCOPE("SV_Physics.edicts") {
 	ent = sv.edicts;
 	for (i=0 ; i<sv.num_edicts ; i++, ent = NEXT_EDICT(ent))
 	{
@@ -1754,29 +1756,30 @@ void SV_Physics (void)
 		}
 
 		if (i > 0 && i <= svs.maxclients)
-			SV_Physics_Client (ent, i);
+			PERF_SCOPE("Phys_Client") SV_Physics_Client (ent, i);
 		else if (ent->v.movetype == MOVETYPE_PUSH)
-			SV_Physics_Pusher (ent);
+			PERF_SCOPE("Phys_Pusher") SV_Physics_Pusher (ent);
 		else if (ent->v.movetype == MOVETYPE_NONE)
-			SV_Physics_None (ent);
+			PERF_SCOPE("Phys_None") SV_Physics_None (ent);
 #ifdef QUAKE2
 		else if (ent->v.movetype == MOVETYPE_FOLLOW)
-			SV_Physics_Follow (ent);
+			PERF_SCOPE("Phys_Follow") SV_Physics_Follow (ent);
 #endif
 		else if (ent->v.movetype == MOVETYPE_NOCLIP)
-			SV_Physics_Noclip (ent);
+			PERF_SCOPE("Phys_Noclip") SV_Physics_Noclip (ent);
 		else if (ent->v.movetype == MOVETYPE_STEP)
-			SV_Physics_Step (ent);
-		else if (ent->v.movetype == MOVETYPE_TOSS 
+			PERF_SCOPE("Phys_Step") SV_Physics_Step (ent);
+		else if (ent->v.movetype == MOVETYPE_TOSS
 		|| ent->v.movetype == MOVETYPE_BOUNCE
 #ifdef QUAKE2
 		|| ent->v.movetype == MOVETYPE_BOUNCEMISSILE
 #endif
 		|| ent->v.movetype == MOVETYPE_FLY
 		|| ent->v.movetype == MOVETYPE_FLYMISSILE)
-			SV_Physics_Toss (ent);
+			PERF_SCOPE("Phys_Toss") SV_Physics_Toss (ent);
 		else
-			Sys_Error ("SV_Physics: bad movetype %i", (int)ent->v.movetype);			
+			Sys_Error ("SV_Physics: bad movetype %i", (int)ent->v.movetype);
+	}
 	}
 	
 	if (pr_global_struct->force_retouch)

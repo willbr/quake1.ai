@@ -56,9 +56,33 @@ Platform files (`sdlquake/platform/*.c`) omit `-std=gnu89` (they're written in m
 - `in_sdl.c` `IN_Move` — calls `V_StopPitchDrift()` every frame, not just on mouse movement, to prevent re-arming after `v_centermove` seconds of walking.
 - `vid_sdl.c` — `vid.conbuffer` points to the same buffer as `vid.buffer`; `Draw_Character` writes to `conbuffer`.
 
-### Render pipeline (Phase 1)
+### Render pipeline (SDL_GPU palette-LUT shader)
 
-Fixed 320×200 resolution. Each frame: Quake's software renderer writes 8-bit palette indices into `vid.buffer`. `VID_Update()` expands to 32-bit ARGB via `d_8to24table` and uploads to an `SDL_TEXTUREACCESS_STREAMING` texture, then presents. `SDL_SetRenderLogicalPresentation` with `INTEGER_SCALE` keeps pixels crisp at any window size.
+Quake's software renderer writes 8-bit palette indices into `vid.buffer`
+and per-pixel palette-slot ids into `vid_palette_id` (for Doom/Wolf3D
+weapon overlays). Every frame `vid_sdl.c::gpu_render_frame` uploads both
+buffers as `R8_UINT` GPU textures, plus a 3×256 RGBA8 LUT, and a
+fullscreen-triangle pipeline running `shaders/palette.{vert,frag}.glsl`
+does the per-pixel `dst = palette[palette_id[px] * 256 + framebuffer[px]]`
+lookup on the GPU. The CPU-side `palette_expand` loop (≈5 ms/frame at
+3x scale) is gone.
+
+Shaders compile at build time via `scripts/build_shaders.sh`
+(glslangValidator GLSL → SPIR-V, then spirv-cross SPIR-V → MSL with
+`--flip-vert-y`), embedded as C arrays in a generated
+`palette_shaders.h`. SPIR-V serves Vulkan; MSL source string is
+compiled at runtime by Metal. DXIL for D3D12 is a TODO.
+
+ImGui composites through the `imgui_impl_sdlgpu3` backend in the same
+render pass. The editor's texture-thumbnail cache (`edit_texcache.c`)
+stores SDL_GPUTextures referenced from ImGui via raw `SDL_GPUTexture*`
+as `ImTextureID`. Window→logical mouse coords go through
+`VID_WindowToLogical`, which reproduces the integer-scale letterbox
+math used at present time.
+
+Known migration TODOs: scanline overlay (set `vid_scanlines 0`),
+crop-screenshot's Crop_PresentOverlay still writes CPU-side and is a
+no-op now, DXIL bytecode for Windows.
 
 ### MCP server (Phase 2)
 

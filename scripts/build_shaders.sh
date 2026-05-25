@@ -25,7 +25,10 @@ compile_one() {
     # MSL 3.0 covers macOS 13+ / iOS 16+. SDL_GPU's Metal backend handles older
     # devices via Metal's own runtime compilation, so requiring a recent MSL is
     # safe for our supported platforms.
-    spirv-cross --msl --msl-version 30000 "$spv" --output "$msl"
+    # --flip-vert-y: Metal's NDC has Y pointing up; spirv-cross emits a Y-flip
+    # on gl_Position.y so the GLSL source (Vulkan Y-down) renders the same on
+    # both backends.
+    spirv-cross --msl --msl-version 30000 --flip-vert-y "$spv" --output "$msl"
 }
 
 compile_one vert
