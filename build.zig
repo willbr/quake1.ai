@@ -284,7 +284,9 @@ pub fn build(b: *std.Build) void {
         .flags = vis_c_flags,
     });
 
-    // Dear ImGui core + SDL3/SDL_Renderer backends + our C++ bridge (no logic)
+    // Dear ImGui core + SDL3 + SDL_GPU3 backends + our C++ bridge (no logic).
+    // Both renderer3 and gpu3 backends compile during the GPU migration; the
+    // bridge picks one at link time.
     mod.addCSourceFiles(.{
         .files = &.{
             imgui_dir ++ "/imgui.cpp",
@@ -293,11 +295,32 @@ pub fn build(b: *std.Build) void {
             imgui_dir ++ "/imgui_widgets.cpp",
             imgui_dir ++ "/backends/imgui_impl_sdl3.cpp",
             imgui_dir ++ "/backends/imgui_impl_sdlrenderer3.cpp",
+            imgui_dir ++ "/backends/imgui_impl_sdlgpu3.cpp",
             "sdlquake/engine/imgui_bridge.cpp",
         },
         .flags = imgui_cpp_flags,
     });
     mod.addIncludePath(b.path(imgui_dir));
+
+    // ---------------------------------------------------------------------------
+    // Shader build pipeline.
+    //
+    // shaders/palette.{vert,frag}.glsl -> SPIR-V bytecode + MSL source string,
+    // both embedded as C arrays in a single header (palette_shaders.h). The
+    // runtime in vid_sdl.c picks the format that matches the active SDL_GPU
+    // backend (SPIR-V for Vulkan, MSL source for Metal). DXIL for D3D12 is a
+    // TODO; Windows currently still builds but won't have a GPU palette path.
+    //
+    // Tools required on PATH at build time:
+    //   - glslangValidator  (brew install glslang  / apt install glslang-tools)
+    //   - spirv-cross       (brew install spirv-cross)
+    // ---------------------------------------------------------------------------
+    const shader_step = b.addSystemCommand(&.{
+        "scripts/build_shaders.sh",
+        "shaders",
+    });
+    const shader_header = shader_step.addOutputFileArg("palette_shaders.h");
+    mod.addIncludePath(shader_header.dirname());
 
     // Platform stubs come first so our winquake.h / mgraph.h shadow the originals.
     mod.addIncludePath(b.path("sdlquake/platform"));
