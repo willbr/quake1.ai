@@ -200,10 +200,13 @@ int light_compile_to_memory(light_options_t *opts,
     /* Re-emit the BSP with updated lightdata + entdata. WriteBSPFile
      * inspects qbsp_membuf_active and routes its bytes into the membuf
      * instead of opening a file -- same mechanism the qbsp pipeline
-     * already uses. */
+     * already uses. The filename arg is reached only in the disk-write
+     * branch, which we never take here; pass NULL so a stray future edit
+     * that drops the flag fails loudly instead of silently spewing a file
+     * into CWD on every editor relight. */
     qbsp_membuf_active = 1;
     qbsp_membuf_reset();
-    WriteBSPFile("light_inproc.bsp");
+    WriteBSPFile(NULL);
 
     qbsp_err_jmp = NULL;
     qbsp_membuf_active = 0;
