@@ -926,25 +926,55 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 }
 
 /* Paint a single-cell blood dot at `pos` on the surface near `normal`.
-   Called from r_part.c when a pt_blood particle enters PARTFL_STICK_ON_HIT.
-   Bails silently if decals are disabled, the spatter cvar is off, the
-   server is inactive (demo playback), or no nearby world surface is found. */
+   Called from r_part.c on PARTFL_STICK_ON_HIT and from the wall-slide drag
+   trail. Bails silently if decals are disabled, the spatter cvar is off,
+   the server is inactive (demo playback), or no nearby world surface is found.
+
+   Saturating: each channel takes max-magnitude delta rather than accumulating.
+   N stuck droplets sliding through the same column would otherwise add their
+   negative deltas (e.g. 4 × -125 on green/blue → clamp to 0 → pure black).
+   With saturation, repeats can't darken further than one spatter's worth,
+   so the trail stays dark-red regardless of overlap. The trade-off vs the
+   regular additive painter: no kernel falloff (1×1 only), no BSP coplanar
+   walk. Both are negligible at the 1u dot size. */
 void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal)
 {
-	msurface_t           *surf;
 	const decal_kernel_t *dk;
+	msurface_t           *surf;
+	stain_t              *st;
+	mtexinfo_t           *tex;
+	float                 u, v;
+	int                   lu, lv, idx;
 	extern server_t       sv;
 
 	if (!r_decals.value)               return;
 	if (!r_decals_blood_spatter.value) return;
-	if (!sv.active)                    return;  // demo playback safety
+	if (!sv.active)                    return;  /* demo playback safety */
 
 	surf = R_PointOnSurface_World (pos, normal, 4.0f);
 	if (!surf) return;
 
-	dk = &decal_kernels[DECAL_BLOOD_SPATTER];
-	Stain_PaintKernel_World (pos, surf, dk->dr, dk->dg, dk->db,
-	                          dk->k, dk->ksize, dk->knorm);
+	st = Stain_GetOrAlloc (surf);
+	if (!st) return;
+
+	tex = surf->texinfo;
+	u   = DotProduct(pos, tex->vecs[0]) + tex->vecs[0][3];
+	v   = DotProduct(pos, tex->vecs[1]) + tex->vecs[1][3];
+	lu  = ((int)floor(u) - surf->texturemins[0]) >> STAIN_CELL_SHIFT;
+	lv  = ((int)floor(v) - surf->texturemins[1]) >> STAIN_CELL_SHIFT;
+	if (lu < 0 || lu >= st->smax || lv < 0 || lv >= st->tmax) return;
+
+	dk  = &decal_kernels[DECAL_BLOOD_SPATTER];
+	idx = (lv * st->smax + lu) * 3;
+	/* Saturating: keep whichever delta is more negative. Existing stain
+	   from a darker decal (splat, scorch) stays unchanged; an empty cell
+	   takes the spatter delta. Subsequent spatter into the same cell
+	   compares equal and skips, capping the darkness at one paint. */
+	if (st->rgb[idx + 0] > dk->dr) st->rgb[idx + 0] = (short)dk->dr;
+	if (st->rgb[idx + 1] > dk->dg) st->rgb[idx + 1] = (short)dk->dg;
+	if (st->rgb[idx + 2] > dk->db) st->rgb[idx + 2] = (short)dk->db;
+	st->generation++;
+	st->last_touched_frame = r_framecount;
 }
 
 void R_SpawnBloodPool (vec3_t origin)
