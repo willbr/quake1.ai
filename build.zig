@@ -284,9 +284,9 @@ pub fn build(b: *std.Build) void {
         .flags = vis_c_flags,
     });
 
-    // Dear ImGui core + SDL3 + SDL_GPU3 backends + our C++ bridge (no logic).
-    // Both renderer3 and gpu3 backends compile during the GPU migration; the
-    // bridge picks one at link time.
+    // Dear ImGui core + SDL3 platform backend + SDL_GPU3 renderer backend +
+    // our C++ bridge. SDL_Renderer3 backend was removed when vid_sdl.c was
+    // migrated to SDL_GPU; see b59194f.
     mod.addCSourceFiles(.{
         .files = &.{
             imgui_dir ++ "/imgui.cpp",
@@ -294,7 +294,6 @@ pub fn build(b: *std.Build) void {
             imgui_dir ++ "/imgui_tables.cpp",
             imgui_dir ++ "/imgui_widgets.cpp",
             imgui_dir ++ "/backends/imgui_impl_sdl3.cpp",
-            imgui_dir ++ "/backends/imgui_impl_sdlrenderer3.cpp",
             imgui_dir ++ "/backends/imgui_impl_sdlgpu3.cpp",
             "sdlquake/engine/imgui_bridge.cpp",
         },
