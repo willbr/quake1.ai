@@ -2116,7 +2116,21 @@ void R_DrawParticles (void)
 				if (new_z <= p->vel[2]) {
 					R_SlideRelease (p);
 				} else {
+					/* Drag trail: blood droplets leave a streak of spatter
+					   dots as they slide. Throttle to one paint per stain
+					   cell crossed in Z so a fast slide doesn't paint the
+					   same cell every frame. STAIN_CELL_SIZE = 1<<STAIN_CELL_SHIFT. */
+					const float cell_size = (float)(1 << STAIN_CELL_SHIFT);
+					int old_cell = (int)floor (p->org[2] / cell_size);
+					int new_cell = (int)floor (new_z      / cell_size);
 					p->org[2] = new_z;
+					if (p->type == pt_blood && new_cell != old_cell) {
+						/* NULL normal: R_PointOnSurface_World finds the
+						   wall on its own — droplet org is offset by
+						   0.5*wall_normal from the impact plane, so a
+						   nearby coplanar surface is always within tolerance. */
+						R_SpawnBloodSpatter (p->org, NULL);
+					}
 				}
 			}
 			if (r_particle_slide_debug.value) {
