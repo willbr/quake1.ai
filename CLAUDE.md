@@ -80,9 +80,14 @@ as `ImTextureID`. Window→logical mouse coords go through
 `VID_WindowToLogical`, which reproduces the integer-scale letterbox
 math used at present time.
 
-Known migration TODOs: scanline overlay (set `vid_scanlines 0`),
-crop-screenshot's Crop_PresentOverlay still writes CPU-side and is a
-no-op now, DXIL bytecode for Windows.
+The CRT scanline overlay (`vid_scanlines` / `vid_scanline_intensity` /
+`vid_scanline_size`) is implemented inside `palette.frag.glsl`: a
+fragment UBO at set=3 binding=0 carries `(intensity, size)`, and the
+shader darkens every other `size`-pixel band of `gl_FragCoord.y`
+(swapchain space, so bands stay locked to the physical pixel grid).
+
+Known migration TODOs: crop-screenshot's Crop_PresentOverlay still
+writes CPU-side and is a no-op now, DXIL bytecode for Windows.
 
 ### MCP server (Phase 2)
 

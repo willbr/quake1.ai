@@ -318,7 +318,8 @@ static int gpu_init(SDL_Window *win) {
     SDL_GPUShaderCreateInfo fs_info = {0};
     vs_info.stage = SDL_GPU_SHADERSTAGE_VERTEX;
     fs_info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fs_info.num_samplers = 3;
+    fs_info.num_samplers         = 3;
+    fs_info.num_uniform_buffers  = 1;   // scanline params
 
     if (active & SDL_GPU_SHADERFORMAT_MSL) {
         vs_info.code        = (const Uint8 *)palette_vert_msl;
@@ -525,6 +526,23 @@ static void gpu_render_frame(void) {
     bindings[1].texture = gpu_palette_id_tex; bindings[1].sampler = gpu_sampler;
     bindings[2].texture = gpu_palette_tex;    bindings[2].sampler = gpu_sampler;
     SDL_BindGPUFragmentSamplers(pass, 0, bindings, 3);
+
+    // Scanline overlay parameters. Layout matches the std140 UBO in
+    // palette.frag.glsl (two floats + two pad floats = 16 bytes).
+    struct { float intensity, size, pad0, pad1; } scan_params;
+    float intensity = vid_scanline_intensity.value;
+    float size      = vid_scanline_size.value;
+    if (vid_scanlines.value == 0.0f) intensity = 0.0f;
+    if (intensity < 0.0f) intensity = 0.0f;
+    if (intensity > 1.0f) intensity = 1.0f;
+    if (size < 1.0f) size = 1.0f;
+    if (size > 8.0f) size = 8.0f;
+    scan_params.intensity = intensity;
+    scan_params.size      = size;
+    scan_params.pad0      = 0.0f;
+    scan_params.pad1      = 0.0f;
+    SDL_PushGPUFragmentUniformData(cmd, 0, &scan_params, sizeof(scan_params));
+
     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 
     ImguiLayer_RenderGPU(cmd, pass);
@@ -1026,15 +1044,6 @@ void VID_Init(unsigned char *palette)
     vid_menudrawfn  = VID_MenuDraw;
     vid_menukeyfn   = VID_MenuKey;
 }
-
-// ---------------------------------------------------------------------------
-// Scanlines: CRT-style horizontal-line overlay
-// ---------------------------------------------------------------------------
-
-// Scanline CRT overlay -- deferred under the SDL_GPU migration; cvars still
-// register and persist, the visual effect is just disabled until we fold it
-// into a shader pass.
-static void Scanline_Draw(void) { }
 
 void VID_Shutdown(void)
 {
