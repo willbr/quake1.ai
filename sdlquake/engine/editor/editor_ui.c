@@ -90,7 +90,7 @@ static void ui_cvar_combo_preset(const char *label, const char *cvar_name,
 // Layout constants (in window pixels). Toolbar runs across the top; brush
 // list anchors the bottom-left, inspector the bottom-right.
 #define UI_PAD          10
-#define UI_TOOLBAR_H    100
+#define UI_TOOLBAR_H    160
 #define UI_LEFT_W       320
 #define UI_RIGHT_W      360
 
@@ -307,7 +307,10 @@ static void draw_toolbar(void)
     ui_cvar_checkbox_same("faces",       "editor_face_mode");
 
     // -- Snap (translate) ------------------------------------------------
-    ui_cvar_checkbox_same("snap", "editor_grid_snap");
+    // Plain (non-_same) checkbox here drops onto a new row so the render
+    // overlays above don't share a line with the snap/rotate/camera/view
+    // widgets — the combined line would extend past the toolbar's right edge.
+    ui_cvar_checkbox("snap", "editor_grid_snap");
     ui_cvar_checkbox_same("abs",  "editor_grid_absolute");
     ui_cvar_checkbox_same("surface", "editor_snap_surface");
     IG_SameLine(0, -1);
