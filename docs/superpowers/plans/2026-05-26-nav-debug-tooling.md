@@ -897,8 +897,8 @@ Manual exercise of the new workflow against a known case. No code change — thi
 - [ ] **Step 1: Delete any cached .nav file so we get a fresh bake with phase tags**
 
 ```bash
-rm -f id1/maps/*.nav id1/maps/*/*.nav 2>/dev/null
-ls id1/maps/*.nav 2>/dev/null || echo "no cached nav files (good)"
+rm -f id1/cache/navmesh/*.nav 2>/dev/null
+ls id1/cache/navmesh/*.nav 2>/dev/null || echo "no cached nav files (good)"
 ```
 
 - [ ] **Step 2: Start the game with MCP**
