@@ -1310,7 +1310,12 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 	// 4x so big splashes read as "denser ring" rather than "fountain to
 	// the ceiling". Particle count keeps scaling with s.
 	float vs = s > 4.0f ? 4.0f : s;
-	count     = (int)(28 * s);
+	// Water has no foam-highlight accent (see comment above), so it relies
+	// purely on droplet density to read against the muted surface texture
+	// — bump the count to compensate. Slime/lava already pop via their
+	// bright highlights, so they stay at the baseline.
+	float count_mult = (kind == 0) ? 1.75f : 1.0f;
+	count     = (int)(28 * s * count_mult);
 	// Speed magnitude range — directions are picked per-particle from an
 	// upper hemisphere below.
 	vz_lo     = 180.0f * vs;
