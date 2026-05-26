@@ -19,7 +19,8 @@
 extern engine_api_t   *eng;
 extern game_globals_t *g;
 
-#define ITEM_VEL_CAP 400.0f
+#define ITEM_VEL_CAP 800.0f
+#define ITEM_IMPULSE_PER_DAMAGE 20.0f
 
 // Slab-method AABB-vs-segment. Mirrors weapons.c:segment_hits_aabb -- kept
 // local so this module doesn't depend on weapons.c internals.
@@ -63,8 +64,8 @@ static void clamp_vel(vec3_t v) {
 
 // dir must be normalized.
 static void apply_impulse(edict_t *e, vec3_t dir, float damage) {
-    e->v.velocity[0] += dir[0] * damage * 8.0f;
-    e->v.velocity[1] += dir[1] * damage * 8.0f;
+    e->v.velocity[0] += dir[0] * damage * ITEM_IMPULSE_PER_DAMAGE;
+    e->v.velocity[1] += dir[1] * damage * ITEM_IMPULSE_PER_DAMAGE;
     // SV_Physics_Toss early-returns on FL_ONGROUND and zeroes velocity on
     // any ground contact (sv_phys.c:1463 / :1603). Without a small upward
     // delta the box re-grounds the very next tick and the slide dies. Floor
