@@ -10,6 +10,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -18,6 +19,11 @@ extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float
 extern void T_RadiusDamage(edict_t *bomb, edict_t *attacker, float rad, edict_t *ignore);
 extern void SpawnBlood(vec3_t org, vec3_t vel, float damage);
 extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
+extern void gib_apply_hit_impulse(edict_t *gib, vec3_t dir, float damage);
+
+static int p6_is_gib(edict_t *e) {
+    return e && e->v.classname && strcmp(e->v.classname, "gib") == 0;
+}
 extern void player_run(edict_t *self);
 extern void BecomeExplosion(void);
 extern void SUB_Remove(edict_t *self);
@@ -72,6 +78,12 @@ static void p6_fire_bullet(float damage, vec3_t aim, float spread_x, float sprea
     if (g->trace_ent && g->trace_ent->v.takedamage) {
         vec3_t blood_vel = {0, 0, 0};
         SpawnBlood(hit_org, blood_vel, damage);
+        // Hitscan impulse on gibs — T_Damage's gib branch suppresses its own
+        // impulse for client inflictors, so apply along the bullet's path here.
+        if (p6_is_gib(g->trace_ent)) {
+            vec3_t ndir; eng->VectorNormalize(dir, ndir);
+            gib_apply_hit_impulse(g->trace_ent, ndir, damage);
+        }
         T_Damage(g->trace_ent, self, self, damage);
     } else {
         // Hit world geometry — bullet impact tempentity.
@@ -123,6 +135,10 @@ static int p6_doom_melee_hit(int damage, float angle_jitter_radians) {
     if (g->trace_ent && g->trace_ent->v.takedamage) {
         vec3_t blood_vel = {0, 0, 0};
         SpawnBlood(g->trace_endpos, blood_vel, (float)damage);
+        if (p6_is_gib(g->trace_ent)) {
+            vec3_t ndir; eng->VectorNormalize(aim, ndir);
+            gib_apply_hit_impulse(g->trace_ent, ndir, (float)damage);
+        }
         T_Damage(g->trace_ent, self, self, (float)damage);
         return 1;
     }
@@ -207,6 +223,8 @@ static int p6_wolf_hitscan(float shoot_cone_radians) {
             if (damage <= 0) return 0;
             vec3_t blood_vel = {0, 0, 0};
             SpawnBlood(g->trace_endpos, blood_vel, (float)damage);
+            if (p6_is_gib(g->trace_ent))
+                gib_apply_hit_impulse(g->trace_ent, g->v_forward, (float)damage);
             T_Damage(g->trace_ent, self, self, (float)damage);
             return 1;
         }

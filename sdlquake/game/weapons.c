@@ -52,7 +52,7 @@ extern void Items_RadiusPush(vec3_t origin, float radius, float base_impulse, ed
 // (which infers direction from inflictor midpoint, fine for radius damage).
 // Does *not* shorten the gib's lifetime: the persistent-gib system already
 // handles long-term cleanup (visibility-aware despawn + LRU cap).
-static void gib_apply_hit_impulse(edict_t *gib, vec3_t dir, float damage) {
+void gib_apply_hit_impulse(edict_t *gib, vec3_t dir, float damage) {
     gib->v.velocity[0] += dir[0] * damage * 40.0f;
     gib->v.velocity[1] += dir[1] * damage * 40.0f;
     gib->v.velocity[2] += dir[2] * damage * 40.0f + 30.0f;
@@ -625,15 +625,23 @@ static void TraceAttack(float damage, vec3_t dir) {
     org[1] = g->trace_endpos[1] - dir[1]*4;
     org[2] = g->trace_endpos[2] - dir[2]*4;
 
-    if (is_flesh(g->trace_ent)) {
+    // Gib check first: ThrowGib spawns fresh edicts with flags=0, so they
+    // fail is_flesh (no FL_MONSTER/FL_CLIENT) even though they bleed and
+    // need impulse. ThrowHead reuses the monster edict and keeps FL_MONSTER,
+    // which is why head gibs incidentally worked through the is_flesh branch
+    // before this split.
+    if (is_gib(g->trace_ent)) {
         vec3_t sv = {vel[0]*0.2f, vel[1]*0.2f, vel[2]*0.2f};
         SpawnBlood(org, sv, damage);
         AddMultiDamage(g->trace_ent, damage);
-        // Hitscan impulse on gibs: push along the bullet's path. T_Damage's
-        // gib branch suppresses its own (inflictor-midpoint) impulse when the
-        // inflictor is a client, so this is the sole hitscan contribution.
-        if (is_gib(g->trace_ent))
-            gib_apply_hit_impulse(g->trace_ent, dir, damage);
+        // T_Damage's gib branch suppresses its own (inflictor-midpoint)
+        // impulse when the inflictor is a client, so this is the sole
+        // hitscan contribution.
+        gib_apply_hit_impulse(g->trace_ent, dir, damage);
+    } else if (is_flesh(g->trace_ent)) {
+        vec3_t sv = {vel[0]*0.2f, vel[1]*0.2f, vel[2]*0.2f};
+        SpawnBlood(org, sv, damage);
+        AddMultiDamage(g->trace_ent, damage);
     } else {
         eng->MSG_WriteByte(MSG_BROADCAST, SVC_TEMPENTITY);
         eng->MSG_WriteByte(MSG_BROADCAST, TE_GUNSHOT);
