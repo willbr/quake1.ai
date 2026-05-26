@@ -27,9 +27,14 @@ typedef enum {
     BS_COMBAT,
     BS_GOTO_ITEM,
     BS_GOTO_KEY,
+    BS_GOTO_BUTTON,
     BS_GOTO_EXIT,
     BS_DEAD,
 } bot_state_t;
+
+// STATE_BOTTOM in the game DLL — a func_button at this state is ready to
+// be pressed. Anything else (UP/TOP/DOWN) means it's mid-cycle.
+#define BOT_BUTTON_STATE_READY 1
 
 #define BOT_MAX_WAYPOINTS 32
 
@@ -134,6 +139,17 @@ static int Bot_IsKey(edict_t *e)
     return strncmp(e->v.classname, "item_key", 8) == 0;
 }
 
+// Touchable func_button that hasn't been pressed yet. Shoot-only buttons
+// (health != 0) are skipped — we don't have button-shooting logic.
+static int Bot_IsButton(edict_t *e)
+{
+    if (!e || e->free || !e->v.classname) return 0;
+    if (strcmp(e->v.classname, "func_button") != 0) return 0;
+    if ((int)e->v.health != 0) return 0;
+    if ((int)e->v.state != BOT_BUTTON_STATE_READY) return 0;
+    return 1;
+}
+
 static float Bot_Dist2(const vec3_t a, const vec3_t bv)
 {
     float dx = a[0]-bv[0], dy = a[1]-bv[1], dz = a[2]-bv[2];
@@ -212,9 +228,11 @@ static int Bot_CurrentWaypointKind(void)
 static void Bot_DecideGoal(void)
 {
     int i;
-    edict_t *best_enemy = NULL, *best_key = NULL, *best_item = NULL, *best_exit = NULL;
+    edict_t *best_enemy = NULL, *best_key = NULL, *best_item = NULL;
+    edict_t *best_exit = NULL, *best_button = NULL;
     float best_enemy_d2 = 1e30f, best_key_d2 = 1e30f;
     float best_item_d2  = 1e30f, best_exit_d2 = 1e30f;
+    float best_button_d2 = 1e30f;
     float aware2  = bot_aware_radius.value  * bot_aware_radius.value;
     float pickup2 = bot_pickup_radius.value * bot_pickup_radius.value;
     vec3_t ppos;
@@ -251,6 +269,14 @@ static void Bot_DecideGoal(void)
                 best_exit = e;
                 best_exit_d2 = d2;
             }
+        } else if (Bot_IsButton(e)) {
+            vec3_t c;
+            Bot_EntityCenter(e, c);
+            d2 = Bot_Dist2(ppos, c);
+            if (d2 < aware2 && d2 < best_button_d2) {
+                best_button = e;
+                best_button_d2 = d2;
+            }
         }
     }
 
@@ -260,6 +286,13 @@ static void Bot_DecideGoal(void)
         b.state = BS_COMBAT;
         b.target_edict = NUM_FOR_EDICT(best_enemy);
         Bot_VecCopy(best_enemy->v.origin, b.target_pos);
+        return;
+    }
+    if (best_button) {
+        b.state = BS_GOTO_BUTTON;
+        b.target_edict = NUM_FOR_EDICT(best_button);
+        Bot_EntityCenter(best_button, b.target_pos);
+        Bot_RequestPath(b.target_pos);
         return;
     }
     if (best_key) {
@@ -306,6 +339,11 @@ static void Bot_AdvanceWaypoint(void)
     const float *wp = Bot_CurrentWaypoint();
     float dx, dy, dz;
     if (!wp) return;
+    // Never auto-advance the final waypoint — keep walking into it so
+    // the bot's bbox physically reaches the goal entity (button → touch
+    // fires, key/item → pickup fires). The 48-unit XY radius is wider
+    // than the player bbox, so without this the bot stops short.
+    if (b.waypoint_idx >= b.waypoint_count - 1) return;
     dx = wp[0] - sv_player->v.origin[0];
     dy = wp[1] - sv_player->v.origin[1];
     dz = wp[2] - sv_player->v.origin[2];
@@ -401,11 +439,12 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         int still_valid = 0;
         if (target && !target->free) {
             switch (b.state) {
-                case BS_COMBAT:    still_valid = Bot_IsEnemy(target); break;
-                case BS_GOTO_KEY:  still_valid = Bot_IsKey(target);   break;
-                case BS_GOTO_ITEM: still_valid = Bot_IsItem(target);  break;
-                case BS_GOTO_EXIT: still_valid = Bot_IsExit(target);  break;
-                default:           still_valid = 1;
+                case BS_COMBAT:      still_valid = Bot_IsEnemy(target);  break;
+                case BS_GOTO_KEY:    still_valid = Bot_IsKey(target);    break;
+                case BS_GOTO_ITEM:   still_valid = Bot_IsItem(target);   break;
+                case BS_GOTO_EXIT:   still_valid = Bot_IsExit(target);   break;
+                case BS_GOTO_BUTTON: still_valid = Bot_IsButton(target); break;
+                default:             still_valid = 1;
             }
         }
         if (!still_valid) {
@@ -494,12 +533,13 @@ static void Bot_DriveFrame(usercmd_t *cmd)
     {
         const char *stname = "?";
         switch (b.state) {
-            case BS_COMBAT:    stname = "COMBAT";    break;
-            case BS_GOTO_KEY:  stname = "GOTO_KEY";  break;
-            case BS_GOTO_ITEM: stname = "GOTO_ITEM"; break;
-            case BS_GOTO_EXIT: stname = "GOTO_EXIT"; break;
-            case BS_IDLE:      stname = "IDLE";      break;
-            case BS_DEAD:      stname = "DEAD";      break;
+            case BS_COMBAT:      stname = "COMBAT";      break;
+            case BS_GOTO_KEY:    stname = "GOTO_KEY";    break;
+            case BS_GOTO_ITEM:   stname = "GOTO_ITEM";   break;
+            case BS_GOTO_EXIT:   stname = "GOTO_EXIT";   break;
+            case BS_GOTO_BUTTON: stname = "GOTO_BUTTON"; break;
+            case BS_IDLE:        stname = "IDLE";        break;
+            case BS_DEAD:        stname = "DEAD";        break;
         }
         Con_Printf("[bot] %s tgt=%d wp=%d/%d hp=%d\n",
                    stname, b.target_edict, b.waypoint_idx, b.waypoint_count,
@@ -596,12 +636,13 @@ static void Bot_Status_f(void)
     const char *stname = "?";
     if (!Bot_Active()) { Con_Printf("[bot] inactive\n"); return; }
     switch (b.state) {
-        case BS_COMBAT:    stname = "COMBAT";    break;
-        case BS_GOTO_KEY:  stname = "GOTO_KEY";  break;
-        case BS_GOTO_ITEM: stname = "GOTO_ITEM"; break;
-        case BS_GOTO_EXIT: stname = "GOTO_EXIT"; break;
-        case BS_IDLE:      stname = "IDLE";      break;
-        case BS_DEAD:      stname = "DEAD";      break;
+        case BS_COMBAT:      stname = "COMBAT";      break;
+        case BS_GOTO_KEY:    stname = "GOTO_KEY";    break;
+        case BS_GOTO_ITEM:   stname = "GOTO_ITEM";   break;
+        case BS_GOTO_EXIT:   stname = "GOTO_EXIT";   break;
+        case BS_GOTO_BUTTON: stname = "GOTO_BUTTON"; break;
+        case BS_IDLE:        stname = "IDLE";        break;
+        case BS_DEAD:        stname = "DEAD";        break;
     }
     Con_Printf("[bot] state=%s target_edict=%d waypoints=%d/%d\n",
                stname, b.target_edict, b.waypoint_idx, b.waypoint_count);
