@@ -36,8 +36,8 @@ extern void Con_Printf(char *fmt, ...);
 /* qbsp_lib.c owns the longjmp + membuf machinery; reuse them directly
  * rather than duplicating. The shared cmdlib.c Error() routes all three
  * compilers' aborts here. */
-extern jmp_buf *qbsp_err_jmp;
-extern char     qbsp_err_msg[1024];
+extern __thread jmp_buf *qbsp_err_jmp;
+extern __thread char     qbsp_err_msg[1024];
 
 /* Portbuf hooks: qbsp_compile_to_memory leaves qbsp_portbuf_active = 1
  * with the .prt text in the buffer; LoadPortals consumes it via the

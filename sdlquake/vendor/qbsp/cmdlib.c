@@ -39,8 +39,8 @@ original printf+exit behaviour.
 */
 #include <setjmp.h>
 
-extern jmp_buf *qbsp_err_jmp;       /* defined in qbsp_lib.c */
-extern char     qbsp_err_msg[1024]; /* defined in qbsp_lib.c */
+extern __thread jmp_buf *qbsp_err_jmp;       /* defined in qbsp_lib.c (TLS) */
+extern __thread char     qbsp_err_msg[1024]; /* defined in qbsp_lib.c (TLS) */
 
 void Error (char *error, ...)
 {

@@ -39,8 +39,8 @@ extern void Con_Printf(char *fmt, ...);
 /* qbsp_lib.c owns the longjmp + membuf machinery; reuse them directly
  * rather than duplicating. The shared cmdlib.c Error() routes both
  * compilers' aborts here. */
-extern jmp_buf *qbsp_err_jmp;
-extern char     qbsp_err_msg[1024];
+extern __thread jmp_buf *qbsp_err_jmp;
+extern __thread char     qbsp_err_msg[1024];
 
 extern int   qbsp_membuf_active;
 extern byte *qbsp_membuf;
@@ -256,15 +256,18 @@ void light_set_entdata(const char *ents, int ents_len)
     entdatasize = n + 1;
 }
 
-/* Worker-thread entry: just run the bake against whatever's currently
- * in qbsp's globals + light_set_entdata'd dentdata. No setjmp here --
- * the worker thread does its own try/catch via SDL_Thread + atomics.
- * Any Error() longjmp would land in the main thread's setjmp slot,
- * which would be a disaster. So we set qbsp_err_jmp to NULL for the
- * duration; an Error() will exit the process, which we treat as
- * "should not happen during routine relights" and accept the cost. */
+/* Worker-thread entry: run the bake against whatever's currently in
+ * qbsp's globals + light_set_entdata'd dentdata.
+ *
+ * qbsp_err_jmp / qbsp_err_msg are __thread, so the worker installs its
+ * OWN setjmp slot here. An Error() inside LoadEntities/MakeTnodes/
+ * LightWorld longjmps back to this frame on the worker thread, never
+ * crossing into the main thread's stack or its own qbsp compile's
+ * setjmp slot. Returns non-zero on Error(); the caller gets a
+ * Con_Printf'd diagnostic instead of the engine exit(1)ing. */
 int light_relight_in_place(void)
 {
+    jmp_buf err_buf;
     if (numfaces <= 0) return 1;
 
     light_reset_state();
@@ -277,11 +280,18 @@ int light_relight_in_place(void)
     memset(light_rgb_dlightdata, 0, MAX_MAP_LIGHTING * 3);
     lightdatasize = 0;
 
-    qbsp_err_jmp = NULL;   /* Error() will abort; see comment above */
+    qbsp_err_jmp    = &err_buf;
+    qbsp_err_msg[0] = '\0';
+    if (setjmp(err_buf) != 0) {
+        Con_Printf("light_relight_in_place: %s\n", qbsp_err_msg);
+        qbsp_err_jmp = NULL;
+        return 1;
+    }
 
     LoadEntities();
     MakeTnodes(&dmodels[0]);
     LightWorld();
+    qbsp_err_jmp = NULL;
     /* WriteEntitiesToString rebuilds dentdata from the in-memory
      * entities[] (which LoadEntities populated). Skip it: we don't
      * re-serialise the BSP and the caller's edit_scene is the source

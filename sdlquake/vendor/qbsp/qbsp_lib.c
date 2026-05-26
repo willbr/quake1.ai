@@ -33,9 +33,17 @@
 extern void Con_Printf(char *fmt, ...);
 
 /* Set by qbsp_compile_to_memory's setjmp; cleared on exit. Error() in
- * cmdlib.c reads these to bail without exit(). */
-jmp_buf *qbsp_err_jmp = NULL;
-char     qbsp_err_msg[1024];
+ * cmdlib.c reads these to bail without exit().
+ *
+ * Thread-local: the light/vis workers run on SDL_Thread spawns while the
+ * main thread may itself be inside qbsp_compile_to_memory with its own
+ * setjmp. Without TLS the workers and main thread would race on a shared
+ * pointer, and a worker's longjmp would jump into another thread's
+ * stack frame -- UB. __thread (clang/GCC) gives each thread its own copy
+ * initialised to zero; the Zig build uses clang on all targets so this
+ * is portable. */
+__thread jmp_buf *qbsp_err_jmp = NULL;
+__thread char     qbsp_err_msg[1024];
 
 /* -------------------------------------------------------------------------
  * Tracked allocator
