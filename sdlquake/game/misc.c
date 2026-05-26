@@ -4,7 +4,6 @@
 #include "game_types.h"
 #include "game_defs.h"
 #include <string.h>
-#include <math.h>
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -149,46 +148,20 @@ static void fire_touch(edict_t *self, edict_t *other) {
     int bouncing_off_world =
         (other == g->world && (int)self->v.movetype == MOVETYPE_BOUNCE);
 
-    // If the fireball hit a wall (no FL_MONSTER|FL_CLIENT), emit sparks.
+    // If the fireball hit a wall (no FL_MONSTER|FL_CLIENT), emit a burst of
+    // the same orange splash particles a hitscan would throw off lava — the
+    // existing TE_WATERSPLASH/kind=2 path with strength 16 (1×). The surface
+    // recovery the spark version did is unused: this splash always sprays
+    // upward from the impact regardless of surface orientation.
     int flesh = ((int)other->v.flags & (FL_MONSTER | FL_CLIENT)) != 0;
     if (!flesh) {
-        // Surface normal recovery via short traceline along velocity.
-        float vx = self->v.velocity[0];
-        float vy = self->v.velocity[1];
-        float vz = self->v.velocity[2];
-        float vlen2 = vx*vx + vy*vy + vz*vz;
-        float nx, ny, nz;
-        if (vlen2 > 1.0f) {
-            float inv = 1.0f / (float)sqrt(vlen2);
-            float dx = vx * inv * 4.0f;
-            float dy = vy * inv * 4.0f;
-            float dz = vz * inv * 4.0f;
-            vec3_t back = {self->v.origin[0] - dx,
-                           self->v.origin[1] - dy,
-                           self->v.origin[2] - dz};
-            vec3_t fwd  = {self->v.origin[0] + dx,
-                           self->v.origin[1] + dy,
-                           self->v.origin[2] + dz};
-            eng->SV_Traceline(back, fwd, 0, self);
-            if (g->trace_fraction < 1.0f) {
-                nx = g->trace_plane_normal[0];
-                ny = g->trace_plane_normal[1];
-                nz = g->trace_plane_normal[2];
-            } else {
-                nx = -vx * inv;
-                ny = -vy * inv;
-                nz = -vz * inv;
-            }
-        } else {
-            nx = 0; ny = 0; nz = 1;
-        }
-        // Fire-ramp particle puff biased along the surface normal. Colour 75
-        // sits in the orange/yellow chunk of Quake's fire ramp (72..79); the
-        // ±150 velocity jitter inside R_RunParticleEffect fans the embers
-        // outward. TE_SPARKBURST would have been wrong here — it's the
-        // cyan-white lightning-gun ping.
-        vec3_t spray = { nx * 60.0f, ny * 60.0f, nz * 60.0f + 30.0f };
-        eng->SV_Particle(self->v.origin, spray, 75, 24);
+        eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+        eng->MSG_WriteByte (MSG_BROADCAST, TE_WATERSPLASH);
+        eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
+        eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+        eng->MSG_WriteByte (MSG_BROADCAST, 2);   // kind=2 lava
+        eng->MSG_WriteByte (MSG_BROADCAST, 16);  // strength_q4 (1×)
     }
     // Gusted fireballs ricochet off world geometry instead of being consumed
     // on first wall contact — sparks already emitted above so bounces visibly
