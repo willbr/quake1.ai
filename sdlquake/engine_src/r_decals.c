@@ -26,6 +26,7 @@ cvar_t r_decals_blooddrip_length   = { "r_decals_blooddrip_length",   "48", true
 cvar_t r_decals_blooddrip_growtime = { "r_decals_blooddrip_growtime", "1.5", true };
 cvar_t r_decals_debug              = { "r_decals_debug",              "0", false };
 cvar_t r_decals_blood_spatter      = { "r_decals_blood_spatter",      "1", true };
+cvar_t r_decals_blood_spatter_size = { "r_decals_blood_spatter_size", "3", true };
 
 /* Forward decl: defined in the kernel section below. */
 static void DecalKernels_Init (void);
@@ -45,6 +46,7 @@ void R_DecalsInit (void)
 	Cvar_RegisterVariable (&r_decals_blooddrip_growtime);
 	Cvar_RegisterVariable (&r_decals_debug);
 	Cvar_RegisterVariable (&r_decals_blood_spatter);
+	Cvar_RegisterVariable (&r_decals_blood_spatter_size);
 	Cmd_AddCommand ("r_decals_test", R_DecalsTest_f);
 	Cmd_AddCommand ("r_decals_test_grid", R_DecalsTestGrid_f);
 	Cmd_AddCommand ("r_decals_test_pool", R_DecalsTestPool_f);
@@ -927,18 +929,24 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 	}
 }
 
-/* Paint a single-cell blood dot at `pos` on the surface near `normal`.
-   Called from r_part.c on PARTFL_STICK_ON_HIT and from the wall-slide drag
-   trail. Bails silently if decals are disabled, the spatter cvar is off,
-   the server is inactive (demo playback), or no nearby world surface is found.
+/* Paint a small blood dot at `pos` on the surface near `normal`.
+   Called from r_part.c on PARTFL_STICK_ON_HIT, from R_SlideRelease's
+   floor-snap, and from the wall-slide drag trail. Bails silently if
+   decals are disabled, the spatter cvar is off, the server is inactive
+   (demo playback), or no nearby world surface is found.
+
+   Footprint is an NxN square in stain cells (N = r_decals_blood_spatter_size,
+   default 3). With STAIN_CELL_SIZE 1 game unit this gives a ~3u blot per
+   droplet — large enough to read on-screen, small enough that the slide
+   trail still looks like a streak rather than a band.
 
    Saturating: each channel takes max-magnitude delta rather than accumulating.
    N stuck droplets sliding through the same column would otherwise add their
    negative deltas (e.g. 4 × -125 on green/blue → clamp to 0 → pure black).
    With saturation, repeats can't darken further than one spatter's worth,
    so the trail stays dark-red regardless of overlap. The trade-off vs the
-   regular additive painter: no kernel falloff (1×1 only), no BSP coplanar
-   walk. Both are negligible at the 1u dot size. */
+   regular additive painter: no kernel falloff, no BSP coplanar walk.
+   Both are negligible at the small footprint size. */
 void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal)
 {
 	const decal_kernel_t *dk;
@@ -947,6 +955,7 @@ void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal)
 	mtexinfo_t           *tex;
 	float                 u, v;
 	int                   lu, lv, idx;
+	int                   size, half, dx, dy, cu, cv;
 	extern server_t       sv;
 
 	if (!r_decals.value)               return;
@@ -966,20 +975,33 @@ void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal)
 	lv  = ((int)floor(v) - surf->texturemins[1]) >> STAIN_CELL_SHIFT;
 	if (lu < 0 || lu >= st->smax || lv < 0 || lv >= st->tmax) return;
 
+	size = (int)r_decals_blood_spatter_size.value;
+	if (size < 1) size = 1;
+	if (size > 9) size = 9;       /* cap so a stray cvar can't blanket a wall */
+	half = size / 2;              /* centered footprint: size==3 → [-1..+1] */
+
 	dk  = &decal_kernels[DECAL_BLOOD_SPATTER];
-	idx = (lv * st->smax + lu) * 3;
 	/* Saturating per channel: a brighten-delta (>0) takes the max value,
 	   a darken-delta (<0) takes the min. Spatter pushes red UP (+50) and
-	   G/B DOWN (-100 each); each channel saturates at one spatter's worth
+	   G/B DOWN (-100 each); each cell saturates at one spatter's worth
 	   so repeated paints into the same cell don't compound. Existing
 	   stronger stains (splat, scorch) win in the direction they already lead. */
 	#define SAT_BRIGHTEN(channel, delta)  \
 		do { if (st->rgb[idx + (channel)] < (delta)) st->rgb[idx + (channel)] = (short)(delta); } while (0)
 	#define SAT_DARKEN(channel, delta)    \
 		do { if (st->rgb[idx + (channel)] > (delta)) st->rgb[idx + (channel)] = (short)(delta); } while (0)
-	if (dk->dr >= 0) SAT_BRIGHTEN (0, dk->dr); else SAT_DARKEN (0, dk->dr);
-	if (dk->dg >= 0) SAT_BRIGHTEN (1, dk->dg); else SAT_DARKEN (1, dk->dg);
-	if (dk->db >= 0) SAT_BRIGHTEN (2, dk->db); else SAT_DARKEN (2, dk->db);
+	for (dy = -half; dy <= half; dy++) {
+		cv = lv + dy;
+		if (cv < 0 || cv >= st->tmax) continue;
+		for (dx = -half; dx <= half; dx++) {
+			cu = lu + dx;
+			if (cu < 0 || cu >= st->smax) continue;
+			idx = (cv * st->smax + cu) * 3;
+			if (dk->dr >= 0) SAT_BRIGHTEN (0, dk->dr); else SAT_DARKEN (0, dk->dr);
+			if (dk->dg >= 0) SAT_BRIGHTEN (1, dk->dg); else SAT_DARKEN (1, dk->dg);
+			if (dk->db >= 0) SAT_BRIGHTEN (2, dk->db); else SAT_DARKEN (2, dk->db);
+		}
+	}
 	#undef SAT_BRIGHTEN
 	#undef SAT_DARKEN
 	st->generation++;
