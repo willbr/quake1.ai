@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    17
+#define NAV_VERSION    18
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -331,15 +331,25 @@ static void entity_center(edict_t *e, vec3_t out) {
     out[2] = e->v.origin[2] + (e->v.mins[2] + e->v.maxs[2]) * 0.5f;
 }
 
-// Player-bbox sweep between two navmesh-node positions. Returns 1 if the
-// path is clear, 0 if a wall / brush / closed door is in the way. Used by
+// Line-of-sight check between two navmesh-node positions, lifted to
+// roughly player-eye height so the trace doesn't snag on floor brushes
+// or on the lift surface plat_top sits on. Returns 1 if the path is
+// clear, 0 if a wall / brush / closed door is in the way. Used by
 // Phase 4.5 to reject distance-only links that would otherwise tunnel
 // through level geometry (the failure mode that draws a navmesh edge
 // straight across a wall in the debug overlay).
+//
+// We use traceline (zero mins/maxs) instead of a player-bbox sweep:
+// plat_top/bottom anchors sit ~4 units above the lift's brush top,
+// and a swept player bbox starts inside that brush → startsolid →
+// every link fails. The horizontal axis is the only one we care about
+// for "is there a wall?", and a point trace at eye height catches
+// that without the bbox-vs-floor problem.
 static int trace_link_clear(const vec3_t a, const vec3_t b) {
-    vec3_t mins = { -16.0f, -16.0f, -24.0f };
-    vec3_t maxs = {  16.0f,  16.0f,  32.0f };
-    eng->SV_TraceMove((float *)a, mins, maxs, (float *)b, 1, NULL);
+    vec3_t a_eye = { a[0], a[1], a[2] + 16.0f };
+    vec3_t b_eye = { b[0], b[1], b[2] + 16.0f };
+    vec3_t zero  = { 0.0f, 0.0f, 0.0f };
+    eng->SV_TraceMove(a_eye, zero, zero, b_eye, 1, NULL);
     return g->trace_fraction >= 0.999f;
 }
 
