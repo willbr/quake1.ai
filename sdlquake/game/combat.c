@@ -274,6 +274,13 @@ static void Killed_impl(edict_t *targ, edict_t *attacker)
     g->self->v.deadflag   = DEAD_DEAD;
     g->self->v.touch      = NULL;
 
+    // Release the sim-AI brain slot. Without this the brain stays in
+    // s_brains[] forever (Sim_AI_Frame would reset its state to IDLE
+    // each tick, but the inspector reads between ticks and the editor
+    // freezes ticks entirely, so a stale SEARCHING/COMBAT state surfaces
+    // on a corpse or — via ThrowHead reusing this edict — on a gib).
+    Sim_AI_UnregisterByEdictNum(eng->ED_GetNum(g->self));
+
     monster_death_use();
 
     // First-kill gib burst: if the killing damage drove health below the
@@ -623,6 +630,12 @@ void ThrowGib(const char *gibname, float dm) {
     edict_t *self = g->self;
     const corpse_gib_info_t *info = gib_parent_info(self);
     edict_t *n = eng->ED_Alloc();
+    // ED_Alloc reuses slots freed > 0.5s ago. If the reused slot was a
+    // monster whose brain was never cleared, the gib would inherit that
+    // brain. Killed_impl clears the original death-slot, but a gib's
+    // think can free the gib and a future ED_Alloc could land in a
+    // different stale slot — clear defensively.
+    Sim_AI_UnregisterByEdictNum(eng->ED_GetNum(n));
     n->v.origin[0] = self->v.origin[0];
     n->v.origin[1] = self->v.origin[1];
     n->v.origin[2] = self->v.origin[2];
@@ -661,6 +674,11 @@ void ThrowGib(const char *gibname, float dm) {
 void ThrowHead(const char *gibname, float dm) {
     edict_t *self = g->self;
     const corpse_gib_info_t *info = corpse_gib_lookup(self->v.classname);
+    // Belt-and-suspenders: Killed_impl already cleared the brain on this
+    // edict, but ThrowHead can also be called from other death paths
+    // (player_die, etc.) that skip Killed_impl. The edict is being
+    // repurposed from monster → head-gib so the brain has to go.
+    Sim_AI_UnregisterByEdictNum(eng->ED_GetNum(self));
     g_throw_parent_classname = self->v.classname;  // for subsequent ThrowGib calls
     self->v.classname   = "gib";  // override the corpse classname; this is now a gib
     eng->SV_SetModel(self, gibname);
