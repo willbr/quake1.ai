@@ -1308,7 +1308,8 @@ static void tool_nav_bake_phases(const char *id_json)
           "{\"id\":3,\"name\":\"TELE_NEAR\",\"source\":\"Phase 4\"},"
           "{\"id\":4,\"name\":\"LIFT_RIDE\",\"source\":\"Phase 4.5\"},"
           "{\"id\":5,\"name\":\"LIFT_PLAT_LINK\",\"source\":\"Phase 4.5\"},"
-          "{\"id\":6,\"name\":\"LIFT_BUTTON_SHOOT\",\"source\":\"Phase 4.5\"}"
+          "{\"id\":6,\"name\":\"LIFT_BUTTON_SHOOT\",\"source\":\"Phase 4.5\"},"
+          "{\"id\":7,\"name\":\"BRIDGE\",\"source\":\"Phase 4.5b\"}"
         "]}";
 
     char escaped[1024];

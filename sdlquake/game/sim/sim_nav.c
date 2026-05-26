@@ -102,6 +102,7 @@ enum {
     NAV_NODE_TELEPORT_SRC = 5,   // trigger_teleport
     NAV_NODE_TELEPORT_DST = 6,   // resolved teleport destination
     NAV_NODE_DOOR_BUTTON  = 7,   // func_door / func_button
+    NAV_NODE_BRIDGE_END   = 8,   // standing pos on extended bridge-door
 };
 
 typedef struct {
@@ -137,7 +138,8 @@ enum {
     NAV_PHASE_LIFT_RIDE         = 4,  // Phase 4.5: PLAT_RIDE top<->bot
     NAV_PHASE_LIFT_PLAT_LINK    = 5,  // Phase 4.5: PLAT_LINK walk-on/off
     NAV_PHASE_LIFT_BUTTON_SHOOT = 6,  // Phase 4.5: BUTTON_LINK + SHOOT_LINK
-    NAV_PHASE_COUNT             = 7,
+    NAV_PHASE_BRIDGE            = 7,  // Phase 4.5b: bridge ride + disembark + button
+    NAV_PHASE_COUNT             = 8,
 };
 
 typedef struct {
@@ -384,6 +386,8 @@ typedef enum {
     ANCHOR_TELEPORT_DST = 2,   // info_teleport_destination (`targetname`)
     ANCHOR_PLAT_TOP     = 3,   // func_plat standing pos at top of travel
     ANCHOR_PLAT_BOTTOM  = 4,   // func_plat standing pos at bottom of travel
+    ANCHOR_BRIDGE_A     = 5,   // horizontal bridge-door end along travel axis (low)
+    ANCHOR_BRIDGE_B     = 6,   // horizontal bridge-door end along travel axis (high)
 } anchor_kind_t;
 
 typedef struct {
@@ -645,6 +649,47 @@ static int bake_floodfill(sim_navmesh_t *m) {
                     eng->Con_Print(dbg);
                     goto next_e;
                 }
+                // Horizontal bridge-door (e.g. e1m1 silver bridge t2):
+                // flat, wide, targetname-driven brush that translates
+                // horizontally into open space when triggered. The brush
+                // itself is the walkable surface at its pos2 (triggered)
+                // position. wait=-1 guarantees it stays there. Bake two
+                // anchors at the extended bridge's near + far ends along
+                // the dominant travel axis.
+                int horizontal = (adz < 24.f) && ((adx > 24.f) || (ady > 24.f));
+                int flat       = (sz < 32.f);
+                int targeted   = (e->v.targetname && e->v.targetname[0]);
+                if (horizontal && flat && standable && targeted) {
+                    float top_z = e->v.pos2[2] + e->v.maxs[2] + 4.f;
+                    float cx    = e->v.pos2[0] + (e->v.mins[0] + e->v.maxs[0]) * 0.5f;
+                    float cy    = e->v.pos2[1] + (e->v.mins[1] + e->v.maxs[1]) * 0.5f;
+                    vec3_t a_pos, b_pos;
+                    if (adx >= ady) {
+                        // Travel along X: A at min-x end, B at max-x end.
+                        a_pos[0] = e->v.pos2[0] + e->v.mins[0] + 16.f;
+                        a_pos[1] = cy;
+                        b_pos[0] = e->v.pos2[0] + e->v.maxs[0] - 16.f;
+                        b_pos[1] = cy;
+                    } else {
+                        a_pos[0] = cx;
+                        a_pos[1] = e->v.pos2[1] + e->v.mins[1] + 16.f;
+                        b_pos[0] = cx;
+                        b_pos[1] = e->v.pos2[1] + e->v.maxs[1] - 16.f;
+                    }
+                    a_pos[2] = top_z;
+                    b_pos[2] = top_z;
+                    anchors_push(&anchors, &anchor_cap, &anchor_n,
+                                 a_pos, ANCHOR_BRIDGE_A, NAV_NODE_BRIDGE_END, e);
+                    anchors_push(&anchors, &anchor_cap, &anchor_n,
+                                 b_pos, ANCHOR_BRIDGE_B, NAV_NODE_BRIDGE_END, e);
+                    char dbg[200];
+                    snprintf(dbg, sizeof(dbg),
+                        "sim_nav: bridge-door '%s' travel=(%.0f,%.0f,%.0f) "
+                        "size=%.0fx%.0fx%.0f extended_top_z=%.0f\n",
+                        e->v.targetname, dx, dy, dz, sx, sy, sz, top_z);
+                    eng->Con_Print(dbg);
+                    goto next_e;
+                }
             }
             // Brush entities have origin (0,0,0) and meaningful mins/maxs;
             // point entities have meaningful origin. Pick the right one.
@@ -801,11 +846,15 @@ static int bake_floodfill(sim_navmesh_t *m) {
     for (int i = 0; i < anchor_n; i++) {
         anchor_t *a = &anchors[i];
         vec3_t   seated;
-        // For lift standing positions we already know where the player
-        // stands (top surface of the brush at pos1/pos2). seat_probe
-        // would otherwise drop the probe through the non-solid brush to
-        // the shaft floor and collapse both anchors to the same node.
-        if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM) {
+        // For lift/bridge standing positions we already know where the
+        // player stands (top surface of the brush). seat_probe would
+        // otherwise drop the probe through the non-solid brush to the
+        // shaft floor and collapse both anchors to the same node. For
+        // bridges the brush is at its HIDDEN position during bake, so
+        // the bridge anchors sit in mid-air over the level — seat_probe
+        // would either drop into the pit or miss entirely.
+        if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM ||
+            a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B) {
             seated[0] = a->pos[0]; seated[1] = a->pos[1]; seated[2] = a->pos[2];
         } else if (!seat_probe(probe, a->pos, seated)) continue;
         int existing = grid_find(&grd, m, seated);
@@ -822,11 +871,12 @@ static int bake_floodfill(sim_navmesh_t *m) {
         if (idx < 0) continue;
         a->node_index    = idx;
         m->points[idx].kind = a->node_kind;
-        // Plat endpoints are not BFS expansion seeds — they're floating
-        // mid-air nodes that would re-drop to the shaft floor on every
-        // walkmove. We link them to neighbours and to each other in
-        // Phase 4.5 below.
-        if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM)
+        // Plat/bridge endpoints are not BFS expansion seeds — they're
+        // floating mid-air nodes that would re-drop to the shaft floor
+        // on every walkmove. We link them to neighbours and to each
+        // other in Phase 4.5 / Phase 4.5b below.
+        if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM ||
+            a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B)
             continue;
         if (q_tail >= q_cap) {
             int nc = q_cap ? q_cap * 2 : 256;
@@ -919,6 +969,12 @@ static int bake_floodfill(sim_navmesh_t *m) {
     for (int i = 0; i < m->point_count; i++) {
         for (int j = 0; j < m->point_count; j++) {
             if (i == j) continue;
+            // Bridge ends are wired up by Phase 4.5b alone — phase 3.5
+            // would otherwise add a free drop edge from surrounding
+            // floor onto the bridge surface, letting A* bypass the
+            // button-press required to extend the bridge.
+            if (m->points[i].kind == NAV_NODE_BRIDGE_END ||
+                m->points[j].kind == NAV_NODE_BRIDGE_END) continue;
             float dx = m->points[j].pos[0] - m->points[i].pos[0];
             float dy = m->points[j].pos[1] - m->points[i].pos[1];
             float dz = m->points[j].pos[2] - m->points[i].pos[2];
@@ -1208,6 +1264,135 @@ static int bake_floodfill(sim_navmesh_t *m) {
         snprintf(buf, sizeof(buf),
             "sim_nav: lifts: %d ride edges + %d floor-link edges\n",
             plat_ride_edges, plat_link_edges);
+        eng->Con_Print(buf);
+    }
+
+    // --- Phase 4.5b: bridge edges ----------------------------------------
+    // Flat horizontal func_doors (e.g. e1m1 silver bridge t2) emit
+    // ANCHOR_BRIDGE_A / ANCHOR_BRIDGE_B at the extended (pos2) end
+    // positions. Bridges are fully gated: the only way ON is via an
+    // activator -> closer-end BUTTON_LINK / SHOOT_LINK edge; once on
+    // the bridge, the bot walks freely between A<->B; stepping OFF to
+    // surrounding floor is a one-way PLAT_LINK in either direction.
+    // Phase 3.5 deliberately skips bridge nodes so it can't synthesize
+    // a free drop-onto-bridge edge from the surrounding floor.
+    int bridge_ride_edges      = 0;
+    int bridge_disembark_edges = 0;
+    int bridge_button_edges    = 0;
+    for (int i = 0; i < anchor_n; i++) {
+        if (anchors[i].kind != ANCHOR_BRIDGE_A) continue;
+        if (anchors[i].node_index < 0) continue;
+        int a_idx = anchors[i].node_index;
+        int b_idx = -1;
+        for (int j = 0; j < anchor_n; j++) {
+            if (anchors[j].kind != ANCHOR_BRIDGE_B) continue;
+            if (anchors[j].entity != anchors[i].entity) continue;
+            b_idx = anchors[j].node_index;
+            break;
+        }
+        if (b_idx < 0) continue;
+
+        edict_t *bridge = anchors[i].entity;
+
+        // Walk-across edge (bidirectional). Reuses NAV_EDGE_PLAT_RIDE
+        // semantics — the bot just steers across the brush surface.
+        float dx = m->points[a_idx].pos[0] - m->points[b_idx].pos[0];
+        float dy = m->points[a_idx].pos[1] - m->points[b_idx].pos[1];
+        float walk_cost = sqrtf(dx*dx + dy*dy) + 1.f;
+        add_edge(m, &cap_edges, a_idx, b_idx, walk_cost,
+                 NAV_EDGE_PLAT_RIDE, 0, NAV_PHASE_BRIDGE);
+        add_edge(m, &cap_edges, b_idx, a_idx, walk_cost,
+                 NAV_EDGE_PLAT_RIDE, 0, NAV_PHASE_BRIDGE);
+        bridge_ride_edges += 2;
+
+        // Disembark: each bridge end -> nearby floor (one-way OFF).
+        // Floor can sit a fair bit above or below the bridge surface
+        // (player jumps up off / drops onto), so use a generous Z
+        // window. Validate with a clear eye-height trace.
+        const float r_xy     = 80.f;
+        const float r_xy2    = r_xy * r_xy;
+        const float r_z_up   = 64.f;
+        const float r_z_down = 48.f;
+        int ends[2] = { a_idx, b_idx };
+        int per_bridge_disembark = 0;
+        for (int e_i = 0; e_i < 2; e_i++) {
+            int end = ends[e_i];
+            for (int p = 0; p < m->point_count; p++) {
+                if (p == a_idx || p == b_idx) continue;
+                if (m->points[p].kind == NAV_NODE_BRIDGE_END) continue;
+                float ddx = m->points[p].pos[0] - m->points[end].pos[0];
+                float ddy = m->points[p].pos[1] - m->points[end].pos[1];
+                float ddz = m->points[p].pos[2] - m->points[end].pos[2];
+                if (ddx*ddx + ddy*ddy > r_xy2) continue;
+                if (ddz < -r_z_down || ddz > r_z_up) continue;
+                vec3_t src = { m->points[end].pos[0], m->points[end].pos[1],
+                               m->points[end].pos[2] + 16.f };
+                vec3_t dst = { m->points[p].pos[0], m->points[p].pos[1],
+                               m->points[p].pos[2] + 16.f };
+                vec3_t zero = { 0.f, 0.f, 0.f };
+                eng->SV_TraceMove(src, zero, zero, dst, 1, NULL);
+                if (g->trace_fraction < 0.999f) continue;
+                float w = sqrtf(ddx*ddx + ddy*ddy) + (ddz < 0 ? -ddz : ddz) + 1.f;
+                add_edge(m, &cap_edges, end, p, w,
+                         NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_BRIDGE);
+                per_bridge_disembark++;
+            }
+        }
+        bridge_disembark_edges += per_bridge_disembark;
+
+        // Activator -> closer bridge end. The closer end is the one
+        // the player physically steps onto right after pressing the
+        // button; A* then routes across the bridge to reach the far
+        // end. Linking only the closer end prevents the cheap edge
+        // cost from teleporting the bot across.
+        int per_bridge_button = 0;
+        edict_t *bt = eng->ED_Next(g->world);
+        while (bt) {
+            const char *bcn = bt->v.classname;
+            if (bcn && bt->v.target && bridge->v.targetname &&
+                !strcmp(bt->v.target, bridge->v.targetname))
+            {
+                int is_button       = !strcmp(bcn, "func_button");
+                int is_shoot_trig   = ((int)bt->v.health > 0) &&
+                    (!strcmp(bcn, "trigger_multiple") ||
+                     !strcmp(bcn, "trigger_once"));
+                int is_shoot_button = is_button && ((int)bt->v.health > 0);
+                int is_touch_button = is_button && ((int)bt->v.health == 0);
+                if (is_touch_button || is_shoot_trig || is_shoot_button) {
+                    for (int k = 0; k < anchor_n; k++) {
+                        if (anchors[k].entity != bt) continue;
+                        if (anchors[k].node_index < 0) continue;
+                        int src_node = anchors[k].node_index;
+                        float ax = m->points[a_idx].pos[0] - m->points[src_node].pos[0];
+                        float ay = m->points[a_idx].pos[1] - m->points[src_node].pos[1];
+                        float bx = m->points[b_idx].pos[0] - m->points[src_node].pos[0];
+                        float by = m->points[b_idx].pos[1] - m->points[src_node].pos[1];
+                        int closer = (ax*ax + ay*ay <= bx*bx + by*by) ? a_idx : b_idx;
+                        unsigned char ek = is_touch_button
+                            ? NAV_EDGE_BUTTON_LINK
+                            : NAV_EDGE_SHOOT_LINK;
+                        add_edge(m, &cap_edges, src_node, closer, 16.f,
+                                 ek, 0, NAV_PHASE_BRIDGE);
+                        per_bridge_button++;
+                        break;
+                    }
+                }
+            }
+            bt = eng->ED_Next(bt);
+        }
+        bridge_button_edges += per_bridge_button;
+
+        char dbg[200];
+        snprintf(dbg, sizeof(dbg),
+            "sim_nav: bridge '%s': %d disembark + %d activator edge(s)\n",
+            bridge->v.targetname, per_bridge_disembark, per_bridge_button);
+        eng->Con_Print(dbg);
+    }
+    if (bridge_ride_edges || bridge_disembark_edges || bridge_button_edges) {
+        char buf[200];
+        snprintf(buf, sizeof(buf),
+            "sim_nav: bridges: %d ride + %d disembark + %d activator edges\n",
+            bridge_ride_edges, bridge_disembark_edges, bridge_button_edges);
         eng->Con_Print(buf);
     }
 
