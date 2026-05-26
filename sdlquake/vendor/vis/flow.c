@@ -4,6 +4,8 @@
  * its first use in PortalFlow / BasePortalVis (C89 implicit-int rule). */
 void *vis_track_malloc(int size);
 
+extern void Con_Printf(char *fmt, ...);
+
 int		c_chains;
 int		c_portalskip, c_leafskip;
 int		c_vistest, c_mighttest;
@@ -171,6 +173,16 @@ Flood fill through the leafs
 If src_portal is NULL, this is the originating leaf
 ==================
 */
+/* Recursion-depth cap. The original tool ran as a subprocess where a
+ * stack overflow only killed the tool; in-process now, an overflow
+ * kills the engine. Each RecursiveLeafFlow frame is ~200 bytes on
+ * stack (pstack_t + windings + locals); a typical 8 MB main-thread
+ * stack tolerates ~40k frames before crashing. Map maximums imply
+ * MAX_MAP_LEAFS=32767 nested portals are pathologically possible.
+ * Cap well below the crash point and abort the bake cleanly via the
+ * sticky depth_exceeded flag on the threaddata_t. */
+#define MAX_FLOW_DEPTH 4096
+
 void RecursiveLeafFlow (int leafnum, threaddata_t *thread, pstack_t *prevstack)
 {
 	pstack_t	stack;
@@ -181,7 +193,18 @@ void RecursiveLeafFlow (int leafnum, threaddata_t *thread, pstack_t *prevstack)
 	int			i, j;
 	long		*test, *might, *vis;
 	qboolean		more;
-	
+
+	if (thread->depth_exceeded)
+		return;
+	if (++thread->depth > MAX_FLOW_DEPTH)
+	{
+		thread->depth_exceeded = 1;
+		thread->depth--;
+		Con_Printf ("vis: RecursiveLeafFlow depth > %d; aborting portal "
+		            "flow for this portal\n", MAX_FLOW_DEPTH);
+		return;
+	}
+
 	c_chains++;
 
 	leaf = &leafs[leafnum];
@@ -331,8 +354,9 @@ void RecursiveLeafFlow (int leafnum, threaddata_t *thread, pstack_t *prevstack)
 		FreeWinding (source);
 		FreeWinding (target);
 	}
-	
+
 	free (stack.mightsee);
+	thread->depth--;
 }
 
 
@@ -380,19 +404,40 @@ of the final calculations.
 byte	portalsee[MAX_PORTALS];
 int		c_leafsee, c_portalsee;
 
+/* SimpleFlood walks a single portal's "mightsee" tree per BasePortalVis
+ * iteration, so a single static depth counter is safe (the function is
+ * called serially from BasePortalVis, no threading). Same crash-vs-abort
+ * tradeoff as RecursiveLeafFlow. */
+static int s_simpleflood_depth = 0;
+static int s_simpleflood_exceeded = 0;
+
 void SimpleFlood (portal_t *srcportal, int leafnum)
 {
 	int		i;
 	leaf_t	*leaf;
 	portal_t	*p;
-	
-	if (srcportal->mightsee[leafnum>>3] & (1<<(leafnum&7)) )
+
+	if (s_simpleflood_exceeded)
 		return;
+	if (++s_simpleflood_depth > MAX_FLOW_DEPTH)
+	{
+		s_simpleflood_exceeded = 1;
+		--s_simpleflood_depth;
+		Con_Printf ("vis: SimpleFlood depth > %d; truncating portalvis\n",
+		            MAX_FLOW_DEPTH);
+		return;
+	}
+
+	if (srcportal->mightsee[leafnum>>3] & (1<<(leafnum&7)) )
+	{
+		--s_simpleflood_depth;
+		return;
+	}
 	srcportal->mightsee[leafnum>>3] |= (1<<(leafnum&7));
 	c_leafsee++;
-	
+
 	leaf = &leafs[leafnum];
-	
+
 	for (i=0 ; i<leaf->numportals ; i++)
 	{
 		p = leaf->portals[i];
@@ -400,6 +445,16 @@ void SimpleFlood (portal_t *srcportal, int leafnum)
 			continue;
 		SimpleFlood (srcportal, p->leaf);
 	}
+	--s_simpleflood_depth;
+}
+
+/* Per-portal entry resets the sticky overflow flag so one bad portal
+ * doesn't poison every subsequent portal's flood result. Called from
+ * BasePortalVis before each top-level SimpleFlood. */
+void SimpleFlood_BeginPortal (void)
+{
+	s_simpleflood_depth = 0;
+	s_simpleflood_exceeded = 0;
 }
 
 
@@ -456,6 +511,7 @@ void BasePortalVis (void)
 		}
 
 		c_leafsee = 0;
+		SimpleFlood_BeginPortal ();
 		SimpleFlood (p, p->leaf);
 		p->nummightsee = c_leafsee;
 //		printf ("portal:%4i  c_leafsee:%4i \n", i, c_leafsee);

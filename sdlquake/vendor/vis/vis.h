@@ -82,6 +82,8 @@ typedef struct
 	byte		*leafvis;		// bit string
 	portal_t	*base;
 	pstack_t	pstack_head;
+	int		depth;			// RecursiveLeafFlow depth, capped to avoid SO
+	int		depth_exceeded;		// sticky: bake aborts cleanly
 } threaddata_t;
 
 
