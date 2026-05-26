@@ -18,8 +18,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 // protocol.h -- communications protocols
+//
+// BUMP THIS when adding/removing/renumbering any svc_*, clc_*, TE_*,
+// U_*, or SU_* code below, or otherwise changing the bytes-on-the-wire
+// for a server->client or client->server message. A mismatched client
+// and server hit Sys_Error("CL_ParseTEnt: bad type") (or similar) on
+// the next packet that uses the diverged code.
 
-#define	PROTOCOL_VERSION	15
+#define	PROTOCOL_VERSION	16
 
 // if the high bit of the servercmd is set, the low bits are fast update flags:
 #define	U_MOREBITS	(1<<0)
