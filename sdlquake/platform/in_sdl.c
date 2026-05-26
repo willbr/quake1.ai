@@ -14,6 +14,10 @@ qboolean winsock_lib_initialized = false;
 // Accumulated mouse movement between frames
 static int mouse_dx, mouse_dy;
 static qboolean mouse_active = false;
+// Set when relative-mouse mode transitions off->on. SDL warps the cursor on
+// enable and the resulting delta arrives as a phantom motion event; drop the
+// next motion event so the first real movement doesn't jump.
+static qboolean discard_next_motion = false;
 
 cvar_t m_filter = {"m_filter", "0"};
 
@@ -91,6 +95,8 @@ static void IN_SyncMouseMode(void)
     SDL_Window *win = VID_GetWindow();
     if (win)
         SDL_SetWindowRelativeMouseMode(win, want);
+    if (want && last_applied != 1)
+        discard_next_motion = true;
     last_applied = (int)want;
 }
 
@@ -258,6 +264,11 @@ void IN_ProcessEvents(void)
             // Don't accumulate game mouse when overlay is open (mouse is
             // free) — except when the editor is in FPS look mode, in which
             // case it explicitly wants the player to receive the delta.
+            if (discard_next_motion)
+            {
+                discard_next_motion = false;
+                break;
+            }
             if (mouse_active && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))
             {
                 mouse_dx += (int)ev.motion.xrel;
@@ -320,6 +331,7 @@ void IN_Init(void)
     if (win)
         SDL_SetWindowRelativeMouseMode(win, true);
     mouse_active = true;
+    discard_next_motion = true;
 }
 
 void IN_Shutdown(void)
