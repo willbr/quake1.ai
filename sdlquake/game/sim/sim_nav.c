@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    10
+#define NAV_VERSION    12
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -119,6 +119,7 @@ enum {
     NAV_EDGE_PLAT_RIDE  = 3,
     NAV_EDGE_TELEPORT   = 4,
     NAV_EDGE_PLAT_LINK  = 5,   // walk on/off a lift's standing position
+    NAV_EDGE_SHOOT_LINK = 6,   // bot must aim+fire at a shootable
 };
 
 typedef struct {
@@ -553,11 +554,18 @@ static int bake_floodfill(sim_navmesh_t *m) {
             }
             // Vertical func_door used as a lift (e.g. e1m1 first lift).
             // A func_door is a "lift-door" when its travel is mostly
-            // vertical AND its brush is a flat-enough slab that the
-            // player can stand on top. Bake TOP / BOTTOM anchors at the
-            // standing positions and let the existing Phase 4.5 logic
-            // wire ride + button edges. (Post-spawn classname is "door";
-            // accept "func_door" defensively.)
+            // vertical AND its top surface is wide enough for the player
+            // to stand on. Bake TOP / BOTTOM anchors at the standing
+            // positions and let the existing Phase 4.5 logic wire ride
+            // + button edges. (Post-spawn classname is "door"; accept
+            // "func_door" defensively.)
+            //
+            // We don't filter on overall brush height because e1m1's t1
+            // lift includes a CLIP sub-brush that extends ~224 units
+            // below the visible platform to define the shaft — the AABB
+            // is 128x128x240 but the standable slab is just the top.
+            // Footprint width is enough to tell a lift from a regular
+            // sliding door (which is typically narrow).
             if (!strcmp(cn, "door") || !strcmp(cn, "func_door")) {
                 float dz = e->v.pos2[2] - e->v.pos1[2];
                 float dx = e->v.pos2[0] - e->v.pos1[0];
@@ -568,9 +576,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 float sx  = e->v.maxs[0] - e->v.mins[0];
                 float sy  = e->v.maxs[1] - e->v.mins[1];
                 float sz  = e->v.maxs[2] - e->v.mins[2];
-                int vertical = (adz > 24.f) && (adz > adx) && (adz > ady);
-                int standable = (sx > 24.f) && (sy > 24.f) &&
-                                (sz < (sx > sy ? sx : sy));
+                int vertical  = (adz > 24.f) && (adz > adx) && (adz > ady);
+                int standable = (sx > 48.f) && (sy > 48.f);
                 if (vertical && standable) {
                     float z_lo = e->v.pos1[2] < e->v.pos2[2] ? e->v.pos1[2] : e->v.pos2[2];
                     float z_hi = e->v.pos1[2] < e->v.pos2[2] ? e->v.pos2[2] : e->v.pos1[2];
@@ -1037,24 +1044,40 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 plat_link_edges += 2;
             }
         } else {
-            // Find any anchor that's a func_button whose target matches
-            // this plat's targetname. Walk the entity list directly
-            // (anchors[] doesn't store target/targetname).
+            // Find any "activator" entity whose target matches this plat's
+            // targetname. Activators come in two flavours:
+            //   * touch-buttons (func_button with health == 0) — bot walks
+            //     into the bbox, edge is PLAT_LINK (walk-through).
+            //   * shoot-activators (func_button with health > 0, or
+            //     trigger_multiple / trigger_once with health > 0) — bot
+            //     stands at the anchor and fires until the entity is
+            //     killed. Edge is SHOOT_LINK; the bot's drive layer
+            //     locates the shootable by proximity to the source node.
             int button_links = 0;
+            int shoot_links  = 0;
             edict_t *bt = eng->ED_Next(g->world);
             while (bt) {
-                if (bt->v.classname && !strcmp(bt->v.classname, "func_button") &&
-                    bt->v.target && !strcmp(bt->v.target, plat->v.targetname))
+                const char *bcn = bt->v.classname;
+                if (bcn && bt->v.target &&
+                    !strcmp(bt->v.target, plat->v.targetname))
                 {
-                    // Find this button's anchor → node index.
-                    for (int k = 0; k < anchor_n; k++) {
-                        if (anchors[k].entity == bt && anchors[k].node_index >= 0) {
-                            // Edge button -> plat_bottom (cheap), but no
-                            // edge back the other way: once you've ridden
-                            // up you don't go back via the button.
+                    int is_button = !strcmp(bcn, "func_button");
+                    int is_shoot_trig = ((int)bt->v.health > 0) &&
+                        (!strcmp(bcn, "trigger_multiple") ||
+                         !strcmp(bcn, "trigger_once"));
+                    int is_shoot_button = is_button && ((int)bt->v.health > 0);
+                    int is_touch_button = is_button && ((int)bt->v.health == 0);
+                    if (is_touch_button || is_shoot_trig || is_shoot_button) {
+                        for (int k = 0; k < anchor_n; k++) {
+                            if (anchors[k].entity != bt) continue;
+                            if (anchors[k].node_index < 0) continue;
+                            unsigned char ek = is_touch_button
+                                ? NAV_EDGE_PLAT_LINK
+                                : NAV_EDGE_SHOOT_LINK;
                             add_edge(m, &cap_edges, anchors[k].node_index,
-                                     bot_idx, 16.0f, NAV_EDGE_PLAT_LINK, 0);
-                            button_links++;
+                                     bot_idx, 16.0f, ek, 0);
+                            if (is_touch_button) button_links++;
+                            else                 shoot_links++;
                             break;
                         }
                     }
@@ -1063,10 +1086,30 @@ static int bake_floodfill(sim_navmesh_t *m) {
             }
             char dbg[200];
             snprintf(dbg, sizeof(dbg),
-                "sim_nav: plat '%s' button-driven, %d button(s) link to it\n",
-                plat->v.targetname, button_links);
+                "sim_nav: plat '%s' targeted by %d touch-button(s), "
+                "%d shoot-activator(s)\n",
+                plat->v.targetname, button_links, shoot_links);
             eng->Con_Print(dbg);
-            plat_link_edges += button_links;
+            plat_link_edges += button_links + shoot_links;
+
+            // Disembark: after riding the lift, the bot needs to step
+            // OFF onto the surrounding lower floor. Add plat_bottom →
+            // lower_floor edges (one-way OFF the lift). The reverse
+            // direction is deliberately omitted so A* can't walk onto
+            // the lift from below without an activator.
+            int disembark_edges = 0;
+            for (int p = 0; p < m->point_count; p++) {
+                if (p == top_idx || p == bot_idx) continue;
+                float dx = m->points[p].pos[0] - m->points[bot_idx].pos[0];
+                float dy = m->points[p].pos[1] - m->points[bot_idx].pos[1];
+                float dz = m->points[p].pos[2] - m->points[bot_idx].pos[2];
+                if (dx*dx + dy*dy > r_xy2) continue;
+                if (dz < -r_z || dz > r_z) continue;
+                float w = sqrtf(dx*dx + dy*dy) + 1.f;
+                add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
+                disembark_edges++;
+            }
+            plat_link_edges += disembark_edges;
         }
     }
     if (plat_ride_edges || plat_link_edges) {

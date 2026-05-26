@@ -39,7 +39,8 @@ typedef enum {
 #define BOT_MAX_WAYPOINTS 32
 
 // Kept in sync with sim_nav.c's NAV_EDGE_* enum. The drive layer uses
-// this to press jump for jump-up edges and wait on plat-ride edges.
+// this to press jump for jump-up edges, wait on plat-ride edges, and
+// aim+fire on shoot-link edges.
 enum {
     BOT_EDGE_WALK       = 0,
     BOT_EDGE_JUMP_UP    = 1,
@@ -47,6 +48,7 @@ enum {
     BOT_EDGE_PLAT_RIDE  = 3,
     BOT_EDGE_TELEPORT   = 4,
     BOT_EDGE_PLAT_LINK  = 5,
+    BOT_EDGE_SHOOT_LINK = 6,
 };
 
 static struct {
@@ -170,12 +172,13 @@ static void Bot_EntityCenter(edict_t *e, vec3_t out)
 static const char *Bot_EdgeKindName(int k)
 {
     switch (k) {
-        case BOT_EDGE_WALK:      return "walk";
-        case BOT_EDGE_JUMP_UP:   return "jump";
-        case BOT_EDGE_DROP_DOWN: return "drop";
-        case BOT_EDGE_PLAT_RIDE: return "ride";
-        case BOT_EDGE_TELEPORT:  return "tele";
-        case BOT_EDGE_PLAT_LINK: return "plat";
+        case BOT_EDGE_WALK:       return "walk";
+        case BOT_EDGE_JUMP_UP:    return "jump";
+        case BOT_EDGE_DROP_DOWN:  return "drop";
+        case BOT_EDGE_PLAT_RIDE:  return "ride";
+        case BOT_EDGE_TELEPORT:   return "tele";
+        case BOT_EDGE_PLAT_LINK:  return "plat";
+        case BOT_EDGE_SHOOT_LINK: return "shoot";
     }
     return "?";
 }
@@ -500,8 +503,10 @@ static void Bot_DriveFrame(usercmd_t *cmd)
             cmd->forwardmove = cl_forwardspeed.value * cosw;
         }
 
-        // Lift wait: standing on plat_bottom with plat_top above us —
-        // hold position so we don't walk off before the lift rises.
+        // Lift wait: when the next waypoint is directly above or below
+        // us (same XY, big dz) we're standing on a lift — hold still
+        // so we don't walk off before it moves. Above = waiting for
+        // lift to rise; below = riding the lift down.
         {
             const float *cur = Bot_CurrentWaypoint();
             int kind = Bot_CurrentWaypointKind();
@@ -509,7 +514,7 @@ static void Bot_DriveFrame(usercmd_t *cmd)
             float dy = cur[1] - sv_player->v.origin[1];
             float dz = cur[2] - sv_player->v.origin[2];
             float xy2 = dx*dx + dy*dy;
-            if (xy2 < (32.f*32.f) && dz > 64.f) {
+            if (xy2 < (32.f*32.f) && (dz > 64.f || dz < -64.f)) {
                 cmd->forwardmove = 0;
                 cmd->sidemove    = 0;
             }
