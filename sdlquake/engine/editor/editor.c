@@ -1703,6 +1703,33 @@ static void Editor_Cmd_Status_f(void)
                total_valid, total_brushes);
 }
 
+// editor_select_ent <idx> -- programmatic selection by edit-scene index.
+// Used by MCP-driven verification (the viewport mouse can't be reached
+// over the wire). Point entities select as (ent, -1); brush entities
+// pick brush 0 so SelectionBBox / gizmo can latch onto something.
+static void Editor_Cmd_SelectEnt_f(void)
+{
+    int idx, brush;
+    if (Cmd_Argc() < 2) {
+        Con_Printf("usage: editor_select_ent <ent_idx>\n");
+        return;
+    }
+    idx = Q_atoi(Cmd_Argv(1));
+    if (idx < 0 || idx >= edit_scene.numentities) {
+        Con_Printf("editor_select_ent: index %d out of range [0..%d)\n",
+                   idx, edit_scene.numentities);
+        return;
+    }
+    brush = (edit_scene.entities[idx].numbrushes > 0) ? 0 : -1;
+    Scene_SelectionClear();
+    Scene_SelectionAdd(idx, brush);
+    Con_Printf("editor: selected ent[%d] cls='%s'\n", idx,
+               edit_scene.entities[idx].classname_idx >= 0
+               ? edit_scene.entities[idx].kv[
+                       edit_scene.entities[idx].classname_idx].value
+               : "(none)");
+}
+
 // -----------------------------------------------------------------------------
 // Populate edit_scene from a running server (editor opened without editor_load)
 // -----------------------------------------------------------------------------
@@ -1979,6 +2006,7 @@ void Editor_Init(void)
     Cmd_RegisterArgCompleter("editor_save", Editor_CompleteMapName);
     Cmd_AddCommand("editor_revert", Editor_Cmd_Revert_f);
     Cmd_AddCommand("editor_status", Editor_Cmd_Status_f);
+    Cmd_AddCommand("editor_select_ent", Editor_Cmd_SelectEnt_f);
     Cmd_AddCommand("editor_textures", Editor_Cmd_Textures_f);
     Cmd_AddCommand("editor_brush_add_cube", Editor_Cmd_AddCube_f);
     Cmd_AddCommand("editor_brush_hollow",   Editor_Cmd_Hollow_f);
