@@ -1125,11 +1125,18 @@ static int polling_enabled = 0;
 
 static void Nav_Rebake_f(void);
 
+// Called from Host_Init while command registration is still allowed
+// (before host_initialized = true). HotReload_Init below runs AFTER
+// Host_Init and so can't use Cmd_AddCommand.
+void HotReload_RegisterCommands(void)
+{
+    Cmd_AddCommand("nav_rebake", Nav_Rebake_f);
+}
+
 void HotReload_Init(void)
 {
     SDL_Time t = get_mtime(GAME_DLL_SRC);
     if (t != 0) do_load();
-    Cmd_AddCommand("nav_rebake", Nav_Rebake_f);
 }
 
 void HotReload_Frame(float dt)

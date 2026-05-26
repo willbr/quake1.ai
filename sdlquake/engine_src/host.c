@@ -970,6 +970,9 @@ void Host_Init (quakeparms_t *parms)
 
 	Editor_Init ();
 
+	extern void HotReload_RegisterCommands(void);
+	HotReload_RegisterCommands();
+
 	Cbuf_InsertText ("exec quake.rc\n");
 
 	Hunk_AllocName (0, "-HOST_HUNKLEVEL-");
