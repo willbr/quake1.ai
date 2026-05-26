@@ -15,6 +15,9 @@ cvar_t bot_pickup_radius= { "bot_pickup_radius","640" };
 cvar_t bot_turn_speed   = { "bot_turn_speed",   "540" };
 cvar_t bot_combat_dist  = { "bot_combat_dist",  "768" };
 cvar_t bot_debug        = { "bot_debug",        "0", true };
+// If the bot can't reach an exit within this many seconds, force a
+// changelevel to keep map-traversal testing alive. 0 disables.
+cvar_t bot_giveup_secs  = { "bot_giveup_secs",  "240", true };
 
 typedef enum {
     BS_IDLE = 0,
@@ -62,6 +65,7 @@ static struct {
 
     float        smoothed_yaw;     // for damping
     char         map_at_init[64];  // detect map change for state reset
+    float        map_entered_time; // host_time when we last saw a new map
 } b;
 
 // in_attack / in_jump live in cl_input.c (kbutton_t globals)
@@ -410,9 +414,37 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         b.next_replan = 0.f;
         b.blocklist_n = 0;
         b.waypoint_started = 0.f;
+        b.map_entered_time = (float)host_time;
         Q_strncpy(b.map_at_init, sv.name, sizeof(b.map_at_init) - 1);
         b.map_at_init[sizeof(b.map_at_init) - 1] = '\0';
         return;  // skip this frame, let server settle
+    }
+
+    // Give-up timer: if we've been on this map far too long without
+    // finding the exit, look up the trigger_changelevel's destination
+    // map name and force a changelevel so map traversal testing keeps
+    // moving. Falls back to engine 'restart' if the trigger has no map.
+    if (bot_giveup_secs.value > 0.f &&
+        (float)host_time - b.map_entered_time > bot_giveup_secs.value)
+    {
+        edict_t *exit_e = NULL;
+        int i;
+        for (i = 1; i < sv.num_edicts; i++) {
+            edict_t *e = Bot_Edict(i);
+            if (Bot_IsExit(e)) { exit_e = e; break; }
+        }
+        if (exit_e && exit_e->v.map && exit_e->v.map[0]) {
+            char cmd_buf[96];
+            snprintf(cmd_buf, sizeof(cmd_buf), "changelevel %s\n", exit_e->v.map);
+            if (bot_debug.value)
+                Con_Printf("[bot] giveup -> %s", cmd_buf);
+            Cbuf_AddText(cmd_buf);
+        } else {
+            if (bot_debug.value) Con_Printf("[bot] giveup -> restart (no exit map)\n");
+            Cbuf_AddText("restart\n");
+        }
+        b.map_entered_time = (float)host_time;  // avoid spamming
+        return;
     }
 
     // Death — issue restart and reset.
@@ -694,6 +726,7 @@ void Bot_Init(void)
     Cvar_RegisterVariable(&bot_turn_speed);
     Cvar_RegisterVariable(&bot_combat_dist);
     Cvar_RegisterVariable(&bot_debug);
+    Cvar_RegisterVariable(&bot_giveup_secs);
     Cmd_AddCommand("bot_status", Bot_Status_f);
 
     b.state = BS_IDLE;
