@@ -157,9 +157,30 @@ void Editor_LightBake_Init(void)
 
 void Editor_LightBake_Shutdown(void)
 {
-    /* If a worker is still running we'd have to wait or detach; in the
-     * shutdown path the process is exiting so just leak the thread.
-     * We do free our side buffer so leak detectors stay quiet. */
+    /* If a worker is still running it owns s_snap.mono/rgb/lightofs and
+     * will be writing to them via light_snapshot_result until it signals
+     * result_ready. Freeing now would race the worker's writes. Spin-wait
+     * (worker is detached so we can't join) until either the worker
+     * publishes its result or a generous timeout elapses — the bake
+     * length is bounded by light_relight_in_place; a few seconds is more
+     * than enough on any map we ship.
+     *
+     * If we time out, the worker keeps running and the process is about
+     * to exit anyway; leaking those few MB is preferable to a use-after-
+     * free.
+     */
+    int spin;
+    for (spin = 0;
+         spin < 300
+            && SDL_GetAtomicInt(&s_in_progress)
+            && !SDL_GetAtomicInt(&s_result_ready);
+         ++spin)
+    {
+        SDL_Delay(10);
+    }
+
+    /* Once result_ready==1 the worker has finished all writes to *snap
+     * and is on its way out. Now safe to release. */
     free(s_live_lightdata);    s_live_lightdata = NULL;
     free(s_live_rgblightdata); s_live_rgblightdata = NULL;
     free(s_snap.mono);          s_snap.mono = NULL;
