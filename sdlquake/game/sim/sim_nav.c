@@ -1454,8 +1454,28 @@ void Sim_Nav_Frame(void) {
             if (has_reverse) continue;
         }
 
-        // Teleport edges (weight 0) drawn in a contrasting colour.
-        int color = (e->weight == 0.0f) ? 192 : 244;
+        // Edge colour-coded by traversal kind so the overlay reveals
+        // what the bot would have to do to use the link:
+        //   WALK         -> 244 (orange)
+        //   JUMP_UP      -> 251 (red)
+        //   DROP_DOWN    -> 254 (bright yellow)
+        //   PLAT_RIDE    -> 220 (light blue)
+        //   TELEPORT     -> 192 (white)
+        //   PLAT_LINK    -> 79  (green)
+        //   SHOOT_LINK   -> 232 (purple)
+        //   BUTTON_LINK  -> 208 (cyan)
+        int color;
+        switch (e->kind) {
+        case NAV_EDGE_JUMP_UP:     color = 251; break;
+        case NAV_EDGE_DROP_DOWN:   color = 254; break;
+        case NAV_EDGE_PLAT_RIDE:   color = 220; break;
+        case NAV_EDGE_TELEPORT:    color = 192; break;
+        case NAV_EDGE_PLAT_LINK:   color = 79;  break;
+        case NAV_EDGE_SHOOT_LINK:  color = 232; break;
+        case NAV_EDGE_BUTTON_LINK: color = 208; break;
+        case NAV_EDGE_WALK:
+        default:                   color = 244; break;
+        }
         eng->SV_DebugLine(s_mesh->points[e->from].pos,
                           s_mesh->points[e->to].pos,
                           color,
