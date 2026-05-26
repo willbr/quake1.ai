@@ -19,7 +19,11 @@ cvar_t r_decals_max                = { "r_decals_max",                "512", tru
 cvar_t r_decals_intensity          = { "r_decals_intensity",          "1.0", true };
 cvar_t r_decals_bloodpool             = { "r_decals_bloodpool",             "1", true };
 cvar_t r_decals_bloodpool_radius      = { "r_decals_bloodpool_radius",      "64", true };
-cvar_t r_decals_bloodpool_growtime    = { "r_decals_bloodpool_growtime",    "3.0", true };
+// Growth rate in world units per second. A corpse pool of radius 64 finishes
+// in ~10s; a gib pool of radius 12 finishes in ~1.8s. This scales the freeze
+// window with pool size — big pools give the player time to disturb them,
+// small pools resolve quickly so the world doesn't feel half-finished.
+cvar_t r_decals_bloodpool_growrate    = { "r_decals_bloodpool_growrate",    "6.5", true };
 cvar_t r_decals_bloodpool_owner_drift = { "r_decals_bloodpool_owner_drift", "4", true };
 cvar_t r_decals_gibbounce          = { "r_decals_gibbounce",          "1", true };
 cvar_t r_decals_blooddrip          = { "r_decals_blooddrip",          "1", true };
@@ -40,7 +44,7 @@ void R_DecalsInit (void)
 	Cvar_RegisterVariable (&r_decals_intensity);
 	Cvar_RegisterVariable (&r_decals_bloodpool);
 	Cvar_RegisterVariable (&r_decals_bloodpool_radius);
-	Cvar_RegisterVariable (&r_decals_bloodpool_growtime);
+	Cvar_RegisterVariable (&r_decals_bloodpool_growrate);
 	Cvar_RegisterVariable (&r_decals_bloodpool_owner_drift);
 	Cvar_RegisterVariable (&r_decals_gibbounce);
 	Cvar_RegisterVariable (&r_decals_blooddrip);
@@ -257,8 +261,8 @@ void R_DecalsClear (void)
 void R_DecalsFrame (void)
 {
 	int          i;
-	float        dur;
-	float        t, target, r_inner_sq, r_outer_sq;
+	float        rate;
+	float        target, r_inner_sq, r_outer_sq;
 	int          luxel_radius, dx, dy, u, v, idx;
 	float        gx, gy, dsq, ou, ov;
 	int          olu, olv, smax, tmax;
@@ -268,8 +272,8 @@ void R_DecalsFrame (void)
 	mtexinfo_t  *tex;
 	stain_t     *st;
 
-	dur = r_decals_bloodpool_growtime.value;
-	if (dur <= 0.001f) dur = 0.001f;
+	rate = r_decals_bloodpool_growrate.value;
+	if (rate <= 0.001f) rate = 0.001f;
 
 	for (i = 0; i < MAX_ACTIVE_BLOODPOOLS; i++) {
 		bp = &r_bloodpools[i];
@@ -299,12 +303,15 @@ void R_DecalsFrame (void)
 			}
 		}
 
-		t = (cl.time - bp->spawn_time) / dur;
-		if (t < 0.0f) t = 0.0f;
-		if (t > 1.0f) t = 1.0f;
-		target = bp->radius_max * t;
+		// Constant growth rate: radius grows by `rate` units per second
+		// until it reaches radius_max. So a 64-unit pool at rate 6.5
+		// takes ~10s, a 12-unit gib pool ~1.8s — the freeze window
+		// scales naturally with how big the spill is.
+		target = (cl.time - bp->spawn_time) * rate;
+		if (target < 0.0f) target = 0.0f;
+		if (target > bp->radius_max) target = bp->radius_max;
 		if (target <= bp->radius_painted) {
-			if (t >= 1.0f) bp->alive = false;
+			if (target >= bp->radius_max) bp->alive = false;
 			continue;
 		}
 
@@ -312,8 +319,8 @@ void R_DecalsFrame (void)
 		if (!surf) { bp->alive = false; continue; }
 
 		if (r_decals_debug.value) {
-			Con_Printf ("BloodPool[%d]: t=%.2f target=%.1f radius_painted=%.1f surf=%p\n",
-				i, t, target, bp->radius_painted, (void*)surf);
+			Con_Printf ("BloodPool[%d]: target=%.1f radius_painted=%.1f surf=%p\n",
+				i, target, bp->radius_painted, (void*)surf);
 		}
 
 		tex = surf->texinfo;
@@ -364,7 +371,7 @@ void R_DecalsFrame (void)
 		st->generation++;
 		st->last_touched_frame = r_framecount;
 		bp->radius_painted = target;
-		if (t >= 1.0f) bp->alive = false;
+		if (target >= bp->radius_max) bp->alive = false;
 	}
 
 	// Drip tick — extend each active drip downward along the wall.
