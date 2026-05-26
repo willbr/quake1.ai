@@ -123,11 +123,29 @@ enum {
     NAV_EDGE_BUTTON_LINK = 7,  // bot must touch a func_button at source
 };
 
+// Per-edge phase tag — which sub-block of bake_floodfill emitted the
+// edge. Distinct from NAV_EDGE_* (which describes traversal style)
+// because two phases can emit the same kind (e.g. Phase 4.5 emits
+// both PLAT_LINK and BUTTON_LINK). Used by the debug overlay's phase
+// mask and by the nav_edges_near MCP tool. Keep in sync with the
+// table in mcp_server.c::tool_nav_bake_phases.
+enum {
+    NAV_PHASE_BFS_WALK          = 0,  // Phase 3:   adjacency WALK edges
+    NAV_PHASE_JUMP_DROP         = 1,  // Phase 3.5: JUMP_UP / DROP_DOWN pairs
+    NAV_PHASE_TELE_SRC          = 2,  // Phase 4:   TELEPORT from trigger anchor
+    NAV_PHASE_TELE_NEAR         = 3,  // Phase 4:   TELEPORT from nearby-node fallback
+    NAV_PHASE_LIFT_RIDE         = 4,  // Phase 4.5: PLAT_RIDE top<->bot
+    NAV_PHASE_LIFT_PLAT_LINK    = 5,  // Phase 4.5: PLAT_LINK walk-on/off
+    NAV_PHASE_LIFT_BUTTON_SHOOT = 6,  // Phase 4.5: BUTTON_LINK + SHOOT_LINK
+    NAV_PHASE_COUNT             = 7,
+};
+
 typedef struct {
     int      from, to;
     float    weight;
     unsigned char kind;        // NAV_EDGE_*
-    unsigned char _pad[3];
+    unsigned char phase;       // NAV_PHASE_* — which bake sub-block emitted this
+    unsigned char _pad[2];
     unsigned int  requires_items;  // bitmask matched against player.items
 } nav_edge_t;
 
@@ -250,7 +268,8 @@ static int add_point(sim_navmesh_t *m, int *cap, grid_t *grd, const vec3_t pos) 
 }
 
 static int add_edge(sim_navmesh_t *m, int *cap, int from, int to,
-                    float weight, unsigned char kind, unsigned int req_items) {
+                    float weight, unsigned char kind,
+                    unsigned int req_items, unsigned char phase) {
     if (m->edge_count >= *cap) {
         int nc = *cap ? *cap * 2 : 1024;
         nav_edge_t *e = realloc(m->edges, sizeof(nav_edge_t) * nc);
@@ -263,7 +282,8 @@ static int add_edge(sim_navmesh_t *m, int *cap, int from, int to,
     e->to     = to;
     e->weight = weight;
     e->kind   = kind;
-    e->_pad[0] = e->_pad[1] = e->_pad[2] = 0;
+    e->phase  = phase;
+    e->_pad[0] = e->_pad[1] = 0;
     e->requires_items = req_items;
     return 1;
 }
@@ -860,7 +880,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
             float ez = m->points[next_idx].pos[2] - cur_pos[2];
             float w  = (float)sqrt(ex*ex + ey*ey + ez*ez);
             if (w < 1.0f) w = 1.0f;
-            add_edge(m, &cap_edges, cur, next_idx, w, NAV_EDGE_WALK, 0);
+            add_edge(m, &cap_edges, cur, next_idx, w, NAV_EDGE_WALK, 0, NAV_PHASE_BFS_WALK);
         }
     }
 
@@ -918,7 +938,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
             float dist = (float)sqrt(xy*xy + dz*dz);
             float bias = (kind == 1) ? JUMP_COST_BIAS : DROP_COST_BIAS;
             unsigned char edge_k = (kind == 1) ? NAV_EDGE_JUMP_UP : NAV_EDGE_DROP_DOWN;
-            add_edge(m, &cap_edges, i, j, dist + bias, edge_k, 0);
+            add_edge(m, &cap_edges, i, j, dist + bias, edge_k, 0, NAV_PHASE_JUMP_DROP);
             if (kind == 1) jump_edges_added++;
             else           drop_edges_added++;
         }
@@ -955,7 +975,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
         if (anchors[i].node_index >= 0) {
             // Source seated normally — single edge.
             add_edge(m, &cap_edges, anchors[i].node_index, dst_node, 0.0f,
-                     NAV_EDGE_TELEPORT, 0);
+                     NAV_EDGE_TELEPORT, 0, NAV_PHASE_TELE_SRC);
             teleport_edges++;
             continue;
         }
@@ -980,7 +1000,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
             if (px < xmin || px > xmax) continue;
             if (py < ymin || py > ymax) continue;
             if (pz < zmin - z_slack || pz > zmax) continue;
-            add_edge(m, &cap_edges, p, dst_node, 0.0f, NAV_EDGE_TELEPORT, 0);
+            add_edge(m, &cap_edges, p, dst_node, 0.0f, NAV_EDGE_TELEPORT, 0, NAV_PHASE_TELE_NEAR);
             // Tag the node so debug viz colour-codes it; the anchor
             // was unseated but in effect this point IS the source.
             if (m->points[p].kind < NAV_NODE_TELEPORT_SRC)
@@ -1032,8 +1052,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
         float ride_dz = m->points[top_idx].pos[2] - m->points[bot_idx].pos[2];
         if (ride_dz < 0) ride_dz = -ride_dz;
         float ride_cost = ride_dz + 32.0f;
-        add_edge(m, &cap_edges, top_idx, bot_idx, ride_cost, NAV_EDGE_PLAT_RIDE, 0);
-        add_edge(m, &cap_edges, bot_idx, top_idx, ride_cost, NAV_EDGE_PLAT_RIDE, 0);
+        add_edge(m, &cap_edges, top_idx, bot_idx, ride_cost, NAV_EDGE_PLAT_RIDE, 0, NAV_PHASE_LIFT_RIDE);
+        add_edge(m, &cap_edges, bot_idx, top_idx, ride_cost, NAV_EDGE_PLAT_RIDE, 0, NAV_PHASE_LIFT_RIDE);
         plat_ride_edges += 2;
 
         // Link top/bottom anchors to floor nodes near their XY, at a
@@ -1067,8 +1087,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
             if (dx*dx + dy*dy > r_xy2) continue;
             if (dz < -r_z || dz > r_z) continue;
             float w = sqrtf(dx*dx + dy*dy) + 1.f;
-            add_edge(m, &cap_edges, p, top_idx, w, NAV_EDGE_PLAT_LINK, 0);
-            add_edge(m, &cap_edges, top_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
+            add_edge(m, &cap_edges, p, top_idx, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
+            add_edge(m, &cap_edges, top_idx, p, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
             plat_link_edges += 2;
         }
 
@@ -1084,8 +1104,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 if (dx*dx + dy*dy > r_xy2) continue;
                 if (dz < -r_z || dz > r_z) continue;
                 float w = sqrtf(dx*dx + dy*dy) + 1.f;
-                add_edge(m, &cap_edges, p, bot_idx, w, NAV_EDGE_PLAT_LINK, 0);
-                add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
+                add_edge(m, &cap_edges, p, bot_idx, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
+                add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
                 plat_link_edges += 2;
             }
         } else {
@@ -1120,7 +1140,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                                 ? NAV_EDGE_BUTTON_LINK
                                 : NAV_EDGE_SHOOT_LINK;
                             add_edge(m, &cap_edges, anchors[k].node_index,
-                                     bot_idx, 16.0f, ek, 0);
+                                     bot_idx, 16.0f, ek, 0, NAV_PHASE_LIFT_BUTTON_SHOOT);
                             if (is_touch_button) button_links++;
                             else                 shoot_links++;
                             break;
@@ -1151,7 +1171,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 if (dx*dx + dy*dy > r_xy2) continue;
                 if (dz < -r_z || dz > r_z) continue;
                 float w = sqrtf(dx*dx + dy*dy) + 1.f;
-                add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
+                add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
                 disembark_edges++;
             }
             plat_link_edges += disembark_edges;
