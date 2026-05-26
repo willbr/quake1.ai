@@ -575,12 +575,18 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         else if (d2 < (200.f*200.f))
             cmd->forwardmove = -cl_forwardspeed.value * 0.5f; // back up
     } else if (Bot_CurrentWaypoint() || target || b.state == BS_WANDER) {
-        // Always walk forward, scaled by cos of remaining yaw error so the
-        // bot crab-walks through turns instead of standing still.
+        // Walk forward only when roughly facing the waypoint. With a
+        // floor on forwardmove (the old behaviour) the bot kept drifting
+        // forward through 90° corners and ended up wedged in the wall
+        // ahead of the turn. Above 60° error, turn in place; below,
+        // scale by cos so the bot strafes smoothly through gentle bends.
         int yaw_err = Bot_AimError(aim_target);
-        float cosw = cosf(yaw_err * (float)M_PI / 180.f);
-        if (cosw < 0.3f) cosw = 0.3f;  // never fully stop
-        cmd->forwardmove = cl_forwardspeed.value * cosw;
+        if (yaw_err > 60) {
+            cmd->forwardmove = 0;
+        } else {
+            float cosw = cosf(yaw_err * (float)M_PI / 180.f);
+            cmd->forwardmove = cl_forwardspeed.value * cosw;
+        }
 
         // Lift wait: if current waypoint is vertically above us at
         // basically the same XY, we're standing on the lift's bottom
