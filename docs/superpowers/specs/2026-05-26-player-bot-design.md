@@ -86,13 +86,20 @@ Weapon switching: pick best available weapon by ammo-vs-distance heuristic. Impl
 
 The bot does not orchestrate map sequence — it just tries to reach an exit. Quake's `trigger_changelevel` will load the next map and on the new map's first server tick the bot continues (perception runs again, finds new exit). For `start.bsp`, picking *any* slipgate counts as "winning" — the bot will then play e1m1+, e2m1+, etc.
 
-## Stuck recovery
+## Stuck recovery + WANDER
 
-Per-frame velocity sampling. If the bot has had a goal for >1s with `|v_xy| < 16` and no waypoint progress:
+Position-based sampling. Every 1.5s, if the bot has moved less than 48 units while pursuing a goal:
 
-1. Set `cmd.upmove = cl_upspeed` for 0.25s (jump).
-2. Pick alternative path: ask `nav_path` again with a small random offset from current pos.
-3. After 3 consecutive failures, mark current goal `BOT_STUCK`, force a full replan with the failed target on a 10s cooldown blocklist.
+1. Twist yaw by ±75° (scramble heading).
+2. Set `jump_until = host_time + 0.35s` (jump).
+3. Advance the waypoint or replan from current position.
+4. After 3 consecutive stuck checks, switch to **`BS_WANDER`** for ~6s — a randomized walk that picks a yaw biased ±90° around the last goal direction half the time, fully random the other half. While in WANDER, only `COMBAT` (visible enemy) or a fresh path-bearing alternative can interrupt. After the wander window, return to `IDLE`, which then re-runs goal selection.
+
+While moving along waypoints the drive layer runs a 48-unit forward trace at eye height. If the trace hits something at <0.6 of full distance, the bot adds full sidemove (oscillating left/right by `host_time` parity) and jumps when on ground, so it scrapes along walls rather than mashing into them.
+
+## Give-up timer
+
+`bot_giveup_secs` (default 240s). If the bot has been on the same map this long, it reads the first `trigger_changelevel`'s `map` field and issues `changelevel <next>` (or `restart` if there's no map). This keeps map-traversal testing alive even when the navmesh + reactive wander can't find a route to the exit.
 
 ## Death handling
 
@@ -110,4 +117,9 @@ The bot caches `g_game_api->nav_path` as a function pointer for speed. On hot-re
 
 ## Testing
 
-Manual smoke test: `zig build run -- +map start +set bot 1` and observe. No automated test suite exists in this project (per CLAUDE.md). Verification is by reaching a level transition within ~120s on start.bsp.
+Manual smoke test: `zig build run -- +map start`, then in console `bot 1`. Cvars are archive-persisted so subsequent runs auto-enable.
+
+Verified on 2026-05-26:
+- start.bsp → e1m1: deterministic, navmesh-driven, ~5s.
+- e1m1 → e1m2 → e1m3: via WANDER + give-up timer; bot fights monsters along the way (`ammo` drops in combat) and was last seen pursuing a key on e1m3 in `BS_GOTO_KEY` state.
+- The navmesh `Sim_Nav_PathTo` returns 0 (no path) for many same-map exit queries — likely because the baked graph doesn't span closed doors / locked rooms. WANDER + give-up are the two compensating mechanisms; both are honest about being fallbacks rather than real navigation.
