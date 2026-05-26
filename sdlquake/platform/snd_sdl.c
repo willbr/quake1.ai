@@ -14,8 +14,14 @@ static byte dma_buf[DMA_BUFFER_SAMPLES * 2]; // *2 for 16-bit
 
 volatile dma_t sn;
 
-// Playback cursor in mono samples, advanced by the audio callback
-static volatile int dma_play_pos;
+// Playback cursor in mono samples, advanced by the audio callback and read
+// by the main thread via SNDDMA_GetDMAPos. `volatile` isn't a memory barrier:
+// on ARM the audio thread's reads of shm->buffer and write of dma_play_pos
+// can be reordered, so the main thread can see a fresh cursor before the
+// reads complete and start overwriting samples that the audio thread is
+// still consuming. SDL_AtomicInt operations are seq-cst and ensure the
+// buffer reads are visible before the cursor update.
+static SDL_AtomicInt dma_play_pos;
 
 // ---------------------------------------------------------------------------
 // SDL3 audio stream get-callback
@@ -37,7 +43,7 @@ static void audio_get_callback(void *userdata, SDL_AudioStream *stream,
         needed = total_buf_bytes;
 
     byte scratch[4096];
-    int pos_bytes = dma_play_pos * bytes_per_sample;
+    int pos_bytes = SDL_GetAtomicInt(&dma_play_pos) * bytes_per_sample;
 
     while (needed > 0)
     {
@@ -53,8 +59,9 @@ static void audio_get_callback(void *userdata, SDL_AudioStream *stream,
         needed -= chunk;
     }
 
-    dma_play_pos = pos_bytes / bytes_per_sample;
-    shm->samplepos = dma_play_pos;
+    int new_pos = pos_bytes / bytes_per_sample;
+    SDL_SetAtomicInt(&dma_play_pos, new_pos);
+    shm->samplepos = new_pos;  // debug mirror; unread by the mixer
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +85,7 @@ qboolean SNDDMA_Init(void)
     shm->splitbuffer    = false;
 
     memset(dma_buf, 0, sizeof(dma_buf));
-    dma_play_pos = 0;
+    SDL_SetAtomicInt(&dma_play_pos, 0);
 
     if (sys_headless)
     {
@@ -115,7 +122,7 @@ qboolean SNDDMA_Init(void)
 int SNDDMA_GetDMAPos(void)
 {
     if (!shm) return 0;
-    return dma_play_pos;
+    return SDL_GetAtomicInt(&dma_play_pos);
 }
 
 void SNDDMA_Submit(void) {}  // pull-callback model; nothing to submit
