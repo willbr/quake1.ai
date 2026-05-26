@@ -447,10 +447,62 @@ static void R_OverlayStain (void)
 	// surface pixels = 1 << STAIN_CELL_SHIFT. Mip n halves surface resolution.
 	// At shift==0 (1u cells at mip 0) the bilinear degenerates cleanly:
 	// mask=0, fx=fy=0, so the interp formula collapses to nearest-neighbour
-	// — each surface pixel samples exactly its own cell, no halo. Negative
-	// shift (cells smaller than the surface pixel at this mip) clamps to 0.
+	// — each surface pixel samples exactly its own cell, no halo.
 	shift = STAIN_CELL_SHIFT - mip;
-	if (shift < 0) shift = 0;
+	if (shift < 0) {
+		// Mip is finer than the stain grid (1u cells, mip>=1): each
+		// surface pixel covers a 2^|shift| × 2^|shift| block of stain
+		// cells. Naively sampling 1 cell per surface pixel would skip
+		// most of the block and a small decal (e.g. a 3x3 spatter) can
+		// disappear entirely between samples as the camera crosses a
+		// mip boundary. Pick the strongest cell in the block per
+		// channel — preserves visibility without averaging the decal
+		// down toward zero.
+		int     block_shift = -shift;
+		int     block_sz    = 1 << block_shift;
+		for (py = 0; py < h; py++) {
+			int v0 = py << block_shift;
+			int v1 = v0 + block_sz;
+			if (v1 > st->tmax) v1 = st->tmax;
+			if (v0 >= st->tmax) continue;
+			for (px = 0; px < w; px++) {
+				int  u0 = px << block_shift;
+				int  u1 = u0 + block_sz;
+				int  sr = 0, sg = 0, sb = 0;
+				int  uu, vv;
+				byte base_idx;
+				int  r, g, b;
+				if (u1 > st->smax) u1 = st->smax;
+				if (u0 >= st->smax) continue;
+				for (vv = v0; vv < v1; vv++) {
+					int row = vv * st->smax;
+					for (uu = u0; uu < u1; uu++) {
+						int idx = (row + uu) * 3;
+						int cr  = (int)st->rgb[idx + 0];
+						int cg  = (int)st->rgb[idx + 1];
+						int cb  = (int)st->rgb[idx + 2];
+						if ((cr < 0 ? -cr : cr) > (sr < 0 ? -sr : sr)) sr = cr;
+						if ((cg < 0 ? -cg : cg) > (sg < 0 ? -sg : sg)) sg = cg;
+						if ((cb < 0 ? -cb : cb) > (sb < 0 ? -sb : sb)) sb = cb;
+					}
+				}
+				if ((sr | sg | sb) == 0) continue;
+				sr = (sr * ks) >> 8;
+				sg = (sg * ks) >> 8;
+				sb = (sb * ks) >> 8;
+				base_idx = dest[py * w + px];
+				r = (int)basepal_r[base_idx] + sr;
+				g = (int)basepal_g[base_idx] + sg;
+				b = (int)basepal_b[base_idx] + sb;
+				if (r < 0)   r = 0;   else if (r > 255) r = 255;
+				if (g < 0)   g = 0;   else if (g > 255) g = 255;
+				if (b < 0)   b = 0;   else if (b > 255) b = 255;
+				dest[py * w + px] = rgbtable[((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2)];
+			}
+		}
+		st->last_touched_frame = r_framecount;
+		return;
+	}
 	mask  = (1 << shift) - 1;
 
 	for (py = 0; py < h; py++)
