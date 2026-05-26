@@ -1273,19 +1273,20 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 	// surface hue. Picked from the bright end of each kind's natural ramp:
 	// cyan-white for water, light green for slime, bright orange for lava.
 	// Highlight base, span, and rate per kind. Slime/lava sit at the bright
-	// end of 8-wide hue ramps (molten splashes are meant to glow). Water's
-	// foam ramp is only three indices (244 #7fbfff mid cyan, 245 #abe7ff
-	// light cyan, 246 #d7ffff near-white) — the palette steps brightness
-	// sharply in this range, so we restrict water to the dimmest two and
-	// halve the highlight rate so foam dots don't read as screen-melting
-	// against muted water textures. Index 247 is #670000 (start of blood
-	// ramp), not cyan — `& 3` previously included it and emitted dark-red
-	// "foam" specks; the modulo-`highlight_span` keeps us inside the foam.
+	// end of 8-wide hue ramps (molten splashes are meant to glow). Water
+	// has no usable highlight: the only cyan in the palette is 244..246
+	// (luminance 191..242), all screen-melting against muted water
+	// textures (~50..80). The blue-purple ramp at 32..47 is too saturated
+	// to read as "lighter than water." So water emits no highlight at all
+	// — `highlight_span = 0` makes the spawn loop fall through to the
+	// texture-sampled path for every droplet. The splash still reads
+	// because the texture-sample picks slightly varying hues across the
+	// surface, with the density of droplets providing the visual punch.
 	int highlight_base, highlight_span, highlight_mask;
 	switch (kind) {
 	case 1:  highlight_base = 180; highlight_span = 4; highlight_mask = 3; break; // slime: 180..183, 1/4 rate
 	case 2:  highlight_base = 236; highlight_span = 4; highlight_mask = 3; break; // lava: 236..239, 1/4 rate
-	default: highlight_base = 244; highlight_span = 2; highlight_mask = 7; break; // water: 244..245 only, 1/8 rate
+	default: highlight_base = 0;   highlight_span = 0; highlight_mask = 3; break; // water: no highlight
 	}
 
 	liq_surf = R_FindLiquidSurface (org);
@@ -1339,10 +1340,12 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 		// PARTFL_LIQUID_SURF check.
 		p->birth = org[2];
 		// Foam highlight — bright, kind-specific. Rate is per-kind via
-		// highlight_mask (1/4 for slime/lava, 1/8 for water). The rest
-		// sample the actual surface texture so the splash still belongs
-		// to the pool it came from.
-		if ((rand() & highlight_mask) == 0) {
+		// highlight_mask (1/4 for slime/lava). `highlight_span == 0`
+		// disables the highlight entirely (water — no usable cyan in
+		// the palette that isn't screen-melting). The rest sample the
+		// actual surface texture so the splash still belongs to the
+		// pool it came from.
+		if (highlight_span > 0 && (rand() & highlight_mask) == 0) {
 			p->color = highlight_base + (rand() % highlight_span);
 		} else if (liq_pixels) {
 			// Sample the actual surface texture with ±4 texel jitter so
