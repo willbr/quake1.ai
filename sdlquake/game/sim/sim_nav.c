@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    16
+#define NAV_VERSION    17
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -329,6 +329,18 @@ static void entity_center(edict_t *e, vec3_t out) {
     out[0] = e->v.origin[0] + (e->v.mins[0] + e->v.maxs[0]) * 0.5f;
     out[1] = e->v.origin[1] + (e->v.mins[1] + e->v.maxs[1]) * 0.5f;
     out[2] = e->v.origin[2] + (e->v.mins[2] + e->v.maxs[2]) * 0.5f;
+}
+
+// Player-bbox sweep between two navmesh-node positions. Returns 1 if the
+// path is clear, 0 if a wall / brush / closed door is in the way. Used by
+// Phase 4.5 to reject distance-only links that would otherwise tunnel
+// through level geometry (the failure mode that draws a navmesh edge
+// straight across a wall in the debug overlay).
+static int trace_link_clear(const vec3_t a, const vec3_t b) {
+    vec3_t mins = { -16.0f, -16.0f, -24.0f };
+    vec3_t maxs = {  16.0f,  16.0f,  32.0f };
+    eng->SV_TraceMove((float *)a, mins, maxs, (float *)b, 1, NULL);
+    return g->trace_fraction >= 0.999f;
 }
 
 // ---------------------------------------------------------------------------
@@ -1065,6 +1077,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
             float dz = m->points[p].pos[2] - m->points[top_idx].pos[2];
             if (dx*dx + dy*dy > r_xy2) continue;
             if (dz < -r_z || dz > r_z) continue;
+            if (!trace_link_clear(m->points[top_idx].pos, m->points[p].pos)) continue;
             float w = sqrtf(dx*dx + dy*dy) + 1.f;
             add_edge(m, &cap_edges, p, top_idx, w, NAV_EDGE_PLAT_LINK, 0);
             add_edge(m, &cap_edges, top_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
@@ -1082,6 +1095,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 float dz = m->points[p].pos[2] - m->points[bot_idx].pos[2];
                 if (dx*dx + dy*dy > r_xy2) continue;
                 if (dz < -r_z || dz > r_z) continue;
+                if (!trace_link_clear(m->points[bot_idx].pos, m->points[p].pos)) continue;
                 float w = sqrtf(dx*dx + dy*dy) + 1.f;
                 add_edge(m, &cap_edges, p, bot_idx, w, NAV_EDGE_PLAT_LINK, 0);
                 add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
@@ -1149,6 +1163,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 float dz = m->points[p].pos[2] - m->points[bot_idx].pos[2];
                 if (dx*dx + dy*dy > r_xy2) continue;
                 if (dz < -r_z || dz > r_z) continue;
+                if (!trace_link_clear(m->points[bot_idx].pos, m->points[p].pos)) continue;
                 float w = sqrtf(dx*dx + dy*dy) + 1.f;
                 add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
                 disembark_edges++;
