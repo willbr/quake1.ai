@@ -1293,6 +1293,33 @@ static void tool_nav_edges_near(const char *id_json, const char *args)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: nav_bake_phases -- enumerate NAV_PHASE_* tags so MCP clients can
+// map id<->name without reading sim_nav.c. Hard-coded mirror of the enum
+// in sdlquake/game/sim/sim_nav.c; keep in sync.
+// ---------------------------------------------------------------------------
+
+static void tool_nav_bake_phases(const char *id_json)
+{
+    static const char *raw =
+        "{\"phases\":["
+          "{\"id\":0,\"name\":\"BFS_WALK\",\"source\":\"Phase 3\"},"
+          "{\"id\":1,\"name\":\"JUMP_DROP\",\"source\":\"Phase 3.5\"},"
+          "{\"id\":2,\"name\":\"TELE_SRC\",\"source\":\"Phase 4\"},"
+          "{\"id\":3,\"name\":\"TELE_NEAR\",\"source\":\"Phase 4\"},"
+          "{\"id\":4,\"name\":\"LIFT_RIDE\",\"source\":\"Phase 4.5\"},"
+          "{\"id\":5,\"name\":\"LIFT_PLAT_LINK\",\"source\":\"Phase 4.5\"},"
+          "{\"id\":6,\"name\":\"LIFT_BUTTON_SHOOT\",\"source\":\"Phase 4.5\"}"
+        "]}";
+
+    char escaped[1024];
+    char *d = escaped;
+    char *dend = escaped + sizeof(escaped) - 1;
+    d = json_escape_append(d, dend, raw);
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
 // Tool: damage_entity -- deterministically apply damage to an edict.
 // Routes through game_api->damage_entity, which thunks into T_Damage with
 // the world as inflictor/attacker so corpse-overdamage and gib branches fire
@@ -1668,6 +1695,10 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
            "\"z\":{\"type\":\"number\"}," \
            "\"radius\":{\"type\":\"number\",\"description\":\"world units; > 0\"}}," \
          "\"required\":[\"x\",\"y\",\"z\",\"radius\"]}}" \
+      "," \
+      "{\"name\":\"nav_bake_phases\"," \
+       "\"description\":\"Enumerate the seven NAV_PHASE_* tags emitted by the navmesh bake (id, name, source phase comment). Returned by the nav_edges_near tool as the `phase` field. Pair with sim_nav_debug_phase_mask cvar to isolate a phase in the overlay (bit N = phase N).\"," \
+       "\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"required\":[]}}" \
     "]}"
 
 // ---------------------------------------------------------------------------
@@ -1838,6 +1869,10 @@ static void mcp_dispatch(const char *line)
         {
             const char *args = strstr(line, "\"arguments\":");
             tool_nav_edges_near(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "nav_bake_phases") == 0)
+        {
+            tool_nav_bake_phases(id_json);
         }
         else
         {
