@@ -25,6 +25,11 @@ void Crop_Exit(void);
    reports 0 — the modal isn't yet capturing input. */
 int  Crop_Active(void);
 
+/* OR'd into host.c's SV_Physics gate (alongside sv.paused / Editor_IsPaused).
+   Returns 1 from Crop_Enter through Crop_Exit so the simulation freezes
+   for the whole crop session — cl.paused alone doesn't gate physics. */
+int  Crop_IsPaused(void);
+
 /* 1 during the one-frame window after Crop_Enter and before
    Crop_FrameStart performs the snapshot. Used by chrome drawers
    (e.g. SCR_DrawPause) to skip themselves so the captured frame

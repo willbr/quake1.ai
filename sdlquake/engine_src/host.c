@@ -34,6 +34,10 @@ extern void Editor_Shutdown    (void);
 extern int  Editor_IsPaused    (void);
 extern int  Editor_AllowGameInput(void);
 
+// Rect-screenshot session also freezes the sim — cl.paused alone doesn't
+// gate SV_Physics. Defined in platform/crop_screenshot.c.
+extern int  Crop_IsPaused      (void);
+
 // Hot-reload DLL handle. host.c already reaches into g_game_api->client_*
 // elsewhere via the transitive game_api.h include from progs.h.
 extern game_api_t *g_game_api;
@@ -584,7 +588,7 @@ void _Host_ServerFrame (void)
 // (Editor_AllowGameInput is the FPS-mode look-mode bypass — when set, the
 // player is actively driving the camera and physics should run even with
 // the editor UI up.)
-	if (!sv.paused && !Editor_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))) )
+	if (!sv.paused && !Editor_IsPaused() && !Crop_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))) )
 		SV_Physics ();
 }
 
@@ -639,7 +643,7 @@ void Host_ServerFrame (void)
 // (Editor_AllowGameInput is the FPS-mode look-mode bypass — when set, the
 // player is actively driving the camera and physics should run even with
 // the editor UI up.)
-	if (!sv.paused && !Editor_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))) )
+	if (!sv.paused && !Editor_IsPaused() && !Crop_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))) )
 		SV_Physics ();
 
 // send all messages to the clients
