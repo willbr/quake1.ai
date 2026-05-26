@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    8
+#define NAV_VERSION    9
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -109,9 +109,24 @@ typedef struct {
     int    kind;   // NAV_NODE_*
 } nav_point_t;
 
+// Per-edge traversal type. The bot uses this to decide what input to
+// produce (press jump for NAV_EDGE_JUMP_UP, stand on lift for
+// NAV_EDGE_PLAT_RIDE, etc.).
+enum {
+    NAV_EDGE_WALK       = 0,
+    NAV_EDGE_JUMP_UP    = 1,
+    NAV_EDGE_DROP_DOWN  = 2,
+    NAV_EDGE_PLAT_RIDE  = 3,
+    NAV_EDGE_TELEPORT   = 4,
+    NAV_EDGE_PLAT_LINK  = 5,   // walk on/off a lift's standing position
+};
+
 typedef struct {
-    int   from, to;
-    float weight;
+    int      from, to;
+    float    weight;
+    unsigned char kind;        // NAV_EDGE_*
+    unsigned char _pad[3];
+    unsigned int  requires_items;  // bitmask matched against player.items
 } nav_edge_t;
 
 struct sim_navmesh_s {
@@ -232,7 +247,8 @@ static int add_point(sim_navmesh_t *m, int *cap, grid_t *grd, const vec3_t pos) 
     return idx;
 }
 
-static int add_edge(sim_navmesh_t *m, int *cap, int from, int to, float weight) {
+static int add_edge(sim_navmesh_t *m, int *cap, int from, int to,
+                    float weight, unsigned char kind, unsigned int req_items) {
     if (m->edge_count >= *cap) {
         int nc = *cap ? *cap * 2 : 1024;
         nav_edge_t *e = realloc(m->edges, sizeof(nav_edge_t) * nc);
@@ -244,6 +260,9 @@ static int add_edge(sim_navmesh_t *m, int *cap, int from, int to, float weight) 
     e->from   = from;
     e->to     = to;
     e->weight = weight;
+    e->kind   = kind;
+    e->_pad[0] = e->_pad[1] = e->_pad[2] = 0;
+    e->requires_items = req_items;
     return 1;
 }
 
@@ -746,7 +765,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
             float ez = m->points[next_idx].pos[2] - cur_pos[2];
             float w  = (float)sqrt(ex*ex + ey*ey + ez*ez);
             if (w < 1.0f) w = 1.0f;
-            add_edge(m, &cap_edges, cur, next_idx, w);
+            add_edge(m, &cap_edges, cur, next_idx, w, NAV_EDGE_WALK, 0);
         }
     }
 
@@ -803,7 +822,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
 
             float dist = (float)sqrt(xy*xy + dz*dz);
             float bias = (kind == 1) ? JUMP_COST_BIAS : DROP_COST_BIAS;
-            add_edge(m, &cap_edges, i, j, dist + bias);
+            unsigned char edge_k = (kind == 1) ? NAV_EDGE_JUMP_UP : NAV_EDGE_DROP_DOWN;
+            add_edge(m, &cap_edges, i, j, dist + bias, edge_k, 0);
             if (kind == 1) jump_edges_added++;
             else           drop_edges_added++;
         }
@@ -839,7 +859,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
 
         if (anchors[i].node_index >= 0) {
             // Source seated normally — single edge.
-            add_edge(m, &cap_edges, anchors[i].node_index, dst_node, 0.0f);
+            add_edge(m, &cap_edges, anchors[i].node_index, dst_node, 0.0f,
+                     NAV_EDGE_TELEPORT, 0);
             teleport_edges++;
             continue;
         }
@@ -864,7 +885,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
             if (px < xmin || px > xmax) continue;
             if (py < ymin || py > ymax) continue;
             if (pz < zmin - z_slack || pz > zmax) continue;
-            add_edge(m, &cap_edges, p, dst_node, 0.0f);
+            add_edge(m, &cap_edges, p, dst_node, 0.0f, NAV_EDGE_TELEPORT, 0);
             // Tag the node so debug viz colour-codes it; the anchor
             // was unseated but in effect this point IS the source.
             if (m->points[p].kind < NAV_NODE_TELEPORT_SRC)
@@ -916,8 +937,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
         float ride_dz = m->points[top_idx].pos[2] - m->points[bot_idx].pos[2];
         if (ride_dz < 0) ride_dz = -ride_dz;
         float ride_cost = ride_dz + 32.0f;
-        add_edge(m, &cap_edges, top_idx, bot_idx, ride_cost);
-        add_edge(m, &cap_edges, bot_idx, top_idx, ride_cost);
+        add_edge(m, &cap_edges, top_idx, bot_idx, ride_cost, NAV_EDGE_PLAT_RIDE, 0);
+        add_edge(m, &cap_edges, bot_idx, top_idx, ride_cost, NAV_EDGE_PLAT_RIDE, 0);
         plat_ride_edges += 2;
 
         // Link top/bottom anchors to floor nodes near their XY, at a
@@ -951,8 +972,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
             if (dx*dx + dy*dy > r_xy2) continue;
             if (dz < -r_z || dz > r_z) continue;
             float w = sqrtf(dx*dx + dy*dy) + 1.f;
-            add_edge(m, &cap_edges, p, top_idx, w);
-            add_edge(m, &cap_edges, top_idx, p, w);
+            add_edge(m, &cap_edges, p, top_idx, w, NAV_EDGE_PLAT_LINK, 0);
+            add_edge(m, &cap_edges, top_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
             plat_link_edges += 2;
         }
 
@@ -968,8 +989,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 if (dx*dx + dy*dy > r_xy2) continue;
                 if (dz < -r_z || dz > r_z) continue;
                 float w = sqrtf(dx*dx + dy*dy) + 1.f;
-                add_edge(m, &cap_edges, p, bot_idx, w);
-                add_edge(m, &cap_edges, bot_idx, p, w);
+                add_edge(m, &cap_edges, p, bot_idx, w, NAV_EDGE_PLAT_LINK, 0);
+                add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0);
                 plat_link_edges += 2;
             }
         } else {
@@ -989,7 +1010,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                             // edge back the other way: once you've ridden
                             // up you don't go back via the button.
                             add_edge(m, &cap_edges, anchors[k].node_index,
-                                     bot_idx, 16.0f);
+                                     bot_idx, 16.0f, NAV_EDGE_PLAT_LINK, 0);
                             button_links++;
                             break;
                         }
@@ -1011,6 +1032,64 @@ static int bake_floodfill(sim_navmesh_t *m) {
             "sim_nav: lifts: %d ride edges + %d floor-link edges\n",
             plat_ride_edges, plat_link_edges);
         eng->Con_Print(buf);
+    }
+
+    // --- Phase 4.6: key-locked door tagging ------------------------------
+    // For each func_door (and func_door_secret) whose .items field is set,
+    // tag every edge crossing the door's absolute bbox with that item
+    // bitmask. A* will skip such edges unless the player carries the key.
+    {
+        int locked_edges_tagged = 0;
+        edict_t *de = eng->ED_Next(g->world);
+        while (de) {
+            const char *cn = de->v.classname;
+            if (cn && (!strcmp(cn, "func_door") || !strcmp(cn, "func_door_secret"))
+                && de->v.items != 0)
+            {
+                unsigned int req = (unsigned int)de->v.items;
+                float xmn = de->v.origin[0] + de->v.mins[0] - 8;
+                float ymn = de->v.origin[1] + de->v.mins[1] - 8;
+                float zmn = de->v.origin[2] + de->v.mins[2] - 8;
+                float xmx = de->v.origin[0] + de->v.maxs[0] + 8;
+                float ymx = de->v.origin[1] + de->v.maxs[1] + 8;
+                float zmx = de->v.origin[2] + de->v.maxs[2] + 8;
+                for (int k = 0; k < m->edge_count; k++) {
+                    nav_edge_t *e = &m->edges[k];
+                    float ax = m->points[e->from].pos[0];
+                    float ay = m->points[e->from].pos[1];
+                    float az = m->points[e->from].pos[2];
+                    float bx = m->points[e->to].pos[0];
+                    float by = m->points[e->to].pos[1];
+                    float bz = m->points[e->to].pos[2];
+                    float mx = (ax + bx) * 0.5f;
+                    float my = (ay + by) * 0.5f;
+                    float mz = (az + bz) * 0.5f;
+                    // Edge counts as door-crossing if its midpoint lies
+                    // within the (slightly expanded) door bbox, OR if
+                    // either endpoint does. (Cheap aabb test rather
+                    // than a full segment-vs-aabb intersection.)
+                    int hit = 0;
+                    if (mx >= xmn && mx <= xmx && my >= ymn && my <= ymx &&
+                        mz >= zmn && mz <= zmx) hit = 1;
+                    else if (ax >= xmn && ax <= xmx && ay >= ymn && ay <= ymx &&
+                             az >= zmn && az <= zmx) hit = 1;
+                    else if (bx >= xmn && bx <= xmx && by >= ymn && by <= ymx &&
+                             bz >= zmn && bz <= zmx) hit = 1;
+                    if (hit) {
+                        e->requires_items |= req;
+                        locked_edges_tagged++;
+                    }
+                }
+            }
+            de = eng->ED_Next(de);
+        }
+        if (locked_edges_tagged > 0) {
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                "sim_nav: %d edges tagged with key requirements\n",
+                locked_edges_tagged);
+            eng->Con_Print(buf);
+        }
     }
 
     {
@@ -1335,7 +1414,10 @@ static pq_entry_t pq_pop(pq_entry_t *h, int *n) {
     return r;
 }
 
-int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out) {
+int Sim_Nav_PathTo(const vec3_t from, const vec3_t to,
+                   vec3_t *out, unsigned char *out_kinds,
+                   unsigned int player_items, int max_out)
+{
     if (!s_mesh || !s_ready) return 0;
     int start = nearest_point(s_mesh, from);
     int goal  = nearest_point(s_mesh, to);
@@ -1345,6 +1427,7 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
             out[0][0] = s_mesh->points[goal].pos[0];
             out[0][1] = s_mesh->points[goal].pos[1];
             out[0][2] = s_mesh->points[goal].pos[2];
+            if (out_kinds) out_kinds[0] = NAV_EDGE_WALK;
         }
         return 1;
     }
@@ -1355,14 +1438,17 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
     float *gscore = malloc(sizeof(float) * N);
     float *fscore = malloc(sizeof(float) * N);
     int   *came   = malloc(sizeof(int)   * N);
+    unsigned char *came_kind = malloc(N);
     char  *closed = calloc(N, 1);
     pq_entry_t *heap = malloc(sizeof(pq_entry_t) * heap_cap);
     int    heap_n = 0;
-    if (!gscore || !fscore || !came || !closed || !heap) {
-        free(gscore); free(fscore); free(came); free(closed); free(heap);
+    if (!gscore || !fscore || !came || !came_kind || !closed || !heap) {
+        free(gscore); free(fscore); free(came); free(came_kind); free(closed); free(heap);
         return 0;
     }
-    for (int i = 0; i < N; i++) { gscore[i] = 1e18f; fscore[i] = 1e18f; came[i] = -1; }
+    for (int i = 0; i < N; i++) {
+        gscore[i] = 1e18f; fscore[i] = 1e18f; came[i] = -1; came_kind[i] = NAV_EDGE_WALK;
+    }
 
     gscore[start] = 0;
     fscore[start] = dist3(s_mesh->points[start].pos, s_mesh->points[goal].pos);
@@ -1380,11 +1466,15 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
         int o1 = s_mesh->adj_offsets[cur + 1];
         for (int k = o0; k < o1; k++) {
             const nav_edge_t *e = &s_mesh->edges[s_mesh->adj[k]];
+            // Locked-edge filter: skip if any required item bit is
+            // missing from the caller's item set.
+            if (e->requires_items & ~player_items) continue;
             int nb = e->to;
             if (closed[nb]) continue;
             float tentative = gscore[cur] + e->weight;
             if (tentative < gscore[nb]) {
-                came[nb]   = cur;
+                came[nb]      = cur;
+                came_kind[nb] = e->kind;
                 gscore[nb] = tentative;
                 fscore[nb] = tentative + dist3(s_mesh->points[nb].pos, s_mesh->points[goal].pos);
                 pq_push(heap, &heap_n, fscore[nb], nb);
@@ -1402,10 +1492,16 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to, vec3_t *out, int max_out)
             out[written][0] = s_mesh->points[tmp[i]].pos[0];
             out[written][1] = s_mesh->points[tmp[i]].pos[1];
             out[written][2] = s_mesh->points[tmp[i]].pos[2];
+            // came_kind[node] is the kind of the edge that LED to that
+            // node. The first emitted waypoint (start) has no incoming
+            // edge, so report WALK there.
+            if (out_kinds) {
+                out_kinds[written] = (i == tn - 1) ? NAV_EDGE_WALK : came_kind[tmp[i]];
+            }
             written++;
         }
     }
 
-    free(gscore); free(fscore); free(came); free(closed); free(heap);
+    free(gscore); free(fscore); free(came); free(came_kind); free(closed); free(heap);
     return written;
 }

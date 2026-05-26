@@ -125,11 +125,17 @@ void           Sim_Nav_Frame(void);                     // debug draw if sim_nav
 int            Sim_Nav_IsReady(void);                   // 0 while baking
 sim_navmesh_t *Sim_Nav_Get(void);                       // NULL if not ready
 
-// Path query: fills out[] with up to max_out vec3 waypoints.
+// Path query: fills out[] with up to max_out vec3 waypoints and (if
+// non-NULL) out_kinds[] with each waypoint's entry-edge kind
+// (NAV_EDGE_*). player_items is bitmasked against each edge's
+// requires_items: edges whose required-item bits aren't a subset of
+// player_items are skipped (key-locked doors).
 // Returns the number of waypoints written, or 0 if no path.
 int Sim_Nav_PathTo(const vec3_t from,
                    const vec3_t to,
                    vec3_t *out,
+                   unsigned char *out_kinds,
+                   unsigned int player_items,
                    int max_out);
 
 // ---------------------------------------------------------------------------

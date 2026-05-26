@@ -394,7 +394,7 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         // Plan (or replan) the navmesh path to the current node.
         if (b->path_len == 0 || b->path_idx >= b->path_len) {
             b->path_len = Sim_Nav_PathTo(e->v.origin, node->v.origin,
-                                         b->path_pts, 32);
+                                         b->path_pts, NULL, 0u, 32);
             b->path_idx = 0;
             if (b->path_len == 0) {
                 // No graph path -- stand and face the node; let vanilla
@@ -425,7 +425,7 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         if (g->time > b->path_replan_time) {
             b->path_replan_time = g->time + 2.0f;
             b->path_len = Sim_Nav_PathTo(e->v.origin, b->last_known_pos,
-                                         b->path_pts, 32);
+                                         b->path_pts, NULL, 0u, 32);
             b->path_idx = 0;
         }
         if (b->path_len == 0) {

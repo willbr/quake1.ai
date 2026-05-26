@@ -33,6 +33,18 @@ typedef enum {
 #define BOT_MAX_WAYPOINTS 32
 #define BOT_BLOCKLIST_MAX 16
 
+// Kept in sync with sim_nav.c's NAV_EDGE_* enum. Used to mirror the
+// edge type for each waypoint so the drive layer can press jump for
+// jump-up edges, wait on lifts, etc.
+enum {
+    BOT_EDGE_WALK       = 0,
+    BOT_EDGE_JUMP_UP    = 1,
+    BOT_EDGE_DROP_DOWN  = 2,
+    BOT_EDGE_PLAT_RIDE  = 3,
+    BOT_EDGE_TELEPORT   = 4,
+    BOT_EDGE_PLAT_LINK  = 5,
+};
+
 typedef struct {
     int    edict_index;     // -1 == positional goal (no edict pin)
     float  cooldown_until;  // host_time when re-eligible
@@ -43,6 +55,7 @@ static struct {
     int          target_edict;     // current goal edict, or -1
     vec3_t       target_pos;       // either edict origin or static (exit center)
     vec3_t       waypoints[BOT_MAX_WAYPOINTS];
+    unsigned char waypoint_kinds[BOT_MAX_WAYPOINTS];  // entry-edge kind per waypoint
     int          waypoint_count;
     int          waypoint_idx;
     float        waypoint_started; // host_time when current waypoint became active
@@ -205,9 +218,14 @@ static void Bot_EntityCenter(edict_t *e, vec3_t out)
 static int Bot_RequestPath(const vec3_t to)
 {
     int n;
+    unsigned int items;
     if (!g_game_api || !g_game_api->nav_path) return 0;
+    items = (unsigned int)sv_player->v.items;
     n = g_game_api->nav_path((float *)sv_player->v.origin, (float *)to,
-                             (float *)b.waypoints, BOT_MAX_WAYPOINTS);
+                             (float *)b.waypoints,
+                             b.waypoint_kinds,
+                             items,
+                             BOT_MAX_WAYPOINTS);
     if (n <= 0) {
         b.waypoint_count = 0;
         b.waypoint_idx = 0;
@@ -216,6 +234,13 @@ static int Bot_RequestPath(const vec3_t to)
     b.waypoint_count = n;
     b.waypoint_idx = 0;
     return 1;
+}
+
+static int Bot_CurrentWaypointKind(void)
+{
+    if (b.waypoint_count <= 0 || b.waypoint_idx >= b.waypoint_count)
+        return BOT_EDGE_WALK;
+    return b.waypoint_kinds[b.waypoint_idx];
 }
 
 // ---------------------------------------------------------------------------
@@ -594,13 +619,26 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         // off the platform.
         {
             const float *wp = Bot_CurrentWaypoint();
+            int kind = Bot_CurrentWaypointKind();
             if (wp) {
                 float dx = wp[0] - sv_player->v.origin[0];
                 float dy = wp[1] - sv_player->v.origin[1];
                 float dz = wp[2] - sv_player->v.origin[2];
-                if (dx*dx + dy*dy < (32.f*32.f) && dz > 64.f) {
+                float xy2 = dx*dx + dy*dy;
+                if (xy2 < (32.f*32.f) && dz > 64.f) {
                     cmd->forwardmove = 0;
                     cmd->sidemove = 0;
+                }
+                // Jump-up edge: press jump as we close on the ledge.
+                // Trigger when within ~64u xy and the dz is between
+                // +18 and +48 (the playable jump-up band). Hold for
+                // one frame; clear afterwards so the edge-trigger
+                // can re-fire later.
+                if (kind == BOT_EDGE_JUMP_UP &&
+                    xy2 < (64.f*64.f) && dz > 18.f && dz < 48.f &&
+                    sv_player->v.flags && ((int)sv_player->v.flags & FL_ONGROUND))
+                {
+                    do_jump = 1;
                 }
             }
         }
@@ -754,13 +792,21 @@ static void Bot_DrawDebug(void)
     eye[1] = sv_player->v.origin[1];
     eye[2] = sv_player->v.origin[2] + sv_player->v.view_ofs[2];
 
-    // Waypoint chain (cyan = 244, falls within the Quake palette).
-    for (i = b.waypoint_idx; i + 1 < b.waypoint_count; i++) {
-        DebugLines_Add(b.waypoints[i], b.waypoints[i+1], 244, 0);
-    }
-    // First waypoint from eye.
-    if (b.waypoint_count > 0 && b.waypoint_idx < b.waypoint_count) {
-        DebugLines_Add(eye, b.waypoints[b.waypoint_idx], 244, 0);
+    // Waypoint chain — colour by the edge kind entering each waypoint.
+    // 244 cyan = walk, 251 red = jump-up, 79 green = drop, 192 yellow =
+    // plat-ride, 13 white = teleport, 254 magenta = plat-link.
+    {
+        static const int kind_color[6] = { 244, 251, 79, 192, 13, 254 };
+        for (i = b.waypoint_idx; i + 1 < b.waypoint_count; i++) {
+            int k = b.waypoint_kinds[i+1];
+            if (k < 0 || k >= 6) k = 0;
+            DebugLines_Add(b.waypoints[i], b.waypoints[i+1], kind_color[k], 0);
+        }
+        if (b.waypoint_count > 0 && b.waypoint_idx < b.waypoint_count) {
+            int k = b.waypoint_kinds[b.waypoint_idx];
+            if (k < 0 || k >= 6) k = 0;
+            DebugLines_Add(eye, b.waypoints[b.waypoint_idx], kind_color[k], 0);
+        }
     }
 
     // Target marker — small red (251) cross at target_pos when goal active.
