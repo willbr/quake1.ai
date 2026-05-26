@@ -27,6 +27,15 @@
  *     thread does not touch them while a bake is in flight.
  *   - The result handoff is via worker-owned heap buffers + a single
  *     SDL_AtomicInt flag, so no shared-mutable-state aliasing.
+ *   - First-bake-only race: until the first apply_snapshot fires,
+ *     mod->lightdata still points at qbsp's dlightdata, which LIGHT is
+ *     mutating in place during the bake. Renderer reads of surf->samples
+ *     can pick up half-written bytes for as long as that first bake
+ *     runs. The visible effect is a one-frame flicker on a freshly
+ *     compiled map — no crash. Subsequent bakes repoint mod->lightdata
+ *     to s_live_lightdata, which is only written from the main thread
+ *     inside apply_snapshot, so the race is gone after the first apply.
+ *     We accept the first-frame artifact rather than block the renderer.
  */
 
 #include "quakedef.h"
