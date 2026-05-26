@@ -1,5 +1,10 @@
 // bot.c -- self-driving player. Reads the live server state and writes
 // the outgoing usercmd_t each frame, replacing keyboard/mouse input.
+//
+// The bot is strictly navmesh-driven: it picks a goal, asks for a path,
+// and walks waypoints. There is no fallback / reactive recovery — if
+// the navmesh says "no path" the bot just stands still, which is the
+// behaviour we want while iterating on the navmesh itself.
 
 #include "quakedef.h"
 #include "hotreload.h"      // g_game_api
@@ -16,16 +21,6 @@ cvar_t bot_turn_speed   = { "bot_turn_speed",   "540" };
 cvar_t bot_combat_dist  = { "bot_combat_dist",  "768" };
 cvar_t bot_debug        = { "bot_debug",        "0", true };
 cvar_t bot_debug_viz    = { "bot_debug_viz",    "0", true };
-// If the bot can't reach an exit within this many seconds, force a
-// changelevel to keep map-traversal testing alive. 0 disables.
-cvar_t bot_giveup_secs  = { "bot_giveup_secs",  "240", true };
-// When 0 (default), the bot will NOT try to recover from being stuck:
-// no random wander, no yaw-scramble, no wall-avoidance sidemove, no
-// idle-to-wander promotion. The bot just stands still when its path
-// fails, which is what you want while iterating on the navmesh — the
-// debug viz then shows you exactly where A* led the bot astray. Flip
-// to 1 to re-enable the reactive fallback behaviour.
-cvar_t bot_unstuck      = { "bot_unstuck",      "0", true };
 
 typedef enum {
     BS_IDLE = 0,
@@ -33,16 +28,13 @@ typedef enum {
     BS_GOTO_ITEM,
     BS_GOTO_KEY,
     BS_GOTO_EXIT,
-    BS_WANDER,    // randomized exploration when no path available
     BS_DEAD,
 } bot_state_t;
 
 #define BOT_MAX_WAYPOINTS 32
-#define BOT_BLOCKLIST_MAX 16
 
-// Kept in sync with sim_nav.c's NAV_EDGE_* enum. Used to mirror the
-// edge type for each waypoint so the drive layer can press jump for
-// jump-up edges, wait on lifts, etc.
+// Kept in sync with sim_nav.c's NAV_EDGE_* enum. The drive layer uses
+// this to press jump for jump-up edges and wait on plat-ride edges.
 enum {
     BOT_EDGE_WALK       = 0,
     BOT_EDGE_JUMP_UP    = 1,
@@ -52,45 +44,22 @@ enum {
     BOT_EDGE_PLAT_LINK  = 5,
 };
 
-typedef struct {
-    int    edict_index;     // -1 == positional goal (no edict pin)
-    float  cooldown_until;  // host_time when re-eligible
-} bot_blocklist_entry_t;
-
 static struct {
     bot_state_t  state;
     int          target_edict;     // current goal edict, or -1
-    vec3_t       target_pos;       // either edict origin or static (exit center)
+    vec3_t       target_pos;       // edict origin or static (exit / plat center)
     vec3_t       waypoints[BOT_MAX_WAYPOINTS];
-    unsigned char waypoint_kinds[BOT_MAX_WAYPOINTS];  // entry-edge kind per waypoint
+    unsigned char waypoint_kinds[BOT_MAX_WAYPOINTS];   // entry-edge kind
     int          waypoint_count;
     int          waypoint_idx;
-    float        waypoint_started; // host_time when current waypoint became active
 
-    float        next_replan;      // host_time of next forced replan
-    int          stuck_fails;      // consecutive stuck replans
-    float        jump_until;       // host_time hold-jump countdown
-    float        last_attack_toggle;
+    float        next_replan;      // host_time of next goal re-evaluation
 
-    vec3_t       progress_pos;     // last position checkpoint
-    float        progress_time;    // host_time when progress_pos last updated
-
-    // Wander state: pick a random yaw heading, keep it for wander_until
-    // seconds; if blocked, pick a new one.
-    float        wander_yaw;
-    float        wander_until;     // host_time when current heading expires
-    float        wander_replan;    // host_time of next goal re-check during wander
-
-    bot_blocklist_entry_t blocklist[BOT_BLOCKLIST_MAX];
-    int                   blocklist_n;
-
-    float        smoothed_yaw;     // for damping
     char         map_at_init[64];  // detect map change for state reset
-    float        map_entered_time; // host_time when we last saw a new map
 } b;
 
 // in_attack / in_jump live in cl_input.c (kbutton_t globals)
-extern kbutton_t in_attack, in_jump, in_forward, in_back, in_moveleft, in_moveright, in_up, in_down;
+extern kbutton_t in_attack, in_jump;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -105,43 +74,6 @@ static float Bot_AngleNorm(float a)
     return a;
 }
 
-static int Bot_Blocked(int edict_index)
-{
-    int i;
-    if (edict_index < 0) return 0;
-    for (i = 0; i < b.blocklist_n; i++) {
-        if (b.blocklist[i].edict_index == edict_index &&
-            b.blocklist[i].cooldown_until > host_time)
-            return 1;
-    }
-    return 0;
-}
-
-static void Bot_AddBlocklist(int edict_index, float secs)
-{
-    int i;
-    if (edict_index < 0) return;
-    // reuse slot if already present
-    for (i = 0; i < b.blocklist_n; i++) {
-        if (b.blocklist[i].edict_index == edict_index) {
-            b.blocklist[i].cooldown_until = host_time + secs;
-            return;
-        }
-    }
-    if (b.blocklist_n >= BOT_BLOCKLIST_MAX) {
-        // overwrite oldest (lowest cooldown_until)
-        int oldest = 0;
-        for (i = 1; i < BOT_BLOCKLIST_MAX; i++)
-            if (b.blocklist[i].cooldown_until < b.blocklist[oldest].cooldown_until) oldest = i;
-        b.blocklist[oldest].edict_index = edict_index;
-        b.blocklist[oldest].cooldown_until = host_time + secs;
-        return;
-    }
-    b.blocklist[b.blocklist_n].edict_index = edict_index;
-    b.blocklist[b.blocklist_n].cooldown_until = host_time + secs;
-    b.blocklist_n++;
-}
-
 // Edict accessor — sv.edicts is byte-strided by pr_edict_size, but in the
 // native-C build all edicts are sizeof(edict_t). EDICT_NUM is the standard.
 static edict_t *Bot_Edict(int i)
@@ -152,7 +84,8 @@ static edict_t *Bot_Edict(int i)
 
 static int Bot_LineOfSight(const vec3_t a, const vec3_t b_pos)
 {
-    trace_t tr = SV_Move((float *)a, vec3_origin, vec3_origin, (float *)b_pos, MOVE_NOMONSTERS, sv_player);
+    trace_t tr = SV_Move((float *)a, vec3_origin, vec3_origin, (float *)b_pos,
+                         MOVE_NOMONSTERS, sv_player);
     return tr.fraction >= 0.999f;
 }
 
@@ -179,9 +112,8 @@ static int Bot_IsItem(edict_t *e)
     return 1;
 }
 
-// Is this item actually worth picking up given our current loadout?
-// Conservative: only chase items that improve us, so we don't waste
-// time pursuing already-maxed ammo (the most common pickup type).
+// Only chase items that actually improve us — saves the bot from
+// orbiting full-ammo pickups that won't help.
 static int Bot_ItemUseful(edict_t *e)
 {
     const char *cls;
@@ -190,18 +122,15 @@ static int Bot_ItemUseful(edict_t *e)
     if (sv_player->v.health < 75 && strncmp(cls, "item_health", 11) == 0) return 1;
     if (strncmp(cls, "item_armor",  10) == 0 && sv_player->v.armortype == 0) return 1;
     if (strncmp(cls, "weapon_",      7) == 0) {
-        // New weapon iff we don't have it yet — entity carries the bit in v.items.
         int new_bits = (int)e->v.items & ~(int)sv_player->v.items;
         return new_bits != 0;
     }
-    // Keys handled separately; ammo / artifacts skipped.
     return 0;
 }
 
 static int Bot_IsKey(edict_t *e)
 {
     if (!e || e->free || !e->v.classname) return 0;
-    // Quake stock key classnames: item_key1, item_key2 (silver/gold).
     return strncmp(e->v.classname, "item_key", 8) == 0;
 }
 
@@ -222,7 +151,7 @@ static void Bot_EntityCenter(edict_t *e, vec3_t out)
 // Path request
 // ---------------------------------------------------------------------------
 
-static const char *bot_edge_kind_name(int k)
+static const char *Bot_EdgeKindName(int k)
 {
     switch (k) {
         case BOT_EDGE_WALK:      return "walk";
@@ -250,7 +179,7 @@ static int Bot_RequestPath(const vec3_t to)
         b.waypoint_count = 0;
         b.waypoint_idx = 0;
         if (bot_debug.value)
-            Con_Printf("[bot] nav_path returned 0 (no path) to (%.0f %.0f %.0f) items=0x%x\n",
+            Con_Printf("[bot] nav_path 0 (no path) to (%.0f %.0f %.0f) items=0x%x\n",
                        to[0], to[1], to[2], items);
         return 0;
     }
@@ -262,7 +191,7 @@ static int Bot_RequestPath(const vec3_t to)
                    n, to[0], to[1], to[2]);
         for (i = 0; i < n; i++) {
             Con_Printf("  [%2d] %s (%.0f %.0f %.0f)\n",
-                       i, bot_edge_kind_name(b.waypoint_kinds[i]),
+                       i, Bot_EdgeKindName(b.waypoint_kinds[i]),
                        b.waypoints[i][0], b.waypoints[i][1], b.waypoints[i][2]);
         }
     }
@@ -284,8 +213,9 @@ static void Bot_DecideGoal(void)
 {
     int i;
     edict_t *best_enemy = NULL, *best_key = NULL, *best_item = NULL, *best_exit = NULL;
-    float best_enemy_d2 = 1e30f, best_key_d2 = 1e30f, best_item_d2 = 1e30f, best_exit_d2 = 1e30f;
-    float aware2 = bot_aware_radius.value * bot_aware_radius.value;
+    float best_enemy_d2 = 1e30f, best_key_d2 = 1e30f;
+    float best_item_d2  = 1e30f, best_exit_d2 = 1e30f;
+    float aware2  = bot_aware_radius.value  * bot_aware_radius.value;
     float pickup2 = bot_pickup_radius.value * bot_pickup_radius.value;
     vec3_t ppos;
 
@@ -296,7 +226,6 @@ static void Bot_DecideGoal(void)
         edict_t *e = Bot_Edict(i);
         float d2;
         if (!e || e->free) continue;
-        if (Bot_Blocked(NUM_FOR_EDICT(e))) continue;
         d2 = Bot_Dist2(ppos, e->v.origin);
 
         if (Bot_IsEnemy(e)) {
@@ -315,7 +244,6 @@ static void Bot_DecideGoal(void)
                 best_item_d2 = d2;
             }
         } else if (Bot_IsExit(e)) {
-            // Use entity centre rather than origin (triggers are brush ents).
             vec3_t c;
             Bot_EntityCenter(e, c);
             d2 = Bot_Dist2(ppos, c);
@@ -326,7 +254,6 @@ static void Bot_DecideGoal(void)
         }
     }
 
-    // Filter best_item by usefulness (don't waste time on full-ammo pickups).
     if (best_item && !Bot_ItemUseful(best_item)) best_item = NULL;
 
     if (best_enemy) {
@@ -335,14 +262,10 @@ static void Bot_DecideGoal(void)
         Bot_VecCopy(best_enemy->v.origin, b.target_pos);
         return;
     }
-    // Set goal in priority order. Path-finding failure no longer
-    // blocklists — the drive layer can still aim directly at the
-    // target position. Blocklisting is reserved for actual stuck loops.
     if (best_key) {
         b.state = BS_GOTO_KEY;
         b.target_edict = NUM_FOR_EDICT(best_key);
         Bot_VecCopy(best_key->v.origin, b.target_pos);
-        b.waypoint_started = (float)host_time;
         Bot_RequestPath(b.target_pos);
         return;
     }
@@ -350,7 +273,6 @@ static void Bot_DecideGoal(void)
         b.state = BS_GOTO_EXIT;
         b.target_edict = NUM_FOR_EDICT(best_exit);
         Bot_EntityCenter(best_exit, b.target_pos);
-        b.waypoint_started = (float)host_time;
         Bot_RequestPath(b.target_pos);
         return;
     }
@@ -358,30 +280,18 @@ static void Bot_DecideGoal(void)
         b.state = BS_GOTO_ITEM;
         b.target_edict = NUM_FOR_EDICT(best_item);
         Bot_VecCopy(best_item->v.origin, b.target_pos);
-        b.waypoint_started = (float)host_time;
         Bot_RequestPath(b.target_pos);
         return;
     }
 
-    // Nothing actionable. When the reactive fallback is enabled, kick
-    // into WANDER so the bot keeps moving and the next sweep sees a
-    // different vantage point. With unstuck off (default while we
-    // iterate on the navmesh), just sit IDLE so failures are obvious.
+    if (bot_debug.value) Con_Printf("[bot] no goal -> IDLE\n");
+    b.state = BS_IDLE;
     b.target_edict = -1;
     b.waypoint_count = 0;
-    if (bot_unstuck.value) {
-        if (bot_debug.value) Con_Printf("[bot] no goal -> WANDER\n");
-        b.state = BS_WANDER;
-        b.wander_until = 0.f;
-        b.wander_replan = (float)host_time + 4.0f;
-    } else {
-        if (bot_debug.value) Con_Printf("[bot] no goal -> IDLE (unstuck off)\n");
-        b.state = BS_IDLE;
-    }
 }
 
 // ---------------------------------------------------------------------------
-// Drive layer -- turns goal + waypoints into usercmd_t
+// Drive layer
 // ---------------------------------------------------------------------------
 
 static const float *Bot_CurrentWaypoint(void)
@@ -399,26 +309,23 @@ static void Bot_AdvanceWaypoint(void)
     dx = wp[0] - sv_player->v.origin[0];
     dy = wp[1] - sv_player->v.origin[1];
     dz = wp[2] - sv_player->v.origin[2];
-    // Require XY proximity AND vertical proximity. Without the Z check,
-    // lift waypoints (same XY at two different heights) auto-advance
-    // instantly when the bot is at either level, so the path skips the
-    // ride entirely and the bot walks past the lift.
+    // Require XY proximity AND vertical proximity; otherwise lift
+    // waypoints (same XY, two heights) auto-advance instantly and the
+    // path skips the ride.
     if (dx*dx + dy*dy < (48.f*48.f) && dz > -64.f && dz < 64.f) {
         b.waypoint_idx++;
-        b.waypoint_started = (float)host_time;
     }
 }
 
-// aim_pitch: 0 = navigate (pitch decays to 0), nonzero = combat (aim Y vs Z).
+// combat_mode: 0 = navigate (pitch decays to 0), 1 = combat (aim Y vs Z).
 static void Bot_AimAt(const vec3_t target, int combat_mode)
 {
     float dx = target[0] - sv_player->v.origin[0];
     float dy = target[1] - sv_player->v.origin[1];
-    float yaw = (atan2f(dy, dx) * 180.f / (float)M_PI);
+    float yaw = atan2f(dy, dx) * 180.f / (float)M_PI;
     float diff = Bot_AngleNorm(yaw - cl.viewangles[YAW]);
     float max_step = bot_turn_speed.value * host_frametime;
-    float want_pitch = 0.f;
-    float pdiff;
+    float want_pitch = 0.f, pdiff;
     if (diff >  max_step) diff = max_step;
     if (diff < -max_step) diff = -max_step;
     cl.viewangles[YAW] = anglemod(cl.viewangles[YAW] + diff);
@@ -447,12 +354,8 @@ static int Bot_AimError(const vec3_t target)
 
 static void Bot_SetButtons(int attack, int jump)
 {
-    // KeyDown sets the down bit (1) and edge bit (2). For continuous
-    // attack/jump just hold bit 1.
-    if (attack) in_attack.state |= 1;
-    else        in_attack.state &= ~1;
-    if (jump)   in_jump.state |= 1;
-    else        in_jump.state &= ~1;
+    if (attack) in_attack.state |= 1; else in_attack.state &= ~1;
+    if (jump)   in_jump.state   |= 1; else in_jump.state   &= ~1;
 }
 
 // ---------------------------------------------------------------------------
@@ -466,12 +369,8 @@ static void Bot_DriveFrame(usercmd_t *cmd)
     const float *wp;
     vec3_t aim_target;
     int do_attack = 0, do_jump = 0;
-    float speed = sv_player->v.velocity[0]*sv_player->v.velocity[0]
-                + sv_player->v.velocity[1]*sv_player->v.velocity[1];
 
-    // Reset state if the map changed under us (slipgate took the bot
-    // to a new level — old waypoints / target_edict / blocklist are
-    // referring to the previous map's entities).
+    // Map change — reset all per-map state (waypoints, target, etc.)
     if (strncmp(b.map_at_init, sv.name, sizeof(b.map_at_init)) != 0) {
         if (bot_debug.value)
             Con_Printf("[bot] map change %s -> %s, resetting\n",
@@ -480,52 +379,15 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         b.target_edict = -1;
         b.waypoint_count = 0;
         b.waypoint_idx = 0;
-        b.progress_time = 0.f;
-        b.stuck_fails = 0;
         b.next_replan = 0.f;
-        b.blocklist_n = 0;
-        b.waypoint_started = 0.f;
-        b.map_entered_time = (float)host_time;
         Q_strncpy(b.map_at_init, sv.name, sizeof(b.map_at_init) - 1);
         b.map_at_init[sizeof(b.map_at_init) - 1] = '\0';
-        return;  // skip this frame, let server settle
-    }
-
-    // Give-up timer: if we've been on this map far too long without
-    // finding the exit, look up the trigger_changelevel's destination
-    // map name and force a changelevel so map traversal testing keeps
-    // moving. Falls back to engine 'restart' if the trigger has no map.
-    if (bot_giveup_secs.value > 0.f &&
-        (float)host_time - b.map_entered_time > bot_giveup_secs.value)
-    {
-        edict_t *exit_e = NULL;
-        int i;
-        for (i = 1; i < sv.num_edicts; i++) {
-            edict_t *e = Bot_Edict(i);
-            if (Bot_IsExit(e)) { exit_e = e; break; }
-        }
-        if (exit_e && exit_e->v.map && exit_e->v.map[0]) {
-            char cmd_buf[96];
-            snprintf(cmd_buf, sizeof(cmd_buf), "changelevel %s\n", exit_e->v.map);
-            if (bot_debug.value)
-                Con_Printf("[bot] giveup -> %s", cmd_buf);
-            Cbuf_AddText(cmd_buf);
-        } else {
-            if (bot_debug.value) Con_Printf("[bot] giveup -> restart (no exit map)\n");
-            Cbuf_AddText("restart\n");
-        }
-        b.map_entered_time = (float)host_time;  // avoid spamming
         return;
     }
 
-    // Death — issue restart and reset (only with bot_unstuck on; while
-    // iterating on the navmesh we leave the corpse alone so the cause
-    // of death is inspectable).
+    // Dead — leave the corpse alone so cause of death is inspectable.
     if (sv_player->v.health <= 0) {
-        if (b.state != BS_DEAD) {
-            b.state = BS_DEAD;
-            if (bot_unstuck.value) Cbuf_AddText("restart\n");
-        }
+        b.state = BS_DEAD;
         return;
     } else if (b.state == BS_DEAD) {
         b.state = BS_IDLE;
@@ -534,16 +396,16 @@ static void Bot_DriveFrame(usercmd_t *cmd)
 
     if (b.target_edict >= 0) target = Bot_Edict(b.target_edict);
 
-    // If our target edict died, freed or became invalid → replan now.
+    // Drop the target if it's gone or no longer matches our goal kind.
     if (b.target_edict >= 0) {
         int still_valid = 0;
         if (target && !target->free) {
             switch (b.state) {
-                case BS_COMBAT:   still_valid = Bot_IsEnemy(target); break;
-                case BS_GOTO_KEY: still_valid = Bot_IsKey(target);   break;
-                case BS_GOTO_ITEM:still_valid = Bot_IsItem(target);  break;
-                case BS_GOTO_EXIT:still_valid = Bot_IsExit(target);  break;
-                default: still_valid = 1;
+                case BS_COMBAT:    still_valid = Bot_IsEnemy(target); break;
+                case BS_GOTO_KEY:  still_valid = Bot_IsKey(target);   break;
+                case BS_GOTO_ITEM: still_valid = Bot_IsItem(target);  break;
+                case BS_GOTO_EXIT: still_valid = Bot_IsExit(target);  break;
+                default:           still_valid = 1;
             }
         }
         if (!still_valid) {
@@ -552,80 +414,30 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         }
     }
 
-    // Replan periodically. During WANDER we still poll, but the only
-    // states allowed to interrupt are COMBAT (must engage) and KEY (we
-    // want to grab keys when we see them). The exit/item branches don't
-    // pre-empt wander so the bot has time to actually move somewhere
-    // useful before reconsidering.
     if (host_time >= b.next_replan) {
-        bot_state_t prev = b.state;
-        int prev_target = b.target_edict;
-        b.next_replan = host_time + 0.5f;
         Bot_DecideGoal();
-        if (prev == BS_WANDER &&
-            b.state != BS_COMBAT && b.state != BS_GOTO_KEY &&
-            b.waypoint_count == 0)
-        {
-            // No path-bearing alternative — keep wandering.
-            b.state = prev;
-            b.target_edict = prev_target;
-        }
+        b.next_replan = host_time + 0.5f;
         target = b.target_edict >= 0 ? Bot_Edict(b.target_edict) : NULL;
     }
-    if (b.state == BS_WANDER && (float)host_time >= b.wander_replan) {
-        // End of wander window — return to idle so the next replan
-        // re-evaluates goals from scratch.
-        b.state = BS_IDLE;
-        b.stuck_fails = 0;
-        b.progress_time = 0.f;
-        b.next_replan = 0;
-    }
 
-    // Aim + movement target.
+    // Pick the point we're aiming at this tick.
     aim_target[0] = aim_target[1] = aim_target[2] = 0.f;
     if (b.state == BS_COMBAT && target) {
         Bot_EntityCenter(target, aim_target);
-    } else if (b.state == BS_WANDER) {
-        // Re-randomize heading every few seconds. Half the time, bias
-        // toward the most recent goal so wandering still drifts in the
-        // right general direction.
-        if ((float)host_time >= b.wander_until) {
-            float biased = 0;
-            int has_bias = (b.target_pos[0] != 0.f || b.target_pos[1] != 0.f);
-            if (has_bias && (rand() & 1)) {
-                float dxg = b.target_pos[0] - sv_player->v.origin[0];
-                float dyg = b.target_pos[1] - sv_player->v.origin[1];
-                float goal_yaw = atan2f(dyg, dxg) * 180.f / (float)M_PI;
-                // jitter the goal direction by +/- 90 degrees
-                biased = goal_yaw + (float)((rand() % 181) - 90);
-            } else {
-                biased = (float)(rand() % 360);
-            }
-            b.wander_yaw   = anglemod(biased);
-            b.wander_until = (float)host_time + 1.0f + ((rand() & 7) * 0.25f);
-        }
-        // Compute a forward aim point from heading.
-        {
-            float r = b.wander_yaw * (float)M_PI / 180.f;
-            aim_target[0] = sv_player->v.origin[0] + cosf(r) * 256.f;
-            aim_target[1] = sv_player->v.origin[1] + sinf(r) * 256.f;
-            aim_target[2] = sv_player->v.origin[2];
-        }
     } else {
         wp = Bot_CurrentWaypoint();
         if (wp) {
             aim_target[0] = wp[0]; aim_target[1] = wp[1]; aim_target[2] = wp[2];
         } else if (target) {
-            // No path; aim straight at target, walk forward (better than nothing).
+            // No path — still face the unreachable target so the
+            // failure is visible. forwardmove stays 0 below, so the
+            // bot turns but doesn't walk into a wall.
             Bot_EntityCenter(target, aim_target);
         }
     }
-
-    if (aim_target[0] || aim_target[1] || aim_target[2]) {
+    if (aim_target[0] || aim_target[1] || aim_target[2])
         Bot_AimAt(aim_target, b.state == BS_COMBAT);
-    }
 
-    // Decide forward / strafe / jump / attack.
     cmd->forwardmove = 0;
     cmd->sidemove    = 0;
     cmd->upmove      = 0;
@@ -634,180 +446,60 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         int yaw_err = Bot_AimError(aim_target);
         float d2 = Bot_Dist2(sv_player->v.origin, target->v.origin);
         do_attack = (yaw_err < 8);
-        // Strafe back/forth based on host_time parity to dodge.
         cmd->sidemove = (sinf((float)host_time * 4.f) > 0.f ? 1.f : -1.f) * cl_sidespeed.value * 0.6f;
-        // Close to combat distance.
         if (d2 > (bot_combat_dist.value * bot_combat_dist.value))
             cmd->forwardmove = cl_forwardspeed.value;
         else if (d2 < (200.f*200.f))
-            cmd->forwardmove = -cl_forwardspeed.value * 0.5f; // back up
-    } else if (Bot_CurrentWaypoint() || b.state == BS_WANDER ||
-               (target && bot_unstuck.value))
-    {
-        // Walk forward only when there's a real navmesh waypoint to follow
-        // (or wander mode is on, or bot_unstuck allows direct-aim-walking).
-        // Without unstuck and without waypoints, we sit still even if a
-        // target edict was found — the navmesh said "no path", so the
-        // bot's job is to stand and let the failure be visible.
+            cmd->forwardmove = -cl_forwardspeed.value * 0.5f;
+    } else if (Bot_CurrentWaypoint()) {
+        // Walk forward only when roughly aligned with the waypoint.
+        // Above 60° error, turn in place; below, scale by cos so the
+        // bot strafes smoothly through gentle bends.
         int yaw_err = Bot_AimError(aim_target);
-        if (yaw_err > 60) {
-            cmd->forwardmove = 0;
-        } else {
+        if (yaw_err <= 60) {
             float cosw = cosf(yaw_err * (float)M_PI / 180.f);
             cmd->forwardmove = cl_forwardspeed.value * cosw;
         }
 
-        // Lift wait: if current waypoint is vertically above us at
-        // basically the same XY, we're standing on the lift's bottom
-        // and need it to rise. Stop pushing forward so we don't walk
-        // off the platform.
+        // Lift wait: standing on plat_bottom with plat_top above us —
+        // hold position so we don't walk off before the lift rises.
         {
-            const float *wp = Bot_CurrentWaypoint();
+            const float *cur = Bot_CurrentWaypoint();
             int kind = Bot_CurrentWaypointKind();
-            if (wp) {
-                float dx = wp[0] - sv_player->v.origin[0];
-                float dy = wp[1] - sv_player->v.origin[1];
-                float dz = wp[2] - sv_player->v.origin[2];
-                float xy2 = dx*dx + dy*dy;
-                if (xy2 < (32.f*32.f) && dz > 64.f) {
-                    cmd->forwardmove = 0;
-                    cmd->sidemove = 0;
-                }
-                // Jump-up edge: press jump as we close on the ledge.
-                // Trigger when within ~64u xy and the dz is between
-                // +18 and +48 (the playable jump-up band). Hold for
-                // one frame; clear afterwards so the edge-trigger
-                // can re-fire later.
-                if (kind == BOT_EDGE_JUMP_UP &&
-                    xy2 < (64.f*64.f) && dz > 18.f && dz < 48.f &&
-                    sv_player->v.flags && ((int)sv_player->v.flags & FL_ONGROUND))
-                {
-                    do_jump = 1;
-                }
+            float dx = cur[0] - sv_player->v.origin[0];
+            float dy = cur[1] - sv_player->v.origin[1];
+            float dz = cur[2] - sv_player->v.origin[2];
+            float xy2 = dx*dx + dy*dy;
+            if (xy2 < (32.f*32.f) && dz > 64.f) {
+                cmd->forwardmove = 0;
+                cmd->sidemove    = 0;
             }
-        }
-
-        // Reactive wall avoidance — strafe + jump when a forward trace
-        // hits geometry, and promote to WANDER if path is gone. Only
-        // active with bot_unstuck. When iterating on the navmesh we
-        // want the bot to mash into walls visibly so we can fix the
-        // path instead of papering over it here.
-        if (bot_unstuck.value) {
-            vec3_t eye, fwd, ahead;
-            float yaw_r = cl.viewangles[YAW] * (float)M_PI / 180.f;
-            eye[0] = sv_player->v.origin[0];
-            eye[1] = sv_player->v.origin[1];
-            eye[2] = sv_player->v.origin[2] + sv_player->v.view_ofs[2];
-            fwd[0] = cosf(yaw_r); fwd[1] = sinf(yaw_r); fwd[2] = 0.f;
-            ahead[0] = eye[0] + fwd[0] * 48.f;
-            ahead[1] = eye[1] + fwd[1] * 48.f;
-            ahead[2] = eye[2];
+            // Jump-up edge: press jump as we close on the ledge.
+            if (kind == BOT_EDGE_JUMP_UP &&
+                xy2 < (64.f*64.f) && dz > 18.f && dz < 48.f &&
+                ((int)sv_player->v.flags & FL_ONGROUND))
             {
-                trace_t tr = SV_Move(eye, vec3_origin, vec3_origin, ahead, MOVE_NORMAL, sv_player);
-                if (tr.fraction < 0.6f) {
-                    cmd->sidemove = ((((int)(host_time*2.f)) & 1) ? 1.f : -1.f) * cl_sidespeed.value;
-                    if (sv_player->v.flags && ((int)sv_player->v.flags & FL_ONGROUND))
-                        do_jump = 1;
-                    if (b.waypoint_count == 0 && tr.fraction < 0.25f &&
-                        b.state != BS_WANDER && b.state != BS_COMBAT)
-                    {
-                        b.state = BS_WANDER;
-                        b.wander_yaw = anglemod(cl.viewangles[YAW] + ((rand() & 1) ? 90.f : -90.f));
-                        b.wander_until = (float)host_time + 0.5f;
-                        b.wander_replan= (float)host_time + 4.f;
-                        if (bot_debug.value)
-                            Con_Printf("[bot] wall hit, fast -> WANDER\n");
-                    }
-                }
+                do_jump = 1;
             }
         }
+
         Bot_AdvanceWaypoint();
-    } else {
-        // Idle wander — small forward nudge to bump into stuff and trigger sight events.
-        cmd->forwardmove = cl_forwardspeed.value * 0.25f;
     }
-
-    // Stuck detection — position-based. Every check_interval seconds, if
-    // we haven't moved enough, escalate (jump → replan → wander). Skip
-    // during WANDER itself (its random heading swap handles unsticking).
-    // Also skipped entirely when bot_unstuck is off, so navmesh failures
-    // show as a parked bot instead of a flailing one.
-    if (bot_unstuck.value &&
-        b.state != BS_IDLE && b.state != BS_DEAD && b.state != BS_WANDER &&
-        b.target_edict >= 0) {
-        const float check_interval = 1.5f;
-        const float min_movement   = 48.f;
-        float dx = sv_player->v.origin[0] - b.progress_pos[0];
-        float dy = sv_player->v.origin[1] - b.progress_pos[1];
-        float moved2 = dx*dx + dy*dy;
-
-        if (b.progress_time == 0.f) {
-            Bot_VecCopy(sv_player->v.origin, b.progress_pos);
-            b.progress_time = (float)host_time;
-        } else if ((float)host_time - b.progress_time > check_interval) {
-            if (moved2 < min_movement * min_movement) {
-                // No real progress — escalate.
-                b.stuck_fails++;
-                b.jump_until = (float)host_time + 0.35f;
-                if (bot_debug.value)
-                    Con_Printf("[bot] stuck #%d at (%.0f %.0f) tgt=%d wp=%d/%d\n",
-                               b.stuck_fails,
-                               sv_player->v.origin[0], sv_player->v.origin[1],
-                               b.target_edict, b.waypoint_idx, b.waypoint_count);
-                // SCRAMBLE — twist yaw by 60-ish degrees so wall avoidance
-                // picks a different direction next frame.
-                cl.viewangles[YAW] = anglemod(cl.viewangles[YAW] +
-                                              ((b.stuck_fails & 1) ? 75.f : -75.f));
-                if (b.stuck_fails >= 3) {
-                    // Switch to WANDER for ~6s and replan after.
-                    b.state = BS_WANDER;
-                    b.wander_yaw   = cl.viewangles[YAW];
-                    b.wander_until = (float)host_time + 1.0f;  // re-randomize quickly
-                    b.wander_replan= (float)host_time + 6.0f;
-                    b.waypoint_count = 0;
-                    if (bot_debug.value)
-                        Con_Printf("[bot] -> WANDER (stuck on tgt=%d)\n", b.target_edict);
-                } else {
-                    // Try advancing waypoint manually first (might be unreachable),
-                    // then replan from current pos.
-                    if (b.waypoint_idx + 1 < b.waypoint_count) b.waypoint_idx++;
-                    else                                       Bot_RequestPath(b.target_pos);
-                }
-            } else {
-                b.stuck_fails = 0;
-            }
-            Bot_VecCopy(sv_player->v.origin, b.progress_pos);
-            b.progress_time = (float)host_time;
-        }
-
-        // Per-waypoint timeout — abandon a waypoint that's not getting reached.
-        if (b.waypoint_count > 0 && b.waypoint_started > 0.f &&
-            (float)host_time - b.waypoint_started > 4.0f) {
-            if (b.waypoint_idx + 1 < b.waypoint_count) {
-                b.waypoint_idx++;
-                b.waypoint_started = (float)host_time;
-            } else {
-                Bot_RequestPath(b.target_pos);
-            }
-        }
-    } else {
-        b.progress_time = 0.f;
-        b.stuck_fails = 0;
-    }
-
-    if (host_time < b.jump_until) do_jump = 1;
+    // else: no waypoint (no path or IDLE). Stand still.
 
     Bot_SetButtons(do_attack, do_jump);
 
-    if (bot_debug.value && b.state != BS_IDLE && ((int)(host_time*2.f) != (int)((host_time - host_frametime)*2.f))) {
+    if (bot_debug.value && b.state != BS_IDLE &&
+        ((int)(host_time*2.f) != (int)((host_time - host_frametime)*2.f)))
+    {
         const char *stname = "?";
         switch (b.state) {
-            case BS_COMBAT:   stname = "COMBAT"; break;
-            case BS_GOTO_KEY: stname = "GOTO_KEY"; break;
-            case BS_GOTO_ITEM:stname = "GOTO_ITEM"; break;
-            case BS_GOTO_EXIT:stname = "GOTO_EXIT"; break;
-            case BS_IDLE:     stname = "IDLE"; break;
-            case BS_DEAD:     stname = "DEAD"; break;
+            case BS_COMBAT:    stname = "COMBAT";    break;
+            case BS_GOTO_KEY:  stname = "GOTO_KEY";  break;
+            case BS_GOTO_ITEM: stname = "GOTO_ITEM"; break;
+            case BS_GOTO_EXIT: stname = "GOTO_EXIT"; break;
+            case BS_IDLE:      stname = "IDLE";      break;
+            case BS_DEAD:      stname = "DEAD";      break;
         }
         Con_Printf("[bot] %s tgt=%d wp=%d/%d hp=%d\n",
                    stname, b.target_edict, b.waypoint_idx, b.waypoint_count,
@@ -816,17 +508,9 @@ static void Bot_DriveFrame(usercmd_t *cmd)
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Debug viz
 // ---------------------------------------------------------------------------
 
-int Bot_Active(void) { return bot.value != 0.f && sv.active && cls.signon == SIGNONS; }
-
-// Submit one frame's worth of debug lines describing the bot's plan.
-//   waypoint chain: cyan
-//   active aim ray: yellow
-//   target marker:  red cross
-//   wall-trace:     magenta when ahead trace is blocked
-// Lines are cleared every R_RenderView; we re-submit each frame.
 static void Bot_DrawDebug(void)
 {
     extern void DebugLines_Add(const float start[3], const float end[3], int color, int ztest);
@@ -840,9 +524,7 @@ static void Bot_DrawDebug(void)
     eye[1] = sv_player->v.origin[1];
     eye[2] = sv_player->v.origin[2] + sv_player->v.view_ofs[2];
 
-    // Waypoint chain — colour by the edge kind entering each waypoint.
-    // 244 cyan = walk, 251 red = jump-up, 79 green = drop, 192 yellow =
-    // plat-ride, 13 white = teleport, 254 magenta = plat-link.
+    // Waypoint chain — colour each segment by its entry-edge kind.
     {
         static const int kind_color[6] = { 244, 251, 79, 192, 13, 254 };
         for (i = b.waypoint_idx; i + 1 < b.waypoint_count; i++) {
@@ -857,8 +539,8 @@ static void Bot_DrawDebug(void)
         }
     }
 
-    // Target marker — small red (251) cross at target_pos when goal active.
-    if (b.target_edict >= 0 || b.state == BS_WANDER) {
+    // Target marker (red cross).
+    if (b.target_edict >= 0) {
         vec3_t tp;
         const float k = 24.f;
         vec3_t a, b2;
@@ -871,7 +553,7 @@ static void Bot_DrawDebug(void)
         DebugLines_Add(a, b2, 251, 0);
     }
 
-    // Current aim ray (yellow = 192) — 256u forward along view yaw.
+    // Aim ray (yellow).
     yaw_r = cl.viewangles[YAW] * (float)M_PI / 180.f;
     fwd[0] = cosf(yaw_r); fwd[1] = sinf(yaw_r); fwd[2] = 0.f;
     aim[0] = eye[0] + fwd[0] * 256.f;
@@ -879,7 +561,7 @@ static void Bot_DrawDebug(void)
     aim[2] = eye[2];
     DebugLines_Add(eye, aim, 192, 0);
 
-    // Wall-trace probe (magenta = 254 when blocked).
+    // Wall-probe stub (magenta when something close in front).
     ahead[0] = eye[0] + fwd[0] * 48.f;
     ahead[1] = eye[1] + fwd[1] * 48.f;
     ahead[2] = eye[2];
@@ -895,6 +577,12 @@ static void Bot_DrawDebug(void)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Public API + console commands
+// ---------------------------------------------------------------------------
+
+int Bot_Active(void) { return bot.value != 0.f && sv.active && cls.signon == SIGNONS; }
+
 void Bot_Frame(usercmd_t *cmd)
 {
     if (!Bot_Active()) return;
@@ -908,16 +596,15 @@ static void Bot_Status_f(void)
     const char *stname = "?";
     if (!Bot_Active()) { Con_Printf("[bot] inactive\n"); return; }
     switch (b.state) {
-        case BS_COMBAT:   stname = "COMBAT"; break;
-        case BS_GOTO_KEY: stname = "GOTO_KEY"; break;
-        case BS_GOTO_ITEM:stname = "GOTO_ITEM"; break;
-        case BS_GOTO_EXIT:stname = "GOTO_EXIT"; break;
-        case BS_IDLE:     stname = "IDLE"; break;
-        case BS_DEAD:     stname = "DEAD"; break;
-        case BS_WANDER:   stname = "WANDER"; break;
+        case BS_COMBAT:    stname = "COMBAT";    break;
+        case BS_GOTO_KEY:  stname = "GOTO_KEY";  break;
+        case BS_GOTO_ITEM: stname = "GOTO_ITEM"; break;
+        case BS_GOTO_EXIT: stname = "GOTO_EXIT"; break;
+        case BS_IDLE:      stname = "IDLE";      break;
+        case BS_DEAD:      stname = "DEAD";      break;
     }
-    Con_Printf("[bot] state=%s target_edict=%d waypoints=%d/%d blocklist=%d\n",
-               stname, b.target_edict, b.waypoint_idx, b.waypoint_count, b.blocklist_n);
+    Con_Printf("[bot] state=%s target_edict=%d waypoints=%d/%d\n",
+               stname, b.target_edict, b.waypoint_idx, b.waypoint_count);
 }
 
 static void Bot_PathDump_f(void)
@@ -935,7 +622,7 @@ static void Bot_PathDump_f(void)
     for (i = 0; i < b.waypoint_count; i++) {
         const char *mark = (i == b.waypoint_idx) ? " <-- current" : "";
         Con_Printf("  [%2d] %s (%.0f %.0f %.0f)%s\n",
-                   i, bot_edge_kind_name(b.waypoint_kinds[i]),
+                   i, Bot_EdgeKindName(b.waypoint_kinds[i]),
                    b.waypoints[i][0], b.waypoints[i][1], b.waypoints[i][2],
                    mark);
     }
@@ -950,8 +637,6 @@ void Bot_Init(void)
     Cvar_RegisterVariable(&bot_combat_dist);
     Cvar_RegisterVariable(&bot_debug);
     Cvar_RegisterVariable(&bot_debug_viz);
-    Cvar_RegisterVariable(&bot_giveup_secs);
-    Cvar_RegisterVariable(&bot_unstuck);
     Cmd_AddCommand("bot_status", Bot_Status_f);
     Cmd_AddCommand("bot_path_dump", Bot_PathDump_f);
 
