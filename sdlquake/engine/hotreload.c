@@ -1182,3 +1182,19 @@ void MCP_DamageEntity(edict_t *targ, float damage)
         g_game_api->mcp_damage(targ, damage);
 }
 
+// MCP-only: forward a nav-edge query through the loaded game DLL. The
+// out_records buffer is treated as opaque — its layout (from[3],
+// to[3], weight, kind, phase) is defined by sim_nav_edge_record_t in
+// the DLL's sim.h; engine callers (mcp_server.c) declare a matching
+// struct locally to read the result. Returns 0 if no DLL is loaded
+// or the bridge isn't wired.
+int MCP_NavEdgesNear(const float *center, float radius,
+                     void *out_records, int max_records,
+                     int *truncated_out)
+{
+    if (truncated_out) *truncated_out = 0;
+    if (!g_game_api || !g_game_api->nav_edges_near) return 0;
+    return g_game_api->nav_edges_near(center, radius, out_records,
+                                      max_records, truncated_out);
+}
+
