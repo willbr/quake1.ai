@@ -881,13 +881,20 @@ void CL_SendCmd (void)
 	{
 	// get basic movement from keyboard
 		CL_BaseMove (&cmd);
-	
+
 	// allow mice or other external controllers to add to the move
 		IN_Move (&cmd);
-	
+
+	// self-driving bot overlay (overwrites cmd + view angles when active)
+		{
+			extern int  Bot_Active(void);
+			extern void Bot_Frame(usercmd_t *);
+			if (Bot_Active()) Bot_Frame(&cmd);
+		}
+
 	// send the unreliable message
 		CL_SendMove (&cmd);
-	
+
 	}
 
 	if (cls.demoplayback)

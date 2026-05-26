@@ -94,6 +94,19 @@ static void game_mcp_damage(edict_t *targ, float damage)
     T_Damage(targ, g->world, g->world, damage);
 }
 
+// Bot pathfinding bridge — wraps Sim_Nav_PathTo so engine-side bot.c
+// doesn't need to link against game.dll's sim module.
+static int game_nav_path(const float *from, const float *to,
+                         float *out_waypoints_xyz, int max_waypoints)
+{
+    vec3_t f, t;
+    vec3_t *out = (vec3_t *)out_waypoints_xyz;
+    if (!from || !to || !out_waypoints_xyz || max_waypoints <= 0) return 0;
+    f[0] = from[0]; f[1] = from[1]; f[2] = from[2];
+    t[0] = to[0];   t[1] = to[1];   t[2] = to[2];
+    return Sim_Nav_PathTo(f, t, out, max_waypoints);
+}
+
 // Editor inspector query — see game_api.h for field contract.
 static int game_ai_inspect(edict_t *e,
                            int *out_state,
@@ -143,6 +156,7 @@ static game_api_t s_api = {
     game_mcp_damage,
     Wind_SampleVelocity,
     game_ai_inspect,
+    game_nav_path,
 };
 
 #ifdef _WIN32

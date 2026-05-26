@@ -43,6 +43,7 @@ pub fn build(b: *std.Build) void {
         "d_polyse.c", "d_scan.c", "d_sky.c", "d_sprite.c", "d_surf.c",
         "d_vars.c", "d_zpoint.c",
         "host.c", "host_cmd.c",
+        "bot.c",
         "keys.c",
         "line_editor.c",
         "mathlib.c",

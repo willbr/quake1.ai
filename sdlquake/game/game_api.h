@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 28
+#define GAME_API_VERSION 29
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -311,6 +311,13 @@ typedef struct game_api_s {
                         int *out_target_edict,
                         float *out_next_tick_dt,
                         int *out_stuck_ticks);
+
+    // Player bot pathfinding bridge. Wraps Sim_Nav_PathTo so the
+    // engine-side bot module (engine_src/bot.c) can drive routes
+    // without linking against the DLL's sim. Returns waypoint count
+    // (0 if no path or navmesh not yet baked).
+    int   (*nav_path)(const float *from, const float *to,
+                      float *out_waypoints_xyz, int max_waypoints);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);
