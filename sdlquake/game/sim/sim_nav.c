@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    7
+#define NAV_VERSION    8
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -77,7 +77,10 @@ extern game_globals_t *g;
 // are almost always redundant with a walkable path around.
 #define JUMP_MAX_XY        96.0f
 #define JUMP_MIN_UP        20.0f   // skip ranges walkmove already handles
-#define JUMP_MAX_UP        64.0f
+// Quake's max vertical jump from a flat surface: jumpspeed^2 / (2*gravity)
+// = 270^2 / 1600 ≈ 45.6. Anything above this can be DROPPED off but not
+// jumped onto, so bake only the achievable up-range.
+#define JUMP_MAX_UP        44.0f
 #define DROP_MAX_XY        40.0f
 #define DROP_MAX_DOWN      192.0f
 #define JUMP_COST_BIAS     48.0f
@@ -928,20 +931,78 @@ static int bake_floodfill(sim_navmesh_t *m) {
         float r_xy   = (half_x > half_y ? half_x : half_y) + 64.0f;
         float r_xy2  = r_xy * r_xy;
         const float r_z = 32.0f;   // same-floor tolerance
-        for (int side = 0; side < 2; side++) {
-            int plat_idx = side ? bot_idx : top_idx;
+
+        // Targetname'd plats START at TOP and only descend when their
+        // .use is called (typically by a button). For these, the
+        // bottom anchor cannot be reached by just walking into the
+        // shaft — the player must first press the button. We route
+        // accordingly: plat_top links to surrounding upper-level
+        // floor as usual, plat_bottom is linked ONLY via the button
+        // anchor(s) that target this plat. This forces A* to route
+        // through the button before "boarding" the lift.
+        int targetname_driven = (plat->v.targetname && plat->v.targetname[0]);
+
+        // 1) plat_top: link to surrounding upper-level floor nodes.
+        for (int p = 0; p < m->point_count; p++) {
+            if (p == top_idx || p == bot_idx) continue;
+            float dx = m->points[p].pos[0] - m->points[top_idx].pos[0];
+            float dy = m->points[p].pos[1] - m->points[top_idx].pos[1];
+            float dz = m->points[p].pos[2] - m->points[top_idx].pos[2];
+            if (dx*dx + dy*dy > r_xy2) continue;
+            if (dz < -r_z || dz > r_z) continue;
+            float w = sqrtf(dx*dx + dy*dy) + 1.f;
+            add_edge(m, &cap_edges, p, top_idx, w);
+            add_edge(m, &cap_edges, top_idx, p, w);
+            plat_link_edges += 2;
+        }
+
+        // 2) plat_bottom: for free (touch-trigger) plats, link to the
+        //    surrounding lower floor as usual. For button-driven plats,
+        //    skip the floor link and use only button→plat_bottom edges.
+        if (!targetname_driven) {
             for (int p = 0; p < m->point_count; p++) {
-                if (p == plat_idx) continue;
                 if (p == top_idx || p == bot_idx) continue;
-                float dx = m->points[p].pos[0] - m->points[plat_idx].pos[0];
-                float dy = m->points[p].pos[1] - m->points[plat_idx].pos[1];
-                float dz = m->points[p].pos[2] - m->points[plat_idx].pos[2];
+                float dx = m->points[p].pos[0] - m->points[bot_idx].pos[0];
+                float dy = m->points[p].pos[1] - m->points[bot_idx].pos[1];
+                float dz = m->points[p].pos[2] - m->points[bot_idx].pos[2];
                 if (dx*dx + dy*dy > r_xy2) continue;
                 if (dz < -r_z || dz > r_z) continue;
-                add_edge(m, &cap_edges, p, plat_idx, sqrtf(dx*dx + dy*dy) + 1.f);
-                add_edge(m, &cap_edges, plat_idx, p, sqrtf(dx*dx + dy*dy) + 1.f);
+                float w = sqrtf(dx*dx + dy*dy) + 1.f;
+                add_edge(m, &cap_edges, p, bot_idx, w);
+                add_edge(m, &cap_edges, bot_idx, p, w);
                 plat_link_edges += 2;
             }
+        } else {
+            // Find any anchor that's a func_button whose target matches
+            // this plat's targetname. Walk the entity list directly
+            // (anchors[] doesn't store target/targetname).
+            int button_links = 0;
+            edict_t *bt = eng->ED_Next(g->world);
+            while (bt) {
+                if (bt->v.classname && !strcmp(bt->v.classname, "func_button") &&
+                    bt->v.target && !strcmp(bt->v.target, plat->v.targetname))
+                {
+                    // Find this button's anchor → node index.
+                    for (int k = 0; k < anchor_n; k++) {
+                        if (anchors[k].entity == bt && anchors[k].node_index >= 0) {
+                            // Edge button -> plat_bottom (cheap), but no
+                            // edge back the other way: once you've ridden
+                            // up you don't go back via the button.
+                            add_edge(m, &cap_edges, anchors[k].node_index,
+                                     bot_idx, 16.0f);
+                            button_links++;
+                            break;
+                        }
+                    }
+                }
+                bt = eng->ED_Next(bt);
+            }
+            char dbg[200];
+            snprintf(dbg, sizeof(dbg),
+                "sim_nav: plat '%s' button-driven, %d button(s) link to it\n",
+                plat->v.targetname, button_links);
+            eng->Con_Print(dbg);
+            plat_link_edges += button_links;
         }
     }
     if (plat_ride_edges || plat_link_edges) {
