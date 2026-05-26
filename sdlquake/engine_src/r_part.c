@@ -964,6 +964,12 @@ static void R_SlideRelease (particle_t *p)
 		p->vel[0] = p->vel[1] = p->vel[2] = 0;
 		p->flags &= ~PARTFL_WALL_STICK;
 		// STUCK stays set: droplet is at rest on the new surface.
+		// Paint the final spatter decal where it landed and retire
+		// the sprite — the decal carries the persistent visual.
+		if (p->type == pt_blood) {
+			R_SpawnBloodSpatter (tr.endpos, tr.plane.normal);
+			if (p->die > cl.time + 0.3f) p->die = cl.time + 0.3f;
+		}
 	} else {
 		// Open air below — release for free-fall.
 		p->vel[0] = p->vel[1] = p->vel[2] = 0;
@@ -1929,6 +1935,16 @@ void R_DrawParticles (void)
 						// so droplets disperse instead of moving in lockstep.
 						p->vel[0] = 0.5f + (rand() & 31) * (1.5f / 31.0f);
 						p->vel[2] = R_FindWallBottom (p->org, n);
+					}
+					// Floor-stuck blood: the high-res spatter decal painted
+					// above is the persistent visual. Retire the sprite
+					// quickly so we're not rendering a 1-pixel dot on top of
+					// the decal for ~16 s. Wall-stuck droplets keep their
+					// full lifetime — the slide trail still needs them.
+					if (p->type == pt_blood
+					    && !(p->flags & PARTFL_WALL_STICK)
+					    && p->die > cl.time + 0.3f) {
+						p->die = cl.time + 0.3f;
 					}
 				} else {
 					// First bounce: inline reflection at r_sparks_restitution.
