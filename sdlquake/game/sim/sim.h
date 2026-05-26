@@ -138,6 +138,26 @@ int Sim_Nav_PathTo(const vec3_t from,
                    unsigned int player_items,
                    int max_out);
 
+// Snapshot of one nav edge for debug/inspection consumers (MCP).
+// Coords are world-space copies of mesh node positions; safe to use
+// even after a rebake.
+typedef struct {
+    float from[3];
+    float to[3];
+    float weight;
+    unsigned char kind;   // NAV_EDGE_*
+    unsigned char phase;  // NAV_PHASE_*
+} sim_nav_edge_record_t;
+
+// Fill `out` with edges whose either endpoint is within `radius` of
+// `center`. Caller provides `max_records` capacity. Returns the
+// number written. If `truncated_out` is non-NULL it is set to 1 when
+// more edges matched than fit (in which case the function still
+// returns `max_records`). Safe to call before bake -- returns 0.
+int Sim_Nav_EdgesNear(const float center[3], float radius,
+                      sim_nav_edge_record_t *out, int max_records,
+                      int *truncated_out);
+
 // ---------------------------------------------------------------------------
 // Retrofit (Phase 8 / M6)
 // ---------------------------------------------------------------------------

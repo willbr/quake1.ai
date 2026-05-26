@@ -1746,3 +1746,37 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to,
     free(gscore); free(fscore); free(came); free(came_kind); free(closed); free(heap);
     return written;
 }
+
+int Sim_Nav_EdgesNear(const float center[3], float radius,
+                      sim_nav_edge_record_t *out, int max_records,
+                      int *truncated_out) {
+    if (truncated_out) *truncated_out = 0;
+    if (!s_mesh || !s_ready || !out || max_records <= 0) return 0;
+    if (radius <= 0.0f) return 0;
+
+    float r2 = radius * radius;
+    int written = 0;
+    for (int i = 0; i < s_mesh->edge_count; i++) {
+        const nav_edge_t *e = &s_mesh->edges[i];
+        const float *a = s_mesh->points[e->from].pos;
+        const float *b = s_mesh->points[e->to].pos;
+
+        float da[3] = { a[0]-center[0], a[1]-center[1], a[2]-center[2] };
+        float db[3] = { b[0]-center[0], b[1]-center[1], b[2]-center[2] };
+        float ra2 = da[0]*da[0] + da[1]*da[1] + da[2]*da[2];
+        float rb2 = db[0]*db[0] + db[1]*db[1] + db[2]*db[2];
+        if (ra2 > r2 && rb2 > r2) continue;
+
+        if (written >= max_records) {
+            if (truncated_out) *truncated_out = 1;
+            return written;   // bail early; flag set
+        }
+        out[written].from[0] = a[0]; out[written].from[1] = a[1]; out[written].from[2] = a[2];
+        out[written].to[0]   = b[0]; out[written].to[1]   = b[1]; out[written].to[2]   = b[2];
+        out[written].weight  = e->weight;
+        out[written].kind    = e->kind;
+        out[written].phase   = e->phase;
+        written++;
+    }
+    return written;
+}
