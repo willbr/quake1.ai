@@ -99,7 +99,8 @@ double Sys_FloatTime(void);
 void   Host_Error(char *error, ...);
 void   Cbuf_AddText(char *text);
 void   AngleVectors(float *angles, float *forward, float *right, float *up);
-void   R_SpawnBloodPool(vec3_t origin);
+void   R_SpawnBloodPool(vec3_t origin, float radius_max, int owner_edict);
+void   SV_SetGibBloodBudget(int idx, float budget, float settle_pool_radius);
 
 // ---------------------------------------------------------------------------
 // Entity / server types (condensed forward decls)
@@ -882,11 +883,21 @@ static void engine_sv_tracemove(float *start, float *mins, float *maxs,
     game_globals.trace_plane_normal[2] = tr.plane.normal[2];
 }
 
-static void engine_spawn_blood_pool(const vec3_t origin)
+static void engine_spawn_blood_pool(const vec3_t origin, float radius_max,
+                                    edict_t *owner)
 {
     vec3_t o;
+    int owner_idx = 0;
     o[0] = origin[0]; o[1] = origin[1]; o[2] = origin[2];
-    R_SpawnBloodPool(o);
+    if (owner) owner_idx = NUM_FOR_EDICT(owner);
+    R_SpawnBloodPool(o, radius_max, owner_idx);
+}
+
+static void engine_set_gib_blood_budget(edict_t *gib, float budget,
+                                        float settle_pool_radius)
+{
+    if (!gib) return;
+    SV_SetGibBloodBudget(NUM_FOR_EDICT(gib), budget, settle_pool_radius);
 }
 
 // Lightmap sample at world-space point (Phase 8 / M5). Reuses the renderer's
@@ -1002,6 +1013,7 @@ static engine_api_t engine_funcs = {
     engine_get_view_origin,
     engine_sv_tracemove,
     engine_spawn_blood_pool,
+    engine_set_gib_blood_budget,
     engine_sample_lightmap,
     Lightmap_AddDelta,
     Lightmap_ClearOwner,

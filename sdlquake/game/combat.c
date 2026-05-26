@@ -39,21 +39,27 @@ typedef struct {
     int         gib_threshold;   // gib when health drops below this (negative)
     const char *head_model;
     const char *gib_models[3];
+    // Blood-pool radii in world units, scaled to monster size. corpse =
+    // pool spawned at monster death; head = pool spawned when the flying
+    // head gib settles; gib = pool spawned when a small chunk settles.
+    float       pool_corpse;
+    float       pool_head;
+    float       pool_gib;
 } corpse_gib_info_t;
 
 static const corpse_gib_info_t k_corpse_gibs[] = {
-    {"monster_army",        -35, "progs/h_guard.mdl",  {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
-    {"monster_enforcer",    -35, "progs/h_mega.mdl",   {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
-    {"monster_ogre",        -80, "progs/h_ogre.mdl",   {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}},
-    {"monster_ogre_marksman",-80,"progs/h_ogre.mdl",   {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}},
-    {"monster_demon1",      -80, "progs/h_demon.mdl",  {"progs/gib1.mdl","progs/gib1.mdl","progs/gib1.mdl"}},
-    {"monster_knight",      -40, "progs/h_knight.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
-    {"monster_hell_knight", -40, "progs/h_hellkn.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
-    {"monster_shalrath",    -90, "progs/h_shal.mdl",   {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
-    {"monster_shambler",    -60, "progs/h_shams.mdl",  {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
-    {"monster_wizard",      -40, "progs/h_wizard.mdl", {"progs/gib2.mdl","progs/gib2.mdl","progs/gib2.mdl"}},
-    {"monster_dog",         -35, "progs/h_dog.mdl",    {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}},
-    {"player",              -40, "progs/h_player.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}},
+    {"monster_army",         -35, "progs/h_guard.mdl",  {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}, 48, 18, 10},
+    {"monster_enforcer",     -35, "progs/h_mega.mdl",   {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}, 48, 18, 10},
+    {"monster_ogre",         -80, "progs/h_ogre.mdl",   {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}, 80, 28, 16},
+    {"monster_ogre_marksman",-80, "progs/h_ogre.mdl",   {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}, 80, 28, 16},
+    {"monster_demon1",       -80, "progs/h_demon.mdl",  {"progs/gib1.mdl","progs/gib1.mdl","progs/gib1.mdl"}, 72, 26, 14},
+    {"monster_knight",       -40, "progs/h_knight.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}, 56, 20, 12},
+    {"monster_hell_knight",  -40, "progs/h_hellkn.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}, 56, 20, 12},
+    {"monster_shalrath",     -90, "progs/h_shal.mdl",   {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}, 72, 26, 14},
+    {"monster_shambler",     -60, "progs/h_shams.mdl",  {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}, 96, 32, 18},
+    {"monster_wizard",       -40, "progs/h_wizard.mdl", {"progs/gib2.mdl","progs/gib2.mdl","progs/gib2.mdl"}, 56, 20, 12},
+    {"monster_dog",          -35, "progs/h_dog.mdl",    {"progs/gib3.mdl","progs/gib3.mdl","progs/gib3.mdl"}, 40, 14,  8},
+    {"player",               -40, "progs/h_player.mdl", {"progs/gib1.mdl","progs/gib2.mdl","progs/gib3.mdl"}, 56, 20, 12},
 };
 
 static const corpse_gib_info_t *corpse_gib_lookup(const char *classname) {
@@ -170,6 +176,7 @@ void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip) {
 
 // Forward decl — definition below where ThrowHead/ThrowGib are in scope.
 int GibCorpse(edict_t *self);
+static void g_throw_parent_reset(void);  // defined alongside ThrowGib/ThrowHead below
 
 int CanDamage(edict_t *targ, edict_t *inflictor)
 {
@@ -253,7 +260,9 @@ static void Killed_impl(edict_t *targ, edict_t *attacker)
     if ((int)g->self->v.flags & FL_MONSTER) {
         g->killed_monsters++;
         eng->MSG_WriteByte(MSG_ALL, SVC_KILLEDMONSTER);
-        eng->spawn_blood_pool(g->self->v.origin);
+        const corpse_gib_info_t *pool_info = corpse_gib_lookup(g->self->v.classname);
+        float pool_r = pool_info ? pool_info->pool_corpse : 0.0f;  // 0 → cvar default
+        eng->spawn_blood_pool(g->self->v.origin, pool_r, g->self);
     }
 
     ClientObituary(g->self, attacker);
@@ -281,6 +290,7 @@ static void Killed_impl(edict_t *targ, edict_t *attacker)
 
     if (g->self->v.th_die)
         g->self->v.th_die(g->self);
+    g_throw_parent_reset();  // clear ThrowHead's captured parent classname
 
     g->self = oself;
 }
@@ -593,8 +603,25 @@ static void gib_ring_add(edict_t *new_gib) {
     gib_ring_count++;
 }
 
+// Captured by ThrowHead before it overwrites self->v.classname = "gib", so
+// the subsequent 3× ThrowGib calls (which see self->v.classname == "gib")
+// can still find the parent monster's per-classname pool radii. Cleared
+// after the death sequence by g_throw_parent_reset().
+static const char *g_throw_parent_classname = NULL;
+static void g_throw_parent_reset(void) { g_throw_parent_classname = NULL; }
+
+// Best-effort parent lookup: prefer the ThrowHead-captured classname; fall
+// back to self->v.classname (covers monster die handlers that call ThrowGib
+// without a preceding ThrowHead, where self is still the monster).
+static const corpse_gib_info_t *gib_parent_info(edict_t *self) {
+    if (g_throw_parent_classname)
+        return corpse_gib_lookup(g_throw_parent_classname);
+    return corpse_gib_lookup(self->v.classname);
+}
+
 void ThrowGib(const char *gibname, float dm) {
     edict_t *self = g->self;
+    const corpse_gib_info_t *info = gib_parent_info(self);
     edict_t *n = eng->ED_Alloc();
     n->v.origin[0] = self->v.origin[0];
     n->v.origin[1] = self->v.origin[1];
@@ -626,12 +653,15 @@ void ThrowGib(const char *gibname, float dm) {
     n->v.frame     = 0;
     n->v.flags     = 0;
     n->v.decal_on_bounce = 1.0f;
+    eng->set_gib_blood_budget(n, 4.0f, info ? info->pool_gib : 0.0f);
 
     gib_ring_add(n);
 }
 
 void ThrowHead(const char *gibname, float dm) {
     edict_t *self = g->self;
+    const corpse_gib_info_t *info = corpse_gib_lookup(self->v.classname);
+    g_throw_parent_classname = self->v.classname;  // for subsequent ThrowGib calls
     self->v.classname   = "gib";  // override the corpse classname; this is now a gib
     eng->SV_SetModel(self, gibname);
     self->v.frame       = 0;
@@ -651,6 +681,7 @@ void ThrowHead(const char *gibname, float dm) {
     self->v.avelocity[1] = (eng->Random()*2.0f - 1.0f) * 600.0f;
     self->v.avelocity[2] = 0;
     self->v.decal_on_bounce = 1.0f;
+    eng->set_gib_blood_budget(self, 4.0f, info ? info->pool_head : 0.0f);
 }
 
 // Blood burst for a gib event. Several SpawnBlood calls with randomized
@@ -694,6 +725,7 @@ int GibCorpse(edict_t *self) {
     ThrowGib(info->gib_models[0], self->v.health);
     ThrowGib(info->gib_models[1], self->v.health);
     ThrowGib(info->gib_models[2], self->v.health);
+    g_throw_parent_reset();  // clear ThrowHead's captured parent classname
     g->self = oself;
     return 1;
 }

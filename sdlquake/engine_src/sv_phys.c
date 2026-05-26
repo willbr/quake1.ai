@@ -29,9 +29,28 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // SV_BounceDecal_Reset (called from SV_SpawnServer).
 static double sv_bounce_decal_next[MAX_EDICTS];
 
+// Per-gib blood budget — game.dll seeds these via engine_api.set_gib_blood_budget
+// at gib spawn time. Each bounce-decal stain costs 1.0; a settle pool costs 2.0.
+// When the budget hits zero the bounce hook stops painting for that edict.
+// Cleared on map load alongside sv_bounce_decal_next.
+static float sv_gib_blood       [MAX_EDICTS];
+static float sv_gib_pool_radius [MAX_EDICTS];
+static qboolean sv_gib_settled  [MAX_EDICTS];  // settle pool already spawned for this gib
+
 void SV_BounceDecal_Reset (void)
 {
 	memset (sv_bounce_decal_next, 0, sizeof(sv_bounce_decal_next));
+	memset (sv_gib_blood,         0, sizeof(sv_gib_blood));
+	memset (sv_gib_pool_radius,   0, sizeof(sv_gib_pool_radius));
+	memset (sv_gib_settled,       0, sizeof(sv_gib_settled));
+}
+
+void SV_SetGibBloodBudget (int idx, float budget, float settle_pool_radius)
+{
+	if (idx <= 0 || idx >= MAX_EDICTS) return;
+	sv_gib_blood       [idx] = budget;
+	sv_gib_pool_radius [idx] = settle_pool_radius;
+	sv_gib_settled     [idx] = false;
 }
 
 /*
@@ -1516,11 +1535,15 @@ void SV_Physics_Toss (edict_t *ent)
 
 // Bounce-decal hook: any bouncing entity tagged with decal_on_bounce stamps a
 // blood splat (floor) or wall drip (vertical) plus a few red particles on
-// each collision, throttled to 0.05s per edict.
+// each collision, throttled to 0.05s per edict. Each stain costs 1.0 from
+// the gib's blood budget; once the budget hits zero the gib still bounces
+// but stops painting.
 	if (ent->v.decal_on_bounce && r_decals.value && r_decals_gibbounce.value)
 	{
 		int idx = NUM_FOR_EDICT (ent);
-		if (idx > 0 && idx < MAX_EDICTS && sv.time >= sv_bounce_decal_next[idx])
+		if (idx > 0 && idx < MAX_EDICTS
+		 && sv.time >= sv_bounce_decal_next[idx]
+		 && sv_gib_blood[idx] > 0.0f)
 		{
 			// Immediate splat at impact point on every bounce — gives instant
 			// visual feedback. On walls we additionally start a drip that
@@ -1533,12 +1556,34 @@ void SV_Physics_Toss (edict_t *ent)
 			}
 			R_RunParticleEffect (trace.endpos, trace.plane.normal, 73, 3);
 			sv_bounce_decal_next[idx] = sv.time + 0.05;
+			sv_gib_blood[idx] -= 1.0f;
+		}
+	}
+
+// Settle pool: when a bleeding gib comes to rest on a roughly horizontal
+// surface, spawn one growing pool owned by the gib so it freezes if the
+// gib gets shot away. Costs 2.0 from the budget. Latched per-edict so a
+// single gib spawns at most one settle pool (it re-arms when budget is
+// re-seeded by set_gib_blood_budget — never happens today, but the latch
+// keeps it cheap if it ever does).
+	if (ent->v.decal_on_bounce && trace.plane.normal[2] > 0.7f
+	 && ent->v.velocity[2] < 60.0f)
+	{
+		int idx = NUM_FOR_EDICT (ent);
+		if (idx > 0 && idx < MAX_EDICTS
+		 && !sv_gib_settled[idx]
+		 && sv_gib_blood[idx] >= 2.0f
+		 && sv_gib_pool_radius[idx] > 0.0f)
+		{
+			R_SpawnBloodPool (ent->v.origin, sv_gib_pool_radius[idx], idx);
+			sv_gib_blood[idx]   -= 2.0f;
+			sv_gib_settled[idx]  = true;
 		}
 	}
 
 // stop if on ground
 	if (trace.plane.normal[2] > 0.7)
-	{		
+	{
 #ifdef QUAKE2
 		if (ent->v.velocity[2] < 60 || (ent->v.movetype != MOVETYPE_BOUNCE && ent->v.movetype != MOVETYPE_BOUNCEMISSILE))
 #else

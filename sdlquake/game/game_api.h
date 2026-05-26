@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 26
+#define GAME_API_VERSION 27
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -175,9 +175,23 @@ typedef struct engine_api_s {
                           vec3_t end, int nomonsters, edict_t *skip);
 
     // Spawn a growing blood pool on the floor beneath origin. Called from
-    // game.dll's Killed() on monster death. No-op if no floor within 64
-    // units, or if r_decals/r_decals_bloodpool is 0.
-    void  (*spawn_blood_pool)(const vec3_t origin);
+    // game.dll on monster death and from the gib settle path. No-op if no
+    // floor within 64 units, or if r_decals/r_decals_bloodpool is 0.
+    //   radius_max ≤ 0 → use r_decals_bloodpool_radius cvar default.
+    //   owner          → if non-NULL, pool freezes (stops growing) when this
+    //                    edict is freed, has its classname pointer changed,
+    //                    or moves more than r_decals_bloodpool_owner_drift
+    //                    units. Already-painted luxels stay permanent.
+    void  (*spawn_blood_pool)(const vec3_t origin, float radius_max,
+                              edict_t *owner);
+
+    // Seed a gib's blood budget. The engine decrements the budget by 1.0 on
+    // each bounce-decal stain and 2.0 on the (one-shot) settle pool that
+    // fires when the gib comes to rest. When the budget hits zero the gib
+    // still bounces but stops painting. settle_pool_radius ≤ 0 disables the
+    // settle pool for this gib (it'll only paint splat/drip decals).
+    void  (*set_gib_blood_budget)(edict_t *gib, float budget,
+                                  float settle_pool_radius);
 
     // Sample the lightmap at a world-space point (Phase 8 / M5).
     // Returns 0..255; 0 if no lightmap is available.

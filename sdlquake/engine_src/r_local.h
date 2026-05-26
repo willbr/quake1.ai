@@ -408,7 +408,11 @@ void R_DecalsInit (void);          // called once from R_Init (registers cvars +
 void R_DecalsClear (void);         // called from R_NewMap (zero stain pool, reset bloodpools)
 void R_DecalsFrame (void);         // called per-frame from R_RenderView (advances bloodpools)
 void R_SpawnDecal (vec3_t pos, decal_type_t type);
-void R_SpawnBloodPool (vec3_t origin);
+// radius_max in world units (≤0 → use r_decals_bloodpool_radius cvar).
+// owner_edict = edict index of the source entity (0 = unowned). If set,
+// the pool freezes when that edict is freed, has its classname pointer
+// reassigned, or drifts past r_decals_bloodpool_owner_drift units.
+void R_SpawnBloodPool (vec3_t origin, float radius_max, int owner_edict);
 // Streak that grows downward along a wall over time. Returns false on
 // ceilings or surfaces where the down-projection is degenerate; caller
 // should fall back to a splat decal in that case.

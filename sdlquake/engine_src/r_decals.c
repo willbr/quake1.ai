@@ -17,9 +17,10 @@ static void Stain_AddCell (msurface_t *target, vec3_t cell_world,
 cvar_t r_decals                    = { "r_decals",                    "1", true };
 cvar_t r_decals_max                = { "r_decals_max",                "512", true };
 cvar_t r_decals_intensity          = { "r_decals_intensity",          "1.0", true };
-cvar_t r_decals_bloodpool          = { "r_decals_bloodpool",          "1", true };
-cvar_t r_decals_bloodpool_radius   = { "r_decals_bloodpool_radius",   "24", true };
-cvar_t r_decals_bloodpool_growtime = { "r_decals_bloodpool_growtime", "3.0", true };
+cvar_t r_decals_bloodpool             = { "r_decals_bloodpool",             "1", true };
+cvar_t r_decals_bloodpool_radius      = { "r_decals_bloodpool_radius",      "64", true };
+cvar_t r_decals_bloodpool_growtime    = { "r_decals_bloodpool_growtime",    "3.0", true };
+cvar_t r_decals_bloodpool_owner_drift = { "r_decals_bloodpool_owner_drift", "4", true };
 cvar_t r_decals_gibbounce          = { "r_decals_gibbounce",          "1", true };
 cvar_t r_decals_blooddrip          = { "r_decals_blooddrip",          "1", true };
 cvar_t r_decals_blooddrip_length   = { "r_decals_blooddrip_length",   "48", true };
@@ -40,6 +41,7 @@ void R_DecalsInit (void)
 	Cvar_RegisterVariable (&r_decals_bloodpool);
 	Cvar_RegisterVariable (&r_decals_bloodpool_radius);
 	Cvar_RegisterVariable (&r_decals_bloodpool_growtime);
+	Cvar_RegisterVariable (&r_decals_bloodpool_owner_drift);
 	Cvar_RegisterVariable (&r_decals_gibbounce);
 	Cvar_RegisterVariable (&r_decals_blooddrip);
 	Cvar_RegisterVariable (&r_decals_blooddrip_length);
@@ -58,7 +60,7 @@ static void R_DecalsTestPool_f (void)
 {
 	Con_Printf ("r_decals_test_pool: spawning at %.1f %.1f %.1f\n",
 		r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
-	R_SpawnBloodPool (r_refdef.vieworg);
+	R_SpawnBloodPool (r_refdef.vieworg, 0.0f, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +198,11 @@ typedef struct {
 	float        radius_max;      // game units
 	float        radius_painted;  // last radius painted
 	qboolean     alive;
+	// Owner tracking — pool freezes if its source edict goes away or moves.
+	// owner_edict == 0 means "unowned" (dev cmd, no auto-freeze).
+	int          owner_edict;
+	const char  *owner_classname; // pointer snapshot for fast identity check
+	vec3_t       owner_origin;    // origin snapshot at spawn time
 } bloodpool_t;
 
 static bloodpool_t r_bloodpools[MAX_ACTIVE_BLOODPOOLS];
@@ -267,6 +274,30 @@ void R_DecalsFrame (void)
 	for (i = 0; i < MAX_ACTIVE_BLOODPOOLS; i++) {
 		bp = &r_bloodpools[i];
 		if (!bp->alive) continue;
+
+		// Owner-freeze: if the source entity is gone (freed, replaced by an
+		// edict with a different classname pointer) or has moved more than
+		// `owner_drift` units from where the pool spawned, stop growing.
+		// Already-painted luxels stay (no fade — pools are permanent stains).
+		if (bp->owner_edict > 0) {
+			edict_t *owner = EDICT_NUM(bp->owner_edict);
+			float drift_sq = r_decals_bloodpool_owner_drift.value;
+			drift_sq = drift_sq * drift_sq;
+			if (!owner || owner->free
+			 || owner->v.classname != bp->owner_classname) {
+				bp->alive = false;
+				continue;
+			}
+			{
+				float ox = owner->v.origin[0] - bp->owner_origin[0];
+				float oy = owner->v.origin[1] - bp->owner_origin[1];
+				float oz = owner->v.origin[2] - bp->owner_origin[2];
+				if (ox*ox + oy*oy + oz*oz > drift_sq) {
+					bp->alive = false;
+					continue;
+				}
+			}
+		}
 
 		t = (cl.time - bp->spawn_time) / dur;
 		if (t < 0.0f) t = 0.0f;
@@ -1008,7 +1039,7 @@ void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal)
 	st->last_touched_frame = r_framecount;
 }
 
-void R_SpawnBloodPool (vec3_t origin)
+void R_SpawnBloodPool (vec3_t origin, float radius_max, int owner_edict)
 {
 	vec3_t   end;
 	trace_t  tr;
@@ -1017,6 +1048,7 @@ void R_SpawnBloodPool (vec3_t origin)
 	float    oldest_time;
 	int      oldest_slot;
 	bloodpool_t *bp;
+	float    use_radius;
 
 	if (r_decals_debug.value) {
 		Con_Printf ("R_SpawnBloodPool: origin=%.1f %.1f %.1f rdecals=%d rbloodpool=%d\n",
@@ -1063,15 +1095,32 @@ void R_SpawnBloodPool (vec3_t origin)
 		slot               = oldest_slot;
 	}
 
+	use_radius = (radius_max > 0.0f) ? radius_max : r_decals_bloodpool_radius.value;
+
 	bp = &r_bloodpools[slot];
 	bp->origin[0]      = tr.endpos[0];
 	bp->origin[1]      = tr.endpos[1];
 	bp->origin[2]      = tr.endpos[2];
 	bp->surf           = surf;
 	bp->spawn_time     = cl.time;
-	bp->radius_max     = r_decals_bloodpool_radius.value;
+	bp->radius_max     = use_radius;
 	bp->radius_painted = 0.0f;
 	bp->alive          = true;
+	bp->owner_edict    = owner_edict;
+	if (owner_edict > 0) {
+		edict_t *owner = EDICT_NUM(owner_edict);
+		if (owner && !owner->free) {
+			bp->owner_classname  = owner->v.classname;
+			bp->owner_origin[0]  = owner->v.origin[0];
+			bp->owner_origin[1]  = owner->v.origin[1];
+			bp->owner_origin[2]  = owner->v.origin[2];
+		} else {
+			bp->owner_edict      = 0;  // owner already gone — treat as unowned
+			bp->owner_classname  = NULL;
+		}
+	} else {
+		bp->owner_classname  = NULL;
+	}
 }
 
 // Spawn a wall-drip. Returns 1 on success (caller may skip splat fallback),
