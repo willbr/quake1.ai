@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    14
+#define NAV_VERSION    15
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -704,10 +704,10 @@ static int bake_floodfill(sim_navmesh_t *m) {
         while (it) {
             if (it != probe && it->v.solid > (float)SOLID_NOT) {
                 const char *icn = it->v.classname;
-                int is_lift = 0;
+                int keep_solid = 0;
                 if (icn) {
                     if (!strcmp(icn, "plat") || !strcmp(icn, "func_plat")) {
-                        is_lift = 1;
+                        keep_solid = 1;  // lift
                     } else if (!strcmp(icn, "door") || !strcmp(icn, "func_door")) {
                         float dz  = it->v.pos2[2] - it->v.pos1[2];
                         float dx  = it->v.pos2[0] - it->v.pos1[0];
@@ -719,10 +719,21 @@ static int bake_floodfill(sim_navmesh_t *m) {
                         float sy  = it->v.maxs[1] - it->v.mins[1];
                         int vertical  = (adz > 24.f) && (adz > adx) && (adz > ady);
                         int standable = (sx > 48.f) && (sy > 48.f);
-                        is_lift = vertical && standable;
+                        int is_lift = vertical && standable;
+                        // Doors that don't open on touch: secret doors get
+                        // health=10000 set on spawn, and externally-triggered
+                        // doors have a targetname. Keep both solid so BFS
+                        // routes around -- the bot has no way to open them
+                        // by walking in. Touch-triggered doors (health=0,
+                        // no targetname) still get their solid cleared and
+                        // BFS walks through them.
+                        int needs_activation =
+                            ((int)it->v.health != 0) ||
+                            (it->v.targetname && it->v.targetname[0]);
+                        keep_solid = is_lift || needs_activation;
                     }
                 }
-                if (is_lift) { it = eng->ED_Next(it); continue; }
+                if (keep_solid) { it = eng->ED_Next(it); continue; }
                 if (solid_saves_n >= solid_saves_cap) {
                     int nc = solid_saves_cap ? solid_saves_cap * 2 : 128;
                     solid_save_t *ns = realloc(solid_saves,
