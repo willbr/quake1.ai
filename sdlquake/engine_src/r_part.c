@@ -1451,36 +1451,24 @@ void R_DebugBloodDroplet (vec3_t org, vec3_t vel)
 ===============
 R_SpawnGunshotChips
 
-Small black specks deposited on a wall by a shotgun pellet impact —
-buckshot-scatter pellet marks that augment the central DECAL_BULLET stain.
-Stationary pt_static, zero velocity, palette black, ~8 s lifetime. Spawned
-right at the trace endpos (which is on the surface) with a 1-2 u jitter so
-the cluster reads as a scatter pattern, not a single point.
+Buckshot-scatter pellet marks deposited next to the central DECAL_BULLET
+stain. Two 1×1 dark stain cells (DECAL_SPIKE — same kernel as nail-impact
+marks) jittered ±2u from the trace endpos so the cluster reads as a
+scatter pattern, not a single point. R_SpawnDecal handles the surface
+lookup; jittered positions still snap onto the same wall via the BSP
+search inside R_SpawnDecal.
 ===============
 */
 void R_SpawnGunshotChips (vec3_t pos)
 {
-	int			i, j;
-	particle_t	*p;
+	int		i, j;
 	const int	count = 2;
 
 	for (i = 0; i < count; i++) {
-		if (!free_particles) return;
-		p = free_particles;
-		free_particles = p->next;
-		p->next = active_particles;
-		active_particles = p;
-		p->flags = 0;
-
-		p->die   = cl.time + 8.0f;
-		p->type  = pt_static;
-		p->color = 0;			// palette index 0 — true black
-		p->ramp  = 0;
-
-		for (j = 0; j < 3; j++) {
-			p->org[j] = pos[j] + ((rand() & 3) - 1);	// ±1 u jitter
-			p->vel[j] = 0;
-		}
+		vec3_t jpos;
+		for (j = 0; j < 3; j++)
+			jpos[j] = pos[j] + ((rand() & 7) - 3);	// -3..+4, ≈±2u jitter
+		R_SpawnDecal (jpos, DECAL_SPIKE);
 	}
 }
 
