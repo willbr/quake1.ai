@@ -517,6 +517,23 @@ static int json_int(const char *json, const char *key, int *out)
     return 1;
 }
 
+// Parse a scalar JSON number for "key": <num>. Permissive — accepts
+// ints or floats. Returns 1 on success.
+static int json_float(const char *json, const char *key, float *out)
+{
+    char search[128];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+    const char *p = strstr(json, search);
+    if (!p) return 0;
+    p += strlen(search);
+    while (*p == ' ') p++;
+    char *endp = NULL;
+    float v = strtof(p, &endp);
+    if (endp == p) return 0;
+    *out = v;
+    return 1;
+}
+
 // Extract a 3-element JSON number array for "key":[x,y,z] -> out[0..2].
 // Returns 1 on success. Permissive: skips whitespace, accepts ints/floats.
 static int json_vec3(const char *json, const char *key, float out[3])
@@ -1162,6 +1179,120 @@ static void tool_inspect_entity(const char *id_json, const char *args)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: nav_edges_near -- query nav edges whose either endpoint is within
+// `radius` of {x,y,z}. Returns JSON with from/to coords, kind name, phase
+// name, weight, and a truncation flag. Capped at NAV_EDGES_NEAR_CAP records
+// to keep payload bounded (e1m1 has ~60k edges; an unbounded query could
+// dump megabytes). Routes via game_api->nav_edges_near.
+// ---------------------------------------------------------------------------
+
+#define NAV_EDGES_NEAR_CAP 200
+
+// Mirror of sim_nav_edge_record_t in sdlquake/game/sim/sim.h. Engine
+// side cannot include sim.h (it's DLL-private); we redeclare. If the
+// DLL layout ever changes, bump GAME_API_VERSION and update both.
+typedef struct {
+    float from[3];
+    float to[3];
+    float weight;
+    unsigned char kind;
+    unsigned char phase;
+} mcp_nav_edge_record_t;
+
+static const char *nav_edge_kind_name(unsigned char k) {
+    switch (k) {
+    case 0: return "WALK";
+    case 1: return "JUMP_UP";
+    case 2: return "DROP_DOWN";
+    case 3: return "PLAT_RIDE";
+    case 4: return "TELEPORT";
+    case 5: return "PLAT_LINK";
+    case 6: return "SHOOT_LINK";
+    case 7: return "BUTTON_LINK";
+    default: return "UNKNOWN";
+    }
+}
+
+static const char *nav_phase_name(unsigned char p) {
+    switch (p) {
+    case 0: return "BFS_WALK";
+    case 1: return "JUMP_DROP";
+    case 2: return "TELE_SRC";
+    case 3: return "TELE_NEAR";
+    case 4: return "LIFT_RIDE";
+    case 5: return "LIFT_PLAT_LINK";
+    case 6: return "LIFT_BUTTON_SHOOT";
+    default: return "UNKNOWN";
+    }
+}
+
+static void tool_nav_edges_near(const char *id_json, const char *args)
+{
+    float x, y, z, radius;
+    if (!args ||
+        !json_float(args, "x", &x) ||
+        !json_float(args, "y", &y) ||
+        !json_float(args, "z", &z) ||
+        !json_float(args, "radius", &radius)) {
+        mcp_error(id_json, -32602, "need x, y, z, radius (numbers)");
+        return;
+    }
+    if (radius <= 0.0f) {
+        mcp_error(id_json, -32602, "radius must be positive");
+        return;
+    }
+
+    extern int MCP_NavEdgesNear(const float *center, float radius,
+                                void *out_records, int max_records,
+                                int *truncated_out);
+    float center[3] = { x, y, z };
+    mcp_nav_edge_record_t recs[NAV_EDGES_NEAR_CAP];
+    int truncated = 0;
+    int n = MCP_NavEdgesNear(center, radius, recs, NAV_EDGES_NEAR_CAP, &truncated);
+
+    // Build raw JSON in one buffer; escape into the JSON-string field
+    // exposed by mcp_text_result. Worst-case bytes: ~180 per edge
+    // (coords, names, weight, formatting) x 200 = 36 KB. Use a heap
+    // buffer to stay off the thread stack.
+    size_t cap = (size_t)NAV_EDGES_NEAR_CAP * 200 + 256;
+    char *raw = (char *)malloc(cap);
+    if (!raw) { mcp_error(id_json, -32603, "oom"); return; }
+
+    int off = snprintf(raw, cap,
+        "{\"count\":%d,\"truncated\":%s,\"edges\":[",
+        n, truncated ? "true" : "false");
+    for (int i = 0; i < n && off > 0 && (size_t)off < cap; i++) {
+        const mcp_nav_edge_record_t *r = &recs[i];
+        off += snprintf(raw + off, cap - (size_t)off,
+            "%s{\"from\":[%.2f,%.2f,%.2f],"
+            "\"to\":[%.2f,%.2f,%.2f],"
+            "\"kind\":\"%s\",\"phase\":\"%s\",\"weight\":%.3f}",
+            i ? "," : "",
+            r->from[0], r->from[1], r->from[2],
+            r->to[0],   r->to[1],   r->to[2],
+            nav_edge_kind_name(r->kind),
+            nav_phase_name(r->phase),
+            (double)r->weight);
+    }
+    if ((size_t)off < cap) {
+        off += snprintf(raw + off, cap - (size_t)off, "]}");
+    }
+
+    // Escape raw into a JSON string for mcp_text_result. Allocate
+    // 2x raw size + slack for worst-case escaping.
+    size_t esc_cap = cap * 2 + 64;
+    char *escaped = (char *)malloc(esc_cap);
+    if (!escaped) { free(raw); mcp_error(id_json, -32603, "oom"); return; }
+    char *d = escaped;
+    char *dend = escaped + esc_cap - 1;
+    d = json_escape_append(d, dend, raw);
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+    free(escaped);
+    free(raw);
+}
+
+// ---------------------------------------------------------------------------
 // Tool: damage_entity -- deterministically apply damage to an edict.
 // Routes through game_api->damage_entity, which thunks into T_Damage with
 // the world as inflictor/attacker so corpse-overdamage and gib branches fire
@@ -1527,6 +1658,16 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
          "\"properties\":{" \
            "\"frames\":{\"type\":\"integer\",\"description\":\"1..60\"}}," \
          "\"required\":[\"frames\"]}}" \
+      "," \
+      "{\"name\":\"nav_edges_near\"," \
+       "\"description\":\"Return nav edges whose either endpoint is within `radius` of (x,y,z). Each edge reports from/to coords, kind (NAV_EDGE_* name), phase (NAV_PHASE_* name — which bake sub-block emitted it), and weight. Capped at 200 records; sets truncated=true when the cap is hit. Returns count=0 with no error before the first bake completes\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"x\":{\"type\":\"number\"}," \
+           "\"y\":{\"type\":\"number\"}," \
+           "\"z\":{\"type\":\"number\"}," \
+           "\"radius\":{\"type\":\"number\",\"description\":\"world units; > 0\"}}," \
+         "\"required\":[\"x\",\"y\",\"z\",\"radius\"]}}" \
     "]}"
 
 // ---------------------------------------------------------------------------
@@ -1692,6 +1833,11 @@ static void mcp_dispatch(const char *line)
         {
             const char *args = strstr(line, "\"arguments\":");
             tool_wait_frames(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "nav_edges_near") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_nav_edges_near(id_json, args ? args : "");
         }
         else
         {
