@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    15
+#define NAV_VERSION    16
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -720,17 +720,19 @@ static int bake_floodfill(sim_navmesh_t *m) {
                         int vertical  = (adz > 24.f) && (adz > adx) && (adz > ady);
                         int standable = (sx > 48.f) && (sy > 48.f);
                         int is_lift = vertical && standable;
-                        // Doors that don't open on touch: secret doors get
-                        // health=10000 set on spawn, and externally-triggered
-                        // doors have a targetname. Keep both solid so BFS
-                        // routes around -- the bot has no way to open them
-                        // by walking in. Touch-triggered doors (health=0,
-                        // no targetname) still get their solid cleared and
-                        // BFS walks through them.
-                        int needs_activation =
-                            ((int)it->v.health != 0) ||
-                            (it->v.targetname && it->v.targetname[0]);
-                        keep_solid = is_lift || needs_activation;
+                        // Secret doors get health=10000 on spawn; they
+                        // can't be opened by walking in, only by shoot
+                        // damage or a remote trigger. Keep them solid
+                        // so BFS routes around them entirely.
+                        //
+                        // NOT including targetname-driven doors here:
+                        // many maps gate their main path behind button
+                        // -> door pairs, and blocking those at the bake
+                        // stage strands the bot. Proper handling needs
+                        // button -> door edges (same shape as the lift
+                        // logic) which is queued.
+                        int is_secret = ((int)it->v.health != 0);
+                        keep_solid = is_lift || is_secret;
                     }
                 }
                 if (keep_solid) { it = eng->ED_Next(it); continue; }
