@@ -646,12 +646,16 @@ void Bot_Frame(usercmd_t *cmd)
 {
     if (!Bot_Active()) return;
     if (!sv_player || sv_player->free) return;
-    // Hand controls back to the user when the menu/console is up or
-    // the game is paused — otherwise the bot keeps driving inputs and
-    // the player can't take over without disabling the cvar.
-    if (key_dest != key_game || cl.paused) {
-        Bot_SetButtons(0, 0);
-        return;
+    // Hand controls back to the user when the menu/console is up, the
+    // game is paused, or the in-game editor is open — otherwise the
+    // bot keeps driving inputs and the player can't take over without
+    // disabling the cvar.
+    {
+        extern int Editor_IsOpen(void);
+        if (key_dest != key_game || cl.paused || Editor_IsOpen()) {
+            Bot_SetButtons(0, 0);
+            return;
+        }
     }
     Bot_DriveFrame(cmd);
     Bot_DrawDebug();
