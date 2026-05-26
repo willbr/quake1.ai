@@ -300,11 +300,14 @@ static void Bot_DecideGoal(void)
         return;
     }
 
-    // Nothing actionable — wander forward.
-    if (bot_debug.value) Con_Printf("[bot] IDLE: no goal found\n");
-    b.state = BS_IDLE;
+    // Nothing actionable — auto-promote to WANDER so we keep moving and
+    // give the next perception sweep a different vantage point.
+    if (bot_debug.value) Con_Printf("[bot] no goal -> WANDER\n");
+    b.state = BS_WANDER;
     b.target_edict = -1;
     b.waypoint_count = 0;
+    b.wander_until = 0.f;  // force fresh heading
+    b.wander_replan = (float)host_time + 4.0f;
 }
 
 // ---------------------------------------------------------------------------
@@ -444,22 +447,33 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         }
     }
 
-    // Replan periodically. While WANDER, the replan check is deferred to
-    // wander_replan so the random walk has time to actually move us.
-    if (b.state == BS_WANDER) {
-        if ((float)host_time >= b.wander_replan) {
-            // Exit wander mode and re-decide goal from new position.
-            b.state = BS_IDLE;
-            b.stuck_fails = 0;
-            b.progress_time = 0.f;
-            Bot_DecideGoal();
-            b.next_replan = host_time + 0.5f;
-            target = b.target_edict >= 0 ? Bot_Edict(b.target_edict) : NULL;
-        }
-    } else if (host_time >= b.next_replan) {
-        Bot_DecideGoal();
+    // Replan periodically. During WANDER we still poll, but the only
+    // states allowed to interrupt are COMBAT (must engage) and KEY (we
+    // want to grab keys when we see them). The exit/item branches don't
+    // pre-empt wander so the bot has time to actually move somewhere
+    // useful before reconsidering.
+    if (host_time >= b.next_replan) {
+        bot_state_t prev = b.state;
+        int prev_target = b.target_edict;
         b.next_replan = host_time + 0.5f;
+        Bot_DecideGoal();
+        if (prev == BS_WANDER &&
+            b.state != BS_COMBAT && b.state != BS_GOTO_KEY &&
+            b.waypoint_count == 0)
+        {
+            // No path-bearing alternative — keep wandering.
+            b.state = prev;
+            b.target_edict = prev_target;
+        }
         target = b.target_edict >= 0 ? Bot_Edict(b.target_edict) : NULL;
+    }
+    if (b.state == BS_WANDER && (float)host_time >= b.wander_replan) {
+        // End of wander window — return to idle so the next replan
+        // re-evaluates goals from scratch.
+        b.state = BS_IDLE;
+        b.stuck_fails = 0;
+        b.progress_time = 0.f;
+        b.next_replan = 0;
     }
 
     // Aim + movement target.
@@ -467,9 +481,22 @@ static void Bot_DriveFrame(usercmd_t *cmd)
     if (b.state == BS_COMBAT && target) {
         Bot_EntityCenter(target, aim_target);
     } else if (b.state == BS_WANDER) {
-        // Re-randomize heading every few seconds.
+        // Re-randomize heading every few seconds. Half the time, bias
+        // toward the most recent goal so wandering still drifts in the
+        // right general direction.
         if ((float)host_time >= b.wander_until) {
-            b.wander_yaw   = (float)(rand() % 360);
+            float biased = 0;
+            int has_bias = (b.target_pos[0] != 0.f || b.target_pos[1] != 0.f);
+            if (has_bias && (rand() & 1)) {
+                float dxg = b.target_pos[0] - sv_player->v.origin[0];
+                float dyg = b.target_pos[1] - sv_player->v.origin[1];
+                float goal_yaw = atan2f(dyg, dxg) * 180.f / (float)M_PI;
+                // jitter the goal direction by +/- 90 degrees
+                biased = goal_yaw + (float)((rand() % 181) - 90);
+            } else {
+                biased = (float)(rand() % 360);
+            }
+            b.wander_yaw   = anglemod(biased);
             b.wander_until = (float)host_time + 1.0f + ((rand() & 7) * 0.25f);
         }
         // Compute a forward aim point from heading.
