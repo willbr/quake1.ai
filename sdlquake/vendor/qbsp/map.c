@@ -2,6 +2,8 @@
 
 #include "bsp5.h"
 
+extern void Con_Printf(char *fmt, ...);
+
 int			nummapbrushes;
 mbrush_t	mapbrushes[MAX_MAP_BRUSHES];
 
@@ -30,7 +32,16 @@ int FindMiptex (char *name)
 	}
 	if (nummiptex == MAX_MAP_TEXINFO)
 		Error ("nummiptex == MAX_MAP_TEXINFO");
-	strcpy (miptex[i], name);
+	/* miptex[i] is char[16]; bare strcpy from an editor-supplied texture
+	 * name would silently smash adjacent slots if the name is too long.
+	 * Truncate at 15 bytes and warn loudly so the offending texture is
+	 * visible in the bake log. */
+	if (strlen(name) >= sizeof(miptex[0])) {
+		Con_Printf("FindMiptex: texture name '%s' truncated to 15 chars\n",
+		           name);
+	}
+	strncpy (miptex[i], name, sizeof(miptex[0]) - 1);
+	miptex[i][sizeof(miptex[0]) - 1] = '\0';
 	nummiptex++;
 	return i;
 }
