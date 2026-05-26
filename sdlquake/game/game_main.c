@@ -110,6 +110,15 @@ static int game_nav_path(const float *from, const float *to,
     return Sim_Nav_PathTo(f, t, out, out_kinds, player_items, max_waypoints);
 }
 
+// MCP debug bridge — see game_api.h::nav_edges_near.
+static int game_nav_edges_near(const float *center, float radius,
+                               void *out_records, int max_records,
+                               int *truncated_out) {
+    return Sim_Nav_EdgesNear(center, radius,
+                             (sim_nav_edge_record_t *)out_records,
+                             max_records, truncated_out);
+}
+
 // Editor inspector query — see game_api.h for field contract.
 static int game_ai_inspect(edict_t *e,
                            int *out_state,
@@ -160,6 +169,7 @@ static game_api_t s_api = {
     Wind_SampleVelocity,
     game_ai_inspect,
     game_nav_path,
+    game_nav_edges_near,
 };
 
 #ifdef _WIN32

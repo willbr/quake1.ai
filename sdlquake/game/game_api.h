@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 30
+#define GAME_API_VERSION 31
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -325,6 +325,18 @@ typedef struct game_api_s {
                       unsigned char *out_kinds,
                       unsigned int player_items,
                       int max_waypoints);
+
+    // Debug-only nav edge query for the MCP nav_edges_near tool. Fills
+    // up to `max_records` snapshots of edges within `radius` of the
+    // 3-float `center` point. Returns the number written; sets
+    // `*truncated_out` to 1 if more edges matched than fit (when
+    // truncated_out is non-NULL). The record layout is fixed by
+    // sim_nav_edge_record_t in sim.h — engine-side code should match
+    // it via an extern struct rather than redeclaring (see
+    // hotreload.c::MCP_NavEdgesNear).
+    int   (*nav_edges_near)(const float *center, float radius,
+                            void *out_records, int max_records,
+                            int *truncated_out);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);
