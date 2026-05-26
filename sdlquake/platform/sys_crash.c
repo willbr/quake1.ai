@@ -237,20 +237,54 @@ static const char *posix_signal_name(int sig)
     }
 }
 
+// Async-signal-safe pieces: write a single decimal int, and a single pointer
+// in lowercase hex with a 0x prefix. We can't call snprintf in a signal
+// handler — it isn't async-signal-safe and can re-enter the allocator if
+// the crash was inside malloc, leaving the handler hung.
+static void sig_write_str(const char *s)
+{
+    size_t len = 0;
+    while (s[len]) len++;
+    (void)write(STDERR_FILENO, s, len);
+}
+static void sig_write_int(int v)
+{
+    char buf[16];
+    int  i = (int)sizeof(buf);
+    unsigned u;
+    if (v < 0) { (void)write(STDERR_FILENO, "-", 1); u = (unsigned)(-(long)v); }
+    else        u = (unsigned)v;
+    if (u == 0) buf[--i] = '0';
+    while (u) { buf[--i] = (char)('0' + (u % 10)); u /= 10; }
+    (void)write(STDERR_FILENO, buf + i, (size_t)((int)sizeof(buf) - i));
+}
+static void sig_write_ptr(const void *p)
+{
+    char buf[2 + 2 * sizeof(void *)];
+    int  i = (int)sizeof(buf);
+    unsigned long u = (unsigned long)p;
+    do { unsigned d = (unsigned)(u & 0xf); u >>= 4;
+         buf[--i] = (char)(d < 10 ? '0' + d : 'a' + (d - 10)); } while (u);
+    buf[--i] = 'x';
+    buf[--i] = '0';
+    (void)write(STDERR_FILENO, buf + i, (size_t)((int)sizeof(buf) - i));
+}
+
 static void posix_crash_handler(int sig, siginfo_t *info, void *uctx)
 {
     (void)uctx;
     void  *frames[64];
     int    n = backtrace(frames, 64);
 
-    // Use only async-signal-safe writes for the header; backtrace_symbols_fd
-    // is documented async-signal-safe on macOS and glibc.
-    char hdr[128];
-    int  hlen = snprintf(hdr, sizeof(hdr),
-                         "\n=== Unhandled signal: %s (%d) at %p ===\n",
-                         posix_signal_name(sig), sig,
-                         info ? info->si_addr : NULL);
-    if (hlen > 0) write(STDERR_FILENO, hdr, (size_t)hlen);
+    // Async-signal-safe header: write each piece as a separate write() call.
+    // backtrace_symbols_fd is documented async-signal-safe on macOS and glibc.
+    sig_write_str("\n=== Unhandled signal: ");
+    sig_write_str(posix_signal_name(sig));
+    sig_write_str(" (");
+    sig_write_int(sig);
+    sig_write_str(") at ");
+    sig_write_ptr(info ? info->si_addr : NULL);
+    sig_write_str(" ===\n");
 
     backtrace_symbols_fd(frames, n, STDERR_FILENO);
 
