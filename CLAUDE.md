@@ -70,8 +70,14 @@ lookup on the GPU. The CPU-side `palette_expand` loop (≈5 ms/frame at
 Shaders compile at build time via `scripts/build_shaders.sh`
 (glslangValidator GLSL → SPIR-V, then spirv-cross SPIR-V → MSL with
 `--flip-vert-y`), embedded as C arrays in a generated
-`palette_shaders.h`. SPIR-V serves Vulkan; MSL source string is
-compiled at runtime by Metal. DXIL for D3D12 is a TODO.
+`palette_shaders.h`. SPIR-V serves Vulkan on Linux *and* Windows
+(SDL_GPU picks the Vulkan backend when the requested shader formats
+are SPIRV|MSL and the system has Vulkan drivers — true for any
+Intel HD 4th gen / NVIDIA Kepler / AMD GCN or later, i.e. effectively
+every Windows GPU since 2014). MSL source string is compiled at
+runtime by Metal on macOS. A DXIL pipeline would let SDL_GPU pick
+D3D12 instead of Vulkan on Windows; it's a fallback for very old
+hardware without Vulkan drivers, not a blocker.
 
 ImGui composites through the `imgui_impl_sdlgpu3` backend in the same
 render pass. The editor's texture-thumbnail cache (`edit_texcache.c`)
@@ -94,7 +100,8 @@ set=3 binding=0. Rect coords are stored in super-pixel space (g.w/g.h)
 and scaled by `vid_supersample_active` during mouse-event handling so
 ss>1 selects the correct slab of the frozen framebuffer.
 
-Known migration TODOs: DXIL bytecode for Windows D3D12.
+Known migration TODOs: DXIL bytecode would let SDL_GPU pick D3D12 on
+Windows as an alternative to Vulkan; nothing else outstanding.
 
 ### MCP server (Phase 2)
 
