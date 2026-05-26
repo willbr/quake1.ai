@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    13
+#define NAV_VERSION    14
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -685,6 +685,16 @@ static int bake_floodfill(sim_navmesh_t *m) {
     // holes in the navmesh around each enemy. We restore solid values
     // after the bake completes. World (edict 0) is left solid so the probe
     // continues to collide with the level geometry it needs to walk on.
+    //
+    // EXCEPTION: lifts stay solid. Wall-mounted button anchors near a
+    // lift use seat_probe (a downward trace) to find a standing floor.
+    // If the lift were non-solid, the probe would drop straight through
+    // the shaft to the floor below, putting the button anchor far below
+    // its actual approach position and breaking the walk edge from
+    // plat_top to button_anchor. Keeping lifts solid means BFS won't
+    // expand *through* them, but plat_top/bottom anchors are handled by
+    // Phase 4.5's explicit link logic, not BFS expansion, so that's
+    // fine.
     typedef struct { edict_t *e; float solid; } solid_save_t;
     solid_save_t *solid_saves     = NULL;
     int           solid_saves_cap = 0;
@@ -693,6 +703,26 @@ static int bake_floodfill(sim_navmesh_t *m) {
         edict_t *it = eng->ED_Next(g->world);
         while (it) {
             if (it != probe && it->v.solid > (float)SOLID_NOT) {
+                const char *icn = it->v.classname;
+                int is_lift = 0;
+                if (icn) {
+                    if (!strcmp(icn, "plat") || !strcmp(icn, "func_plat")) {
+                        is_lift = 1;
+                    } else if (!strcmp(icn, "door") || !strcmp(icn, "func_door")) {
+                        float dz  = it->v.pos2[2] - it->v.pos1[2];
+                        float dx  = it->v.pos2[0] - it->v.pos1[0];
+                        float dy  = it->v.pos2[1] - it->v.pos1[1];
+                        float adz = dz < 0 ? -dz : dz;
+                        float adx = dx < 0 ? -dx : dx;
+                        float ady = dy < 0 ? -dy : dy;
+                        float sx  = it->v.maxs[0] - it->v.mins[0];
+                        float sy  = it->v.maxs[1] - it->v.mins[1];
+                        int vertical  = (adz > 24.f) && (adz > adx) && (adz > ady);
+                        int standable = (sx > 48.f) && (sy > 48.f);
+                        is_lift = vertical && standable;
+                    }
+                }
+                if (is_lift) { it = eng->ED_Next(it); continue; }
                 if (solid_saves_n >= solid_saves_cap) {
                     int nc = solid_saves_cap ? solid_saves_cap * 2 : 128;
                     solid_save_t *ns = realloc(solid_saves,
