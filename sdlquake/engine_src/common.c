@@ -1831,15 +1831,12 @@ void COM_AddGameDirectory (char *dir)
 	strcpy (com_gamedir, dir);
 
 //
-// add the directory to the search path
-//
-	search = Hunk_Alloc (sizeof(searchpath_t));
-	strcpy (search->filename, dir);
-	search->next = com_searchpaths;
-	com_searchpaths = search;
-
-//
-// add any pak files in the format pak0.pak pak1.pak, ...
+// Add paks FIRST so the loose directory ends up at the HEAD of the
+// LIFO searchpath list (i.e. searched first). Loose files in id1/
+// then shadow same-named entries in pak0.pak — the behaviour the
+// repo's loose-asset workflow assumes (e.g. id1/default.cfg with
+// WASD bindings overrides the pak's vintage cursor-key default.cfg).
+// CLAUDE.md flags this gotcha; this is the structural fix.
 //
 	for (i=0 ; ; i++)
 	{
@@ -1850,8 +1847,16 @@ void COM_AddGameDirectory (char *dir)
 		search = Hunk_Alloc (sizeof(searchpath_t));
 		search->pack = pak;
 		search->next = com_searchpaths;
-		com_searchpaths = search;               
+		com_searchpaths = search;
 	}
+
+//
+// add the loose directory last (= front of the LIFO list = searched first)
+//
+	search = Hunk_Alloc (sizeof(searchpath_t));
+	strcpy (search->filename, dir);
+	search->next = com_searchpaths;
+	com_searchpaths = search;
 
 //
 // add the contents of the parms.txt file to the end of the command line
