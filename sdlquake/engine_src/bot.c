@@ -15,6 +15,7 @@ cvar_t bot_pickup_radius= { "bot_pickup_radius","640" };
 cvar_t bot_turn_speed   = { "bot_turn_speed",   "540" };
 cvar_t bot_combat_dist  = { "bot_combat_dist",  "768" };
 cvar_t bot_debug        = { "bot_debug",        "0", true };
+cvar_t bot_debug_viz    = { "bot_debug_viz",    "0", true };
 // If the bot can't reach an exit within this many seconds, force a
 // changelevel to keep map-traversal testing alive. 0 disables.
 cvar_t bot_giveup_secs  = { "bot_giveup_secs",  "240", true };
@@ -594,6 +595,18 @@ static void Bot_DriveFrame(usercmd_t *cmd)
                     cmd->sidemove = ((((int)(host_time*2.f)) & 1) ? 1.f : -1.f) * cl_sidespeed.value;
                     if (sv_player->v.flags && ((int)sv_player->v.flags & FL_ONGROUND))
                         do_jump = 1;
+                    // No path and pressed straight into a wall → don't
+                    // wait for the 1.5s stuck timer; promote to WANDER now.
+                    if (b.waypoint_count == 0 && tr.fraction < 0.25f &&
+                        b.state != BS_WANDER && b.state != BS_COMBAT)
+                    {
+                        b.state = BS_WANDER;
+                        b.wander_yaw = anglemod(cl.viewangles[YAW] + ((rand() & 1) ? 90.f : -90.f));
+                        b.wander_until = (float)host_time + 0.5f;
+                        b.wander_replan= (float)host_time + 4.f;
+                        if (bot_debug.value)
+                            Con_Printf("[bot] wall hit, fast -> WANDER\n");
+                    }
                 }
             }
         }
@@ -694,11 +707,78 @@ static void Bot_DriveFrame(usercmd_t *cmd)
 
 int Bot_Active(void) { return bot.value != 0.f && sv.active && cls.signon == SIGNONS; }
 
+// Submit one frame's worth of debug lines describing the bot's plan.
+//   waypoint chain: cyan
+//   active aim ray: yellow
+//   target marker:  red cross
+//   wall-trace:     magenta when ahead trace is blocked
+// Lines are cleared every R_RenderView; we re-submit each frame.
+static void Bot_DrawDebug(void)
+{
+    extern void DebugLines_Add(const float start[3], const float end[3], int color, int ztest);
+    vec3_t eye, fwd, ahead, aim;
+    float yaw_r;
+    int i;
+
+    if (!bot_debug_viz.value || !sv_player || sv_player->free) return;
+
+    eye[0] = sv_player->v.origin[0];
+    eye[1] = sv_player->v.origin[1];
+    eye[2] = sv_player->v.origin[2] + sv_player->v.view_ofs[2];
+
+    // Waypoint chain (cyan = 244, falls within the Quake palette).
+    for (i = b.waypoint_idx; i + 1 < b.waypoint_count; i++) {
+        DebugLines_Add(b.waypoints[i], b.waypoints[i+1], 244, 0);
+    }
+    // First waypoint from eye.
+    if (b.waypoint_count > 0 && b.waypoint_idx < b.waypoint_count) {
+        DebugLines_Add(eye, b.waypoints[b.waypoint_idx], 244, 0);
+    }
+
+    // Target marker — small red (251) cross at target_pos when goal active.
+    if (b.target_edict >= 0 || b.state == BS_WANDER) {
+        vec3_t tp;
+        const float k = 24.f;
+        vec3_t a, b2;
+        Bot_VecCopy(b.target_pos, tp);
+        a[0]=tp[0]-k; a[1]=tp[1]; a[2]=tp[2]; b2[0]=tp[0]+k; b2[1]=tp[1]; b2[2]=tp[2];
+        DebugLines_Add(a, b2, 251, 0);
+        a[0]=tp[0]; a[1]=tp[1]-k; a[2]=tp[2]; b2[0]=tp[0]; b2[1]=tp[1]+k; b2[2]=tp[2];
+        DebugLines_Add(a, b2, 251, 0);
+        a[0]=tp[0]; a[1]=tp[1]; a[2]=tp[2]-k; b2[0]=tp[0]; b2[1]=tp[1]; b2[2]=tp[2]+k;
+        DebugLines_Add(a, b2, 251, 0);
+    }
+
+    // Current aim ray (yellow = 192) — 256u forward along view yaw.
+    yaw_r = cl.viewangles[YAW] * (float)M_PI / 180.f;
+    fwd[0] = cosf(yaw_r); fwd[1] = sinf(yaw_r); fwd[2] = 0.f;
+    aim[0] = eye[0] + fwd[0] * 256.f;
+    aim[1] = eye[1] + fwd[1] * 256.f;
+    aim[2] = eye[2];
+    DebugLines_Add(eye, aim, 192, 0);
+
+    // Wall-trace probe (magenta = 254 when blocked).
+    ahead[0] = eye[0] + fwd[0] * 48.f;
+    ahead[1] = eye[1] + fwd[1] * 48.f;
+    ahead[2] = eye[2];
+    {
+        trace_t tr = SV_Move(eye, vec3_origin, vec3_origin, ahead, MOVE_NORMAL, sv_player);
+        if (tr.fraction < 0.95f) {
+            vec3_t hit;
+            hit[0] = eye[0] + (ahead[0]-eye[0]) * tr.fraction;
+            hit[1] = eye[1] + (ahead[1]-eye[1]) * tr.fraction;
+            hit[2] = eye[2];
+            DebugLines_Add(eye, hit, 254, 0);
+        }
+    }
+}
+
 void Bot_Frame(usercmd_t *cmd)
 {
     if (!Bot_Active()) return;
     if (!sv_player || sv_player->free) return;
     Bot_DriveFrame(cmd);
+    Bot_DrawDebug();
 }
 
 static void Bot_Status_f(void)
@@ -726,6 +806,7 @@ void Bot_Init(void)
     Cvar_RegisterVariable(&bot_turn_speed);
     Cvar_RegisterVariable(&bot_combat_dist);
     Cvar_RegisterVariable(&bot_debug);
+    Cvar_RegisterVariable(&bot_debug_viz);
     Cvar_RegisterVariable(&bot_giveup_secs);
     Cmd_AddCommand("bot_status", Bot_Status_f);
 
