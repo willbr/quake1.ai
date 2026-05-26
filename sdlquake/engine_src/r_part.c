@@ -1272,16 +1272,20 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 	// reads as splash and doesn't camouflage into the (typically muted)
 	// surface hue. Picked from the bright end of each kind's natural ramp:
 	// cyan-white for water, light green for slime, bright orange for lava.
-	// Highlight base + rate, both per-kind. Slime/lava sit at the bright
-	// end of their ramps (molten splashes are meant to glow), but water's
-	// 244..247 foam ramp is the brightest cyan in the palette and reads as
-	// screen-melting against muted water textures — so water uses a dimmer
-	// subrange (240..243) and half the highlight rate of slime/lava.
-	int highlight_base, highlight_mask;
+	// Highlight base, span, and rate per kind. Slime/lava sit at the bright
+	// end of 8-wide hue ramps (molten splashes are meant to glow). Water's
+	// foam ramp is only three indices (244 #7fbfff mid cyan, 245 #abe7ff
+	// light cyan, 246 #d7ffff near-white) — the palette steps brightness
+	// sharply in this range, so we restrict water to the dimmest two and
+	// halve the highlight rate so foam dots don't read as screen-melting
+	// against muted water textures. Index 247 is #670000 (start of blood
+	// ramp), not cyan — `& 3` previously included it and emitted dark-red
+	// "foam" specks; the modulo-`highlight_span` keeps us inside the foam.
+	int highlight_base, highlight_span, highlight_mask;
 	switch (kind) {
-	case 1:  highlight_base = 180; highlight_mask = 3; break; // slime: brighter end of 176..183 ramp, 1/4 rate
-	case 2:  highlight_base = 236; highlight_mask = 3; break; // lava: brighter end of 232..239 ramp, 1/4 rate
-	default: highlight_base = 240; highlight_mask = 7; break; // water: dimmer end of foam ramp, 1/8 rate
+	case 1:  highlight_base = 180; highlight_span = 4; highlight_mask = 3; break; // slime: 180..183, 1/4 rate
+	case 2:  highlight_base = 236; highlight_span = 4; highlight_mask = 3; break; // lava: 236..239, 1/4 rate
+	default: highlight_base = 244; highlight_span = 2; highlight_mask = 7; break; // water: 244..245 only, 1/8 rate
 	}
 
 	liq_surf = R_FindLiquidSurface (org);
@@ -1339,7 +1343,7 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 		// sample the actual surface texture so the splash still belongs
 		// to the pool it came from.
 		if ((rand() & highlight_mask) == 0) {
-			p->color = highlight_base + (rand() & 3);
+			p->color = highlight_base + (rand() % highlight_span);
 		} else if (liq_pixels) {
 			// Sample the actual surface texture with ±4 texel jitter so
 			// neighbouring droplets pick up natural texture variation
