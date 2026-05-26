@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    19
+#define NAV_VERSION    20
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -349,6 +349,29 @@ static void entity_center(edict_t *e, vec3_t out) {
     out[0] = e->v.origin[0] + (e->v.mins[0] + e->v.maxs[0]) * 0.5f;
     out[1] = e->v.origin[1] + (e->v.mins[1] + e->v.maxs[1]) * 0.5f;
     out[2] = e->v.origin[2] + (e->v.mins[2] + e->v.maxs[2]) * 0.5f;
+}
+
+// Validate a Phase 4.5 PLAT_LINK candidate: trace from the floor sample
+// `a` (lifted to ~eye height) toward the plat anchor `b`. The lift brush
+// itself is kept solid during bake, so a successful link will usually
+// fail the trace by hitting the lift surface — that's not a wall, just
+// the lift. We accept the failure when trace_endpos lies inside (or
+// just outside) the lift's XY footprint, and reject only when the trace
+// hit something else (a real wall between p and the lift). This is the
+// "check where it hit" variant of the trace_link_clear that was reverted
+// in 924bc8f for false-negativing every link onto plat_top.
+static int trace_link_clear_plat(const vec3_t a, const vec3_t b, edict_t *plat) {
+    vec3_t a_eye = { a[0], a[1], a[2] + 16.0f };
+    vec3_t b_eye = { b[0], b[1], b[2] + 16.0f };
+    vec3_t zero  = { 0.0f, 0.0f, 0.0f };
+    eng->SV_TraceMove(a_eye, zero, zero, b_eye, 1, NULL);
+    if (g->trace_fraction >= 0.999f) return 1;
+
+    const float pad = 8.0f;
+    float ex = g->trace_endpos[0];
+    float ey = g->trace_endpos[1];
+    return (ex >= plat->v.mins[0] - pad && ex <= plat->v.maxs[0] + pad &&
+            ey >= plat->v.mins[1] - pad && ey <= plat->v.maxs[1] + pad);
 }
 
 
@@ -1086,6 +1109,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
             float dz = m->points[p].pos[2] - m->points[top_idx].pos[2];
             if (dx*dx + dy*dy > r_xy2) continue;
             if (dz < -r_z || dz > r_z) continue;
+            if (!trace_link_clear_plat(m->points[p].pos, m->points[top_idx].pos, plat)) continue;
             float w = sqrtf(dx*dx + dy*dy) + 1.f;
             add_edge(m, &cap_edges, p, top_idx, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
             add_edge(m, &cap_edges, top_idx, p, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
@@ -1103,6 +1127,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 float dz = m->points[p].pos[2] - m->points[bot_idx].pos[2];
                 if (dx*dx + dy*dy > r_xy2) continue;
                 if (dz < -r_z || dz > r_z) continue;
+                if (!trace_link_clear_plat(m->points[p].pos, m->points[bot_idx].pos, plat)) continue;
                 float w = sqrtf(dx*dx + dy*dy) + 1.f;
                 add_edge(m, &cap_edges, p, bot_idx, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
                 add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
@@ -1170,6 +1195,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 float dz = m->points[p].pos[2] - m->points[bot_idx].pos[2];
                 if (dx*dx + dy*dy > r_xy2) continue;
                 if (dz < -r_z || dz > r_z) continue;
+                if (!trace_link_clear_plat(m->points[p].pos, m->points[bot_idx].pos, plat)) continue;
                 float w = sqrtf(dx*dx + dy*dy) + 1.f;
                 add_edge(m, &cap_edges, bot_idx, p, w, NAV_EDGE_PLAT_LINK, 0, NAV_PHASE_LIFT_PLAT_LINK);
                 disembark_edges++;
