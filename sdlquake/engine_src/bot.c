@@ -222,6 +222,19 @@ static void Bot_EntityCenter(edict_t *e, vec3_t out)
 // Path request
 // ---------------------------------------------------------------------------
 
+static const char *bot_edge_kind_name(int k)
+{
+    switch (k) {
+        case BOT_EDGE_WALK:      return "walk";
+        case BOT_EDGE_JUMP_UP:   return "jump";
+        case BOT_EDGE_DROP_DOWN: return "drop";
+        case BOT_EDGE_PLAT_RIDE: return "ride";
+        case BOT_EDGE_TELEPORT:  return "tele";
+        case BOT_EDGE_PLAT_LINK: return "plat";
+    }
+    return "?";
+}
+
 static int Bot_RequestPath(const vec3_t to)
 {
     int n;
@@ -236,10 +249,23 @@ static int Bot_RequestPath(const vec3_t to)
     if (n <= 0) {
         b.waypoint_count = 0;
         b.waypoint_idx = 0;
+        if (bot_debug.value)
+            Con_Printf("[bot] nav_path returned 0 (no path) to (%.0f %.0f %.0f) items=0x%x\n",
+                       to[0], to[1], to[2], items);
         return 0;
     }
     b.waypoint_count = n;
     b.waypoint_idx = 0;
+    if (bot_debug.value) {
+        int i;
+        Con_Printf("[bot] path %d wps to (%.0f %.0f %.0f):\n",
+                   n, to[0], to[1], to[2]);
+        for (i = 0; i < n; i++) {
+            Con_Printf("  [%2d] %s (%.0f %.0f %.0f)\n",
+                       i, bot_edge_kind_name(b.waypoint_kinds[i]),
+                       b.waypoints[i][0], b.waypoints[i][1], b.waypoints[i][2]);
+        }
+    }
     return 1;
 }
 
@@ -892,6 +918,27 @@ static void Bot_Status_f(void)
                stname, b.target_edict, b.waypoint_idx, b.waypoint_count, b.blocklist_n);
 }
 
+static void Bot_PathDump_f(void)
+{
+    int i;
+    if (b.waypoint_count <= 0) {
+        Con_Printf("[bot] no active path\n");
+        return;
+    }
+    Con_Printf("[bot] path target_pos=(%.0f %.0f %.0f) idx=%d/%d:\n",
+               b.target_pos[0], b.target_pos[1], b.target_pos[2],
+               b.waypoint_idx, b.waypoint_count);
+    Con_Printf("  player @ (%.0f %.0f %.0f)\n",
+               sv_player->v.origin[0], sv_player->v.origin[1], sv_player->v.origin[2]);
+    for (i = 0; i < b.waypoint_count; i++) {
+        const char *mark = (i == b.waypoint_idx) ? " <-- current" : "";
+        Con_Printf("  [%2d] %s (%.0f %.0f %.0f)%s\n",
+                   i, bot_edge_kind_name(b.waypoint_kinds[i]),
+                   b.waypoints[i][0], b.waypoints[i][1], b.waypoints[i][2],
+                   mark);
+    }
+}
+
 void Bot_Init(void)
 {
     Cvar_RegisterVariable(&bot);
@@ -904,6 +951,7 @@ void Bot_Init(void)
     Cvar_RegisterVariable(&bot_giveup_secs);
     Cvar_RegisterVariable(&bot_unstuck);
     Cmd_AddCommand("bot_status", Bot_Status_f);
+    Cmd_AddCommand("bot_path_dump", Bot_PathDump_f);
 
     b.state = BS_IDLE;
     b.target_edict = -1;
