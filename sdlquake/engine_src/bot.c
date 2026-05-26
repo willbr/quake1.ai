@@ -19,6 +19,13 @@ cvar_t bot_debug_viz    = { "bot_debug_viz",    "0", true };
 // If the bot can't reach an exit within this many seconds, force a
 // changelevel to keep map-traversal testing alive. 0 disables.
 cvar_t bot_giveup_secs  = { "bot_giveup_secs",  "240", true };
+// When 0 (default), the bot will NOT try to recover from being stuck:
+// no random wander, no yaw-scramble, no wall-avoidance sidemove, no
+// idle-to-wander promotion. The bot just stands still when its path
+// fails, which is what you want while iterating on the navmesh — the
+// debug viz then shows you exactly where A* led the bot astray. Flip
+// to 1 to re-enable the reactive fallback behaviour.
+cvar_t bot_unstuck      = { "bot_unstuck",      "0", true };
 
 typedef enum {
     BS_IDLE = 0,
@@ -330,14 +337,21 @@ static void Bot_DecideGoal(void)
         return;
     }
 
-    // Nothing actionable — auto-promote to WANDER so we keep moving and
-    // give the next perception sweep a different vantage point.
-    if (bot_debug.value) Con_Printf("[bot] no goal -> WANDER\n");
-    b.state = BS_WANDER;
+    // Nothing actionable. When the reactive fallback is enabled, kick
+    // into WANDER so the bot keeps moving and the next sweep sees a
+    // different vantage point. With unstuck off (default while we
+    // iterate on the navmesh), just sit IDLE so failures are obvious.
     b.target_edict = -1;
     b.waypoint_count = 0;
-    b.wander_until = 0.f;  // force fresh heading
-    b.wander_replan = (float)host_time + 4.0f;
+    if (bot_unstuck.value) {
+        if (bot_debug.value) Con_Printf("[bot] no goal -> WANDER\n");
+        b.state = BS_WANDER;
+        b.wander_until = 0.f;
+        b.wander_replan = (float)host_time + 4.0f;
+    } else {
+        if (bot_debug.value) Con_Printf("[bot] no goal -> IDLE (unstuck off)\n");
+        b.state = BS_IDLE;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -478,11 +492,13 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         return;
     }
 
-    // Death — issue restart and reset.
+    // Death — issue restart and reset (only with bot_unstuck on; while
+    // iterating on the navmesh we leave the corpse alone so the cause
+    // of death is inspectable).
     if (sv_player->v.health <= 0) {
         if (b.state != BS_DEAD) {
             b.state = BS_DEAD;
-            Cbuf_AddText("restart\n");
+            if (bot_unstuck.value) Cbuf_AddText("restart\n");
         }
         return;
     } else if (b.state == BS_DEAD) {
@@ -643,9 +659,12 @@ static void Bot_DriveFrame(usercmd_t *cmd)
             }
         }
 
-        // Wall avoidance — trace forward from eye height. If something
-        // close in front, add sidemove to swerve and bias jump.
-        {
+        // Reactive wall avoidance — strafe + jump when a forward trace
+        // hits geometry, and promote to WANDER if path is gone. Only
+        // active with bot_unstuck. When iterating on the navmesh we
+        // want the bot to mash into walls visibly so we can fix the
+        // path instead of papering over it here.
+        if (bot_unstuck.value) {
             vec3_t eye, fwd, ahead;
             float yaw_r = cl.viewangles[YAW] * (float)M_PI / 180.f;
             eye[0] = sv_player->v.origin[0];
@@ -661,8 +680,6 @@ static void Bot_DriveFrame(usercmd_t *cmd)
                     cmd->sidemove = ((((int)(host_time*2.f)) & 1) ? 1.f : -1.f) * cl_sidespeed.value;
                     if (sv_player->v.flags && ((int)sv_player->v.flags & FL_ONGROUND))
                         do_jump = 1;
-                    // No path and pressed straight into a wall → don't
-                    // wait for the 1.5s stuck timer; promote to WANDER now.
                     if (b.waypoint_count == 0 && tr.fraction < 0.25f &&
                         b.state != BS_WANDER && b.state != BS_COMBAT)
                     {
@@ -685,7 +702,10 @@ static void Bot_DriveFrame(usercmd_t *cmd)
     // Stuck detection — position-based. Every check_interval seconds, if
     // we haven't moved enough, escalate (jump → replan → wander). Skip
     // during WANDER itself (its random heading swap handles unsticking).
-    if (b.state != BS_IDLE && b.state != BS_DEAD && b.state != BS_WANDER &&
+    // Also skipped entirely when bot_unstuck is off, so navmesh failures
+    // show as a parked bot instead of a flailing one.
+    if (bot_unstuck.value &&
+        b.state != BS_IDLE && b.state != BS_DEAD && b.state != BS_WANDER &&
         b.target_edict >= 0) {
         const float check_interval = 1.5f;
         const float min_movement   = 48.f;
@@ -882,6 +902,7 @@ void Bot_Init(void)
     Cvar_RegisterVariable(&bot_debug);
     Cvar_RegisterVariable(&bot_debug_viz);
     Cvar_RegisterVariable(&bot_giveup_secs);
+    Cvar_RegisterVariable(&bot_unstuck);
     Cmd_AddCommand("bot_status", Bot_Status_f);
 
     b.state = BS_IDLE;
