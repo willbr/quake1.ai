@@ -314,10 +314,31 @@ pub fn build(b: *std.Build) void {
     //   - glslangValidator  (brew install glslang  / apt install glslang-tools)
     //   - spirv-cross       (brew install spirv-cross)
     // ---------------------------------------------------------------------------
+    // Pre-build: verify the per-tool duplicates of bspfile.h / cmdlib.h /
+    // mathlib.h in vendor/{qbsp,light,vis}/ are byte-identical. Only the
+    // qbsp .c versions are compiled; light/vis link against them. If one
+    // header copy drifts, the light/vis TUs see different struct layouts
+    // than the linker target -- silent ABI mismatch with no compiler
+    // diagnostic. Fail the build at the start of a drift.
+    const vendor_check = b.addSystemCommand(&.{
+        "scripts/check_vendor_headers.sh",
+    });
+    vendor_check.addFileInput(b.path("scripts/check_vendor_headers.sh"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/qbsp/bspfile.h"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/qbsp/cmdlib.h"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/qbsp/mathlib.h"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/light/bspfile.h"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/light/cmdlib.h"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/light/mathlib.h"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/vis/bspfile.h"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/vis/cmdlib.h"));
+    vendor_check.addFileInput(b.path("sdlquake/vendor/vis/mathlib.h"));
+
     const shader_step = b.addSystemCommand(&.{
         "scripts/build_shaders.sh",
         "shaders",
     });
+    shader_step.step.dependOn(&vendor_check.step);
     // Declare input files so Zig invalidates the cache when shaders change.
     shader_step.addFileInput(b.path("scripts/build_shaders.sh"));
     shader_step.addFileInput(b.path("shaders/palette.vert.glsl"));
