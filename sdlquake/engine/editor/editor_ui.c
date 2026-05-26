@@ -12,11 +12,22 @@
 #include "editor_classlist.h"
 #include "editor.h"
 #include "editor_internal.h"
+#include "hotreload.h"          // g_game_api — ai_inspect / Wind_SampleVelocity
 
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
+
+// Platform headers for resolve_function_symbol — dbghelp on Windows
+// (already linked by sys_crash.c), dlfcn on POSIX.
+#if defined(_WIN32)
+  #include <windows.h>
+  #include <dbghelp.h>
+#else
+  #include <dlfcn.h>
+#endif
 
 // Toolbar Textures... button toggles this; consumed by draw_texture_browser.
 static int s_show_tex_browser = 0;
@@ -961,11 +972,117 @@ static void format_edict_link(edict_t *ed, char *out, int out_sz)
              ed->v.classname ? ed->v.classname : "?", idx);
 }
 
+// Resolve a function pointer to "name+0xOFFSET" via dladdr (POSIX) or
+// dbghelp SymFromAddr (Windows). Static functions are often not in the
+// dynamic symbol table, so on POSIX we fall back to "<module>+0xOFFSET"
+// — the user can resolve with `atos -o zig-out/bin/game.dll 0xOFFSET`.
+// Used in the editor inspector to show what a corpse's nextthink will
+// actually fire.
+static void resolve_function_symbol(void *ptr, char *out, int out_sz)
+{
+    if (!ptr) { snprintf(out, out_sz, "(null)"); return; }
+#if defined(_WIN32)
+    static int s_sym_inited = 0;
+    if (!s_sym_inited) {
+        SymSetOptions(SymGetOptions() | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES);
+        SymInitialize(GetCurrentProcess(), NULL, TRUE);
+        s_sym_inited = 1;
+    }
+    char symbuf[sizeof(SYMBOL_INFO) + 256];
+    SYMBOL_INFO *sym = (SYMBOL_INFO *)symbuf;
+    memset(symbuf, 0, sizeof(symbuf));
+    sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+    sym->MaxNameLen   = 255;
+    DWORD64 disp = 0;
+    if (SymFromAddr(GetCurrentProcess(), (DWORD64)(uintptr_t)ptr, &disp, sym))
+    {
+        if (disp == 0) snprintf(out, out_sz, "%s", sym->Name);
+        else           snprintf(out, out_sz, "%s+0x%llx",
+                                sym->Name, (unsigned long long)disp);
+        return;
+    }
+    snprintf(out, out_sz, "%p", ptr);
+#else
+    Dl_info info;
+    memset(&info, 0, sizeof(info));
+    if (dladdr(ptr, &info) && info.dli_sname)
+    {
+        ptrdiff_t off = (char *)ptr - (char *)info.dli_saddr;
+        if (off == 0) snprintf(out, out_sz, "%s", info.dli_sname);
+        else          snprintf(out, out_sz, "%s+0x%lx",
+                               info.dli_sname, (long)off);
+        return;
+    }
+    if (info.dli_fbase && info.dli_fname)
+    {
+        ptrdiff_t off = (char *)ptr - (char *)info.dli_fbase;
+        const char *base = info.dli_fname;
+        const char *slash = strrchr(base, '/');
+        if (slash) base = slash + 1;
+        snprintf(out, out_sz, "%s+0x%lx", base, (long)off);
+        return;
+    }
+    snprintf(out, out_sz, "%p", ptr);
+#endif
+}
+
+static const char *ai_state_name(int s)
+{
+    switch (s) {
+    case 0: return "IDLE";
+    case 1: return "SUSPICIOUS";
+    case 2: return "SEARCHING";
+    case 3: return "COMBAT";
+    default: return "?";
+    }
+}
+
+// Per-inspector velocity watch: tracks the peak speed seen on the
+// currently selected edict over the recent past. Single-slot — the
+// inspector only shows one entity at a time, so a ring keyed by edict
+// number would be wasted memory. Resets when the selection changes.
+#define VEL_WATCH_WINDOW_SEC 5.0f
+typedef struct {
+    int   edict_num;
+    float peak_mag;
+    float peak_time;       // sv.time when peak was observed
+    float peak_v[3];
+} vel_watch_t;
+static vel_watch_t s_vel_watch = { -1, 0, 0, {0,0,0} };
+
+static void vel_watch_update(edict_t *ed)
+{
+    int en = NUM_FOR_EDICT(ed);
+    const float *v = ed->v.velocity;
+    float mag = sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+
+    // Selection changed or watch window elapsed since last peak → reset.
+    if (s_vel_watch.edict_num != en ||
+        sv.time - s_vel_watch.peak_time > VEL_WATCH_WINDOW_SEC)
+    {
+        s_vel_watch.edict_num = en;
+        s_vel_watch.peak_mag  = mag;
+        s_vel_watch.peak_time = sv.time;
+        s_vel_watch.peak_v[0] = v[0];
+        s_vel_watch.peak_v[1] = v[1];
+        s_vel_watch.peak_v[2] = v[2];
+        return;
+    }
+    if (mag > s_vel_watch.peak_mag)
+    {
+        s_vel_watch.peak_mag  = mag;
+        s_vel_watch.peak_time = sv.time;
+        s_vel_watch.peak_v[0] = v[0];
+        s_vel_watch.peak_v[1] = v[1];
+        s_vel_watch.peak_v[2] = v[2];
+    }
+}
+
 static void draw_live_state(edit_entity_t *e)
 {
     extern cvar_t editor_view_mode;
     edict_t *ed;
-    char buf[160];
+    char buf[256];
     int en;
 
     // Live state only makes sense in live mode + with a real edict bound.
@@ -984,24 +1101,84 @@ static void draw_live_state(edit_entity_t *e)
              movetype_name((int)ed->v.movetype));
     IG_TextUnformatted(buf);
 
+    // Origin — always shown. Useful for spotting tiny drift (z creeping up
+    // by 0.01 each frame, for instance) which is invisible from the gizmo.
+    {
+        const float *o = ed->v.origin;
+        snprintf(buf, sizeof(buf), "origin (%.2f %.2f %.2f)", o[0], o[1], o[2]);
+        IG_TextUnformatted(buf);
+    }
+
+    // Velocity — always shown, even sub-unit. Sliding-corpse debugging
+    // hinges on seeing drift that would have been hidden by the old
+    // `> 0.5` gate.
+    vel_watch_update(ed);
+    {
+        const float *v = ed->v.velocity;
+        float mag = sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+        snprintf(buf, sizeof(buf), "vel %.3f  (%.3f %.3f %.3f)",
+                 mag, v[0], v[1], v[2]);
+        IG_TextUnformatted(buf);
+
+        if (s_vel_watch.edict_num == en && s_vel_watch.peak_mag > 0)
+        {
+            float age = sv.time - s_vel_watch.peak_time;
+            snprintf(buf, sizeof(buf),
+                     "vel peak (last %.0fs): %.3f  (%.2f %.2f %.2f)  %.2fs ago",
+                     VEL_WATCH_WINDOW_SEC,
+                     s_vel_watch.peak_mag,
+                     s_vel_watch.peak_v[0], s_vel_watch.peak_v[1],
+                     s_vel_watch.peak_v[2], age);
+            IG_TextUnformatted(buf);
+        }
+    }
+
+    // Angular velocity — gibs spin; nonzero avelocity on a "settled"
+    // corpse is a tell that something is still ticking it.
+    {
+        const float *av = ed->v.avelocity;
+        float amag = sqrtf(av[0]*av[0] + av[1]*av[1] + av[2]*av[2]);
+        if (amag > 0.01f)
+        {
+            snprintf(buf, sizeof(buf), "avel %.2f  (%.2f %.2f %.2f)",
+                     amag, av[0], av[1], av[2]);
+            IG_TextUnformatted(buf);
+        }
+    }
+
+    // Ground entity link + ONGROUND status. A corpse without ONGROUND is
+    // a candidate for spurious motion — gravity (MOVETYPE_STEP) or
+    // bounce (MOVETYPE_BOUNCE) will keep ticking displacement.
+    {
+        int onground = ((int)ed->v.flags & FL_ONGROUND) != 0;
+        char who[80];
+        format_edict_link(ed->v.groundentity, who, sizeof(who));
+        snprintf(buf, sizeof(buf), "ground: %s  [%s]",
+                 who, onground ? "ONGROUND" : "AIRBORNE");
+        IG_TextUnformatted(buf);
+    }
+
     if (ed->v.health != 0 || ed->v.max_health != 0)
     {
-        snprintf(buf, sizeof(buf), "health %g / %g  takedamage %d  deadflag %s",
+        snprintf(buf, sizeof(buf), "health %g / %g  deadflag %s",
                  ed->v.health, ed->v.max_health,
-                 (int)ed->v.takedamage,
                  deadflag_name((int)ed->v.deadflag));
         IG_TextUnformatted(buf);
     }
 
+    if (ed->v.takedamage != 0 || ed->v.dmg_take != 0 || ed->v.dmg_save != 0)
     {
-        const float *v = ed->v.velocity;
-        float mag = sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
-        if (mag > 0.5f)
-        {
-            snprintf(buf, sizeof(buf), "vel %.0f  (%.0f %.0f %.0f)",
-                     mag, v[0], v[1], v[2]);
-            IG_TextUnformatted(buf);
-        }
+        snprintf(buf, sizeof(buf), "takedamage %g  dmg_take %g  dmg_save %g",
+                 ed->v.takedamage, ed->v.dmg_take, ed->v.dmg_save);
+        IG_TextUnformatted(buf);
+    }
+
+    if (ed->v.dmg_inflictor)
+    {
+        char who[80];
+        format_edict_link(ed->v.dmg_inflictor, who, sizeof(who));
+        snprintf(buf, sizeof(buf), "dmg_inflictor: %s", who);
+        IG_TextUnformatted(buf);
     }
 
     {
@@ -1012,10 +1189,30 @@ static void draw_live_state(edit_entity_t *e)
         IG_TextUnformatted(buf);
     }
 
-    if (ed->v.nextthink > 0)
+    // Think function + nextthink countdown. Symbol resolution is best-
+    // effort: static functions in game.dll often won't have a dynamic
+    // symbol entry; on POSIX we then print module+offset so the user
+    // can `atos` it manually. On Windows dbghelp usually resolves PDB
+    // symbols correctly. See resolve_function_symbol above.
+    if (ed->v.think)
+    {
+        char name[128];
+        resolve_function_symbol((void *)ed->v.think, name, sizeof(name));
+        if (ed->v.nextthink > 0)
+        {
+            float dt = ed->v.nextthink - sv.time;
+            snprintf(buf, sizeof(buf), "think %s  in %.3fs", name, dt);
+        }
+        else
+        {
+            snprintf(buf, sizeof(buf), "think %s  (no nextthink)", name);
+        }
+        IG_TextUnformatted(buf);
+    }
+    else if (ed->v.nextthink > 0)
     {
         float dt = ed->v.nextthink - sv.time;
-        snprintf(buf, sizeof(buf), "nextthink in %.2fs", dt);
+        snprintf(buf, sizeof(buf), "nextthink in %.3fs  (no think fn)", dt);
         IG_TextUnformatted(buf);
     }
 
@@ -1033,6 +1230,44 @@ static void draw_live_state(edit_entity_t *e)
         format_edict_link(ed->v.owner, who, sizeof(who));
         snprintf(buf, sizeof(buf), "owner: %s", who);
         IG_TextUnformatted(buf);
+    }
+
+    // AI brain (sim-side side table). The brain lives in s_brains[]
+    // inside the game DLL even after the monster dies — if a corpse
+    // shows a brain that's still ticking, that's the bug.
+    if (g_game_api && g_game_api->ai_inspect)
+    {
+        int   ai_state, target_n, stuck;
+        float alert, next_dt;
+        float last_pos[3];
+        if (g_game_api->ai_inspect(ed, &ai_state, &alert, last_pos,
+                                   &target_n, &next_dt, &stuck))
+        {
+            snprintf(buf, sizeof(buf),
+                     "ai: %s  alert %.2f  next tick in %+.2fs  stuck %d",
+                     ai_state_name(ai_state), alert, next_dt, stuck);
+            IG_TextUnformatted(buf);
+            snprintf(buf, sizeof(buf),
+                     "ai last_known (%.0f %.0f %.0f)  target #%d",
+                     last_pos[0], last_pos[1], last_pos[2], target_n);
+            IG_TextUnformatted(buf);
+        }
+    }
+
+    // Wind sample at the entity's origin. Gust / info_wind_source can
+    // push corpses (movetype != NONE/PUSH); a nonzero wind here while a
+    // corpse is sliding is the smoking gun.
+    if (g_game_api && g_game_api->Wind_SampleVelocity)
+    {
+        float w[3];
+        g_game_api->Wind_SampleVelocity(ed->v.origin, w);
+        float wm = sqrtf(w[0]*w[0] + w[1]*w[1] + w[2]*w[2]);
+        if (wm > 0.01f)
+        {
+            snprintf(buf, sizeof(buf), "wind here %.2f  (%.2f %.2f %.2f)",
+                     wm, w[0], w[1], w[2]);
+            IG_TextUnformatted(buf);
+        }
     }
 }
 

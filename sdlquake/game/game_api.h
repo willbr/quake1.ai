@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 27
+#define GAME_API_VERSION 28
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -293,6 +293,24 @@ typedef struct game_api_s {
     // before the grid is initialised, writes (0,0,0). Implemented in
     // sim_wind.c. Used by r_part.c to drift visual particles.
     void  (*Wind_SampleVelocity)(const vec3_t pos, vec3_t out_vel);
+
+    // Editor inspector: query the sim-side AI brain for an edict.
+    // Returns 1 and fills the out_* pointers when a brain is registered,
+    // 0 otherwise (also leaves the outputs untouched in that case).
+    //   out_state:           AI_IDLE/SUSPICIOUS/SEARCHING/COMBAT (int cast of ai_state_t)
+    //   out_alert:           0..1 alert_level
+    //   out_last_known_pos:  vec3, brain's last_known_pos
+    //   out_target_edict:    edict number, -1 if none
+    //   out_next_tick_dt:    next_tick_time - g->time (seconds until next AI tick)
+    //   out_stuck_ticks:     consecutive stuck-tick count
+    // Any out_* pointer may be NULL to skip that field.
+    int   (*ai_inspect)(edict_t *e,
+                        int *out_state,
+                        float *out_alert,
+                        float *out_last_known_pos,
+                        int *out_target_edict,
+                        float *out_next_tick_dt,
+                        int *out_stuck_ticks);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);

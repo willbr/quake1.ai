@@ -94,6 +94,32 @@ static void game_mcp_damage(edict_t *targ, float damage)
     T_Damage(targ, g->world, g->world, damage);
 }
 
+// Editor inspector query — see game_api.h for field contract.
+static int game_ai_inspect(edict_t *e,
+                           int *out_state,
+                           float *out_alert,
+                           float *out_last_known_pos,
+                           int *out_target_edict,
+                           float *out_next_tick_dt,
+                           int *out_stuck_ticks)
+{
+    ai_brain_t *b;
+    if (!e || e->free) return 0;
+    b = Sim_AI_GetBrain(e);
+    if (!b || !b->in_use) return 0;
+    if (out_state)          *out_state = (int)b->state;
+    if (out_alert)          *out_alert = b->alert_level;
+    if (out_last_known_pos) {
+        out_last_known_pos[0] = b->last_known_pos[0];
+        out_last_known_pos[1] = b->last_known_pos[1];
+        out_last_known_pos[2] = b->last_known_pos[2];
+    }
+    if (out_target_edict)   *out_target_edict = b->target_edict;
+    if (out_next_tick_dt)   *out_next_tick_dt = b->next_tick_time - g->time;
+    if (out_stuck_ticks)    *out_stuck_ticks = b->stuck_ticks;
+    return 1;
+}
+
 static game_api_t s_api = {
     GAME_API_VERSION,
     game_init,
@@ -116,6 +142,7 @@ static game_api_t s_api = {
     Doors_OpenAllSecret,
     game_mcp_damage,
     Wind_SampleVelocity,
+    game_ai_inspect,
 };
 
 #ifdef _WIN32
