@@ -174,11 +174,18 @@ static void fire_touch(edict_t *self, edict_t *other) {
 
 static void fire_fly(edict_t *self);
 
-// Death effect: burst of fire-colored particles in place of silent removal.
+// Death effect: lava-splash burst in place of silent removal. Same particles
+// the wall-bounce path uses, slightly stronger so the death reads larger
+// than a single bounce.
 static void fire_die(edict_t *self) {
     g->self = self;
-    vec3_t up = { 0.0f, 0.0f, 20.0f };
-    eng->SV_Particle(self->v.origin, up, 75, 30);
+    eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
+    eng->MSG_WriteByte (MSG_BROADCAST, TE_WATERSPLASH);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[0]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[1]);
+    eng->MSG_WriteCoord(MSG_BROADCAST, self->v.origin[2]);
+    eng->MSG_WriteByte (MSG_BROADCAST, 2);   // kind=2 lava
+    eng->MSG_WriteByte (MSG_BROADCAST, 24);  // strength_q4 (1.5×)
     eng->ED_Free(self);
 }
 
