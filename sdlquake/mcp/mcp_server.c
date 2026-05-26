@@ -32,6 +32,11 @@
 typedef SOCKET mcp_raw_sock_t;
 #define MCP_SOCK_INVALID  INVALID_SOCKET
 #define mcp_sock_close(s) closesocket(s)
+static void mcp_sock_set_recv_timeout_ms(mcp_raw_sock_t s, int ms)
+{
+    DWORD t = (DWORD)ms;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&t, sizeof(t));
+}
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -39,6 +44,13 @@ typedef SOCKET mcp_raw_sock_t;
 typedef int mcp_raw_sock_t;
 #define MCP_SOCK_INVALID  (-1)
 #define mcp_sock_close(s) close(s)
+static void mcp_sock_set_recv_timeout_ms(mcp_raw_sock_t s, int ms)
+{
+    struct timeval tv;
+    tv.tv_sec  = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
 #endif
 
 #include <sys/stat.h>
@@ -235,6 +247,13 @@ static int SDLCALL mcp_http_thread(void *userdata)
                                      (struct sockaddr *)&addr, &alen);
         if (conn == (mcp_raw_sock_t)MCP_SOCK_INVALID) break;
 
+        /* Cap header / body reads so a peer that opens a connection and
+         * dribbles bytes can't pin the (single-threaded) accept loop
+         * forever. Localhost-only bind already makes this a curiosity
+         * rather than a real attack surface, but the timeout is one
+         * setsockopt and saves debugging a hung devloop. */
+        mcp_sock_set_recv_timeout_ms(conn, 5000);
+
         char hdr[4096];
         http_recv_headers(conn, hdr, sizeof(hdr));
 
@@ -254,6 +273,10 @@ static int SDLCALL mcp_http_thread(void *userdata)
                 "\n",
                 mcp_http_port);
             send(conn, response, rlen, 0);
+
+            // SSE is a long-lived stream; clear the 5 s recv cap we set
+            // on accept so the connection doesn't die when idle.
+            mcp_sock_set_recv_timeout_ms(conn, 0);
 
             // Replace any existing SSE client.
             SDL_LockMutex(mcp_sse_mutex);
@@ -1113,7 +1136,7 @@ static void tool_inspect_entity(const char *id_json, const char *args)
         "\"takedamage\":%g,\"deadflag\":%g,\"health\":%g,"
         "\"flags_raw\":%d,\"on_ground\":%s,\"monster\":%s,\"client\":%s,"
         "\"nextthink\":%g,\"sv_time\":%g,\"think_in\":%.3f,"
-        "\"think_ptr\":\"%p\"}",
+        "\"has_think\":%s}",
         eid, cn, model,
         e->v.origin[0], e->v.origin[1], e->v.origin[2],
         e->v.velocity[0], e->v.velocity[1], e->v.velocity[2],
@@ -1128,7 +1151,7 @@ static void tool_inspect_entity(const char *id_json, const char *args)
         monster  ? "true" : "false",
         client   ? "true" : "false",
         (double)e->v.nextthink, (double)sv.time, dt_to_think,
-        (void *)(uintptr_t)e->v.think);
+        e->v.think ? "true" : "false");
 
     char escaped[3072];
     char *d = escaped;
