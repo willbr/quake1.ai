@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    9
+#define NAV_VERSION    10
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -550,6 +550,49 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 anchors_push(&anchors, &anchor_cap, &anchor_n,
                              bot, ANCHOR_PLAT_BOTTOM, NAV_NODE_GENERIC, e);
                 goto next_e;
+            }
+            // Vertical func_door used as a lift (e.g. e1m1 first lift).
+            // A func_door is a "lift-door" when its travel is mostly
+            // vertical AND its brush is a flat-enough slab that the
+            // player can stand on top. Bake TOP / BOTTOM anchors at the
+            // standing positions and let the existing Phase 4.5 logic
+            // wire ride + button edges. (Post-spawn classname is "door";
+            // accept "func_door" defensively.)
+            if (!strcmp(cn, "door") || !strcmp(cn, "func_door")) {
+                float dz = e->v.pos2[2] - e->v.pos1[2];
+                float dx = e->v.pos2[0] - e->v.pos1[0];
+                float dy = e->v.pos2[1] - e->v.pos1[1];
+                float adz = dz < 0 ? -dz : dz;
+                float adx = dx < 0 ? -dx : dx;
+                float ady = dy < 0 ? -dy : dy;
+                float sx  = e->v.maxs[0] - e->v.mins[0];
+                float sy  = e->v.maxs[1] - e->v.mins[1];
+                float sz  = e->v.maxs[2] - e->v.mins[2];
+                int vertical = (adz > 24.f) && (adz > adx) && (adz > ady);
+                int standable = (sx > 24.f) && (sy > 24.f) &&
+                                (sz < (sx > sy ? sx : sy));
+                if (vertical && standable) {
+                    float z_lo = e->v.pos1[2] < e->v.pos2[2] ? e->v.pos1[2] : e->v.pos2[2];
+                    float z_hi = e->v.pos1[2] < e->v.pos2[2] ? e->v.pos2[2] : e->v.pos1[2];
+                    vec3_t top, bot;
+                    top[0] = e->v.origin[0] + (e->v.mins[0] + e->v.maxs[0]) * 0.5f;
+                    top[1] = e->v.origin[1] + (e->v.mins[1] + e->v.maxs[1]) * 0.5f;
+                    top[2] = z_hi + e->v.maxs[2] + 4.f;
+                    bot[0] = top[0];
+                    bot[1] = top[1];
+                    bot[2] = z_lo + e->v.maxs[2] + 4.f;
+                    anchors_push(&anchors, &anchor_cap, &anchor_n,
+                                 top, ANCHOR_PLAT_TOP, NAV_NODE_GENERIC, e);
+                    anchors_push(&anchors, &anchor_cap, &anchor_n,
+                                 bot, ANCHOR_PLAT_BOTTOM, NAV_NODE_GENERIC, e);
+                    char dbg[160];
+                    snprintf(dbg, sizeof(dbg),
+                        "sim_nav: lift-door '%s' travel=%.0fz size=%.0fx%.0fx%.0f\n",
+                        e->v.targetname ? e->v.targetname : "(no targetname)",
+                        adz, sx, sy, sz);
+                    eng->Con_Print(dbg);
+                    goto next_e;
+                }
             }
             // Brush entities have origin (0,0,0) and meaningful mins/maxs;
             // point entities have meaningful origin. Pick the right one.
