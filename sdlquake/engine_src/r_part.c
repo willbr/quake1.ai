@@ -1272,11 +1272,16 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 	// reads as splash and doesn't camouflage into the (typically muted)
 	// surface hue. Picked from the bright end of each kind's natural ramp:
 	// cyan-white for water, light green for slime, bright orange for lava.
-	int highlight_base;
+	// Highlight base + rate, both per-kind. Slime/lava sit at the bright
+	// end of their ramps (molten splashes are meant to glow), but water's
+	// 244..247 foam ramp is the brightest cyan in the palette and reads as
+	// screen-melting against muted water textures — so water uses a dimmer
+	// subrange (240..243) and half the highlight rate of slime/lava.
+	int highlight_base, highlight_mask;
 	switch (kind) {
-	case 1:  highlight_base = 180; break; // slime: brighter end of 176..183 ramp
-	case 2:  highlight_base = 236; break; // lava: brighter end of 232..239 ramp
-	default: highlight_base = 244; break; // water: light cyan (id1 foam idiom)
+	case 1:  highlight_base = 180; highlight_mask = 3; break; // slime: brighter end of 176..183 ramp, 1/4 rate
+	case 2:  highlight_base = 236; highlight_mask = 3; break; // lava: brighter end of 232..239 ramp, 1/4 rate
+	default: highlight_base = 240; highlight_mask = 7; break; // water: dimmer end of foam ramp, 1/8 rate
 	}
 
 	liq_surf = R_FindLiquidSurface (org);
@@ -1329,10 +1334,11 @@ void R_WaterSplash (vec3_t org, int kind, int strength_q4)
 		// repurpose it here as the settle plane for the integrator's
 		// PARTFL_LIQUID_SURF check.
 		p->birth = org[2];
-		// ~25% foam highlight — bright, kind-specific. The rest sample the
-		// actual surface texture so the splash still belongs to the pool
-		// it came from.
-		if ((rand() & 3) == 0) {
+		// Foam highlight — bright, kind-specific. Rate is per-kind via
+		// highlight_mask (1/4 for slime/lava, 1/8 for water). The rest
+		// sample the actual surface texture so the splash still belongs
+		// to the pool it came from.
+		if ((rand() & highlight_mask) == 0) {
 			p->color = highlight_base + (rand() & 3);
 		} else if (liq_pixels) {
 			// Sample the actual surface texture with ±4 texel jitter so
