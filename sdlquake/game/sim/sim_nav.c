@@ -1420,6 +1420,11 @@ void Sim_Nav_Init(void) {
     // 1024 keeps a generous view radius while bounding draw cost on dense
     // meshes (e1m1: ~6k nodes / 60k edges).
     eng->Cvar_Register("sim_nav_debug_range", "1024");
+    // Bitmask over NAV_PHASE_* — bit N selects phase N. Default 0xFF
+    // shows all phases. Special-case: a literal 0 also means "show
+    // all" so accidental `set sim_nav_debug_phase_mask 0` doesn't
+    // make the overlay vanish.
+    eng->Cvar_Register("sim_nav_debug_phase_mask", "255");
 }
 
 int            Sim_Nav_IsReady(void) { return s_ready; }
@@ -1453,6 +1458,14 @@ void Sim_Nav_Frame(void) {
 
     for (int i = 0; i < s_mesh->edge_count; i++) {
         nav_edge_t *e = &s_mesh->edges[i];
+        // Phase mask filter — independent of the kind-based colouring
+        // applied below. Mask defaults to 0xFF (all); treat literal 0
+        // as "all" too so the overlay can't be accidentally blanked.
+        {
+            unsigned mask = (unsigned)eng->Cvar_VariableValue("sim_nav_debug_phase_mask");
+            if (mask == 0) mask = 0xFFu;
+            if (!(mask & (1u << e->phase))) continue;
+        }
         if (has_range && !in_range[e->from] && !in_range[e->to]) continue;
 
         // Dedupe bidirectional pairs in the visualization. The bake stores
