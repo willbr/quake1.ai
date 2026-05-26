@@ -1207,6 +1207,9 @@ static int bake_floodfill(sim_navmesh_t *m) {
             // what A* actually sees — undirected connectivity oversells
             // it when one-way edges (drops, teleports, plat-links from
             // the button-driven branch) prevent traversing back.
+            // Adjacency wasn't built until after bake_floodfill returned;
+            // build it now so the directed BFS has indexes to walk.
+            build_adjacency(m);
             {
                 char *reached = calloc(m->point_count, 1);
                 int  *queue   = malloc(sizeof(int) * m->point_count);
@@ -1446,7 +1449,9 @@ void Sim_Nav_LevelInit(const char *mapname) {
         s_mesh = 0;
         return;
     }
-    build_adjacency(s_mesh);
+    // build_adjacency is already called inside bake_floodfill (so the
+    // directed-reachability diagnostic can walk it); calling it again
+    // would leak the existing adj/adj_offsets allocations.
 
     sim_mkdir("id1/cache");
     sim_mkdir("id1/cache/navmesh");
