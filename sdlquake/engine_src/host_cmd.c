@@ -517,7 +517,12 @@ LOAD / SAVE GAME
 ===============================================================================
 */
 
-#define	SAVEGAME_VERSION	5
+// Bump whenever the savegame format on disk changes, or whenever entvars_t
+// changes shape under NATIVE_GAME (once ED_Write is wired up, see pr_edict.c
+// stubs). Today saves don't store edicts, so bumping is mostly defensive —
+// it invalidates any pre-bump .sav files instead of silently restoring
+// partial state.
+#define	SAVEGAME_VERSION	6
 
 /*
 ===============
@@ -600,15 +605,18 @@ void Host_Savegame_f (void)
 
 	sprintf (name, "%s/%s", com_gamedir, Cmd_Argv(1));
 	COM_DefaultExtension (name, ".sav");
-	
+
 	Con_Printf ("Saving game to %s...\n", name);
+	// ED_Write is a NATIVE_GAME stub (see pr_edict.c), so the resulting .sav
+	// records skill / map / lightstyles / spawn_parms only — no entity state.
+	Con_Printf ("WARNING: NATIVE_GAME saves do not record entity state yet.\n");
 	f = fopen (name, "w");
 	if (!f)
 	{
 		Con_Printf ("ERROR: couldn't open.\n");
 		return;
 	}
-	
+
 	fprintf (f, "%i\n", SAVEGAME_VERSION);
 	Host_SavegameComment (comment);
 	fprintf (f, "%s\n", comment);
