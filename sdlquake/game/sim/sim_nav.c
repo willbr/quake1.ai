@@ -1153,12 +1153,64 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 }
                 if (size > biggest) biggest = size;
             }
-            char buf[200];
+            char buf[240];
             snprintf(buf, sizeof(buf),
-                     "sim_nav: connectivity %d components, largest=%d (%.0f%%)\n",
+                     "sim_nav: connectivity (undirected) %d components, largest=%d (%.0f%%)\n",
                      n_comp, biggest,
                      100.0 * biggest / (m->point_count > 0 ? m->point_count : 1));
             eng->Con_Print(buf);
+
+            // Directed reachability from each player-spawn node. This is
+            // what A* actually sees — undirected connectivity oversells
+            // it when one-way edges (drops, teleports, plat-links from
+            // the button-driven branch) prevent traversing back.
+            {
+                char *reached = calloc(m->point_count, 1);
+                int  *queue   = malloc(sizeof(int) * m->point_count);
+                if (reached && queue) {
+                    int spawn_node = -1;
+                    for (int i = 0; i < m->point_count; i++) {
+                        if (m->points[i].kind == NAV_NODE_PLAYER_SPAWN) {
+                            spawn_node = i; break;
+                        }
+                    }
+                    if (spawn_node >= 0) {
+                        int qh = 0, qt = 0;
+                        queue[qt++] = spawn_node;
+                        reached[spawn_node] = 1;
+                        while (qh < qt) {
+                            int v = queue[qh++];
+                            int o0 = m->adj_offsets[v];
+                            int o1 = m->adj_offsets[v + 1];
+                            for (int k = o0; k < o1; k++) {
+                                const nav_edge_t *e = &m->edges[m->adj[k]];
+                                if (e->from != v) continue;   // directed
+                                if (reached[e->to]) continue;
+                                reached[e->to] = 1;
+                                queue[qt++] = e->to;
+                            }
+                        }
+                        int reached_n = 0;
+                        int reached_exit = 0;
+                        for (int i = 0; i < m->point_count; i++) {
+                            if (reached[i]) {
+                                reached_n++;
+                                if (m->points[i].kind == NAV_NODE_EXIT)
+                                    reached_exit = 1;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf),
+                            "sim_nav: directed-from-spawn: %d/%d (%.0f%%) reachable, "
+                            "exit-reachable=%s\n",
+                            reached_n, m->point_count,
+                            100.0 * reached_n / m->point_count,
+                            reached_exit ? "yes" : "NO");
+                        eng->Con_Print(buf);
+                    }
+                }
+                free(reached);
+                free(queue);
+            }
             // Per-component bbox so we can tell which physical region
             // each island represents.
             for (int c = 1; c <= n_comp && c <= 6; c++) {

@@ -641,12 +641,14 @@ static void Bot_DriveFrame(usercmd_t *cmd)
             cmd->forwardmove = cl_forwardspeed.value;
         else if (d2 < (200.f*200.f))
             cmd->forwardmove = -cl_forwardspeed.value * 0.5f; // back up
-    } else if (Bot_CurrentWaypoint() || target || b.state == BS_WANDER) {
-        // Walk forward only when roughly facing the waypoint. With a
-        // floor on forwardmove (the old behaviour) the bot kept drifting
-        // forward through 90° corners and ended up wedged in the wall
-        // ahead of the turn. Above 60° error, turn in place; below,
-        // scale by cos so the bot strafes smoothly through gentle bends.
+    } else if (Bot_CurrentWaypoint() || b.state == BS_WANDER ||
+               (target && bot_unstuck.value))
+    {
+        // Walk forward only when there's a real navmesh waypoint to follow
+        // (or wander mode is on, or bot_unstuck allows direct-aim-walking).
+        // Without unstuck and without waypoints, we sit still even if a
+        // target edict was found — the navmesh said "no path", so the
+        // bot's job is to stand and let the failure be visible.
         int yaw_err = Bot_AimError(aim_target);
         if (yaw_err > 60) {
             cmd->forwardmove = 0;
