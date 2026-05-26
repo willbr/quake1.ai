@@ -1456,16 +1456,17 @@ void Sim_Nav_Frame(void) {
         }
     }
 
+    // Phase mask filter — independent of the kind-based colouring applied
+    // below. Mask defaults to 0xFF (all); treat literal 0 as "all" too so
+    // the overlay can't be accidentally blanked. Hoisted out of the loop
+    // to match the range/ztest pattern; on e1m1 the loop has ~60k iters
+    // and a cross-DLL Cvar_VariableValue per iter is wasted work.
+    unsigned phase_mask = (unsigned)eng->Cvar_VariableValue("sim_nav_debug_phase_mask");
+    if (phase_mask == 0) phase_mask = 0xFFu;
+
     for (int i = 0; i < s_mesh->edge_count; i++) {
         nav_edge_t *e = &s_mesh->edges[i];
-        // Phase mask filter — independent of the kind-based colouring
-        // applied below. Mask defaults to 0xFF (all); treat literal 0
-        // as "all" too so the overlay can't be accidentally blanked.
-        {
-            unsigned mask = (unsigned)eng->Cvar_VariableValue("sim_nav_debug_phase_mask");
-            if (mask == 0) mask = 0xFFu;
-            if (!(mask & (1u << e->phase))) continue;
-        }
+        if (!(phase_mask & (1u << e->phase))) continue;
         if (has_range && !in_range[e->from] && !in_range[e->to]) continue;
 
         // Dedupe bidirectional pairs in the visualization. The bake stores
