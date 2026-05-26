@@ -42,13 +42,14 @@ typedef enum {
 // this to press jump for jump-up edges, wait on plat-ride edges, and
 // aim+fire on shoot-link edges.
 enum {
-    BOT_EDGE_WALK       = 0,
-    BOT_EDGE_JUMP_UP    = 1,
-    BOT_EDGE_DROP_DOWN  = 2,
-    BOT_EDGE_PLAT_RIDE  = 3,
-    BOT_EDGE_TELEPORT   = 4,
-    BOT_EDGE_PLAT_LINK  = 5,
-    BOT_EDGE_SHOOT_LINK = 6,
+    BOT_EDGE_WALK        = 0,
+    BOT_EDGE_JUMP_UP     = 1,
+    BOT_EDGE_DROP_DOWN   = 2,
+    BOT_EDGE_PLAT_RIDE   = 3,
+    BOT_EDGE_TELEPORT    = 4,
+    BOT_EDGE_PLAT_LINK   = 5,
+    BOT_EDGE_SHOOT_LINK  = 6,
+    BOT_EDGE_BUTTON_LINK = 7,
 };
 
 static struct {
@@ -177,10 +178,32 @@ static const char *Bot_EdgeKindName(int k)
         case BOT_EDGE_DROP_DOWN:  return "drop";
         case BOT_EDGE_PLAT_RIDE:  return "ride";
         case BOT_EDGE_TELEPORT:   return "tele";
-        case BOT_EDGE_PLAT_LINK:  return "plat";
-        case BOT_EDGE_SHOOT_LINK: return "shoot";
+        case BOT_EDGE_PLAT_LINK:   return "plat";
+        case BOT_EDGE_SHOOT_LINK:  return "shoot";
+        case BOT_EDGE_BUTTON_LINK: return "btn";
     }
     return "?";
+}
+
+// Is there a func_button within `radius` of `pos` that's still ready
+// to be pressed? Used to gate the BUTTON_LINK "don't advance" logic —
+// once the button's state leaves BOTTOM (we've touched it) the bot is
+// allowed to move on.
+static int Bot_NearbyButtonReady(const vec3_t pos, float radius)
+{
+    int i;
+    float r2 = radius * radius;
+    for (i = 1; i < sv.num_edicts; i++) {
+        edict_t *e = Bot_Edict(i);
+        vec3_t c;
+        if (!e || e->free || !e->v.classname) continue;
+        if (strcmp(e->v.classname, "func_button") != 0) continue;
+        if ((int)e->v.health != 0) continue;
+        if ((int)e->v.state != BOT_BUTTON_STATE_READY) continue;
+        Bot_EntityCenter(e, c);
+        if (Bot_Dist2(pos, c) < r2) return 1;
+    }
+    return 0;
 }
 
 static int Bot_RequestPath(const vec3_t to)
@@ -232,10 +255,9 @@ static void Bot_DecideGoal(void)
 {
     int i;
     edict_t *best_enemy = NULL, *best_key = NULL, *best_item = NULL;
-    edict_t *best_exit = NULL, *best_button = NULL;
+    edict_t *best_exit = NULL;
     float best_enemy_d2 = 1e30f, best_key_d2 = 1e30f;
     float best_item_d2  = 1e30f, best_exit_d2 = 1e30f;
-    float best_button_d2 = 1e30f;
     float aware2  = bot_aware_radius.value  * bot_aware_radius.value;
     float pickup2 = bot_pickup_radius.value * bot_pickup_radius.value;
     vec3_t ppos;
@@ -272,14 +294,6 @@ static void Bot_DecideGoal(void)
                 best_exit = e;
                 best_exit_d2 = d2;
             }
-        } else if (Bot_IsButton(e)) {
-            vec3_t c;
-            Bot_EntityCenter(e, c);
-            d2 = Bot_Dist2(ppos, c);
-            if (d2 < aware2 && d2 < best_button_d2) {
-                best_button = e;
-                best_button_d2 = d2;
-            }
         }
     }
 
@@ -289,13 +303,6 @@ static void Bot_DecideGoal(void)
         b.state = BS_COMBAT;
         b.target_edict = NUM_FOR_EDICT(best_enemy);
         Bot_VecCopy(best_enemy->v.origin, b.target_pos);
-        return;
-    }
-    if (best_button) {
-        b.state = BS_GOTO_BUTTON;
-        b.target_edict = NUM_FOR_EDICT(best_button);
-        Bot_EntityCenter(best_button, b.target_pos);
-        Bot_RequestPath(b.target_pos);
         return;
     }
     if (best_key) {
@@ -343,10 +350,17 @@ static void Bot_AdvanceWaypoint(void)
     float dx, dy, dz;
     if (!wp) return;
     // Never auto-advance the final waypoint — keep walking into it so
-    // the bot's bbox physically reaches the goal entity (button → touch
-    // fires, key/item → pickup fires). The 48-unit XY radius is wider
-    // than the player bbox, so without this the bot stops short.
+    // the bot's bbox physically reaches the goal entity (key/item →
+    // pickup fires). The 48-unit XY radius is wider than the player
+    // bbox, so without this the bot stops short.
     if (b.waypoint_idx >= b.waypoint_count - 1) return;
+    // If the next edge is a button-link, the current waypoint is the
+    // button-anchor and we must stay here until the bbox actually
+    // overlaps the button (state leaves BOTTOM). Otherwise the bot
+    // sails past at 48 units without ever triggering it.
+    if (b.waypoint_kinds[b.waypoint_idx + 1] == BOT_EDGE_BUTTON_LINK) {
+        if (Bot_NearbyButtonReady(wp, 96.f)) return;
+    }
     dx = wp[0] - sv_player->v.origin[0];
     dy = wp[1] - sv_player->v.origin[1];
     dz = wp[2] - sv_player->v.origin[2];

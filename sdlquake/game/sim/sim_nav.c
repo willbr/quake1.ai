@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    12
+#define NAV_VERSION    13
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -120,6 +120,7 @@ enum {
     NAV_EDGE_TELEPORT   = 4,
     NAV_EDGE_PLAT_LINK  = 5,   // walk on/off a lift's standing position
     NAV_EDGE_SHOOT_LINK = 6,   // bot must aim+fire at a shootable
+    NAV_EDGE_BUTTON_LINK = 7,  // bot must touch a func_button at source
 };
 
 typedef struct {
@@ -1072,7 +1073,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                             if (anchors[k].entity != bt) continue;
                             if (anchors[k].node_index < 0) continue;
                             unsigned char ek = is_touch_button
-                                ? NAV_EDGE_PLAT_LINK
+                                ? NAV_EDGE_BUTTON_LINK
                                 : NAV_EDGE_SHOOT_LINK;
                             add_edge(m, &cap_edges, anchors[k].node_index,
                                      bot_idx, 16.0f, ek, 0);
