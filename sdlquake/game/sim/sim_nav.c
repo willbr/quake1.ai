@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    5
+#define NAV_VERSION    7
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -314,6 +314,8 @@ typedef enum {
     ANCHOR_GENERIC      = 0,
     ANCHOR_TELEPORT_SRC = 1,   // trigger_teleport (entity has `target`)
     ANCHOR_TELEPORT_DST = 2,   // info_teleport_destination (`targetname`)
+    ANCHOR_PLAT_TOP     = 3,   // func_plat standing pos at top of travel
+    ANCHOR_PLAT_BOTTOM  = 4,   // func_plat standing pos at bottom of travel
 } anchor_kind_t;
 
 typedef struct {
@@ -501,6 +503,32 @@ static int bake_floodfill(sim_navmesh_t *m) {
             if (!strcmp(cn, "testplayerstart"))                goto next_e;
             if (!strcmp(cn, "trigger_teleport"))               goto next_e;
             if (!strcmp(cn, "trigger_changelevel"))            goto next_e;
+            // func_plat (renamed to "plat" by spawn_func_plat) — push two
+            // anchors: one for the standing position when the lift is at
+            // TOP, one for BOTTOM. The pos1 / pos2 fields hold the lift's
+            // brush origin at the two extremes; the player stands on the
+            // brush's TOP surface (origin + maxs.z) at either end. seat_probe
+            // is skipped for these (Phase 2 uses the synthetic position
+            // directly) because the brush is non-solid during bake and
+            // would otherwise drop straight to the shaft floor.
+            if (!strcmp(cn, "plat") || !strcmp(cn, "func_plat")) {
+                vec3_t top, bot;
+                float stand_z_top, stand_z_bot;
+                // Player feet land at brush top surface + ~4u clearance.
+                stand_z_top = e->v.pos1[2] + e->v.maxs[2] + 4.f;
+                stand_z_bot = e->v.pos2[2] + e->v.maxs[2] + 4.f;
+                top[0] = e->v.origin[0] + (e->v.mins[0] + e->v.maxs[0]) * 0.5f;
+                top[1] = e->v.origin[1] + (e->v.mins[1] + e->v.maxs[1]) * 0.5f;
+                top[2] = stand_z_top;
+                bot[0] = top[0];
+                bot[1] = top[1];
+                bot[2] = stand_z_bot;
+                anchors_push(&anchors, &anchor_cap, &anchor_n,
+                             top, ANCHOR_PLAT_TOP, NAV_NODE_GENERIC, e);
+                anchors_push(&anchors, &anchor_cap, &anchor_n,
+                             bot, ANCHOR_PLAT_BOTTOM, NAV_NODE_GENERIC, e);
+                goto next_e;
+            }
             // Brush entities have origin (0,0,0) and meaningful mins/maxs;
             // point entities have meaningful origin. Pick the right one.
             vec3_t pos;
@@ -613,7 +641,13 @@ static int bake_floodfill(sim_navmesh_t *m) {
     for (int i = 0; i < anchor_n; i++) {
         anchor_t *a = &anchors[i];
         vec3_t   seated;
-        if (!seat_probe(probe, a->pos, seated)) continue;
+        // For lift standing positions we already know where the player
+        // stands (top surface of the brush at pos1/pos2). seat_probe
+        // would otherwise drop the probe through the non-solid brush to
+        // the shaft floor and collapse both anchors to the same node.
+        if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM) {
+            seated[0] = a->pos[0]; seated[1] = a->pos[1]; seated[2] = a->pos[2];
+        } else if (!seat_probe(probe, a->pos, seated)) continue;
         int existing = grid_find(&grd, m, seated);
         if (existing >= 0) {
             a->node_index = existing;
@@ -628,6 +662,12 @@ static int bake_floodfill(sim_navmesh_t *m) {
         if (idx < 0) continue;
         a->node_index    = idx;
         m->points[idx].kind = a->node_kind;
+        // Plat endpoints are not BFS expansion seeds — they're floating
+        // mid-air nodes that would re-drop to the shaft floor on every
+        // walkmove. We link them to neighbours and to each other in
+        // Phase 4.5 below.
+        if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM)
+            continue;
         if (q_tail >= q_cap) {
             int nc = q_cap ? q_cap * 2 : 256;
             int *nq = realloc(queue, sizeof(int) * nc);
@@ -768,11 +808,18 @@ static int bake_floodfill(sim_navmesh_t *m) {
 
     // --- Phase 4: teleporter edges ---------------------------------------
     // For each TELEPORT_SRC anchor, find its destination by matching
-    // `target` (on src) to `targetname` (on dst).
+    // `target` (on src) to `targetname` (on dst). The source anchor's
+    // bbox center frequently sits in mid-air (trigger brushes span floor
+    // to ceiling) so seat_probe fails and node_index stays -1. In that
+    // case, scan all baked nav points and treat any whose XY lies inside
+    // the trigger bbox (with a small Z tolerance) as a real teleport
+    // entry; add a one-way edge to the destination from each. This is
+    // what fixed e1m1's two-component split: the underground exit room
+    // was reachable only via a trigger_teleport whose center seat_probe
+    // couldn't drop to the floor.
     int teleport_edges = 0;
     for (int i = 0; i < anchor_n; i++) {
         if (anchors[i].kind != ANCHOR_TELEPORT_SRC)          continue;
-        if (anchors[i].node_index < 0)                       continue;
         if (!anchors[i].entity || !anchors[i].entity->v.target) continue;
 
         const char *want = anchors[i].entity->v.target;
@@ -786,8 +833,123 @@ static int bake_floodfill(sim_navmesh_t *m) {
             break;
         }
         if (dst_node < 0) continue;
-        add_edge(m, &cap_edges, anchors[i].node_index, dst_node, 0.0f);
-        teleport_edges++;
+
+        if (anchors[i].node_index >= 0) {
+            // Source seated normally — single edge.
+            add_edge(m, &cap_edges, anchors[i].node_index, dst_node, 0.0f);
+            teleport_edges++;
+            continue;
+        }
+
+        // Source did not seat. Fall back: link every baked node whose
+        // XY lies inside the trigger's bbox and whose Z is within (or
+        // just below) the bbox vertical span — that's where a player
+        // physically walks into the trigger from.
+        edict_t *src = anchors[i].entity;
+        float xmin = src->v.origin[0] + src->v.mins[0];
+        float ymin = src->v.origin[1] + src->v.mins[1];
+        float zmin = src->v.origin[2] + src->v.mins[2];
+        float xmax = src->v.origin[0] + src->v.maxs[0];
+        float ymax = src->v.origin[1] + src->v.maxs[1];
+        float zmax = src->v.origin[2] + src->v.maxs[2];
+        const float z_slack = 64.0f;  // node may sit on a floor ~step below
+        int linked_here = 0;
+        for (int p = 0; p < m->point_count; p++) {
+            float px = m->points[p].pos[0];
+            float py = m->points[p].pos[1];
+            float pz = m->points[p].pos[2];
+            if (px < xmin || px > xmax) continue;
+            if (py < ymin || py > ymax) continue;
+            if (pz < zmin - z_slack || pz > zmax) continue;
+            add_edge(m, &cap_edges, p, dst_node, 0.0f);
+            // Tag the node so debug viz colour-codes it; the anchor
+            // was unseated but in effect this point IS the source.
+            if (m->points[p].kind < NAV_NODE_TELEPORT_SRC)
+                m->points[p].kind = NAV_NODE_TELEPORT_SRC;
+            teleport_edges++;
+            linked_here++;
+        }
+        if (linked_here == 0) {
+            char dbg[200];
+            snprintf(dbg, sizeof(dbg),
+                "sim_nav: WARN tele_src bbox (%.0f %.0f %.0f)..(%.0f %.0f %.0f) "
+                "has no baked nodes inside — orphan island stays disconnected\n",
+                xmin, ymin, zmin, xmax, ymax, zmax);
+            eng->Con_Print(dbg);
+        } else {
+            char dbg[160];
+            snprintf(dbg, sizeof(dbg),
+                "sim_nav: tele_src bbox linked %d entry node(s) -> dst\n",
+                linked_here);
+            eng->Con_Print(dbg);
+        }
+    }
+
+    // --- Phase 4.5: lift edges -------------------------------------------
+    // Each func_plat produced two anchors (TOP / BOTTOM) at the player
+    // standing positions. Connect each to nearby floor nodes (so the
+    // surrounding level can walk onto the lift) and add a bidirectional
+    // ride edge between top and bottom.
+    int plat_link_edges = 0;
+    int plat_ride_edges = 0;
+    for (int i = 0; i < anchor_n; i++) {
+        if (anchors[i].kind != ANCHOR_PLAT_TOP) continue;
+        if (anchors[i].node_index < 0) continue;
+
+        int top_idx = anchors[i].node_index;
+        int bot_idx = -1;
+        // Find matching BOTTOM anchor by entity pointer.
+        for (int j = 0; j < anchor_n; j++) {
+            if (anchors[j].kind != ANCHOR_PLAT_BOTTOM) continue;
+            if (anchors[j].entity != anchors[i].entity) continue;
+            bot_idx = anchors[j].node_index;
+            break;
+        }
+        if (bot_idx < 0) continue;
+
+        // Ride edge: bidirectional, cost = vertical travel + small bias
+        // (a real ride takes ~lift_speed seconds). 1 unit per unit is
+        // fine; the bot will still prefer walking when it's shorter.
+        float ride_dz = m->points[top_idx].pos[2] - m->points[bot_idx].pos[2];
+        if (ride_dz < 0) ride_dz = -ride_dz;
+        float ride_cost = ride_dz + 32.0f;
+        add_edge(m, &cap_edges, top_idx, bot_idx, ride_cost);
+        add_edge(m, &cap_edges, bot_idx, top_idx, ride_cost);
+        plat_ride_edges += 2;
+
+        // Link top/bottom anchors to floor nodes near their XY, at a
+        // similar Z. The bbox center XY is where the player stands;
+        // they walk onto the lift from neighbouring floor of the same
+        // level. Use a fairly generous XY radius to catch the doorway
+        // approaches.
+        edict_t *plat = anchors[i].entity;
+        float half_x = (plat->v.maxs[0] - plat->v.mins[0]) * 0.5f;
+        float half_y = (plat->v.maxs[1] - plat->v.mins[1]) * 0.5f;
+        float r_xy   = (half_x > half_y ? half_x : half_y) + 64.0f;
+        float r_xy2  = r_xy * r_xy;
+        const float r_z = 32.0f;   // same-floor tolerance
+        for (int side = 0; side < 2; side++) {
+            int plat_idx = side ? bot_idx : top_idx;
+            for (int p = 0; p < m->point_count; p++) {
+                if (p == plat_idx) continue;
+                if (p == top_idx || p == bot_idx) continue;
+                float dx = m->points[p].pos[0] - m->points[plat_idx].pos[0];
+                float dy = m->points[p].pos[1] - m->points[plat_idx].pos[1];
+                float dz = m->points[p].pos[2] - m->points[plat_idx].pos[2];
+                if (dx*dx + dy*dy > r_xy2) continue;
+                if (dz < -r_z || dz > r_z) continue;
+                add_edge(m, &cap_edges, p, plat_idx, sqrtf(dx*dx + dy*dy) + 1.f);
+                add_edge(m, &cap_edges, plat_idx, p, sqrtf(dx*dx + dy*dy) + 1.f);
+                plat_link_edges += 2;
+            }
+        }
+    }
+    if (plat_ride_edges || plat_link_edges) {
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+            "sim_nav: lifts: %d ride edges + %d floor-link edges\n",
+            plat_ride_edges, plat_link_edges);
+        eng->Con_Print(buf);
     }
 
     {
@@ -851,12 +1013,34 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 }
                 if (size > biggest) biggest = size;
             }
-            char buf[160];
+            char buf[200];
             snprintf(buf, sizeof(buf),
                      "sim_nav: connectivity %d components, largest=%d (%.0f%%)\n",
                      n_comp, biggest,
                      100.0 * biggest / (m->point_count > 0 ? m->point_count : 1));
             eng->Con_Print(buf);
+            // Per-component bbox so we can tell which physical region
+            // each island represents.
+            for (int c = 1; c <= n_comp && c <= 6; c++) {
+                float bxmn=1e9f, bymn=1e9f, bzmn=1e9f;
+                float bxmx=-1e9f, bymx=-1e9f, bzmx=-1e9f;
+                int sz = 0;
+                for (int i = 0; i < m->point_count; i++) {
+                    if (comp[i] != c) continue;
+                    sz++;
+                    if (m->points[i].pos[0] < bxmn) bxmn = m->points[i].pos[0];
+                    if (m->points[i].pos[1] < bymn) bymn = m->points[i].pos[1];
+                    if (m->points[i].pos[2] < bzmn) bzmn = m->points[i].pos[2];
+                    if (m->points[i].pos[0] > bxmx) bxmx = m->points[i].pos[0];
+                    if (m->points[i].pos[1] > bymx) bymx = m->points[i].pos[1];
+                    if (m->points[i].pos[2] > bzmx) bzmx = m->points[i].pos[2];
+                }
+                snprintf(buf, sizeof(buf),
+                    "sim_nav:  component %d: %d nodes, "
+                    "xy (%.0f %.0f)..(%.0f %.0f) z (%.0f..%.0f)\n",
+                    c, sz, bxmn, bymn, bxmx, bymx, bzmn, bzmx);
+                eng->Con_Print(buf);
+            }
         }
         free(comp);
         free(stk);

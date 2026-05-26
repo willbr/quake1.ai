@@ -329,11 +329,16 @@ static const float *Bot_CurrentWaypoint(void)
 static void Bot_AdvanceWaypoint(void)
 {
     const float *wp = Bot_CurrentWaypoint();
-    float dx, dy;
+    float dx, dy, dz;
     if (!wp) return;
     dx = wp[0] - sv_player->v.origin[0];
     dy = wp[1] - sv_player->v.origin[1];
-    if (dx*dx + dy*dy < (48.f*48.f)) {
+    dz = wp[2] - sv_player->v.origin[2];
+    // Require XY proximity AND vertical proximity. Without the Z check,
+    // lift waypoints (same XY at two different heights) auto-advance
+    // instantly when the bot is at either level, so the path skips the
+    // ride entirely and the bot walks past the lift.
+    if (dx*dx + dy*dy < (48.f*48.f) && dz > -64.f && dz < 64.f) {
         b.waypoint_idx++;
         b.waypoint_started = (float)host_time;
     }
@@ -576,6 +581,23 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         float cosw = cosf(yaw_err * (float)M_PI / 180.f);
         if (cosw < 0.3f) cosw = 0.3f;  // never fully stop
         cmd->forwardmove = cl_forwardspeed.value * cosw;
+
+        // Lift wait: if current waypoint is vertically above us at
+        // basically the same XY, we're standing on the lift's bottom
+        // and need it to rise. Stop pushing forward so we don't walk
+        // off the platform.
+        {
+            const float *wp = Bot_CurrentWaypoint();
+            if (wp) {
+                float dx = wp[0] - sv_player->v.origin[0];
+                float dy = wp[1] - sv_player->v.origin[1];
+                float dz = wp[2] - sv_player->v.origin[2];
+                if (dx*dx + dy*dy < (32.f*32.f) && dz > 64.f) {
+                    cmd->forwardmove = 0;
+                    cmd->sidemove = 0;
+                }
+            }
+        }
 
         // Wall avoidance — trace forward from eye height. If something
         // close in front, add sidemove to swerve and bias jump.
