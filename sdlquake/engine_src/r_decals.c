@@ -595,8 +595,9 @@ static void Stain_PaintKernel (msurface_t *surf, int lu, int lv,
 	st->last_touched_frame = r_framecount;
 }
 
-// Forward decl: definition lives below.
-static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist);
+// Forward decl: definition lives below. Exposed via r_local.h so r_part.c
+// can reuse it for nail/bullet spark texture sampling.
+msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist);
 
 // Internal: project cell_world into `target`'s lightmap UV and apply one kernel
 // cell. Skips silently if the cell falls outside target's lightmap rectangle.
@@ -743,7 +744,7 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 
 // Walk the world BSP to find the surface that point P lies on (or near).
 // Uses the surface plane and a caller-supplied tolerance. Returns NULL if no match.
-static msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist)
+msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist)
 {
 	model_t    *world;
 	msurface_t *best, *s;

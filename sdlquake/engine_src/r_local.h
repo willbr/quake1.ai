@@ -429,4 +429,10 @@ void R_SpawnShell (vec3_t origin, vec3_t vel);
 // sticks to a surface. Hooked from r_part.c on PARTFL_STICK_ON_HIT.
 void R_SpawnBloodSpatter (vec3_t pos, vec3_t normal);
 
+// Find the world surface that point `p` lies on (or near). `max_plane_dist`
+// is the tolerance against the surface plane. `normal` may be NULL.
+// Returns NULL if no match. Used by the decal system and by r_part.c to
+// sample wall textures for nail/bullet spark colours.
+msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist);
+
 #endif

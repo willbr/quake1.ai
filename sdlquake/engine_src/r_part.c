@@ -1131,7 +1131,32 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 {
 	int			i, j;
 	particle_t	*p;
-	
+	// Wall-impact texture sampling for color==0 (TE_SPIKE / TE_SUPERSPIKE /
+	// TE_GUNSHOT). Same idea as the water-splash texture sample in
+	// R_WaterSplash: find the hit surface, then per-particle pick a colour
+	// off its texture so the chips/dust read as the actual wall material
+	// (rust on metal, grey on concrete, etc.) instead of a fixed dark ramp.
+	// Lookup is done once outside the spawn loop. Falls back to the old
+	// `(color & ~7) + (rand() & 7)` path if no surface is found within 4u
+	// of `org` or the texture has no mip0 data.
+	msurface_t *wall_surf   = NULL;
+	byte       *wall_pixels = NULL;
+	int         wall_w = 0, wall_h = 0;
+	float       wall_s0 = 0.0f, wall_t0 = 0.0f;
+	if (color == 0 && count != 1024 && cl.worldmodel) {
+		wall_surf = R_PointOnSurface_World (org, NULL, 4.0f);
+		if (wall_surf && wall_surf->texinfo && wall_surf->texinfo->texture &&
+		    wall_surf->texinfo->texture->offsets[0]) {
+			mtexinfo_t *tex = wall_surf->texinfo;
+			texture_t  *t   = tex->texture;
+			wall_w      = (int)t->width;
+			wall_h      = (int)t->height;
+			wall_pixels = (byte *)t + t->offsets[0];
+			wall_s0     = DotProduct(org, tex->vecs[0]) + tex->vecs[0][3];
+			wall_t0     = DotProduct(org, tex->vecs[1]) + tex->vecs[1][3];
+		}
+	}
+
 	for (i=0 ; i<count ; i++)
 	{
 		if (!free_particles)
@@ -1170,14 +1195,24 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 		else
 		{
 			p->die = cl.time + 0.1*(rand()%5);
-			// Bolt cyan-white (244-246) is the only useful chunk inside
-			// the 240-247 block — 240-243 is yellow, 247 is red — so the
-			// default & ~7 mask poisons it. Special-case the lightning
-			// range to a tight 3-wide pick so it matches the bolt skin.
-			if (color >= 244 && color <= 246)
+			if (wall_pixels) {
+				// Sample the wall texture with ±4-texel jitter so adjacent
+				// chips pick up natural texture variation rather than one
+				// flat hue. Same kernel as R_WaterSplash.
+				int s_i = (int)(wall_s0 + ((rand() & 7) - 4));
+				int t_i = (int)(wall_t0 + ((rand() & 7) - 4));
+				s_i = ((s_i % wall_w) + wall_w) % wall_w;
+				t_i = ((t_i % wall_h) + wall_h) % wall_h;
+				p->color = wall_pixels[t_i * wall_w + s_i];
+			} else if (color >= 244 && color <= 246) {
+				// Bolt cyan-white (244-246) is the only useful chunk inside
+				// the 240-247 block — 240-243 is yellow, 247 is red — so the
+				// default & ~7 mask poisons it. Special-case the lightning
+				// range to a tight 3-wide pick so it matches the bolt skin.
 				p->color = 244 + (rand() % 3);
-			else
+			} else {
 				p->color = (color&~7) + (rand()&7);
+			}
 			p->type = pt_grav;
 			for (j=0 ; j<3 ; j++)
 			{
