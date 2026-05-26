@@ -16,6 +16,7 @@ sizebuf_t *svb_reliable_datagram(void)  { return &sv.reliable_datagram; }
 sizebuf_t *svb_signon(void)             { return &sv.signon; }
 int        svb_state(void)              { return (int)sv.state; }
 int        svb_active(void)             { return (int)sv.active; }
+const char *svb_name(void)              { return sv.name; }
 edict_t   *svb_edicts(void)             { return sv.edicts; }
 int        svb_num_edicts(void)         { return sv.num_edicts; }
 

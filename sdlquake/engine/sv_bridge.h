@@ -18,6 +18,7 @@ struct sizebuf_s *svb_reliable_datagram(void);
 struct sizebuf_s *svb_signon(void);
 int               svb_state(void);     /* ss_loading=0, ss_active=1 */
 int               svb_active(void);    /* sv.active (qboolean) */
+const char       *svb_name(void);      /* sv.name (current map) */
 struct edict_s   *svb_edicts(void);
 int               svb_num_edicts(void);
 const char       *svb_model_precache(int i);

@@ -1629,6 +1629,29 @@ void Sim_Nav_LevelInit(const char *mapname) {
     s_ready = 1;
 }
 
+void Sim_Nav_Rebake(const char *mapname) {
+    if (!mapname || !*mapname) {
+        eng->Con_Print("nav_rebake: no map loaded\n");
+        return;
+    }
+    char bsp_vfs_path[256];
+    char nav_path[256];
+    snprintf(bsp_vfs_path, sizeof(bsp_vfs_path), "maps/%s.bsp", mapname);
+    int bsp_sz = 0;
+    void *bsp_raw = eng->LoadFile(bsp_vfs_path, &bsp_sz);
+    if (bsp_raw) free(bsp_raw);
+    if (bsp_sz > 0) {
+        snprintf(nav_path, sizeof(nav_path),
+                 "id1/cache/navmesh/%s-%d.nav", mapname, bsp_sz);
+        if (remove(nav_path) == 0) {
+            char buf[300];
+            snprintf(buf, sizeof(buf), "nav_rebake: deleted %s\n", nav_path);
+            eng->Con_Print(buf);
+        }
+    }
+    Sim_Nav_LevelInit(mapname);
+}
+
 // ---------------------------------------------------------------------------
 // A* — small open-set, no priority queue. O(N^2) per step; fine for ~few k.
 // ---------------------------------------------------------------------------

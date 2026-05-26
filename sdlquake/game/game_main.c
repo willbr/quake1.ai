@@ -119,6 +119,11 @@ static int game_nav_edges_near(const float *center, float radius,
                              max_records, truncated_out);
 }
 
+// Console-command bridge — see game_api.h::nav_rebake.
+static void game_nav_rebake(const char *mapname) {
+    Sim_Nav_Rebake(mapname);
+}
+
 // Editor inspector query — see game_api.h for field contract.
 static int game_ai_inspect(edict_t *e,
                            int *out_state,
@@ -170,6 +175,7 @@ static game_api_t s_api = {
     game_ai_inspect,
     game_nav_path,
     game_nav_edges_near,
+    game_nav_rebake,
 };
 
 #ifdef _WIN32

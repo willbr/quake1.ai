@@ -98,6 +98,7 @@ float  Cvar_VariableValue(char *var_name);
 double Sys_FloatTime(void);
 void   Host_Error(char *error, ...);
 void   Cbuf_AddText(char *text);
+void   Cmd_AddCommand(char *cmd_name, void (*function)(void));
 void   AngleVectors(float *angles, float *forward, float *right, float *up);
 void   R_SpawnBloodPool(vec3_t origin, float radius_max, int owner_edict);
 void   SV_SetGibBloodBudget(int idx, float budget, float settle_pool_radius);
@@ -1122,10 +1123,13 @@ static int polling_enabled = 0;
 
 #define RELOAD_CHECK_INTERVAL 60   // frames between mtime polls (~1 s at 60 fps)
 
+static void Nav_Rebake_f(void);
+
 void HotReload_Init(void)
 {
     SDL_Time t = get_mtime(GAME_DLL_SRC);
     if (t != 0) do_load();
+    Cmd_AddCommand("nav_rebake", Nav_Rebake_f);
 }
 
 void HotReload_Frame(float dt)
@@ -1173,6 +1177,24 @@ void HotReload_EnablePolling(void)
 {
     polling_enabled = 1;
     Con_Printf("hotreload: polling enabled\n");
+}
+
+// Console command: nav_rebake — delete the cached .nav file for the
+// active map and trigger a fresh bake. Used while iterating on the
+// Phase 4.5 trace-validation or other bake-time logic so the
+// rebuilt DLL's behaviour actually runs against fresh edges.
+static void Nav_Rebake_f(void)
+{
+    const char *mn = svb_name();
+    if (!svb_active() || !mn || !mn[0]) {
+        Con_Printf("nav_rebake: no active server / no map loaded\n");
+        return;
+    }
+    if (!g_game_api || !g_game_api->nav_rebake) {
+        Con_Printf("nav_rebake: game DLL not loaded or too old\n");
+        return;
+    }
+    g_game_api->nav_rebake(mn);
 }
 
 // MCP-only: route a damage event through the loaded game DLL.

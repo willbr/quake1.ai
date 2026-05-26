@@ -121,6 +121,7 @@ typedef struct sim_navmesh_s sim_navmesh_t;
 
 void           Sim_Nav_Init(void);
 void           Sim_Nav_LevelInit(const char *mapname);  // kicks off bake or load
+void           Sim_Nav_Rebake(const char *mapname);     // deletes cache, re-bakes
 void           Sim_Nav_Frame(void);                     // debug draw if sim_nav_debug set
 int            Sim_Nav_IsReady(void);                   // 0 while baking
 sim_navmesh_t *Sim_Nav_Get(void);                       // NULL if not ready
