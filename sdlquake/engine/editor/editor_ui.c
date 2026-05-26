@@ -679,22 +679,45 @@ static const spawnflag_def_t s_door_flags[]    = {
     { 1,  "Start open" }, { 4,  "Don't link" }, { 8,  "Gold key" },
     { 16, "Silver key" }, { 32, "Toggle" },
 };
+static const spawnflag_def_t s_door_secret_flags[] = {
+    { 1, "Open once" }, { 2, "1st left" }, { 4, "1st down" },
+    { 8, "No shoot" }, { 16, "Always shoot" },
+};
 static const spawnflag_def_t s_plat_flags[]    = { { 1, "Low trigger" } };
 static const spawnflag_def_t s_trigger_flags[] = { { 1, "No touch" } };
+static const spawnflag_def_t s_teleport_flags[] = {
+    { 1, "Player only" }, { 2, "Silent" },
+};
+static const spawnflag_def_t s_push_flags[]    = { { 1, "Push once" } };
+static const spawnflag_def_t s_button_flags[]  = { { 1, "Don't move" } };
+static const spawnflag_def_t s_wall_flags[]    = { { 1, "Toggle" } };
+static const spawnflag_def_t s_path_flags[]    = {
+    { 1, "Wait for trigger" }, { 2, "Teleport" },
+};
+static const spawnflag_def_t s_monster_flags[] = { { 1, "Ambush" } };
 static const spawnflag_def_t s_health_flags[]  = {
     { 1, "Rotten (15)" }, { 2, "Mega (100)" },
 };
 static const spawnflag_def_t s_changelevel_flags[] = { { 1, "Silent" } };
 
+#define FLAGS_OF(arr) (arr), (int)(sizeof(arr) / sizeof((arr)[0]))
+
 static const class_flag_table_t s_class_flag_tables[] = {
-    { NULL,                  "light",      s_light_flags,        1 },
-    { "func_door",           NULL,         s_door_flags,         5 },
-    { "func_door_secret",    NULL,         s_door_flags,         5 },
-    { "func_plat",           NULL,         s_plat_flags,         1 },
-    { "trigger_multiple",    NULL,         s_trigger_flags,      1 },
-    { "trigger_once",        NULL,         s_trigger_flags,      1 },
-    { "trigger_changelevel", NULL,         s_changelevel_flags,  1 },
-    { "item_health",         NULL,         s_health_flags,       2 },
+    { NULL,                  "light",      FLAGS_OF(s_light_flags) },
+    { "func_door_secret",    NULL,         FLAGS_OF(s_door_secret_flags) },
+    { "func_door",           NULL,         FLAGS_OF(s_door_flags) },
+    { "func_plat",           NULL,         FLAGS_OF(s_plat_flags) },
+    { "func_button",         NULL,         FLAGS_OF(s_button_flags) },
+    { "func_wall",           NULL,         FLAGS_OF(s_wall_flags) },
+    { "func_illusionary",    NULL,         FLAGS_OF(s_wall_flags) },
+    { "trigger_multiple",    NULL,         FLAGS_OF(s_trigger_flags) },
+    { "trigger_once",        NULL,         FLAGS_OF(s_trigger_flags) },
+    { "trigger_teleport",    NULL,         FLAGS_OF(s_teleport_flags) },
+    { "trigger_push",        NULL,         FLAGS_OF(s_push_flags) },
+    { "trigger_changelevel", NULL,         FLAGS_OF(s_changelevel_flags) },
+    { "path_corner",         NULL,         FLAGS_OF(s_path_flags) },
+    { "item_health",         NULL,         FLAGS_OF(s_health_flags) },
+    { NULL,                  "monster_",   FLAGS_OF(s_monster_flags) },
 };
 
 static const class_flag_table_t *find_class_flags(const char *classname)
@@ -883,6 +906,57 @@ static void draw_spawnflags_section(edit_entity_t *e)
     }
 }
 
+// Render the effects section: EF_* dynamic-light bits as checkboxes plus a
+// raw integer. Round-trips through the "effects" kv and pokes the live
+// edict's v.effects so dlights re-evaluate the next server frame.
+static const spawnflag_def_t s_effects_bits[] = {
+    { EF_BRIGHTFIELD, "Brightfield" },
+    { EF_MUZZLEFLASH, "Muzzleflash" },
+    { EF_BRIGHTLIGHT, "Bright light" },
+    { EF_DIMLIGHT,    "Dim light" },
+};
+
+static void draw_effects_section(edit_entity_t *e)
+{
+    char buf[32];
+    char label[80];
+    int  changed = 0, on, j;
+    int  current;
+    int  ef_idx = kv_lookup(e, "effects");
+
+    current = ef_idx >= 0 ? atoi(e->kv[ef_idx].value) : 0;
+
+    IG_TextUnformatted("effects");
+
+    for (j = 0; j < (int)(sizeof(s_effects_bits) / sizeof(s_effects_bits[0])); j++)
+    {
+        on = (current & s_effects_bits[j].bit) != 0;
+        snprintf(label, sizeof(label), "%s##ef%d", s_effects_bits[j].label, j);
+        if (IG_Checkbox(label, &on))
+        {
+            if (on) current |=  s_effects_bits[j].bit;
+            else    current &= ~s_effects_bits[j].bit;
+            changed = 1;
+        }
+    }
+
+    snprintf(buf, sizeof(buf), "%d", current);
+    IG_SetNextItemWidth(120);
+    if (IG_InputText("raw##efraw", buf, sizeof(buf), IG_ITF_EnterReturnsTrue))
+    {
+        current = atoi(buf);
+        changed = 1;
+    }
+
+    if (changed)
+    {
+        snprintf(buf, sizeof(buf), "%d", current);
+        Entity_SetKV(e, "effects", buf);
+        if (e->live_ent && !e->live_ent->free)
+            e->live_ent->v.effects = (float)current;
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Live state readout — runtime fields that aren't in the .map kv. Read-only:
 // gives the user a debugging view of what the engine is actually doing with
@@ -923,6 +997,93 @@ static const char *deadflag_name(int df)
     case DEAD_DEAD:  return "DEAD";
     case 3:          return "RESPAWNABLE";
     default:         return "?";
+    }
+}
+
+// Print bits set in `mask` as a pipe-joined token list ("ABC|XYZ"), or
+// "(none)" when no bits are set. Shared by flags / effects / items.
+static void format_bitmask(int mask,
+                           const struct { int bit; const char *name; } *tab,
+                           int ntab, char *out, int out_sz)
+{
+    int i, n = 0;
+    out[0] = 0;
+    for (i = 0; i < ntab; i++)
+    {
+        if (mask & tab[i].bit)
+        {
+            int w = snprintf(out + n, out_sz - n, "%s%s",
+                             n ? "|" : "", tab[i].name);
+            if (w < 0 || w >= out_sz - n) break;
+            n += w;
+        }
+    }
+    if (out[0] == 0) snprintf(out, out_sz, "(none)");
+}
+
+// Active-weapon names: v.weapon holds a single IT_* bit when the player has
+// a Quake weapon out; v.weapon2 holds a Doom/Wolf IT2_* bit when a Phase 6
+// gun is selected (and v.weapon is then forced to 0). NULL = no match.
+static const char *quake_weapon_name(int w)
+{
+    switch (w)
+    {
+    case IT_AXE:             return "Axe";
+    case IT_SHOTGUN:         return "Shotgun";
+    case IT_SUPER_SHOTGUN:   return "Super Shotgun";
+    case IT_NAILGUN:         return "Nailgun";
+    case IT_SUPER_NAILGUN:   return "Super Nailgun";
+    case IT_GRENADE_LAUNCHER:return "Grenade Launcher";
+    case IT_ROCKET_LAUNCHER: return "Rocket Launcher";
+    case IT_LIGHTNING:       return "Lightning";
+    default:                 return NULL;
+    }
+}
+
+// IT2_* bits live in game_defs.h on the DLL side; engine doesn't include
+// it. The values are stable Phase-6 ABI — hard-coded here so the engine
+// inspector can decode without a header dependency.
+#define ED_IT2_DOOM_FIST       (1 << 0)
+#define ED_IT2_DOOM_PISTOL     (1 << 1)
+#define ED_IT2_DOOM_SHOTGUN    (1 << 2)
+#define ED_IT2_DOOM_CHAINGUN   (1 << 3)
+#define ED_IT2_DOOM_ROCKET     (1 << 4)
+#define ED_IT2_DOOM_CHAINSAW   (1 << 5)
+#define ED_IT2_WOLF_KNIFE      (1 << 6)
+#define ED_IT2_WOLF_PISTOL     (1 << 7)
+#define ED_IT2_WOLF_MACHINEGUN (1 << 8)
+#define ED_IT2_WOLF_CHAINGUN   (1 << 9)
+
+static const char *bonus_weapon_name(int w)
+{
+    switch (w)
+    {
+    case ED_IT2_DOOM_FIST:       return "Doom Fist";
+    case ED_IT2_DOOM_PISTOL:     return "Doom Pistol";
+    case ED_IT2_DOOM_SHOTGUN:    return "Doom Shotgun";
+    case ED_IT2_DOOM_CHAINGUN:   return "Doom Chaingun";
+    case ED_IT2_DOOM_ROCKET:     return "Doom Rocket";
+    case ED_IT2_DOOM_CHAINSAW:   return "Doom Chainsaw";
+    case ED_IT2_WOLF_KNIFE:      return "Wolf Knife";
+    case ED_IT2_WOLF_PISTOL:     return "Wolf Pistol";
+    case ED_IT2_WOLF_MACHINEGUN: return "Wolf MG";
+    case ED_IT2_WOLF_CHAINGUN:   return "Wolf Chaingun";
+    default:                     return NULL;
+    }
+}
+
+static const char *contents_name(int c)
+{
+    switch (c)
+    {
+    case 0:                return "(none)";
+    case CONTENTS_EMPTY:   return "EMPTY";
+    case CONTENTS_SOLID:   return "SOLID";
+    case CONTENTS_WATER:   return "WATER";
+    case CONTENTS_SLIME:   return "SLIME";
+    case CONTENTS_LAVA:    return "LAVA";
+    case CONTENTS_SKY:     return "SKY";
+    default:               return "?";
     }
 }
 
@@ -1187,6 +1348,114 @@ static void draw_live_state(edit_entity_t *e)
         snprintf(buf, sizeof(buf), "frame %d  flags %s",
                  (int)ed->v.frame, flagsbuf);
         IG_TextUnformatted(buf);
+    }
+
+    // Effects (dynamic-light bits + nodraw). The setter UI lives in the
+    // kv panel — this is just the live readout.
+    if (ed->v.effects != 0)
+    {
+        static const struct { int bit; const char *name; } eftab[] = {
+            { EF_BRIGHTFIELD, "BRIGHTFIELD" }, { EF_MUZZLEFLASH, "MUZZLEFLASH" },
+            { EF_BRIGHTLIGHT, "BRIGHTLIGHT" }, { EF_DIMLIGHT,    "DIMLIGHT" },
+        };
+        char efbuf[96];
+        format_bitmask((int)ed->v.effects, eftab,
+                       (int)(sizeof(eftab) / sizeof(eftab[0])),
+                       efbuf, sizeof(efbuf));
+        snprintf(buf, sizeof(buf), "effects %s", efbuf);
+        IG_TextUnformatted(buf);
+    }
+
+    // Water — useful when AI seems to be drowning, sliding, or refusing
+    // to path through liquids. watertype is a CONTENTS_* code (negative).
+    if (ed->v.waterlevel != 0 || ed->v.watertype != 0)
+    {
+        snprintf(buf, sizeof(buf), "water level %d  type %s",
+                 (int)ed->v.waterlevel, contents_name((int)ed->v.watertype));
+        IG_TextUnformatted(buf);
+    }
+
+    // Player-only readouts: inventory bitfields and live input buttons.
+    // `cl.viewentity` is the local client's edict index; the inspector can
+    // target any entity, so most monsters won't take this branch.
+    if (en == cl.viewentity)
+    {
+        // v.weapon = active Quake gun (single IT_* bit). v.weapon2 = active
+        // Doom/Wolf gun (single IT2_* bit, Phase 6). If both are zero the
+        // player isn't holding anything (in_blink / clamp during teleport).
+        int w  = (int)ed->v.weapon;
+        int w2 = (int)ed->v.weapon2;
+        const char *wn  = w  ? quake_weapon_name(w)   : NULL;
+        const char *w2n = w2 ? bonus_weapon_name(w2)  : NULL;
+        if (w2n)
+            snprintf(buf, sizeof(buf), "weapon %s  (weapon2=%d)", w2n, w2);
+        else if (wn)
+            snprintf(buf, sizeof(buf), "weapon %s  (%d)", wn, w);
+        else
+            snprintf(buf, sizeof(buf), "weapon %d / weapon2 %d", w, w2);
+        IG_TextUnformatted(buf);
+
+        // v.items mask. Decode by category for readability.
+        {
+            static const struct { int bit; const char *name; } itab[] = {
+                { IT_SHOTGUN, "SHOT" }, { IT_SUPER_SHOTGUN, "SSHOT" },
+                { IT_NAILGUN, "NAIL" }, { IT_SUPER_NAILGUN, "SNAIL" },
+                { IT_GRENADE_LAUNCHER, "GL" }, { IT_ROCKET_LAUNCHER, "RL" },
+                { IT_LIGHTNING, "LG" }, { IT_AXE, "AXE" },
+                { IT_ARMOR1, "GA" }, { IT_ARMOR2, "YA" }, { IT_ARMOR3, "RA" },
+                { IT_KEY1, "SKEY" }, { IT_KEY2, "GKEY" },
+                { IT_INVISIBILITY, "RING" }, { IT_INVULNERABILITY, "PENT" },
+                { IT_SUIT, "SUIT" }, { IT_QUAD, "QUAD" },
+                { IT_SIGIL1, "S1" }, { IT_SIGIL2, "S2" },
+                { IT_SIGIL3, "S3" }, { IT_SIGIL4, "S4" },
+            };
+            char itbuf[160];
+            format_bitmask((int)ed->v.items, itab,
+                           (int)(sizeof(itab) / sizeof(itab[0])),
+                           itbuf, sizeof(itbuf));
+            snprintf(buf, sizeof(buf), "items %s", itbuf);
+            IG_TextUnformatted(buf);
+        }
+
+        // v.items2 — Phase 6 Doom/Wolf3D bonus roster. Only show if any
+        // bit is set to avoid clutter on vanilla play.
+        if (ed->v.items2 != 0)
+        {
+            static const struct { int bit; const char *name; } i2tab[] = {
+                { ED_IT2_DOOM_FIST,       "DFIST" },
+                { ED_IT2_DOOM_PISTOL,     "DPIST" },
+                { ED_IT2_DOOM_SHOTGUN,    "DSHOT" },
+                { ED_IT2_DOOM_CHAINGUN,   "DCHAIN" },
+                { ED_IT2_DOOM_ROCKET,     "DROCK" },
+                { ED_IT2_DOOM_CHAINSAW,   "DSAW" },
+                { ED_IT2_WOLF_KNIFE,      "WKNF" },
+                { ED_IT2_WOLF_PISTOL,     "WPIST" },
+                { ED_IT2_WOLF_MACHINEGUN, "WMG" },
+                { ED_IT2_WOLF_CHAINGUN,   "WCHN" },
+            };
+            char itbuf[160];
+            format_bitmask((int)ed->v.items2, i2tab,
+                           (int)(sizeof(i2tab) / sizeof(i2tab[0])),
+                           itbuf, sizeof(itbuf));
+            snprintf(buf, sizeof(buf), "items2 %s", itbuf);
+            IG_TextUnformatted(buf);
+        }
+
+        // Buttons — live input. button3 = Blink, button4 = Gust (Phase 8
+        // M3). Useful to confirm the new clc_move bits are reaching the
+        // server when a bind seems unresponsive.
+        if (ed->v.button0 || ed->v.button1 || ed->v.button2
+            || ed->v.button3 || ed->v.button4)
+        {
+            snprintf(buf, sizeof(buf),
+                     "buttons %s%s%s%s%s",
+                     ed->v.button0 ? "ATK " : "",
+                     ed->v.button1 ? "JMP " : "",
+                     ed->v.button2 ? "B2 "  : "",
+                     ed->v.button3 ? "BLNK ": "",
+                     ed->v.button4 ? "GUST ": "");
+            IG_TextUnformatted(buf);
+        }
     }
 
     // Think function + nextthink countdown. Symbol resolution is best-
@@ -2072,6 +2341,7 @@ static void draw_inspector(void)
     // mutations push their own History_Push so undo round-trips.
     {
         int sf_idx = kv_lookup(e, "spawnflags");
+        int ef_idx = kv_lookup(e, "effects");
         int order[2] = { e->classname_idx, e->origin_idx };
         int j;
         int removed_any = 0;
@@ -2107,6 +2377,7 @@ static void draw_inspector(void)
             if (i == e->classname_idx) continue;
             if (i == e->origin_idx)    continue;
             if (i == sf_idx)           continue;
+            if (i == ef_idx)           continue;
             IG_PushID_Int(i);
             snprintf(buf, sizeof(buf), "%s##key", e->kv[i].key);
             IG_SetNextItemWidth(180);
@@ -2149,6 +2420,8 @@ static void draw_inspector(void)
     }
     IG_Separator();
     draw_spawnflags_section(e);
+    IG_Separator();
+    draw_effects_section(e);
     IG_Separator();
 
     if (b)
