@@ -269,6 +269,12 @@ static void Bot_DecideGoal(void)
         edict_t *e = Bot_Edict(i);
         float d2;
         if (!e || e->free) continue;
+        /* Items / keys turn SOLID_NOT on pickup (key_touch + h_touch),
+         * but the entity sticks around with classname intact. Without
+         * this filter the goal cascade keeps re-targeting a consumed
+         * key and the bot loops on its origin instead of progressing. */
+        if (e->v.solid == SOLID_NOT && !Bot_IsEnemy(e) && !Bot_IsExit(e))
+            continue;
         d2 = Bot_Dist2(ppos, e->v.origin);
 
         if (Bot_IsEnemy(e)) {
