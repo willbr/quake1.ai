@@ -240,8 +240,14 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
         if (e == client) continue;
         // Skip world-static / engine-pushed entities. Corpses (STEP+SOLID_NOT),
         // gibs (BOUNCE), items (TOSS), and monsters (STEP/FLY/WALK) all pass.
+        // Explosive barrels spawn MOVETYPE_NONE but should kick like a prop
+        // when gusted; promote to BOUNCE below so the impulse sticks.
         int mt = (int)e->v.movetype;
-        if (mt == MOVETYPE_NONE || mt == MOVETYPE_PUSH) continue;
+        const char *cn = e->v.classname ? e->v.classname : "";
+        int is_barrel = (strcmp(cn, "misc_explobox") == 0 ||
+                         strcmp(cn, "misc_explobox2") == 0);
+        if (mt == MOVETYPE_PUSH) continue;
+        if (mt == MOVETYPE_NONE && !is_barrel) continue;
 
         vec3_t to;
         to[0] = e->v.origin[0] - eye[0];
@@ -282,7 +288,8 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
 
         // Gusted TOSS entities ricochet off walls like grenades instead of
         // sliding. Fireballs pinball, pickups bounce a couple of times.
-        if (mt == MOVETYPE_TOSS) e->v.movetype = MOVETYPE_BOUNCE;
+        // Barrels likewise become BOUNCE so gravity + ricochet kick in.
+        if (mt == MOVETYPE_TOSS || is_barrel) e->v.movetype = MOVETYPE_BOUNCE;
 
         // Knock STEP-mode monsters off the ground briefly so the push reads.
         if (e->v.flags && ((int)e->v.flags & FL_ONGROUND)) {
