@@ -2114,12 +2114,19 @@ void R_DrawParticles (void)
 				// Liquid interaction: floating blood reads better than
 				// blood teleporting through the surface and falling forever
 				// out of sight.  Water/slime = float, lava = vaporise.
+				// On entry, emit a tiny R_WaterSplash so the impact reads
+				// as "drop hit liquid" instead of silently sticking. Floor
+				// strength (4 = 0.25×, ~7 droplets) keeps shotgun-spray
+				// flurries from turning the surface into a fountain.
 				if (cl.worldmodel) {
 					int c = SV_HullPointContents (&cl.worldmodel->hulls[0], 0, p->org);
 					if (c == CONTENTS_WATER || c == CONTENTS_SLIME) {
+						int kind = (c == CONTENTS_SLIME) ? 1 : 0;
+						R_WaterSplash (p->org, kind, 4);
 						p->vel[0] = p->vel[1] = p->vel[2] = 0;
 						p->flags |= PARTFL_STUCK;
 					} else if (c == CONTENTS_LAVA) {
+						R_WaterSplash (p->org, 2, 4);
 						p->die = -1;
 					}
 				}
