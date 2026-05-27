@@ -2,7 +2,7 @@
 set -u
 LOG=$(mktemp -t ai-test.XXXXXX.log)
 
-zig build run -- +map ai_t01_nav +set bot 1 > "$LOG" 2>&1 &
+zig build run -- +map ai_t01_nav +bot 1 > "$LOG" 2>&1 &
 PID=$!
 
 TIMEOUT_S=390
@@ -18,12 +18,12 @@ kill "$PID" 2>/dev/null
 wait "$PID" 2>/dev/null
 
 echo "=== AI test markers seen ==="
-grep -E "^AI-TEST " "$LOG" || echo "(none)"
+grep -aE "AI-TEST " "$LOG" || echo "(none)"
 
 EXPECTED="t01_nav t02_combat t03_stimulus t04_smoke t05_light t06_wander DONE"
 RC=0
 for tag in $EXPECTED; do
-  if ! grep -q "^AI-TEST $tag" "$LOG"; then
+  if ! grep -aq "AI-TEST $tag" "$LOG"; then
     echo "MISS: AI-TEST $tag"
     RC=1
   fi

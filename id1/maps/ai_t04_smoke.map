@@ -74,6 +74,7 @@
 }
 {
 "classname" "trigger_changelevel"
+"spawnflags" "1"
 "map" "ai_t05_light"
 {
 ( 32 352 48 ) ( 32 352 16 ) ( 32 288 16 ) trigger 0 0 0 1 1
