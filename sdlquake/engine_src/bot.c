@@ -14,7 +14,7 @@
 // Cvars + state
 // ---------------------------------------------------------------------------
 
-cvar_t bot              = { "bot",              "0", true };
+cvar_t bot              = { "bot",              "0" };
 cvar_t bot_aware_radius = { "bot_aware_radius", "1024" };
 cvar_t bot_pickup_radius= { "bot_pickup_radius","640" };
 cvar_t bot_turn_speed   = { "bot_turn_speed",   "540" };
