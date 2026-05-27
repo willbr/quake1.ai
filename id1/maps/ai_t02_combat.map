@@ -118,27 +118,6 @@
 "target" "kill_b"
 }
 {
-"classname" "trigger_counter"
-"targetname" "kill_b"
-"count" "3"
-"target" "exit_unlock"
-}
-{
-"classname" "func_door"
-"targetname" "exit_unlock"
-"angle" "-1"
-"wait" "-1"
-"speed" "100"
-{
-( 320 352 96 ) ( 320 352 16 ) ( 320 288 16 ) metal1_1 0 0 0 1 1
-( 256 288 96 ) ( 256 288 16 ) ( 256 352 16 ) metal1_1 0 0 0 1 1
-( 256 352 96 ) ( 256 352 16 ) ( 320 352 16 ) metal1_1 0 0 0 1 1
-( 320 288 96 ) ( 320 288 16 ) ( 256 288 16 ) metal1_1 0 0 0 1 1
-( 320 352 96 ) ( 320 288 96 ) ( 256 288 96 ) metal1_1 0 0 0 1 1
-( 256 352 16 ) ( 256 288 16 ) ( 320 288 16 ) metal1_1 0 0 0 1 1
-}
-}
-{
 "classname" "trigger_changelevel"
 "spawnflags" "1"
 "map" "ai_t03_stimulus"

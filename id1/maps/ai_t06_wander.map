@@ -96,6 +96,10 @@
 "light" "200"
 }
 {
+"classname" "item_health"
+"origin" "0 0 48"
+}
+{
 "classname" "light"
 "origin" "300 300 200"
 "light" "300"
