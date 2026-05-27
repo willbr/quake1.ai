@@ -1135,6 +1135,87 @@ static void draw_angle_arrows(void)
 // paths emerge naturally from this — a path_corner with target=next
 // chains to the next path_corner, etc. The check is O(N²) per pair but
 // runs only while the editor is open + paused, on ≤ a few hundred ents.
+// Per-frame cache of entity indices that share a target/targetname link
+// with any currently-selected entity. Populated once per Editor_RenderScene
+// by compute_link_partners(); read by the wire + bbox passes so the *other*
+// end of a selected link draws with depth-bypass (matching the link arrow's
+// own through-wall path). Cap is generous for big maps but bounded.
+#define EDIT_LINK_PARTNERS_MAX 512
+static int s_link_partners[EDIT_LINK_PARTNERS_MAX];
+static int s_link_partners_n;
+
+static int entity_is_link_partner(int e_idx)
+{
+    int k;
+    for (k = 0; k < s_link_partners_n; k++)
+        if (s_link_partners[k] == e_idx) return 1;
+    return 0;
+}
+
+static void link_partners_add(int idx)
+{
+    int k;
+    if (s_link_partners_n >= EDIT_LINK_PARTNERS_MAX) return;
+    for (k = 0; k < s_link_partners_n; k++)
+        if (s_link_partners[k] == idx) return;
+    s_link_partners[s_link_partners_n++] = idx;
+}
+
+// Walk every selected entity's target/killtarget/targetname kvs and pool
+// the indices of every other entity matching the other half of the link.
+// "Selected as source" (has target/killtarget) → partners are anything
+// with a matching targetname. "Selected as dest" (has targetname) →
+// partners are anything pointing at it.
+static void compute_link_partners(void)
+{
+    int s, i, j, k;
+    int nsel = Scene_NumSelected();
+    s_link_partners_n = 0;
+    if (nsel == 0) return;
+
+    for (s = 0; s < nsel; s++)
+    {
+        int e_idx, b_idx;
+        edit_entity_t *se;
+        if (!Scene_GetSelected(s, &e_idx, &b_idx)) continue;
+        if (e_idx < 0 || e_idx >= edit_scene.numentities) continue;
+        se = &edit_scene.entities[e_idx];
+
+        for (j = 0; j < se->numkv; j++)
+        {
+            const char *key = se->kv[j].key;
+            const char *val = se->kv[j].value;
+            int sel_is_src, sel_is_dst;
+            if (!val[0]) continue;
+            sel_is_src = (!strcmp(key, "target") || !strcmp(key, "killtarget"));
+            sel_is_dst = !strcmp(key, "targetname");
+            if (!sel_is_src && !sel_is_dst) continue;
+
+            for (i = 0; i < edit_scene.numentities; i++)
+            {
+                edit_entity_t *t;
+                if (i == e_idx) continue;
+                t = &edit_scene.entities[i];
+                for (k = 0; k < t->numkv; k++)
+                {
+                    const char *tk = t->kv[k].key;
+                    const char *tv = t->kv[k].value;
+                    int hit = 0;
+                    if (sel_is_src
+                        && !strcmp(tk, "targetname")
+                        && !strcmp(tv, val))
+                        hit = 1;
+                    else if (sel_is_dst
+                        && (!strcmp(tk, "target") || !strcmp(tk, "killtarget"))
+                        && !strcmp(tv, val))
+                        hit = 1;
+                    if (hit) { link_partners_add(i); break; }
+                }
+            }
+        }
+    }
+}
+
 static void draw_target_links(void)
 {
     extern cvar_t editor_show_links;
@@ -1202,6 +1283,12 @@ void Editor_RenderScene(void)
 
     if (!editor_open && !view_map) return;
     if (edit_scene.numentities == 0) return;
+
+    // Pool the entities at the far end of any selected target/targetname
+    // link so the subsequent wire + bbox passes know to draw them with
+    // depth-bypass. Without this, a selected button's link arrow flies
+    // through walls but the destination door's wireframe is still occluded.
+    compute_link_partners();
 
     // If the engine's loaded worldmodel came from a recent editor_compile
     // (i.e. it lives in the virtual-file registry), the BSP renderer is
@@ -1304,6 +1391,8 @@ void Editor_RenderScene(void)
             // the per-brush wireframe so we don't get a busy outline behind
             // it. (For face-level work, toggle editor_trigger_render → tex.)
             if (is_trigger && !trigger_tex) continue;
+            int is_link = !Scene_SelectionContains(i, -1)
+                          && entity_is_link_partner(i);
             for (j = 0; j < e->numbrushes; j++)
             {
                 edit_brush_t *b = &e->brushes[j];
@@ -1334,7 +1423,10 @@ void Editor_RenderScene(void)
                     int show_sel = is_sel && editor_open;
                     byte bc = show_sel    ? EDIT_COLOR_SELECTED :
                               is_brush_ent ? category_color(e)  : EDIT_COLOR_BRUSH;
-                    draw_brush(b, bc, show_sel);
+                    // Link partners ride the depth-bypass path alongside
+                    // selected brushes so the user can see the far end of
+                    // the relationship through walls.
+                    draw_brush(b, bc, show_sel || is_link);
                 }
                 // Active-face highlight: walk the face whose plane_idx
                 // matches and draw its edges in white over everything,
@@ -1411,7 +1503,11 @@ void Editor_RenderScene(void)
             if (!have_bbox) continue;
             is_sel = Scene_SelectionContains(i, -1);
             color  = is_sel ? EDIT_COLOR_SELECTED : EDIT_COLOR_TRIGGER;
-            draw_aabb_ex(tmin, tmax, color, is_sel);
+            // Linked but unselected triggers (e.g. a trigger_relay called
+            // from the selected button) get the same through-wall path so
+            // they're visible alongside the link arrow.
+            draw_aabb_ex(tmin, tmax, color,
+                         is_sel || (!is_sel && entity_is_link_partner(i)));
         }
     }
 
@@ -1459,17 +1555,21 @@ void Editor_RenderScene(void)
             edit_entity_t *e = &edit_scene.entities[i];
             const char *cls = NULL;
             vec3_t pmin, pmax;
-            int is_sel, has_model;
+            int is_sel, is_link, has_model;
             byte color;
             if (!Entity_IsPoint(e)) continue;
             if (Editor_EntityHidden(i)) continue;
-            is_sel = Scene_SelectionContains(i, -1);
+            is_sel  = Scene_SelectionContains(i, -1);
+            is_link = !is_sel && entity_is_link_partner(i);
             if (e->classname_idx >= 0) cls = e->kv[e->classname_idx].value;
             has_model = classname_to_model(cls) != NULL;
-            if (!is_sel && has_model) continue;
+            // Linked point ents (path_corner with a model preview, a
+            // targeted monster, etc.) override the "has-model → hide bbox"
+            // skip so the user can pinpoint the far end of the link.
+            if (!is_sel && !is_link && has_model) continue;
             Editor_PointEntityBBox(e, pmin, pmax);
             color = is_sel ? EDIT_COLOR_SELECTED : category_color(e);
-            draw_aabb_ex(pmin, pmax, color, is_sel);
+            draw_aabb_ex(pmin, pmax, color, is_sel || is_link);
         }
     }
 
