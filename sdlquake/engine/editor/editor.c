@@ -1903,6 +1903,10 @@ static int spawn_one_pending(edit_entity_t *e)
     // into this same entity (otherwise re-spawning is the only way to
     // affect a placed monster's origin).
     e->live_ent = ent;
+    if (ent->v.classname)
+        Q_strncpy(e->live_bound_classname, ent->v.classname, EDIT_KEY_LEN - 1);
+    else
+        e->live_bound_classname[0] = '\0';
     return 1;
 }
 

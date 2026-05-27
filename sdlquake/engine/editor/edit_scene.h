@@ -102,6 +102,16 @@ typedef struct edit_entity_s {
     // ED_Free'd it, so the *only* runtime presence is in the client static
     // list. Gizmo drags push the new origin here so the model visibly moves.
     struct entity_s *live_static;
+
+    // Snapshot of live_ent->v.classname captured at bind time. QuakeC spawn
+    // functions commonly rewrite classname mid-spawn ("func_door" → "door",
+    // "func_button" → "button"), so the live edict's v.classname diverges
+    // from the .map kv as soon as the spawn function ran. detach_stale_live_ent
+    // compares the *current* v.classname against this snapshot, not against
+    // the kv — a mismatch means the underlying edict slot got reused by
+    // something unrelated (e.g. a spike took a freed monster's slot), which
+    // is the case the detach was actually meant to catch.
+    char            live_bound_classname[EDIT_KEY_LEN];
 } edit_entity_t;
 
 // One entry in the selection list. (entity, brush) is the global address;

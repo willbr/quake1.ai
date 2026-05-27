@@ -1857,14 +1857,29 @@ int Editor_EntityInView(int e_idx)
 // runtime-edict pick pass below, which materialises a transient entry.
 static void detach_stale_live_ent(edit_entity_t *e)
 {
-    const char *cls;
     if (!e->live_ent) return;
-    if (e->live_ent->free) { e->live_ent = NULL; return; }
-    if (e->classname_idx < 0) return;
-    if (!e->live_ent->v.classname) return;
-    cls = e->kv[e->classname_idx].value;
-    if (strcmp(e->live_ent->v.classname, cls) != 0)
+    if (e->live_ent->free) {
         e->live_ent = NULL;
+        e->live_bound_classname[0] = '\0';
+        return;
+    }
+    if (!e->live_ent->v.classname) return;
+    // No snapshot → the binding pre-dates this field (e.g. a legacy code
+    // path that didn't call through the bind helper). Skip the detach
+    // rather than null a binding we can't validate.
+    if (!e->live_bound_classname[0]) return;
+    // Compare against the classname captured at bind time, NOT against the
+    // .map kv. QuakeC spawn functions rewrite v.classname ("func_door" →
+    // "door", "func_button" → "button"), so a kv-vs-live compare would
+    // detach every spawn-renamed brush ent every frame — exactly the bug
+    // that was causing transient stubs to shadow real entities in the
+    // picker. The snapshot already reflects the post-spawn name, so a
+    // mismatch here means the slot got reused by something else (the case
+    // the detach was meant to catch).
+    if (strcmp(e->live_ent->v.classname, e->live_bound_classname) != 0) {
+        e->live_ent = NULL;
+        e->live_bound_classname[0] = '\0';
+    }
 }
 
 // Reap transient entries whose underlying live edict went away (rocket
@@ -1976,6 +1991,8 @@ static int find_or_create_transient(edict_t *ed)
     e->spawned       = 1;
     e->transient     = 1;
     e->live_ent      = ed;
+    if (ed->v.classname)
+        Q_strncpy(e->live_bound_classname, ed->v.classname, EDIT_KEY_LEN - 1);
 
     Entity_SetKV(e, "classname",
                  ed->v.classname ? ed->v.classname : "(runtime)");

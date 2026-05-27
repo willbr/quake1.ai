@@ -399,6 +399,15 @@ static int parse_scene_text(char *src)
                 }
             }
             e->live_ent = best;
+            // Snapshot v.classname so detach_stale_live_ent has a stable
+            // reference. The QuakeC spawn rename (func_door → door etc.)
+            // has already run by the time we bind, so `best->v.classname`
+            // here is the post-spawn name.
+            if (best && best->v.classname)
+                Q_strncpy(e->live_bound_classname, best->v.classname,
+                          EDIT_KEY_LEN - 1);
+            else
+                e->live_bound_classname[0] = '\0';
         }
     }
 
