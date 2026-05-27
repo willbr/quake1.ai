@@ -1071,7 +1071,7 @@ void SV_SpawnServer (char *server)
 		Cvar_Set ("hostname", "UNNAMED");
 	scr_centertime_off = 0;
 
-	Con_DPrintf ("SpawnServer: %s\n",server);
+	Con_Printf ("Map: %s\n", server);
 	svs.changelevel_issued = false;		// now safe to issue another
 
 //
