@@ -1179,6 +1179,87 @@ static void tool_inspect_entity(const char *id_json, const char *args)
 }
 
 // ---------------------------------------------------------------------------
+// Tool: floor_probe -- traceline straight down from the player and report
+// the surface normal, slope angle, and whether SV_FlyMove would treat it as
+// ground (normal.z > 0.7 -> FL_ONGROUND). Useful for diagnosing why the
+// player slides on slopes that look shallow.
+// ---------------------------------------------------------------------------
+
+static void tool_floor_probe(const char *id_json, const char *args)
+{
+    extern server_t sv;
+    extern int      pr_edict_size;
+
+    if (!sv.active || sv.num_edicts < 2 || pr_edict_size <= 0) {
+        mcp_error(id_json, -32602, "no active server");
+        return;
+    }
+
+    edict_t *player = (edict_t *)((byte *)sv.edicts + pr_edict_size);
+    if (player->free) {
+        mcp_error(id_json, -32602, "no player edict");
+        return;
+    }
+
+    float max_dist = 256.0f;
+    if (args) json_float(args, "max_distance", &max_dist);
+    if (max_dist < 1.0f)    max_dist = 1.0f;
+    if (max_dist > 8192.0f) max_dist = 8192.0f;
+
+    vec3_t start, end, zero = {0,0,0};
+    VectorCopy(player->v.origin, start);
+    end[0] = start[0];
+    end[1] = start[1];
+    end[2] = start[2] - max_dist;
+
+    /* Point trace (mins=maxs=0) so we report the geometric surface normal
+     * directly under the player origin, not an averaged box-trace result. */
+    trace_t tr = SV_Move(start, zero, zero, end, MOVE_NOMONSTERS, player);
+
+    int   hit       = (tr.fraction < 1.0f && !tr.allsolid) ? 1 : 0;
+    float dist      = hit ? (max_dist * tr.fraction) : -1.0f;
+    float nz        = hit ? tr.plane.normal[2] : 0.0f;
+    if (nz >  1.0f) nz =  1.0f;
+    if (nz < -1.0f) nz = -1.0f;
+    float angle_deg = hit ? (float)(acos(nz) * 180.0 / M_PI) : -1.0f;
+    int   is_floor  = (hit && tr.plane.normal[2] > 0.7f) ? 1 : 0;
+    int   onground  = ((int)player->v.flags & FL_ONGROUND) ? 1 : 0;
+    float hspeed = sqrtf(player->v.velocity[0]*player->v.velocity[0]
+                       + player->v.velocity[1]*player->v.velocity[1]);
+
+    char raw[768];
+    snprintf(raw, sizeof(raw),
+        "{\"hit\":%s,\"distance\":%.2f,"
+        "\"contact\":[%.2f,%.2f,%.2f],"
+        "\"normal\":[%.4f,%.4f,%.4f],"
+        "\"normal_z\":%.4f,\"slope_deg\":%.2f,"
+        "\"is_floor\":%s,\"floor_threshold\":0.7,"
+        "\"on_ground\":%s,"
+        "\"velocity\":[%.2f,%.2f,%.2f],\"hspeed\":%.2f,"
+        "\"player_origin\":[%.2f,%.2f,%.2f],"
+        "\"allsolid\":%s,\"startsolid\":%s}",
+        hit ? "true" : "false",
+        dist,
+        tr.endpos[0], tr.endpos[1], tr.endpos[2],
+        tr.plane.normal[0], tr.plane.normal[1], tr.plane.normal[2],
+        nz, angle_deg,
+        is_floor ? "true" : "false",
+        onground ? "true" : "false",
+        player->v.velocity[0], player->v.velocity[1], player->v.velocity[2],
+        hspeed,
+        player->v.origin[0], player->v.origin[1], player->v.origin[2],
+        tr.allsolid ? "true" : "false",
+        tr.startsolid ? "true" : "false");
+
+    char escaped[1536];
+    char *d = escaped;
+    char *dend = escaped + sizeof(escaped) - 1;
+    d = json_escape_append(d, dend, raw);
+    *d = '\0';
+    mcp_text_result(id_json, escaped);
+}
+
+// ---------------------------------------------------------------------------
 // Tool: nav_edges_near -- query nav edges whose either endpoint is within
 // `radius` of {x,y,z}. Returns JSON with from/to coords, kind name, phase
 // name, weight, and a truncation flag. Capped at NAV_EDGES_NEAR_CAP records
@@ -1687,6 +1768,12 @@ static void tool_set_cvar(const char *id_json, const char *name, const char *val
            "\"frames\":{\"type\":\"integer\",\"description\":\"1..60\"}}," \
          "\"required\":[\"frames\"]}}" \
       "," \
+      "{\"name\":\"floor_probe\"," \
+       "\"description\":\"Trace straight down from the player edict and report the surface normal, slope angle in degrees, distance, and whether SV_FlyMove would treat it as floor (normal.z > 0.7 -> FL_ONGROUND). Also reports current FL_ONGROUND flag, velocity, and horizontal speed. Useful for diagnosing slope sliding\"," \
+       "\"inputSchema\":{\"type\":\"object\"," \
+         "\"properties\":{" \
+           "\"max_distance\":{\"type\":\"number\",\"description\":\"Max trace distance in world units (default 256, clamped 1..8192)\"}}," \
+         "\"required\":[]}}," \
       "{\"name\":\"nav_edges_near\"," \
        "\"description\":\"Return nav edges whose either endpoint is within `radius` of (x,y,z). Each edge reports from/to coords, kind (NAV_EDGE_* name), phase (NAV_PHASE_* name — which bake sub-block emitted it), and weight. Capped at 200 records; sets truncated=true when the cap is hit. Returns count=0 with no error before the first bake completes\"," \
        "\"inputSchema\":{\"type\":\"object\"," \
@@ -1865,6 +1952,11 @@ static void mcp_dispatch(const char *line)
         {
             const char *args = strstr(line, "\"arguments\":");
             tool_wait_frames(id_json, args ? args : "");
+        }
+        else if (strcmp(tool_name, "floor_probe") == 0)
+        {
+            const char *args = strstr(line, "\"arguments\":");
+            tool_floor_probe(id_json, args ? args : "");
         }
         else if (strcmp(tool_name, "nav_edges_near") == 0)
         {
