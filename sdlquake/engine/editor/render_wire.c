@@ -1226,8 +1226,14 @@ static void draw_target_links(void)
     for (i = 0; i < edit_scene.numentities; i++)
     {
         edit_entity_t *e = &edit_scene.entities[i];
-        int src_sel, src_hidden;
-        src_hidden = Editor_EntityHidden(i);
+        int src_sel;
+        // Skip entities the engine isn't actually rendering (live mode's
+        // "no live_ent / no model" filter) — they aren't in the live
+        // world, so a link to them would be misleading. Category-hidden
+        // entities still count as present; the arrow is a relationship
+        // indicator and the visible end anchors it.
+        if (Editor_EntityHidden(i) && !Editor_EntityHiddenByCategory(i))
+            continue;
         if (!Editor_EntityAnchor(e, a)) continue;
         src_sel = entity_is_selected(i);
 
@@ -1245,16 +1251,11 @@ static void draw_target_links(void)
             for (k = 0; k < edit_scene.numentities; k++)
             {
                 edit_entity_t *t;
-                int dst_sel, either_sel, dst_hidden;
+                int dst_sel, either_sel;
                 if (k == i) continue;
                 t = &edit_scene.entities[k];
-                dst_hidden = Editor_EntityHidden(k);
-                // Draw if at least one end is visible — the arrow is a
-                // relationship indicator, not the entity itself, and we
-                // want users to see the link even when one side is in a
-                // category they've hidden (e.g. trigger → door, with the
-                // trigger category collapsed).
-                if (src_hidden && dst_hidden) continue;
+                if (Editor_EntityHidden(k) && !Editor_EntityHiddenByCategory(k))
+                    continue;
                 dst_sel    = entity_is_selected(k);
                 either_sel = src_sel || dst_sel;
                 // Toolbar toggle gates everything except links touching
