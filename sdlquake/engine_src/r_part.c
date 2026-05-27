@@ -2185,6 +2185,31 @@ void R_DrawParticles (void)
 			float dz = slide * p->vel[0] * frametime;
 			if (dz > 0.0f) {
 				float new_z = p->org[2] - dz;
+				// Liquid-surface crossing during slide: walls meeting a
+				// pool typically extend below the water surface, so a
+				// wall-stuck blood droplet would otherwise slide silently
+				// through it (the pt_blood liquid check is gated on
+				// !STUCK and never fires while WALL_STICK is set). Probe
+				// contents at the new slide Z; on first crossing into a
+				// liquid emit the splash, halt the slide, and freeze.
+				if (p->type == pt_blood && cl.worldmodel) {
+					vec3_t probe;
+					probe[0] = p->org[0]; probe[1] = p->org[1]; probe[2] = new_z;
+					int lc = SV_HullPointContents (&cl.worldmodel->hulls[0], 0, probe);
+					if (lc == CONTENTS_WATER || lc == CONTENTS_SLIME) {
+						int kind = (lc == CONTENTS_SLIME) ? 1 : 0;
+						R_WaterSplash (probe, kind, 4);
+						p->org[2] = new_z;
+						p->flags &= ~PARTFL_WALL_STICK;
+						if (p->die > cl.time + 0.45f) p->die = cl.time + 0.45f;
+						goto slide_done;
+					} else if (lc == CONTENTS_LAVA) {
+						R_WaterSplash (probe, 2, 4);
+						p->die = -1;
+						p->flags &= ~PARTFL_WALL_STICK;
+						goto slide_done;
+					}
+				}
 				if (new_z <= p->vel[2]) {
 					R_SlideRelease (p);
 				} else {
@@ -2220,6 +2245,7 @@ void R_DrawParticles (void)
 				cb[0] = c[0]; cb[1] = c[1]; cb[2] = c[2] + 3;
 				DebugLines_Add (ca, cb, 244, 1);
 			}
+			slide_done:;
 		}
 
 		// Apply wind-debug bucket colour after the type switch so it
