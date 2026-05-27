@@ -553,4 +553,118 @@ pub fn build(b: *std.Build) void {
     const extract_auto = b.addRunArtifact(extract_exe);
     extract_auto.setCwd(b.path(""));
     b.getInstallStep().dependOn(&extract_auto.step);
+
+    // ---------------------------------------------------------------------------
+    // mapcompile CLI: zig build mapcompile -- <basedir> <mapname>
+    //   Stand-alone driver for the vendored qbsp/vis/light libs. Same
+    //   pipeline editor_compile_export runs in-process inside the engine,
+    //   but with no SDL window, no editor scene, no engine state — useful
+    //   for batch-compiling test maps from shell scripts. Same C compile
+    //   flags as the engine's qbsp/light/vis blocks above so the tracked-
+    //   allocator + longjmp + namespace headers line up.
+    // ---------------------------------------------------------------------------
+    const mapc_mod = b.createModule(.{
+        .target    = target,
+        .optimize  = optimize,
+        .link_libc = true,
+    });
+    mapc_mod.addCSourceFiles(.{
+        .files = &.{"tools/mapcompile/mapcompile.c"},
+        .flags = &.{
+            "-fno-strict-aliasing",
+            "-fwrapv",
+            "-w",
+        },
+    });
+    mapc_mod.addCSourceFiles(.{
+        .files = &.{
+            "sdlquake/vendor/qbsp/brush.c",
+            "sdlquake/vendor/qbsp/bspfile.c",
+            "sdlquake/vendor/qbsp/cmdlib.c",
+            "sdlquake/vendor/qbsp/csg4.c",
+            "sdlquake/vendor/qbsp/map.c",
+            "sdlquake/vendor/qbsp/mathlib.c",
+            "sdlquake/vendor/qbsp/merge.c",
+            "sdlquake/vendor/qbsp/nodraw.c",
+            "sdlquake/vendor/qbsp/outside.c",
+            "sdlquake/vendor/qbsp/portals.c",
+            "sdlquake/vendor/qbsp/qbsp.c",
+            "sdlquake/vendor/qbsp/region.c",
+            "sdlquake/vendor/qbsp/solidbsp.c",
+            "sdlquake/vendor/qbsp/surfaces.c",
+            "sdlquake/vendor/qbsp/tjunc.c",
+            "sdlquake/vendor/qbsp/writebsp.c",
+            "sdlquake/vendor/qbsp/qbsp_lib.c",
+        },
+        .flags = if (is_windows) &.{
+            "-DWIN32", "-DDOUBLEVEC_T",
+            "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+            "-fno-strict-aliasing", "-fwrapv", "-std=gnu89", "-fcommon", "-w",
+            "-fno-sanitize=undefined",
+        } else &.{
+            "-DDOUBLEVEC_T",
+            "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+            "-fno-strict-aliasing", "-fwrapv", "-std=gnu89", "-fcommon", "-w",
+            "-fno-sanitize=undefined",
+        },
+    });
+    mapc_mod.addCSourceFiles(.{
+        .files = &.{
+            "sdlquake/vendor/light/light.c",
+            "sdlquake/vendor/light/entities.c",
+            "sdlquake/vendor/light/ltface.c",
+            "sdlquake/vendor/light/trace.c",
+            "sdlquake/vendor/light/light_lib.c",
+        },
+        .flags = if (is_windows) &.{
+            "-DWIN32", "-DDOUBLEVEC_T",
+            "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+            "-include", "sdlquake/vendor/light/light_namespace.h",
+            "-fno-strict-aliasing", "-fwrapv", "-std=gnu89", "-fcommon", "-w",
+            "-fno-sanitize=undefined",
+        } else &.{
+            "-DDOUBLEVEC_T",
+            "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+            "-include", "sdlquake/vendor/light/light_namespace.h",
+            "-fno-strict-aliasing", "-fwrapv", "-std=gnu89", "-fcommon", "-w",
+            "-fno-sanitize=undefined",
+        },
+    });
+    mapc_mod.addCSourceFiles(.{
+        .files = &.{
+            "sdlquake/vendor/vis/vis.c",
+            "sdlquake/vendor/vis/flow.c",
+            "sdlquake/vendor/vis/soundpvs.c",
+            "sdlquake/vendor/vis/vis_lib.c",
+        },
+        .flags = if (is_windows) &.{
+            "-DWIN32", "-DDOUBLEVEC_T",
+            "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+            "-include", "sdlquake/vendor/vis/vis_namespace.h",
+            "-fno-strict-aliasing", "-fwrapv", "-std=gnu89", "-fcommon", "-w",
+            "-fno-sanitize=undefined",
+        } else &.{
+            "-DDOUBLEVEC_T",
+            "-include", "sdlquake/vendor/qbsp/qbsp_namespace.h",
+            "-include", "sdlquake/vendor/vis/vis_namespace.h",
+            "-fno-strict-aliasing", "-fwrapv", "-std=gnu89", "-fcommon", "-w",
+            "-fno-sanitize=undefined",
+        },
+    });
+    mapc_mod.addIncludePath(b.path("sdlquake/engine"));
+    mapc_mod.addIncludePath(b.path("sdlquake/vendor/qbsp"));
+    mapc_mod.addIncludePath(b.path("sdlquake/vendor/light"));
+    mapc_mod.addIncludePath(b.path("sdlquake/vendor/vis"));
+
+    const mapc_exe = b.addExecutable(.{
+        .name        = "mapcompile",
+        .root_module = mapc_mod,
+    });
+    b.installArtifact(mapc_exe);
+
+    const mapc_run = b.addRunArtifact(mapc_exe);
+    mapc_run.step.dependOn(b.getInstallStep());
+    mapc_run.setCwd(b.path(""));
+    if (b.args) |args| mapc_run.addArgs(args);
+    b.step("mapcompile", "Compile a .map -> .bsp+.lit (args: <basedir> <mapname>)").dependOn(&mapc_run.step);
 }
