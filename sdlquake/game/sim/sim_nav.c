@@ -338,13 +338,26 @@ static edict_t *alloc_probe(void) {
 // SetOrigin to `pos` then DropToFloor. On success, copies the resulting
 // floor-seated origin to `out` and returns 1. DropToFloor also sets
 // FL_ONGROUND, which SV_WalkMove requires.
+//
+// DropToFloor traces straight down from the probe origin and bails when the
+// bbox starts embedded in solid (trace.allsolid). An info_player_start whose
+// feet sit a few units below a raised ledge top (e.g. a spawn at z=160 over a
+// ledge top at z=144 — feet at 160-24=136, 8u into the ledge) is exactly such
+// a case, so the seed never seats and the whole flood collapses. Recover by
+// lifting the start origin up in step-sized increments until the bbox clears
+// whatever it was embedded in, then dropping back down onto it.
 static int seat_probe(edict_t *probe, const vec3_t pos, vec3_t out) {
-    eng->SV_SetOrigin(probe, (float *)pos);
-    if (!eng->SV_DropToFloor(probe)) return 0;
-    out[0] = probe->v.origin[0];
-    out[1] = probe->v.origin[1];
-    out[2] = probe->v.origin[2];
-    return 1;
+    static const float lift[] = { 0.f, 8.f, 16.f, 24.f, 32.f, 48.f, 64.f };
+    for (unsigned li = 0; li < sizeof(lift) / sizeof(lift[0]); li++) {
+        vec3_t start = { pos[0], pos[1], pos[2] + lift[li] };
+        eng->SV_SetOrigin(probe, start);
+        if (!eng->SV_DropToFloor(probe)) continue;
+        out[0] = probe->v.origin[0];
+        out[1] = probe->v.origin[1];
+        out[2] = probe->v.origin[2];
+        return 1;
+    }
+    return 0;
 }
 
 static void entity_center(edict_t *e, vec3_t out) {
