@@ -1459,6 +1459,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	int					numframes, numskins;
 	int					size, skinsize;
 	int					start, end, total;
+	int					hdrstart;
 	lm_model_t			*lm;
 	lm_result_t			lr;
 	qalloc_t			scratch;
@@ -1483,6 +1484,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 			lm->numverts * sizeof (stvert_t) +
 			lm->numtris * sizeof (mtriangle_t);
 
+	hdrstart = Hunk_LowMark ();
 	pheader = Hunk_AllocName (size, loadname);
 	pmodel = (mdl_t *) ((byte *)&pheader[1] +
 			(lm->numframes - 1) * sizeof (pheader->frames[0]));
@@ -1647,7 +1649,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 // move the complete, relocatable alias model to the cache
 //
 	end = Hunk_LowMark ();
-	total = end - start;
+	total = end - hdrstart;
 
 	Cache_Alloc (&mod->cache, total, loadname);
 	if (!mod->cache.data)
