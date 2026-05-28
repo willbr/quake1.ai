@@ -31,6 +31,10 @@ qalloc_t qalloc_malloc(void) {
 #define QA_ALIGN 16
 
 static size_t qa_round_up(size_t n) {
+    /* Saturate instead of wrapping: a near-SIZE_MAX request must not round
+       down to a small value and slip past the arena's size check. */
+    if (n > (size_t)-1 - (QA_ALIGN - 1))
+        return (size_t)-1;
     return (n + (QA_ALIGN - 1)) & ~((size_t)QA_ALIGN - 1);
 }
 

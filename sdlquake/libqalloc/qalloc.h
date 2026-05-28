@@ -20,7 +20,7 @@ typedef struct qalloc_s {
 qalloc_t qalloc_malloc(void);
 
 /* Bump allocator over a caller-owned buffer. free is a no-op; realloc bumps a
-   fresh block and copies old_size bytes. Out-of-space returns NULL. */
+   fresh block and copies up to old_size bytes. Out-of-space returns NULL. */
 typedef struct qalloc_arena_s {
     unsigned char *base;
     size_t         size;
