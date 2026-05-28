@@ -1149,7 +1149,16 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	case MOVETYPE_WALK:
 		if (!SV_RunThink (ent))
 			return;
-		if (!SV_CheckWater (ent) && ! ((int)ent->v.flags & FL_WATERJUMP) )
+		/* Skip gravity while standing on floor (FL_ONGROUND set last frame).
+		 * Without this, gravity injects -z velocity every frame; SV_FlyMove's
+		 * ClipVelocity converts that into along-slope velocity on any slope,
+		 * producing a perpetual downhill drift that friction can't fully
+		 * cancel. Skipping the inject leaves momentum slides intact (friction
+		 * still decays existing velocity) but lets the player come to rest
+		 * on shallow slopes. Stepping off a ledge clears FL_ONGROUND inside
+		 * SV_WalkMove, so gravity re-engages on the next frame. */
+		if (!SV_CheckWater (ent) && ! ((int)ent->v.flags & FL_WATERJUMP)
+			&& ! ((int)ent->v.flags & FL_ONGROUND) )
 			SV_AddGravity (ent);
 		SV_CheckStuck (ent);
 #ifdef QUAKE2
