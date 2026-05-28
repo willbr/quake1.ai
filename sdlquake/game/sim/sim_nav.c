@@ -543,10 +543,28 @@ static const float k_yaws[8] = {
     0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f
 };
 
+static int xy_in_bridge_fp(float fp[][4], int n, float x, float y) {
+    for (int i = 0; i < n; i++)
+        if (x >= fp[i][0] && x <= fp[i][2] && y >= fp[i][1] && y <= fp[i][3])
+            return 1;
+    return 0;
+}
+
 static int bake_floodfill(sim_navmesh_t *m) {
     anchor_t *anchors     = NULL;
     int       anchor_cap  = 0;
     int       anchor_n    = 0;
+
+    // Closed-bridge footprints (XY AABB at the retracted/pos1 position).
+    // A horizontal bridge-door is non-solid during bake, so the flood
+    // would seed phantom floor nodes on whatever sits under it. At
+    // runtime the closed door occupies that volume, so a bot routed onto
+    // such a node climbs the door and gets dropped into the pit when the
+    // door extends. We forbid flood nodes inside these footprints; the
+    // bridge is reachable only via its gated A/B anchors + button link.
+    #define MAX_BRIDGE_FP 16
+    float bridge_fp[MAX_BRIDGE_FP][4];  /* minx, miny, maxx, maxy */
+    int   bridge_fp_n = 0;
 
     // --- Phase 1: collect anchors ----------------------------------------
     // Done BEFORE allocating the probe so we can bail cheaply when the bake
@@ -696,6 +714,13 @@ static int bake_floodfill(sim_navmesh_t *m) {
                                  a_pos, ANCHOR_BRIDGE_A, NAV_NODE_BRIDGE_END, e);
                     anchors_push(&anchors, &anchor_cap, &anchor_n,
                                  b_pos, ANCHOR_BRIDGE_B, NAV_NODE_BRIDGE_END, e);
+                    if (bridge_fp_n < MAX_BRIDGE_FP) {
+                        bridge_fp[bridge_fp_n][0] = e->v.mins[0] - 4.f;
+                        bridge_fp[bridge_fp_n][1] = e->v.mins[1] - 4.f;
+                        bridge_fp[bridge_fp_n][2] = e->v.maxs[0] + 4.f;
+                        bridge_fp[bridge_fp_n][3] = e->v.maxs[1] + 4.f;
+                        bridge_fp_n++;
+                    }
                     char dbg[200];
                     snprintf(dbg, sizeof(dbg),
                         "sim_nav: bridge-door '%s' travel=(%.0f,%.0f,%.0f) "
@@ -704,6 +729,33 @@ static int bake_floodfill(sim_navmesh_t *m) {
                     eng->Con_Print(dbg);
                     goto next_e;
                 }
+            }
+            // func_button: a wall-mounted button has its brush centre
+            // inside (or flush with) the wall, so a centre seat_probe
+            // embeds in solid and yields no node — the bot could never
+            // path to it. Seat the anchor on the floor IN FRONT of the
+            // button face instead, opposite its push direction
+            // (e->v.movedir, the way it sinks when pressed). The bot
+            // drives physically into the button to fire it (touch), so
+            // offset by half the button's depth plus 8u — the player
+            // bbox then overlaps the face by ~8u on arrival.
+            if (!strcmp(cn, "func_button")) {
+                vec3_t c, front;
+                entity_center(e, c);
+                float md0 = e->v.movedir[0];
+                float md1 = e->v.movedir[1];
+                float md2 = e->v.movedir[2];
+                float ext = 0.5f * (float)fabs(
+                    md0 * (e->v.maxs[0] - e->v.mins[0]) +
+                    md1 * (e->v.maxs[1] - e->v.mins[1]) +
+                    md2 * (e->v.maxs[2] - e->v.mins[2]));
+                float off = ext + 8.f;
+                front[0] = c[0] - md0 * off;
+                front[1] = c[1] - md1 * off;
+                front[2] = c[2];
+                anchors_push(&anchors, &anchor_cap, &anchor_n,
+                             front, ANCHOR_GENERIC, NAV_NODE_DOOR_BUTTON, e);
+                goto next_e;
             }
             // Brush entities have origin (0,0,0) and meaningful mins/maxs;
             // point entities have meaningful origin. Pick the right one.
@@ -871,6 +923,12 @@ static int bake_floodfill(sim_navmesh_t *m) {
             a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B) {
             seated[0] = a->pos[0]; seated[1] = a->pos[1]; seated[2] = a->pos[2];
         } else if (!seat_probe(probe, a->pos, seated)) continue;
+        // Bridge A/B anchors live at the extended position (outside the
+        // closed footprint); every other anchor that seats under a
+        // closed bridge is unreachable at runtime — drop it.
+        if (a->kind != ANCHOR_BRIDGE_A && a->kind != ANCHOR_BRIDGE_B &&
+            xy_in_bridge_fp(bridge_fp, bridge_fp_n, seated[0], seated[1]))
+            continue;
         int existing = grid_find(&grd, m, seated);
         if (existing >= 0) {
             a->node_index = existing;
@@ -946,6 +1004,9 @@ static int bake_floodfill(sim_navmesh_t *m) {
             if (dz < -POST_WALK_MAX_DROP_Z || dz > POST_WALK_MAX_DROP_Z)
                 continue;
 
+            // Don't flood onto floor hidden under a closed bridge-door.
+            if (xy_in_bridge_fp(bridge_fp, bridge_fp_n, end[0], end[1]))
+                continue;
             int next_idx = grid_find(&grd, m, end);
             if (next_idx < 0) {
                 if (m->point_count >= MAX_NODES) continue;

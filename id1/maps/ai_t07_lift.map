@@ -149,7 +149,7 @@
 {
 "classname" "trigger_changelevel"
 "spawnflags" "1"
-"map" "ai_done"
+"map" "ai_t08_bridge"
 {
 ( 312 32 176 ) ( 312 32 144 ) ( 312 -32 144 ) trigger 0 0 0 1 1
 ( 248 -32 176 ) ( 248 -32 144 ) ( 248 32 144 ) trigger 0 0 0 1 1
