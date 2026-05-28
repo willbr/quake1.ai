@@ -103,6 +103,7 @@ enum {
     NAV_NODE_TELEPORT_DST = 6,   // resolved teleport destination
     NAV_NODE_DOOR_BUTTON  = 7,   // func_door / func_button
     NAV_NODE_BRIDGE_END   = 8,   // standing pos on extended bridge-door
+    NAV_NODE_PLAT_END     = 9,   // standing pos on a lift (func_plat / lift-door)
 };
 
 typedef struct {
@@ -609,9 +610,9 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 bot[1] = top[1];
                 bot[2] = stand_z_bot;
                 anchors_push(&anchors, &anchor_cap, &anchor_n,
-                             top, ANCHOR_PLAT_TOP, NAV_NODE_GENERIC, e);
+                             top, ANCHOR_PLAT_TOP, NAV_NODE_PLAT_END, e);
                 anchors_push(&anchors, &anchor_cap, &anchor_n,
-                             bot, ANCHOR_PLAT_BOTTOM, NAV_NODE_GENERIC, e);
+                             bot, ANCHOR_PLAT_BOTTOM, NAV_NODE_PLAT_END, e);
                 goto next_e;
             }
             // Vertical func_door used as a lift (e.g. e1m1 first lift).
@@ -651,9 +652,9 @@ static int bake_floodfill(sim_navmesh_t *m) {
                     bot[1] = top[1];
                     bot[2] = z_lo + e->v.maxs[2] + 4.f;
                     anchors_push(&anchors, &anchor_cap, &anchor_n,
-                                 top, ANCHOR_PLAT_TOP, NAV_NODE_GENERIC, e);
+                                 top, ANCHOR_PLAT_TOP, NAV_NODE_PLAT_END, e);
                     anchors_push(&anchors, &anchor_cap, &anchor_n,
-                                 bot, ANCHOR_PLAT_BOTTOM, NAV_NODE_GENERIC, e);
+                                 bot, ANCHOR_PLAT_BOTTOM, NAV_NODE_PLAT_END, e);
                     char dbg[160];
                     snprintf(dbg, sizeof(dbg),
                         "sim_nav: lift-door '%s' travel=%.0fz size=%.0fx%.0fx%.0f\n",
@@ -985,9 +986,15 @@ static int bake_floodfill(sim_navmesh_t *m) {
             // Bridge ends are wired up by Phase 4.5b alone — phase 3.5
             // would otherwise add a free drop edge from surrounding
             // floor onto the bridge surface, letting A* bypass the
-            // button-press required to extend the bridge.
+            // button-press required to extend the bridge. Lift (plat)
+            // standing nodes have the same hazard: a button-driven lift
+            // resting at the LOW floor (e.g. ai_t07_lift's lift2) would
+            // get a free drop edge onto its bottom node, letting A* board
+            // and ride it up without ever pressing the activator button.
             if (m->points[i].kind == NAV_NODE_BRIDGE_END ||
-                m->points[j].kind == NAV_NODE_BRIDGE_END) continue;
+                m->points[j].kind == NAV_NODE_BRIDGE_END ||
+                m->points[i].kind == NAV_NODE_PLAT_END ||
+                m->points[j].kind == NAV_NODE_PLAT_END) continue;
             float dx = m->points[j].pos[0] - m->points[i].pos[0];
             float dy = m->points[j].pos[1] - m->points[i].pos[1];
             float dz = m->points[j].pos[2] - m->points[i].pos[2];
