@@ -148,6 +148,7 @@
 }
 {
 "classname" "trigger_changelevel"
+"spawnflags" "1"
 "map" "ai_done"
 {
 ( 312 32 176 ) ( 312 32 144 ) ( 312 -32 144 ) trigger 0 0 0 1 1
