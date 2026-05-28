@@ -477,6 +477,37 @@ pub fn build(b: *std.Build) void {
     game_step.dependOn(&game_install.step);
 
     // ---------------------------------------------------------------------------
+    // libmodel parser test: zig build test-libmodel
+    // ---------------------------------------------------------------------------
+    const lib_c_flags: []const []const u8 = &.{
+        "-fno-strict-aliasing",
+        "-fwrapv",
+        "-w",
+    };
+    const lmtest_mod = b.createModule(.{
+        .target    = target,
+        .optimize  = optimize,
+        .link_libc = true,
+    });
+    lmtest_mod.addCSourceFiles(.{
+        .files = &.{
+            "sdlquake/libqalloc/qalloc.c",
+            "sdlquake/libmodel/mdl.c",
+            "sdlquake/libmodel/test_mdl.c",
+        },
+        .flags = lib_c_flags,
+    });
+    lmtest_mod.addIncludePath(b.path("sdlquake/libqalloc"));
+    lmtest_mod.addIncludePath(b.path("sdlquake/libmodel"));
+    const lmtest_exe = b.addExecutable(.{
+        .name        = "test_libmodel",
+        .root_module = lmtest_mod,
+    });
+    const lmtest_run = b.addRunArtifact(lmtest_exe);
+    lmtest_run.setCwd(b.path(""));
+    b.step("test-libmodel", "Run libmodel parser tests").dependOn(&lmtest_run.step);
+
+    // ---------------------------------------------------------------------------
     // Executable
     // ---------------------------------------------------------------------------
     const exe = b.addExecutable(.{
