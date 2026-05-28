@@ -138,6 +138,26 @@ pub fn build(b: *std.Build) void {
         .flags = platform_c_flags,
     });
 
+    // libmodel + libqalloc: portable parser core compiled with neutral flags
+    // (no SDLQUAKE, no engine headers). qalloc_hunk.c is the engine-side
+    // adapter and DOES need engine headers, so it uses platform_c_flags.
+    const lib_core_flags: []const []const u8 = &.{
+        "-fno-strict-aliasing",
+        "-fwrapv",
+        "-w",
+    };
+    mod.addCSourceFiles(.{
+        .files = &.{
+            "sdlquake/libqalloc/qalloc.c",
+            "sdlquake/libmodel/mdl.c",
+        },
+        .flags = lib_core_flags,
+    });
+    mod.addCSourceFiles(.{
+        .files = &.{"sdlquake/engine/qalloc_hunk.c"},
+        .flags = platform_c_flags,
+    });
+
     // Vendored qbsp (id Software, GPLv2). Compiles in-process so the editor
     // can recompile the .map and load the resulting .bsp without leaving the
     // engine. Same C dialect quirks as the engine source — gnu89 + fcommon +
@@ -353,6 +373,8 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(b.path("sdlquake/platform"));
     mod.addIncludePath(b.path("sdlquake/mcp"));
     mod.addIncludePath(b.path("sdlquake/engine"));
+    mod.addIncludePath(b.path("sdlquake/libqalloc"));
+    mod.addIncludePath(b.path("sdlquake/libmodel"));
     mod.addIncludePath(b.path("sdlquake/engine/editor"));
     mod.addIncludePath(b.path("sdlquake/game"));
     mod.addIncludePath(b.path("sdlquake/vendor/stb"));
