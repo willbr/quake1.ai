@@ -1034,7 +1034,35 @@ void SV_WalkMove (edict_t *ent)
 	clip = SV_FlyMove (ent, host_frametime, &steptrace);
 
 	if ( !(clip & 2) )
+	{
+		// Move didn't block on a step. SV_FlyMove only sets FL_ONGROUND when
+		// a trace collides with a walkable floor; a player resting on (or
+		// sliding along) a slope often runs parallel to the surface, or has
+		// ~0 velocity and exits the bump loop before tracing at all, so the
+		// flag never gets re-set. Left unflagged, the gravity-skip in
+		// SV_Physics_Client flickers off every other frame and re-injects a
+		// downhill drift. Re-ground the player if they were grounded last
+		// frame, aren't moving upward, and a walkable floor is within a step
+		// below us -- snapping to it the same way the step-down code does.
+		if ( oldonground && ent->v.velocity[2] <= 0
+			&& !((int)ent->v.flags & FL_ONGROUND) )
+		{
+			vec3_t  groundend;
+			trace_t groundtrace;
+			VectorCopy (ent->v.origin, groundend);
+			groundend[2] -= STEPSIZE;
+			groundtrace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs,
+				groundend, false, ent);
+			if (!groundtrace.allsolid && groundtrace.fraction < 1
+				&& groundtrace.plane.normal[2] > 0.7)
+			{
+				VectorCopy (groundtrace.endpos, ent->v.origin);
+				ent->v.flags = (int)ent->v.flags | FL_ONGROUND;
+				ent->v.groundentity = groundtrace.ent;
+			}
+		}
 		return;		// move didn't block on a step
+	}
 
 	if (!oldonground && ent->v.waterlevel == 0)
 		return;		// don't stair up while jumping
@@ -1156,7 +1184,9 @@ void SV_Physics_Client (edict_t	*ent, int num)
 		 * cancel. Skipping the inject leaves momentum slides intact (friction
 		 * still decays existing velocity) but lets the player come to rest
 		 * on shallow slopes. Stepping off a ledge clears FL_ONGROUND inside
-		 * SV_WalkMove, so gravity re-engages on the next frame. */
+		 * SV_WalkMove, so gravity re-engages on the next frame. Relies on the
+		 * ground-snap in SV_WalkMove to keep FL_ONGROUND stable frame to frame
+		 * -- otherwise the flag flickers and gravity sneaks back in. */
 		if (!SV_CheckWater (ent) && ! ((int)ent->v.flags & FL_WATERJUMP)
 			&& ! ((int)ent->v.flags & FL_ONGROUND) )
 			SV_AddGravity (ent);
@@ -1170,7 +1200,7 @@ void SV_Physics_Client (edict_t	*ent, int num)
 		VectorSubtract (ent->v.velocity, ent->v.basevelocity, ent->v.velocity);
 #endif
 		break;
-		
+
 	case MOVETYPE_TOSS:
 	case MOVETYPE_BOUNCE:
 		SV_Physics_Toss (ent);
