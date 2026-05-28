@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_local.h"
+#include <stdlib.h>	/* getenv — temporary, for QUAKE_ALIASDUMP baseline capture */
 
 model_t	*loadmodel;
 char	loadname[32];	// for hunk tags
@@ -1751,6 +1752,25 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	if (!mod->cache.data)
 		return;
 	memcpy (mod->cache.data, pheader, total);
+
+	{
+		const char *dd = getenv ("QUAKE_ALIASDUMP");
+		if (dd)
+		{
+			char path[1024], nm[256];
+			int k;
+			FILE *df;
+			for (k = 0; mod->name[k] && k < 255; k++)
+			{
+				char ch = mod->name[k];
+				nm[k] = (ch == '/' || ch == '\\' || ch == ':') ? '_' : ch;
+			}
+			nm[k] = 0;
+			snprintf (path, sizeof(path), "%s/%s.bin", dd, nm);
+			df = fopen (path, "wb");
+			if (df) { fwrite (mod->cache.data, 1, total, df); fclose (df); }
+		}
+	}
 
 	Hunk_FreeToLowMark (start);
 }
