@@ -6,15 +6,17 @@
 ## Goal
 
 Add a hand-authored test map, `ai_t07_lift`, that exercises the **player bot**
-(`sdlquake/engine_src/bot.c`) against a **button-triggered vertical lift**, in
-the style of the first lift at the start of e1m1. The bot must spawn, walk to a
-wall button, press it to call the lift, ride the lift up, and reach the exit.
+(`sdlquake/engine_src/bot.c`) against **two button-triggered vertical lifts**, in
+the style of the lifts at the start of e1m1. The bot spawns on a high ledge,
+**rides a first lift down** to a lower floor, crosses to a **second lift and
+rides it up** to the exit ledge — each lift gated by its own wall button.
 
-This is the first scenario in the `ai_t0x` suite where the lift is **gated by a
+This is the first scenario in the `ai_t0x` suite where a lift is **gated by a
 button press** rather than auto-activated by stepping on it (as in
-`ai_t01_nav`). The map is the vehicle for the real follow-on work: **finding and
-fixing the navmesh bugs** that prevent the bot from chaining
-`BUTTON_LINK → PLAT_LINK → PLAT_RIDE` correctly.
+`ai_t01_nav`), and the first with a **descending** ride and **two** lifts in one
+map. The map is the vehicle for the real follow-on work: **finding and fixing the
+navmesh bugs** that prevent the bot from chaining
+`PLAT_LINK → BUTTON_LINK → PLAT_RIDE` correctly in both directions.
 
 ## Background
 
@@ -38,9 +40,30 @@ fixing the navmesh bugs** that prevent the bot from chaining
   will be triggered this way.
 
 So all the *primitives* exist. What is unverified — and the point of this map —
-is whether the bake actually **sequences** "press the button, *then* ride the
-lift" into a single path. The existing `ai_t01_nav` lift is touch-activated, so
-that button→lift dependency has never been exercised by the suite.
+is whether the bake can (a) sequence "board the lift, *then* press the button,
+*then* ride" into a single path, and (b) do it for a **descending** lift and for
+**two** lifts in the same map without the anchors cross-linking. The existing
+`ai_t01_nav` lift is touch-activated and rises only, so none of this has been
+exercised by the suite.
+
+## Lift mechanism — flush-rest, ride-while-pressing
+
+To keep the bot from pressing a button and then watching the lift leave without
+it, each lift **rests flush with the floor the bot is standing on**, and its
+button is on the adjacent wall at the lift's edge:
+
+1. Bot walks from its current floor straight onto the lift pad (no height
+   change — `PLAT_LINK`).
+2. Standing on the pad's edge, the bot touches the wall button (`BUTTON_LINK`).
+   Because the bot is already aboard, it rides when the lift moves.
+3. The lift travels to the far level carrying the bot (`PLAT_RIDE`); the bot
+   steps off onto the destination floor (`PLAT_LINK`).
+4. The `func_door` returns to its rest position after `wait` seconds — the bot
+   has already stepped off, so the return trip is harmless.
+
+This is the canonical e1m1 "ride the lift" feel, but with the button placed so
+the *board → press → ride* order is unambiguous. Getting the bake to honour that
+order is the heart of the navmesh work.
 
 ## Map design — `id1/maps/ai_t07_lift.map`
 
@@ -48,54 +71,58 @@ Same authoring conventions as the rest of the suite (see
 `docs/superpowers/plans/2026-05-27-ai-test-levels.md`): hand-written `.map`,
 axis-aligned 16-unit-thick brushes, textures `wbrick1_5` (walls), `sfloor4_2`
 (floor), `tlight02` (lift pad), `+0basebtn` (button), `metal1_1` (trim),
-`trigger` (trigger volumes), `sky1` (ceiling band).
+`trigger` (trigger volumes), `sky1` (ceiling band). One sealed `768×768×256`
+room (the shared skeleton); the two ledges are raised platforms inside it and the
+skeleton floor (`z=16`) is the lower level.
 
 ### Layout (side view, looking along +Y; +X right, +Z up)
 
 ```
-                                              ┌──────────────┐  ← upper ledge (z=144)
-                                              │  exit pad     │     trigger_changelevel
-                                              │  (→ ai_done)  │
-   ┌──────────────────────────┐──────────────┘              │
-   │                          │   lift shaft  │ ▒▒▒▒▒▒▒▒▒▒▒  │  ← lift at TOP (z=144)
-   │  spawn                   │   ░░░░░░░░░    │              │
-   │  (bot)        [BUTTON]   │   ░ lift  ░    │              │
-   │   ●            on wall   │   ▒▒▒▒▒▒▒▒▒    │ ← lift at BOTTOM (z=16)
-   └──────────────────────────┴───────────────┘
-  z=16  lower room floor                shaft     ledge wall
+   ┌─────────────┐                                   ┌─────────────┐  ← exit ledge (top z=144)
+   │ start ledge │ [B1]                         [B2] │  exit pad    │     trigger_changelevel
+   │ (spawn ●)   ││▒▒▒▒│  lift1 rests here        │▒▒▒▒│ (→ ai_done) │     → ai_done
+   │  top z=144  ││lift1│  (flush w/ start ledge)  │lift2│           │
+   └─────────────┘│ ░░ │                          │ ░░ │ ← lift2 rests here (flush w/ low floor)
+                  │ ░░ │ ↓ rides DOWN              │ ░░ │ ↑ rides UP
+   ───────────────┴────┴──────────────────────────┴────┴───────────────  ← low floor (z=16)
+        bot rides lift1 down, walks across low floor, boards lift2, rides up
 ```
 
-Top-down, the whole thing sits inside one sealed `768×768×~256` room (the shared
-skeleton), partitioned into:
+- **Start ledge** (west, top surface `z=144`): a raised platform holding
+  `info_player_start`. The bot spawns here, facing lift 1.
+- **Lift 1** (`func_door`, vertical): pad **rests flush with the start ledge**
+  (`top z=144`), travels ~128u **down** to the low floor (`top z=32`).
+  `targetname "lift1"`, `wait` a few seconds (returns up after the ride).
+  Button **B1** (`func_button`, `target "lift1"`, `health 0`) on the shaft wall
+  at the start-ledge level, at the lift's edge.
+- **Low floor** (`z=16`, the skeleton floor): the bot walks from the foot of
+  lift 1 across to lift 2.
+- **Lift 2** (`func_door`, vertical): pad **rests flush with the low floor**
+  (`top z=32`), travels ~128u **up** to the exit ledge (`top z=144`).
+  `targetname "lift2"`, `angle "-1"`. Button **B2** (`func_button`,
+  `target "lift2"`, `health 0`) on the shaft wall at the low-floor level, at the
+  lift's edge.
+- **Exit ledge** (east, top surface `z=144`): reachable only by riding lift 2.
+  Holds the `trigger_changelevel` exit pad, `map "ai_done"`.
 
-- **Lower room** (west half): `info_player_start` on the floor (`z=32`). Open
-  floor so the bot can reach both the button and the lift.
-- **Wall button** (`func_button`): mounted on a partition/pillar face that the
-  bot walks up to. `target "lift1"`, touch-activated (`health 0`),
-  `wait "-1"` (stays fired — we don't want it cycling back and dropping the lift
-  mid-ride). Texture `+0basebtn`.
-- **Lift shaft + lift** (`func_door`, vertical): a pad (`tlight02`) that starts
-  at the bottom (`z=16..32`) and travels up `~128` units to align with the upper
-  ledge. `targetname "lift1"`, `angle "-1"` (Quake "up" / move toward `angle`),
-  `lip`/`speed`/`wait` tuned so it rises on trigger and **holds at top** long
-  enough to ride (`wait "-1"` or a large wait). Footprint wide enough for the
-  bake's lift heuristic (sim_nav.c uses footprint width to tell a lift from a
-  regular door).
-- **Upper ledge** (east, `z=144`): reachable only by riding the lift. Holds the
-  `trigger_changelevel` exit pad, `map "ai_done"`.
+Both lifts need a footprint wide enough for the bake's lift heuristic (sim_nav.c
+uses footprint width to tell a lift from a regular door) and distinct
+`targetname`s so the two button→lift pairs don't cross-wire.
 
-Lighting: a handful of `light` entities (lower room, button face, shaft, ledge)
-so both the bot's `R_LightPoint`-based systems and a human observer can see.
+Lighting: `light` entities over each ledge, both shafts, and the low floor so
+the bot's `R_LightPoint`-based systems and a human observer can see.
 
 ### Entity summary
 
 | classname | key fields | role |
 |---|---|---|
 | `worldspawn` | `message "AI-TEST t07_lift"`, `wad "gfx/base.wad"` | level marker for the suite |
-| `info_player_start` | lower-room floor, facing the button | bot spawn |
-| `func_button` | `target "lift1"`, `health 0`, `wait -1` | calls the lift |
-| `func_door` | `targetname "lift1"`, `angle -1`, vertical travel ~128u | the lift |
-| `trigger_changelevel` | `map "ai_done"`, on the upper ledge | exit |
+| `info_player_start` | on the start ledge (`z≈148`), facing lift 1 | bot spawn |
+| `func_button` (B1) | `target "lift1"`, `health 0` | calls lift 1 down |
+| `func_door` (lift 1) | `targetname "lift1"`, rests at top, ~128u down travel | descending lift |
+| `func_button` (B2) | `target "lift2"`, `health 0` | calls lift 2 up |
+| `func_door` (lift 2) | `targetname "lift2"`, `angle -1`, rests at bottom, ~128u up travel | ascending lift |
+| `trigger_changelevel` | `map "ai_done"`, on the exit ledge | exit |
 | `light` ×N | scattered | visibility |
 
 No new engine or DLL entity types — every classname above is already registered
@@ -129,7 +156,8 @@ Smoke-test load (no bot) to verify geometry/triggers manually:
 
 ```sh
 zig build run -- +map ai_t07_lift
-# console: noclip — confirm button presses, lift rises, exit fires
+# console: noclip — board lift 1, press B1, confirm it descends with you;
+#          cross to lift 2, press B2, confirm it ascends; exit fires.
 ```
 
 ## Test methodology (drives the navmesh-fix phase)
@@ -138,8 +166,9 @@ zig build run -- +map ai_t07_lift
    ```sh
    zig build run -- +map ai_t07_lift +set bot 1
    ```
-   Expected end state: bot presses button → rides lift → `<player> exited the
-   level` → `AI-TEST DONE`.
+   Expected end state: bot boards lift 1 → presses B1 → rides down → crosses →
+   boards lift 2 → presses B2 → rides up → `<player> exited the level` →
+   `AI-TEST DONE`.
 
 2. **When it fails** (the likely outcome — that's why we're here), diagnose with
    the bot's existing tooling:
@@ -153,15 +182,21 @@ zig build run -- +map ai_t07_lift
 
 3. **Hypothesised navmesh gaps to investigate** (not prescribed fixes — confirm
    against the debug output first):
-   - The bake may not link the **button anchor → lift** dependency, so the path
-     skips the button and dead-ends at a lift that never moves.
-   - `PLAT_LINK` onto the lift may only be emitted for the BOTTOM anchor when
-     the lift is *at* bottom at bake time; a button-gated lift's resting state
-     and the "press first" ordering may need explicit handling.
-   - The `BUTTON_LINK` "don't advance until pressed" gate
-     (`Bot_NearbyButtonReady`, bot.c:367) assumes the button is *on the path to*
-     the lift; verify the bake places the button anchor as a required
-     predecessor of the lift anchors, not a side spur.
+   - **Button anchor placement.** For ride-while-pressing to work, each button's
+     anchor must sit **on the lift's top surface**, not on the adjacent static
+     floor. If the bake anchors the button to static floor, the bot presses and
+     the lift leaves without it.
+   - **Descending ride.** `PLAT_RIDE` / `PLAT_LINK` may have only ever been
+     validated for a lift that *rises*. Verify the bake links
+     `start-ledge → board lift1 (top) → ride DOWN → low floor` — the top→bottom
+     direction and a lift whose rest state is TOP.
+   - **Press-after-board ordering.** The `BUTTON_LINK` "don't advance until
+     pressed" gate (`Bot_NearbyButtonReady`, bot.c:367) assumes the button is on
+     the path; confirm the bake sequences *board → press → ride*, not *press →
+     board* (which would strand the bot).
+   - **Two lifts, one map.** Confirm lift1/lift2 anchors and button links don't
+     cross-wire (correct `targetname` resolution, no spurious edges between the
+     two shafts).
 
    Each confirmed gap becomes a focused fix in `sim_nav.c` (and, if the drive
    layer needs it, `bot.c`), validated by re-running step 1 until the bot
@@ -170,7 +205,8 @@ zig build run -- +map ai_t07_lift
 ## Scope / non-goals
 
 - **In scope:** the `ai_t07_lift` map, chain rewiring, run-script update, and the
-  navmesh/bot fixes needed to make the bot complete the button→lift→exit chain.
+  navmesh/bot fixes needed to make the bot complete the
+  down-lift → cross → up-lift → exit chain.
 - **Out of scope:** monsters/combat in this map (it's a pure navigation probe);
   reworking the touch-activated `ai_t01_nav` lift; any non-lift navmesh work.
 
