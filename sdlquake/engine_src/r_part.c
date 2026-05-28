@@ -1584,6 +1584,30 @@ void R_SparkBurst (vec3_t origin, vec3_t normal, int count)
 	scaled_count = (int)(count * mul);
 	if (scaled_count <= 0) return;
 
+	// Wall-impact texture sampling, same idea as R_RunParticleEffect's
+	// color==0 chips and R_WaterSplash's droplets: find the surface at the
+	// impact and per-spark pick a colour off its texture so the burst reads
+	// as material debris (rust on metal, grey on concrete) rather than a
+	// fixed cyan-white ember. Lookup is done once at `origin` (the true
+	// impact, before the normal nudge below). Falls back to the cyan hot
+	// ramp if no surface is found within 4u or the texture has no mip0 data.
+	byte *wall_pixels = NULL;
+	int   wall_w = 0, wall_h = 0;
+	float wall_s0 = 0.0f, wall_t0 = 0.0f;
+	if (cl.worldmodel) {
+		msurface_t *wall_surf = R_PointOnSurface_World (origin, NULL, 4.0f);
+		if (wall_surf && wall_surf->texinfo && wall_surf->texinfo->texture &&
+		    wall_surf->texinfo->texture->offsets[0]) {
+			mtexinfo_t *tex = wall_surf->texinfo;
+			texture_t  *t   = tex->texture;
+			wall_w      = (int)t->width;
+			wall_h      = (int)t->height;
+			wall_pixels = (byte *)t + t->offsets[0];
+			wall_s0     = DotProduct(origin, tex->vecs[0]) + tex->vecs[0][3];
+			wall_t0     = DotProduct(origin, tex->vecs[1]) + tex->vecs[1][3];
+		}
+	}
+
 	// 1-unit spawn offset along the surface normal.
 	base[0] = origin[0] + normal[0];
 	base[1] = origin[1] + normal[1];
@@ -1614,12 +1638,26 @@ void R_SparkBurst (vec3_t origin, vec3_t normal, int count)
 		for (j = 0; j < 3; j++) p->vel[j] = v[j] * vlen * speed;
 
 		VectorCopy (base, p->org);
-		p->color = 244 + (rand() % 3);		// cyan-white core: 244..246
 		p->ramp = 0;
 		p->birth = cl.time;
 		p->die = cl.time + 0.025f + (rand() & 31) * (0.025f / 31.0f);	// 0.025-0.05 s
 		p->type = pt_spark;
-		p->flags = PARTFL_BOUNCE | PARTFL_RAMP_HOLD;
+		if (wall_pixels) {
+			// Material colour with ±4-texel jitter so adjacent sparks pick
+			// up natural texture variation. PARTFL_DWELL (and no RAMP_HOLD)
+			// marks the spark "born cold": the pt_spark update skips both
+			// the cyan flicker and the cool-down ramp, so this colour holds
+			// for the spark's whole life.
+			int s_i = (int)(wall_s0 + ((rand() & 7) - 4));
+			int t_i = (int)(wall_t0 + ((rand() & 7) - 4));
+			s_i = ((s_i % wall_w) + wall_w) % wall_w;
+			t_i = ((t_i % wall_h) + wall_h) % wall_h;
+			p->color = wall_pixels[t_i * wall_w + s_i];
+			p->flags = PARTFL_BOUNCE | PARTFL_DWELL;
+		} else {
+			p->color = 244 + (rand() % 3);		// cyan-white core: 244..246
+			p->flags = PARTFL_BOUNCE | PARTFL_RAMP_HOLD;
+		}
 	}
 }
 
