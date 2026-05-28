@@ -20,7 +20,7 @@ wait "$PID" 2>/dev/null
 echo "=== AI test markers seen ==="
 grep -aE "AI-TEST " "$LOG" || echo "(none)"
 
-EXPECTED="t01_nav t02_combat t03_stimulus t04_smoke t05_light t06_wander DONE"
+EXPECTED="t01_nav t02_combat t03_stimulus t04_smoke t05_light t06_wander t07_lift DONE"
 RC=0
 for tag in $EXPECTED; do
   if ! grep -aq "AI-TEST $tag" "$LOG"; then

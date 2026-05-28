@@ -75,7 +75,7 @@
 {
 "classname" "trigger_changelevel"
 "spawnflags" "1"
-"map" "ai_done"
+"map" "ai_t07_lift"
 {
 ( 336 336 48 ) ( 336 336 16 ) ( 336 272 16 ) trigger 0 0 0 1 1
 ( 272 272 48 ) ( 272 272 16 ) ( 272 336 16 ) trigger 0 0 0 1 1
