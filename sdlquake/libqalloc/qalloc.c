@@ -41,7 +41,9 @@ static size_t qa_round_up(size_t n) {
 static void *qa_arena_alloc(void *ctx, size_t size) {
     qalloc_arena_t *a = (qalloc_arena_t *)ctx;
     size_t need = qa_round_up(size);
-    if (a->used + need > a->size)
+    /* Compare without adding (used + need can wrap); used <= size invariant
+       holds, so size - used never underflows. */
+    if (need > a->size - a->used)
         return NULL;
     {
         void *p = a->base + a->used;
