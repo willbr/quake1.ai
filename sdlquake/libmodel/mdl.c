@@ -24,6 +24,7 @@ static uint32_t rd_u32(lm_cursor_t *c) {
     return v;
 }
 static int rd_i32(lm_cursor_t *c) { return (int)rd_u32(c); }
+/* Assumes a little-endian IEEE-754 host (true for all Quake targets). */
 static float rd_f32(lm_cursor_t *c) {
     uint32_t u = rd_u32(c);
     float f;
@@ -118,8 +119,8 @@ lm_result_t lm_load_mdl(const void *buf, size_t len,
             sk->grouped = 1; sk->numpics = nb;
             sk->intervals = QALLOC_ARR(&a, float, nb);
             sk->pics = QALLOC_ARR(&a, unsigned char *, nb);
+            if (sk->pics) memset(sk->pics, 0, (size_t)nb * sizeof(unsigned char *));
             if (!sk->intervals || !sk->pics) FAIL(LM_ERR_OOM);
-            memset(sk->pics, 0, (size_t)nb * sizeof(unsigned char *));
             for (j = 0; j < nb; j++) sk->intervals[j] = rd_f32(&c);
             CHECK_TRUNC();
             for (j = 0; j < nb; j++) {
@@ -178,8 +179,8 @@ lm_result_t lm_load_mdl(const void *buf, size_t len,
             CHECK_TRUNC();
             fr->intervals = QALLOC_ARR(&a, float, nb);
             fr->poses = QALLOC_ARR(&a, lm_pose_t, nb);
+            if (fr->poses) memset(fr->poses, 0, (size_t)nb * sizeof(lm_pose_t));
             if (!fr->intervals || !fr->poses) FAIL(LM_ERR_OOM);
-            memset(fr->poses, 0, (size_t)nb * sizeof(lm_pose_t));
             for (j = 0; j < nb; j++) fr->intervals[j] = rd_f32(&c);
             CHECK_TRUNC();
             for (j = 0; j < nb; j++) {
