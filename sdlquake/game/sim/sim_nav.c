@@ -681,15 +681,20 @@ static int bake_floodfill(sim_navmesh_t *m) {
                     vec3_t a_pos, b_pos;
                     if (adx >= ady) {
                         // Travel along X: A at min-x end, B at max-x end.
-                        a_pos[0] = e->v.pos2[0] + e->v.mins[0] + 16.f;
+                        // Inset 24u (> the 16u flood dedupe radius) so the
+                        // end anchors sit clearly over the bridge surface
+                        // and never merge with an adjacent platform-edge
+                        // floor node — a merge would give the bot a free
+                        // walk edge onto the bridge, bypassing the button.
+                        a_pos[0] = e->v.pos2[0] + e->v.mins[0] + 24.f;
                         a_pos[1] = cy;
-                        b_pos[0] = e->v.pos2[0] + e->v.maxs[0] - 16.f;
+                        b_pos[0] = e->v.pos2[0] + e->v.maxs[0] - 24.f;
                         b_pos[1] = cy;
                     } else {
                         a_pos[0] = cx;
-                        a_pos[1] = e->v.pos2[1] + e->v.mins[1] + 16.f;
+                        a_pos[1] = e->v.pos2[1] + e->v.mins[1] + 24.f;
                         b_pos[0] = cx;
-                        b_pos[1] = e->v.pos2[1] + e->v.maxs[1] - 16.f;
+                        b_pos[1] = e->v.pos2[1] + e->v.maxs[1] - 24.f;
                     }
                     a_pos[2] = top_z;
                     b_pos[2] = top_z;
