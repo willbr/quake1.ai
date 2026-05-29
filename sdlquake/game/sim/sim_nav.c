@@ -45,7 +45,7 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    20
+#define NAV_VERSION    21
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -104,6 +104,7 @@ enum {
     NAV_NODE_DOOR_BUTTON  = 7,   // func_door / func_button
     NAV_NODE_BRIDGE_END   = 8,   // standing pos on extended bridge-door
     NAV_NODE_PLAT_END     = 9,   // standing pos on a lift (func_plat / lift-door)
+    NAV_NODE_TRAIN_END    = 10,  // standing pos on a func_train parked at a path_corner
 };
 
 typedef struct {
@@ -123,6 +124,8 @@ enum {
     NAV_EDGE_PLAT_LINK  = 5,   // walk on/off a lift's standing position
     NAV_EDGE_SHOOT_LINK = 6,   // bot must aim+fire at a shootable
     NAV_EDGE_BUTTON_LINK = 7,  // bot must touch a func_button at source
+    NAV_EDGE_TRAIN_RIDE  = 8,  // stand on a func_train, get carried corner->corner
+    NAV_EDGE_TRAIN_LINK  = 9,  // walk on/off a parked train's standing position
 };
 
 // Per-edge phase tag — which sub-block of bake_floodfill emitted the
@@ -403,6 +406,8 @@ typedef enum {
     ANCHOR_BRIDGE_A     = 5,   // horizontal bridge-door end along travel axis (low)
     ANCHOR_BRIDGE_B     = 6,   // horizontal bridge-door end along travel axis (high)
     ANCHOR_BRIDGE_MID   = 7,   // interior node along the extended bridge span
+    ANCHOR_TRAIN_A      = 8,   // func_train standing pos parked at first path_corner
+    ANCHOR_TRAIN_B      = 9,   // func_train standing pos parked at second path_corner
 } anchor_kind_t;
 
 typedef struct {

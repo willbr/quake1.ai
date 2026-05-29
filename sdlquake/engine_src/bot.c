@@ -50,6 +50,8 @@ enum {
     BOT_EDGE_PLAT_LINK   = 5,
     BOT_EDGE_SHOOT_LINK  = 6,
     BOT_EDGE_BUTTON_LINK = 7,
+    BOT_EDGE_TRAIN_RIDE  = 8,
+    BOT_EDGE_TRAIN_LINK  = 9,
 };
 
 static struct {
