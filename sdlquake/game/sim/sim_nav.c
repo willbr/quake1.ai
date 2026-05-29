@@ -402,6 +402,7 @@ typedef enum {
     ANCHOR_PLAT_BOTTOM  = 4,   // func_plat standing pos at bottom of travel
     ANCHOR_BRIDGE_A     = 5,   // horizontal bridge-door end along travel axis (low)
     ANCHOR_BRIDGE_B     = 6,   // horizontal bridge-door end along travel axis (high)
+    ANCHOR_BRIDGE_MID   = 7,   // interior node along the extended bridge span
 } anchor_kind_t;
 
 typedef struct {
@@ -543,28 +544,10 @@ static const float k_yaws[8] = {
     0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f
 };
 
-static int xy_in_bridge_fp(float fp[][4], int n, float x, float y) {
-    for (int i = 0; i < n; i++)
-        if (x >= fp[i][0] && x <= fp[i][2] && y >= fp[i][1] && y <= fp[i][3])
-            return 1;
-    return 0;
-}
-
 static int bake_floodfill(sim_navmesh_t *m) {
     anchor_t *anchors     = NULL;
     int       anchor_cap  = 0;
     int       anchor_n    = 0;
-
-    // Closed-bridge footprints (XY AABB at the retracted/pos1 position).
-    // A horizontal bridge-door is non-solid during bake, so the flood
-    // would seed phantom floor nodes on whatever sits under it. At
-    // runtime the closed door occupies that volume, so a bot routed onto
-    // such a node climbs the door and gets dropped into the pit when the
-    // door extends. We forbid flood nodes inside these footprints; the
-    // bridge is reachable only via its gated A/B anchors + button link.
-    #define MAX_BRIDGE_FP 16
-    float bridge_fp[MAX_BRIDGE_FP][4];  /* minx, miny, maxx, maxy */
-    int   bridge_fp_n = 0;
 
     // --- Phase 1: collect anchors ----------------------------------------
     // Done BEFORE allocating the probe so we can bail cheaply when the bake
@@ -714,12 +697,24 @@ static int bake_floodfill(sim_navmesh_t *m) {
                                  a_pos, ANCHOR_BRIDGE_A, NAV_NODE_BRIDGE_END, e);
                     anchors_push(&anchors, &anchor_cap, &anchor_n,
                                  b_pos, ANCHOR_BRIDGE_B, NAV_NODE_BRIDGE_END, e);
-                    if (bridge_fp_n < MAX_BRIDGE_FP) {
-                        bridge_fp[bridge_fp_n][0] = e->v.mins[0] - 4.f;
-                        bridge_fp[bridge_fp_n][1] = e->v.mins[1] - 4.f;
-                        bridge_fp[bridge_fp_n][2] = e->v.maxs[0] + 4.f;
-                        bridge_fp[bridge_fp_n][3] = e->v.maxs[1] + 4.f;
-                        bridge_fp_n++;
+                    // Interior strip nodes evenly spaced between the two
+                    // ends so the extended span reads as continuous
+                    // walkable floor in the navmesh (not just a single
+                    // ride edge across the pit). Phase 4.5b chains them.
+                    {
+                        float span = sqrtf(
+                            (b_pos[0]-a_pos[0])*(b_pos[0]-a_pos[0]) +
+                            (b_pos[1]-a_pos[1])*(b_pos[1]-a_pos[1]));
+                        int segs = (int)(span / 56.f);
+                        for (int s = 1; s < segs; s++) {
+                            float t = (float)s / (float)segs;
+                            vec3_t mid;
+                            mid[0] = a_pos[0] + (b_pos[0]-a_pos[0]) * t;
+                            mid[1] = a_pos[1] + (b_pos[1]-a_pos[1]) * t;
+                            mid[2] = top_z;
+                            anchors_push(&anchors, &anchor_cap, &anchor_n,
+                                mid, ANCHOR_BRIDGE_MID, NAV_NODE_BRIDGE_END, e);
+                        }
                     }
                     char dbg[200];
                     snprintf(dbg, sizeof(dbg),
@@ -872,6 +867,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                         float ady = dy < 0 ? -dy : dy;
                         float sx  = it->v.maxs[0] - it->v.mins[0];
                         float sy  = it->v.maxs[1] - it->v.mins[1];
+                        float sz  = it->v.maxs[2] - it->v.mins[2];
                         int vertical  = (adz > 24.f) && (adz > adx) && (adz > ady);
                         int standable = (sx > 48.f) && (sy > 48.f);
                         int is_lift = vertical && standable;
@@ -887,7 +883,17 @@ static int bake_floodfill(sim_navmesh_t *m) {
                         // button -> door edges (same shape as the lift
                         // logic) which is queued.
                         int is_secret = ((int)it->v.health != 0);
-                        keep_solid = is_lift || is_secret;
+                        // Horizontal bridge-door: keep solid so the flood
+                        // seats nodes on the retracted bridge's TOP surface
+                        // (valid standable floor while the bridge is closed)
+                        // rather than dropping phantom nodes onto the floor
+                        // hidden beneath it. Same heuristic as the bridge
+                        // anchor pass below.
+                        int flat       = sz < 32.f;
+                        int horizontal = (adz < 24.f) && ((adx > 24.f) || (ady > 24.f));
+                        int is_bridge  = horizontal && flat && standable &&
+                                         it->v.targetname && it->v.targetname[0];
+                        keep_solid = is_lift || is_secret || is_bridge;
                     }
                 }
                 if (keep_solid) { it = eng->ED_Next(it); continue; }
@@ -920,15 +926,10 @@ static int bake_floodfill(sim_navmesh_t *m) {
         // the bridge anchors sit in mid-air over the level — seat_probe
         // would either drop into the pit or miss entirely.
         if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM ||
-            a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B) {
+            a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B ||
+            a->kind == ANCHOR_BRIDGE_MID) {
             seated[0] = a->pos[0]; seated[1] = a->pos[1]; seated[2] = a->pos[2];
         } else if (!seat_probe(probe, a->pos, seated)) continue;
-        // Bridge A/B anchors live at the extended position (outside the
-        // closed footprint); every other anchor that seats under a
-        // closed bridge is unreachable at runtime — drop it.
-        if (a->kind != ANCHOR_BRIDGE_A && a->kind != ANCHOR_BRIDGE_B &&
-            xy_in_bridge_fp(bridge_fp, bridge_fp_n, seated[0], seated[1]))
-            continue;
         int existing = grid_find(&grd, m, seated);
         if (existing >= 0) {
             a->node_index = existing;
@@ -948,7 +949,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
         // on every walkmove. We link them to neighbours and to each
         // other in Phase 4.5 / Phase 4.5b below.
         if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM ||
-            a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B)
+            a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B ||
+            a->kind == ANCHOR_BRIDGE_MID)
             continue;
         if (q_tail >= q_cap) {
             int nc = q_cap ? q_cap * 2 : 256;
@@ -1004,9 +1006,6 @@ static int bake_floodfill(sim_navmesh_t *m) {
             if (dz < -POST_WALK_MAX_DROP_Z || dz > POST_WALK_MAX_DROP_Z)
                 continue;
 
-            // Don't flood onto floor hidden under a closed bridge-door.
-            if (xy_in_bridge_fp(bridge_fp, bridge_fp_n, end[0], end[1]))
-                continue;
             int next_idx = grid_find(&grd, m, end);
             if (next_idx < 0) {
                 if (m->point_count >= MAX_NODES) continue;
@@ -1375,16 +1374,52 @@ static int bake_floodfill(sim_navmesh_t *m) {
 
         edict_t *bridge = anchors[i].entity;
 
-        // Walk-across edge (bidirectional). Reuses NAV_EDGE_PLAT_RIDE
-        // semantics — the bot just steers across the brush surface.
-        float dx = m->points[a_idx].pos[0] - m->points[b_idx].pos[0];
-        float dy = m->points[a_idx].pos[1] - m->points[b_idx].pos[1];
-        float walk_cost = sqrtf(dx*dx + dy*dy) + 1.f;
-        add_edge(m, &cap_edges, a_idx, b_idx, walk_cost,
-                 NAV_EDGE_PLAT_RIDE, 0, NAV_PHASE_BRIDGE);
-        add_edge(m, &cap_edges, b_idx, a_idx, walk_cost,
-                 NAV_EDGE_PLAT_RIDE, 0, NAV_PHASE_BRIDGE);
-        bridge_ride_edges += 2;
+        // Walk-across the span: gather A, every interior strip node, and
+        // B, order them along the A->B axis, and chain consecutive nodes
+        // with bidirectional PLAT_RIDE edges. The bot just steers across
+        // the brush surface; the strip makes the extended span read as
+        // continuous walkable floor rather than one long ride edge.
+        int chain[34];
+        int chain_n = 0;
+        chain[chain_n++] = a_idx;
+        for (int j = 0; j < anchor_n && chain_n < 33; j++) {
+            if (anchors[j].kind != ANCHOR_BRIDGE_MID) continue;
+            if (anchors[j].entity != bridge) continue;
+            if (anchors[j].node_index < 0) continue;
+            chain[chain_n++] = anchors[j].node_index;
+        }
+        chain[chain_n++] = b_idx;
+        // Sort by projection onto the A->B vector (insertion sort, tiny n).
+        {
+            float ax = m->points[a_idx].pos[0], ay = m->points[a_idx].pos[1];
+            float vx = m->points[b_idx].pos[0] - ax;
+            float vy = m->points[b_idx].pos[1] - ay;
+            for (int p = 1; p < chain_n; p++) {
+                int   key = chain[p];
+                float kp  = (m->points[key].pos[0]-ax)*vx +
+                            (m->points[key].pos[1]-ay)*vy;
+                int q = p - 1;
+                while (q >= 0) {
+                    float qp = (m->points[chain[q]].pos[0]-ax)*vx +
+                               (m->points[chain[q]].pos[1]-ay)*vy;
+                    if (qp <= kp) break;
+                    chain[q+1] = chain[q];
+                    q--;
+                }
+                chain[q+1] = key;
+            }
+        }
+        for (int c = 0; c + 1 < chain_n; c++) {
+            int u = chain[c], v = chain[c+1];
+            float dx = m->points[u].pos[0] - m->points[v].pos[0];
+            float dy = m->points[u].pos[1] - m->points[v].pos[1];
+            float walk_cost = sqrtf(dx*dx + dy*dy) + 1.f;
+            add_edge(m, &cap_edges, u, v, walk_cost,
+                     NAV_EDGE_PLAT_RIDE, 0, NAV_PHASE_BRIDGE);
+            add_edge(m, &cap_edges, v, u, walk_cost,
+                     NAV_EDGE_PLAT_RIDE, 0, NAV_PHASE_BRIDGE);
+            bridge_ride_edges += 2;
+        }
 
         // Disembark: each bridge end -> nearby floor (one-way OFF).
         // Floor can sit a fair bit above or below the bridge surface
