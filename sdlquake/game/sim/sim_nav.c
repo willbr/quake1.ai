@@ -621,6 +621,62 @@ static int bake_floodfill(sim_navmesh_t *m) {
                              bot, ANCHOR_PLAT_BOTTOM, NAV_NODE_PLAT_END, e);
                 goto next_e;
             }
+            // func_train (renamed to "train" by spawn_func_train) used as a
+            // horizontal ferry. Follow its path_corner loop, collect the two
+            // rest corners, and push a standing anchor on the train's TOP
+            // surface as it would sit parked at each corner. When parked at a
+            // corner, func_train sets origin = corner - mins, so the brush
+            // absmin lands ON the corner and the footprint spans
+            // corner .. corner+size (size = maxs - mins, model coords absolute).
+            if (!strcmp(cn, "train") || !strcmp(cn, "func_train")) {
+                vec3_t size;
+                size[0] = e->v.maxs[0] - e->v.mins[0];
+                size[1] = e->v.maxs[1] - e->v.mins[1];
+                size[2] = e->v.maxs[2] - e->v.mins[2];
+                vec3_t   corners[2];
+                edict_t *seen[2] = { NULL, NULL };
+                int      ncorners = 0;
+                const char *t = e->v.target;
+                while (t && t[0] && ncorners < 2) {
+                    edict_t *pc = eng->ED_Find(g->world, "targetname", t);
+                    int dup = 0, s;
+                    if (!pc || pc == g->world) break;
+                    for (s = 0; s < ncorners; s++) if (seen[s] == pc) dup = 1;
+                    if (dup) break;
+                    corners[ncorners][0] = pc->v.origin[0];
+                    corners[ncorners][1] = pc->v.origin[1];
+                    corners[ncorners][2] = pc->v.origin[2];
+                    seen[ncorners] = pc;
+                    ncorners++;
+                    t = pc->v.target;
+                }
+                if (ncorners == 2) {
+                    int c;
+                    for (c = 0; c < 2; c++) {
+                        vec3_t stand;
+                        stand[0] = corners[c][0] + size[0] * 0.5f;
+                        stand[1] = corners[c][1] + size[1] * 0.5f;
+                        stand[2] = corners[c][2] + size[2] + 4.f;
+                        anchors_push(&anchors, &anchor_cap, &anchor_n, stand,
+                                     c == 0 ? ANCHOR_TRAIN_A : ANCHOR_TRAIN_B,
+                                     NAV_NODE_TRAIN_END, e);
+                    }
+                    char dbg[176];
+                    snprintf(dbg, sizeof(dbg),
+                        "sim_nav: train '%s' ferry A(%.0f %.0f %.0f) B(%.0f %.0f %.0f)\n",
+                        e->v.targetname ? e->v.targetname : "(auto)",
+                        corners[0][0], corners[0][1], corners[0][2],
+                        corners[1][0], corners[1][1], corners[1][2]);
+                    eng->Con_Print(dbg);
+                } else {
+                    char dbg[128];
+                    snprintf(dbg, sizeof(dbg),
+                        "sim_nav: train '%s' has %d path_corner(s) (need 2), skipped\n",
+                        e->v.targetname ? e->v.targetname : "(auto)", ncorners);
+                    eng->Con_Print(dbg);
+                }
+                goto next_e;
+            }
             // Vertical func_door used as a lift (e.g. e1m1 first lift).
             // A func_door is a "lift-door" when its travel is mostly
             // vertical AND its top surface is wide enough for the player
@@ -868,6 +924,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 if (icn) {
                     if (!strcmp(icn, "plat") || !strcmp(icn, "func_plat")) {
                         keep_solid = 1;  // lift
+                    } else if (!strcmp(icn, "train") || !strcmp(icn, "func_train")) {
+                        keep_solid = 1;  // ferry: seat its anchors on the brush top
                     } else if (!strcmp(icn, "door") || !strcmp(icn, "func_door")) {
                         float dz  = it->v.pos2[2] - it->v.pos1[2];
                         float dx  = it->v.pos2[0] - it->v.pos1[0];
@@ -937,7 +995,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
         // would either drop into the pit or miss entirely.
         if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM ||
             a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B ||
-            a->kind == ANCHOR_BRIDGE_MID) {
+            a->kind == ANCHOR_BRIDGE_MID ||
+            a->kind == ANCHOR_TRAIN_A || a->kind == ANCHOR_TRAIN_B) {
             seated[0] = a->pos[0]; seated[1] = a->pos[1]; seated[2] = a->pos[2];
         } else if (!seat_probe(probe, a->pos, seated)) continue;
         int existing = grid_find(&grd, m, seated);
@@ -960,7 +1019,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
         // other in Phase 4.5 / Phase 4.5b below.
         if (a->kind == ANCHOR_PLAT_TOP || a->kind == ANCHOR_PLAT_BOTTOM ||
             a->kind == ANCHOR_BRIDGE_A || a->kind == ANCHOR_BRIDGE_B ||
-            a->kind == ANCHOR_BRIDGE_MID)
+            a->kind == ANCHOR_BRIDGE_MID ||
+            a->kind == ANCHOR_TRAIN_A || a->kind == ANCHOR_TRAIN_B)
             continue;
         if (q_tail >= q_cap) {
             int nc = q_cap ? q_cap * 2 : 256;
@@ -1064,7 +1124,9 @@ static int bake_floodfill(sim_navmesh_t *m) {
             if (m->points[i].kind == NAV_NODE_BRIDGE_END ||
                 m->points[j].kind == NAV_NODE_BRIDGE_END ||
                 m->points[i].kind == NAV_NODE_PLAT_END ||
-                m->points[j].kind == NAV_NODE_PLAT_END) continue;
+                m->points[j].kind == NAV_NODE_PLAT_END ||
+                m->points[i].kind == NAV_NODE_TRAIN_END ||
+                m->points[j].kind == NAV_NODE_TRAIN_END) continue;
             float dx = m->points[j].pos[0] - m->points[i].pos[0];
             float dy = m->points[j].pos[1] - m->points[i].pos[1];
             float dz = m->points[j].pos[2] - m->points[i].pos[2];
@@ -1354,6 +1416,66 @@ static int bake_floodfill(sim_navmesh_t *m) {
         snprintf(buf, sizeof(buf),
             "sim_nav: lifts: %d ride edges + %d floor-link edges\n",
             plat_ride_edges, plat_link_edges);
+        eng->Con_Print(buf);
+    }
+
+    // --- Phase 4.5c: train (ferry) edges ---------------------------------
+    // Each func_train produced ANCHOR_TRAIN_A / _B at the standing positions
+    // over the parked brush at its two path_corners. Add a bidirectional
+    // ride edge (the bot stands still and SV_PushMove carries it across) and
+    // link both ends to nearby floor (the boarding / dismount ledges). No
+    // button gating: the ferry runs continuously.
+    int train_ride_edges = 0;
+    int train_link_edges = 0;
+    for (int i = 0; i < anchor_n; i++) {
+        if (anchors[i].kind != ANCHOR_TRAIN_A) continue;
+        if (anchors[i].node_index < 0) continue;
+        int a_idx = anchors[i].node_index;
+        int b_idx = -1;
+        for (int j = 0; j < anchor_n; j++) {
+            if (anchors[j].kind != ANCHOR_TRAIN_B) continue;
+            if (anchors[j].entity != anchors[i].entity) continue;
+            b_idx = anchors[j].node_index;
+            break;
+        }
+        if (b_idx < 0) continue;
+
+        float rdx = m->points[a_idx].pos[0] - m->points[b_idx].pos[0];
+        float rdy = m->points[a_idx].pos[1] - m->points[b_idx].pos[1];
+        float ride_cost = sqrtf(rdx*rdx + rdy*rdy) + 32.0f;
+        add_edge(m, &cap_edges, a_idx, b_idx, ride_cost, NAV_EDGE_TRAIN_RIDE, 0, NAV_PHASE_BRIDGE);
+        add_edge(m, &cap_edges, b_idx, a_idx, ride_cost, NAV_EDGE_TRAIN_RIDE, 0, NAV_PHASE_BRIDGE);
+        train_ride_edges += 2;
+
+        edict_t *train = anchors[i].entity;
+        float half_x = (train->v.maxs[0] - train->v.mins[0]) * 0.5f;
+        float half_y = (train->v.maxs[1] - train->v.mins[1]) * 0.5f;
+        float r_xy   = (half_x > half_y ? half_x : half_y) + 64.0f;
+        float r_xy2  = r_xy * r_xy;
+        const float r_z = 32.0f;
+        int ends[2]; ends[0] = a_idx; ends[1] = b_idx;
+        for (int ei = 0; ei < 2; ei++) {
+            int end = ends[ei];
+            for (int p = 0; p < m->point_count; p++) {
+                if (p == a_idx || p == b_idx) continue;
+                float dx = m->points[p].pos[0] - m->points[end].pos[0];
+                float dy = m->points[p].pos[1] - m->points[end].pos[1];
+                float dz = m->points[p].pos[2] - m->points[end].pos[2];
+                if (dx*dx + dy*dy > r_xy2) continue;
+                if (dz < -r_z || dz > r_z) continue;
+                if (!trace_link_clear_plat(m->points[p].pos, m->points[end].pos, train)) continue;
+                float w = sqrtf(dx*dx + dy*dy) + 1.f;
+                add_edge(m, &cap_edges, p, end, w, NAV_EDGE_TRAIN_LINK, 0, NAV_PHASE_BRIDGE);
+                add_edge(m, &cap_edges, end, p, w, NAV_EDGE_TRAIN_LINK, 0, NAV_PHASE_BRIDGE);
+                train_link_edges += 2;
+            }
+        }
+    }
+    if (train_ride_edges || train_link_edges) {
+        char buf[128];
+        snprintf(buf, sizeof(buf),
+            "sim_nav: train edges: %d ride, %d link\n",
+            train_ride_edges, train_link_edges);
         eng->Con_Print(buf);
     }
 
@@ -1842,6 +1964,8 @@ void Sim_Nav_Frame(void) {
         case NAV_EDGE_PLAT_RIDE:   color = 220; break;
         case NAV_EDGE_TELEPORT:    color = 192; break;
         case NAV_EDGE_PLAT_LINK:   color = 79;  break;
+        case NAV_EDGE_TRAIN_RIDE:  color = 251; break;
+        case NAV_EDGE_TRAIN_LINK:  color = 244; break;
         case NAV_EDGE_SHOOT_LINK:  color = 232; break;
         case NAV_EDGE_BUTTON_LINK: color = 208; break;
         case NAV_EDGE_WALK:
