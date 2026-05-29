@@ -292,6 +292,17 @@ static void Key_TabComplete (qboolean reverse)
 		if (dedup_count == 0)
 			return;
 
+		/* Sort alphabetically so the cycle order is predictable regardless
+		 * of cmd/cvar/alias registration order. Insertion sort: dedup_count
+		 * is small (same O(n^2)-is-fine reasoning as the dedup above). */
+		for (i = 1 ; i < dedup_count ; i++)
+		{
+			char	*key = tab_matches[i];
+			for (j = i - 1 ; j >= 0 && Q_strcmp (tab_matches[j], key) > 0 ; j--)
+				tab_matches[j + 1] = tab_matches[j];
+			tab_matches[j + 1] = key;
+		}
+
 		tab_match_count = dedup_count;
 		tab_index = reverse ? dedup_count - 1 : 0;
 	}
