@@ -183,6 +183,8 @@ static const char *Bot_EdgeKindName(int k)
         case BOT_EDGE_PLAT_LINK:   return "plat";
         case BOT_EDGE_SHOOT_LINK:  return "shoot";
         case BOT_EDGE_BUTTON_LINK: return "btn";
+        case BOT_EDGE_TRAIN_RIDE:  return "train";
+        case BOT_EDGE_TRAIN_LINK:  return "tlink";
     }
     return "?";
 }
@@ -248,6 +250,57 @@ static int Bot_TriggeredBridgeOpen(const vec3_t pos, float radius)
         }
     }
     return 1;
+}
+
+// Is a func_train currently parked (~stationary) with its footprint over
+// `pos`? Gates boarding: the bot must not step toward a train's standing
+// anchor until the train is actually there, or it walks into the gap.
+static int Bot_TrainParkedAt(const vec3_t pos, float pad)
+{
+    int i;
+    for (i = 1; i < sv.num_edicts; i++) {
+        edict_t *e = Bot_Edict(i);
+        if (!e || e->free || !e->v.classname) continue;
+        if (strcmp(e->v.classname, "train") != 0 &&
+            strcmp(e->v.classname, "func_train") != 0) continue;
+        float vx = e->v.velocity[0], vy = e->v.velocity[1], vz = e->v.velocity[2];
+        if (vx*vx + vy*vy + vz*vz > 1.0f) continue;   // still moving
+        float minx = e->v.origin[0] + e->v.mins[0] - pad;
+        float maxx = e->v.origin[0] + e->v.maxs[0] + pad;
+        float miny = e->v.origin[1] + e->v.mins[1] - pad;
+        float maxy = e->v.origin[1] + e->v.maxs[1] + pad;
+        if (pos[0] >= minx && pos[0] <= maxx &&
+            pos[1] >= miny && pos[1] <= maxy)
+            return 1;
+    }
+    return 0;
+}
+
+// Returns the func_train the player is currently standing on (footprint XY
+// over the player, train top ~ player feet), else NULL. Distinguishes
+// "boarding from a ledge" from "already riding".
+static edict_t *Bot_OnTrain(void)
+{
+    int i;
+    if (!sv_player) return NULL;
+    for (i = 1; i < sv.num_edicts; i++) {
+        edict_t *e = Bot_Edict(i);
+        if (!e || e->free || !e->v.classname) continue;
+        if (strcmp(e->v.classname, "train") != 0 &&
+            strcmp(e->v.classname, "func_train") != 0) continue;
+        float px   = sv_player->v.origin[0];
+        float py   = sv_player->v.origin[1];
+        float feet = sv_player->v.origin[2] + sv_player->v.mins[2];
+        float top  = e->v.origin[2] + e->v.maxs[2];
+        float minx = e->v.origin[0] + e->v.mins[0] - 8.f;
+        float maxx = e->v.origin[0] + e->v.maxs[0] + 8.f;
+        float miny = e->v.origin[1] + e->v.mins[1] - 8.f;
+        float maxy = e->v.origin[1] + e->v.maxs[1] + 8.f;
+        if (px >= minx && px <= maxx && py >= miny && py <= maxy &&
+            feet >= top - 8.f && feet <= top + 24.f)
+            return e;
+    }
+    return NULL;
 }
 
 static int Bot_RequestPath(const vec3_t to)
@@ -411,6 +464,16 @@ static void Bot_AdvanceWaypoint(void)
     if (b.waypoint_kinds[b.waypoint_idx + 1] == BOT_EDGE_BUTTON_LINK) {
         if (Bot_NearbyButtonReady(wp, 96.f)) return;       // not pressed yet
         if (!Bot_TriggeredBridgeOpen(wp, 96.f)) return;    // bridge still extending
+    }
+    // Train board-gate: when the NEXT edge steps onto a train (TRAIN_LINK
+    // boarding, or a TRAIN_RIDE leaving this ledge) and we're not already
+    // aboard, hold until the train is parked at that standing anchor — else
+    // we step into the gap.
+    if ((b.waypoint_kinds[b.waypoint_idx + 1] == BOT_EDGE_TRAIN_LINK ||
+         b.waypoint_kinds[b.waypoint_idx + 1] == BOT_EDGE_TRAIN_RIDE) &&
+        !Bot_OnTrain()) {
+        const float *next = b.waypoints[b.waypoint_idx + 1];
+        if (!Bot_TrainParkedAt(next, 8.f)) return;
     }
     dx = wp[0] - sv_player->v.origin[0];
     dy = wp[1] - sv_player->v.origin[1];
@@ -589,6 +652,14 @@ static void Bot_DriveFrame(usercmd_t *cmd)
                 ((int)sv_player->v.flags & FL_ONGROUND))
             {
                 do_jump = 1;
+            }
+            // Train ride: standing on the ferry, the next stop is the far
+            // corner (same Z, big XY). Hold still and let SV_PushMove carry
+            // us; Bot_AdvanceWaypoint fires on XY proximity when the train
+            // parks at the far corner, stepping us off onto the ledge.
+            if (kind == BOT_EDGE_TRAIN_RIDE && Bot_OnTrain()) {
+                cmd->forwardmove = 0;
+                cmd->sidemove    = 0;
             }
         }
 
