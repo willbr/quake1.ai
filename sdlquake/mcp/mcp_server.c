@@ -1290,6 +1290,8 @@ static const char *nav_edge_kind_name(unsigned char k) {
     case 5: return "PLAT_LINK";
     case 6: return "SHOOT_LINK";
     case 7: return "BUTTON_LINK";
+    case 8: return "TRAIN_RIDE";
+    case 9: return "TRAIN_LINK";
     default: return "UNKNOWN";
     }
 }

@@ -924,8 +924,14 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 if (icn) {
                     if (!strcmp(icn, "plat") || !strcmp(icn, "func_plat")) {
                         keep_solid = 1;  // lift
-                    } else if (!strcmp(icn, "train") || !strcmp(icn, "func_train")) {
-                        keep_solid = 1;  // ferry: seat its anchors on the brush top
+                    // NOTE: func_train is deliberately NOT kept solid. Its
+                    // standing anchors are seated synthetically (see the
+                    // ANCHOR_TRAIN_* seat-skip below), so keeping the brush
+                    // solid only makes the flood seat phantom walkable nodes on
+                    // the train's bake-time top surface — nodes that float over
+                    // the pit once the ferry moves, luring the bot off the edge.
+                    // Non-solid keeps the gap empty; the ride edge is the only
+                    // way across.
                     } else if (!strcmp(icn, "door") || !strcmp(icn, "func_door")) {
                         float dz  = it->v.pos2[2] - it->v.pos1[2];
                         float dx  = it->v.pos2[0] - it->v.pos1[0];
