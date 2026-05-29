@@ -222,6 +222,27 @@ static arg_completer_t Key_LookupArgCompleter (
 	return fn;
 }
 
+/*
+============
+Key_NameCmp
+
+Lexicographic compare for tab-completion sorting. We can't use Q_strcmp:
+it only distinguishes equal/not-equal (returns 0 or -1), never the sign
+of the difference, so it can't drive an ordering. Returns <0, 0, >0 like
+standard strcmp. Case-sensitive is fine here: cmd/cvar/map names are
+lowercase by convention.
+============
+*/
+static int Key_NameCmp (const char *a, const char *b)
+{
+	while (*a && (*a == *b))
+	{
+		a++;
+		b++;
+	}
+	return (int)(unsigned char)*a - (int)(unsigned char)*b;
+}
+
 static void Key_TabComplete (qboolean reverse)
 {
 	qboolean cycling;
@@ -298,7 +319,7 @@ static void Key_TabComplete (qboolean reverse)
 		for (i = 1 ; i < dedup_count ; i++)
 		{
 			char	*key = tab_matches[i];
-			for (j = i - 1 ; j >= 0 && Q_strcmp (tab_matches[j], key) > 0 ; j--)
+			for (j = i - 1 ; j >= 0 && Key_NameCmp (tab_matches[j], key) > 0 ; j--)
 				tab_matches[j + 1] = tab_matches[j];
 			tab_matches[j + 1] = key;
 		}
