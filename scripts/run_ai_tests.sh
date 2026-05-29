@@ -5,7 +5,7 @@ LOG=$(mktemp -t ai-test.XXXXXX.log)
 zig build run -- +map ai_t01_nav +bot 1 > "$LOG" 2>&1 &
 PID=$!
 
-TIMEOUT_S=390
+TIMEOUT_S=540
 DEADLINE=$(( $(date +%s) + TIMEOUT_S ))
 
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do

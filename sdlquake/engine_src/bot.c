@@ -206,6 +206,48 @@ static int Bot_NearbyButtonReady(const vec3_t pos, float radius)
     return 0;
 }
 
+// STATE_TOP in the game DLL — a func_door at this state is fully open.
+#define BOT_DOOR_STATE_TOP 0
+
+// After pressing a button that drives a HORIZONTAL bridge-door, hold until
+// that door has finished extending. A bridge that slides toward the bot
+// (e.g. out of a side wall) covers its near boarding end LAST, so stepping
+// on the instant the button is pressed drops the bot into the pit. Vertical
+// lift-doors are NOT gated here — their ride logic boards-then-rides, and
+// waiting for their travel end would strand the bot at the wrong level.
+// Returns 1 (clear to board) when no bridge-door is involved.
+static int Bot_TriggeredBridgeOpen(const vec3_t pos, float radius)
+{
+    int i, j;
+    float r2 = radius * radius;
+    for (i = 1; i < sv.num_edicts; i++) {
+        edict_t *bt = Bot_Edict(i);
+        vec3_t c;
+        if (!bt || bt->free || !bt->v.classname) continue;
+        if (strcmp(bt->v.classname, "func_button") != 0) continue;
+        if (!bt->v.target) continue;
+        Bot_EntityCenter(bt, c);
+        if (Bot_Dist2(pos, c) >= r2) continue;
+        for (j = 1; j < sv.num_edicts; j++) {
+            edict_t *d = Bot_Edict(j);
+            if (!d || d->free || !d->v.classname) continue;
+            if (strcmp(d->v.classname, "door") != 0 &&
+                strcmp(d->v.classname, "func_door") != 0) continue;
+            if (!d->v.targetname ||
+                strcmp(d->v.targetname, bt->v.target) != 0) continue;
+            float adz = fabsf(d->v.pos2[2] - d->v.pos1[2]);
+            float adx = fabsf(d->v.pos2[0] - d->v.pos1[0]);
+            float ady = fabsf(d->v.pos2[1] - d->v.pos1[1]);
+            float sz  = d->v.maxs[2] - d->v.mins[2];
+            int horizontal = (adz < 24.f) && (adx > 24.f || ady > 24.f);
+            int flat       = sz < 32.f;
+            if (horizontal && flat)
+                return ((int)d->v.state == BOT_DOOR_STATE_TOP);
+        }
+    }
+    return 1;
+}
+
 static int Bot_RequestPath(const vec3_t to)
 {
     int n;
@@ -365,7 +407,8 @@ static void Bot_AdvanceWaypoint(void)
     // overlaps the button (state leaves BOTTOM). Otherwise the bot
     // sails past at 48 units without ever triggering it.
     if (b.waypoint_kinds[b.waypoint_idx + 1] == BOT_EDGE_BUTTON_LINK) {
-        if (Bot_NearbyButtonReady(wp, 96.f)) return;
+        if (Bot_NearbyButtonReady(wp, 96.f)) return;       // not pressed yet
+        if (!Bot_TriggeredBridgeOpen(wp, 96.f)) return;    // bridge still extending
     }
     dx = wp[0] - sv_player->v.origin[0];
     dy = wp[1] - sv_player->v.origin[1];
