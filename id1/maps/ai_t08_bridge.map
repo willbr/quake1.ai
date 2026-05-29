@@ -141,7 +141,7 @@
 {
 "classname" "trigger_changelevel"
 "spawnflags" "1"
-"map" "ai_done"
+"map" "ai_t09_train"
 {
 ( 300 494 240 ) ( 300 494 160 ) ( 300 440 160 ) trigger 0 0 0 1 1
 ( 180 440 240 ) ( 180 440 160 ) ( 180 494 160 ) trigger 0 0 0 1 1

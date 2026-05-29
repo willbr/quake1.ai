@@ -45,7 +45,11 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 #define NAV_MAGIC      0x4E41564D    // 'NAVM'
-#define NAV_VERSION    21
+// Train nav (TRAIN_RIDE/TRAIN_LINK, ANCHOR_TRAIN_*) was added without bumping
+// this: the change is purely additive and alters no existing (trainless) map's
+// bake, so trainless .nav caches stay valid. Bump only when an existing map's
+// bake output actually changes.
+#define NAV_VERSION    20
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
