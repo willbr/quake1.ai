@@ -5,6 +5,7 @@
 #include "game_defs.h"
 #include "weapons_phase6.h"
 #include "weapons_fire.h"
+#include "flammables.h"
 #include "sim/sim.h"
 #include <string.h>
 #include <math.h>
@@ -302,6 +303,7 @@ void W_Precache(void) {
     eng->PrecacheSound("weapons/shotgn2.wav");
     eng->PrecacheSound("ambience/fire1.wav");   // flamethrower loop (M8/F3)
     WeaponsFire_Init();
+    Flammables_Init();
 
     Phase6_PrecacheCommon();
 }
@@ -1665,6 +1667,7 @@ static void ImpulseCommands(void) {
     if (imp == 210) Fire_IgniteTraced(self);   // debug: ignite entity under crosshair
     if (imp == 211) Fire_OilTraced(self);      // debug: deposit oil at crosshair
     if (imp == 212) Fire_GiveWeapons(self);    // M8/F3: grant fire weapons + cells
+    if (imp == 213) Flammables_DebugSpawnBarrel(self);   // M8/F4 debug: oil barrel ahead
     if (imp == 255) QuadCheat();
     self->v.impulse = 0;
 }

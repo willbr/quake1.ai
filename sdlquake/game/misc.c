@@ -223,7 +223,7 @@ static void fire_fly(edict_t *self) {
 // ---------------------------------------------------------------------------
 // barrel / misc_explobox
 // ---------------------------------------------------------------------------
-static void barrel_explode(edict_t *self) {
+void barrel_explode(edict_t *self) {
     g->self = self;
     self->v.takedamage = DAMAGE_NO;
     self->v.classname  = "explo_box";

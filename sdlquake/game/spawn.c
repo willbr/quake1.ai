@@ -107,6 +107,7 @@ void spawn_light_flame_small_white(edict_t *e);
 void spawn_misc_fireball(edict_t *e);
 void spawn_misc_explobox(edict_t *e);
 void spawn_misc_explobox2(edict_t *e);
+void spawn_misc_oilbarrel(edict_t *e);
 void spawn_trap_spikeshooter(edict_t *e);
 void spawn_trap_shooter(edict_t *e);
 void spawn_air_bubbles(edict_t *e);
@@ -227,6 +228,7 @@ static const spawn_entry_t s_spawns[] = {
     { "misc_fireball",                spawn_misc_fireball                   },
     { "misc_explobox",                spawn_misc_explobox                   },
     { "misc_explobox2",               spawn_misc_explobox2                  },
+    { "misc_oilbarrel",               spawn_misc_oilbarrel                  },
     { "trap_spikeshooter",            spawn_trap_spikeshooter               },
     { "trap_shooter",                 spawn_trap_shooter                    },
     { "air_bubbles",                  spawn_air_bubbles                     },
