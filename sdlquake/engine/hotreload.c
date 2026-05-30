@@ -56,7 +56,14 @@ extern void Lightmap_ClearOwner(int owner);
 // Game-DLL cvar registration shim.
 // Quake's cvar_t must persist for the engine's lifetime; we own the storage.
 // ---------------------------------------------------------------------------
-#define MAX_GAME_CVARS 32
+// Must comfortably exceed the number of distinct cvars the game DLL registers
+// across all modules (abilities + every sim/*.c + weapons). As of M8/F2 that
+// is ~36; 64 leaves headroom. Overflow past this used to be dropped *silently*
+// (engine_cvar_register), which surfaced only as downstream "Cvar_Set:
+// variable X not found" spam for whichever dropped cvar happened to be written
+// each frame (e.g. ph_energy). engine_cvar_register now logs on overflow and
+// dedups re-registrations, so a hot-reload re-init can't re-exhaust the table.
+#define MAX_GAME_CVARS 64
 
 // Must match engine's cvar_t layout: name, string, archive(int), server(int),
 // value(float), next(ptr). qboolean is int in Quake.
@@ -71,6 +78,7 @@ typedef struct game_reg_cvar_s {
 
 // Forward-declare the engine function (defined in cvar.c).
 void Cvar_RegisterVariable(game_reg_cvar_t *cvar);
+void Con_Printf(char *fmt, ...);   // used by engine_cvar_register below (re-declared later with the other wrappers)
 
 static game_reg_cvar_t s_game_cvars[MAX_GAME_CVARS];
 static char            s_game_cvar_names[MAX_GAME_CVARS][64];
@@ -78,7 +86,18 @@ static char            s_game_cvar_defaults[MAX_GAME_CVARS][64];
 static int             s_game_cvar_count;
 
 static void engine_cvar_register(const char *name, const char *default_val) {
-    if (s_game_cvar_count >= MAX_GAME_CVARS) return;
+    // Already registered (e.g. game-DLL re-init on hot-reload)? Don't consume a
+    // fresh slot -- the existing engine cvar_t is still valid and points at our
+    // stable s_game_cvars[] entry.
+    for (int j = 0; j < s_game_cvar_count; j++)
+        if (!strcmp(s_game_cvar_names[j], name)) return;
+    if (s_game_cvar_count >= MAX_GAME_CVARS) {
+        // Loud, not silent: a dropped cvar otherwise only shows up later as
+        // "Cvar_Set: variable %s not found" spam from whoever writes it.
+        Con_Printf("engine_cvar_register: MAX_GAME_CVARS (%d) exceeded, dropping '%s' -- bump the cap\n",
+                   MAX_GAME_CVARS, name);
+        return;
+    }
     int i = s_game_cvar_count++;
     strncpy(s_game_cvar_names[i],    name,        63);
     strncpy(s_game_cvar_defaults[i], default_val, 63);
