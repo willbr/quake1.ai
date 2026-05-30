@@ -42,6 +42,7 @@ extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
 #define OIL_COAT_SECS        8.0f      // how long an edict stays oil-coated
 #define OIL_COAT_BURN_SECS   8.0f      // a coated edict burns this long (vs OIL_IGNITE_SECS)
 #define TORCH_OIL_REACH      40.0f     // a lit torch lights oil within radius+this
+#define OIL_FIRE_LIGHT_RADIUS 160.0f   // F5: reach of a lit oil patch's room-brighten override
 
 typedef struct {
     int   active;
@@ -68,6 +69,7 @@ typedef struct {
     float  burn_until;      // when lit: expiry time
     float  next_dmg_time;   // when lit: next area-DOT application
     float  next_fire_stim;  // when lit: next g->time this patch may emit STIM_FIRE (2 Hz throttle)
+    float  light_delta;     // F5: +delta applied via Light_AddOverride when lit (0 = none); subtract on extinguish
 } oil_patch_t;
 
 static oil_patch_t s_oil[OIL_MAX_PATCHES];
@@ -119,6 +121,8 @@ void Fire_Init(void) {
     eng->Cvar_Register("fire_oil_ignite", "0");    // light nearest oil to player (test hook)
     eng->Cvar_Register("fire_oil_count",  "0");    // Fire_Frame writes live patch count
     eng->Cvar_Register("fire_spread_radius", "64");// entity->entity contact-spread reach
+    eng->Cvar_Register("fire_light",      "96");   // F5: lit-oil room-brighten delta (paired +/-)
+    eng->Cvar_Register("fire_smoke",      "0.12"); // F5: smoke amount per fire tick (mirrors FIRE_SMOKE_AMOUNT)
 }
 
 void Fire_LevelInit(void) {
@@ -253,6 +257,11 @@ void Fire_AddOil(const vec3_t origin_in, float radius, float amount) {
     }
 
     oil_patch_t *o = &s_oil[slot];
+    // If recycling a still-lit patch, un-pair its room-brighten light first so
+    // the override doesn't leak (memset below would drop light_delta silently).
+    if (o->active && o->lit && o->light_delta != 0.0f) {
+        Light_AddOverride(o->origin, OIL_FIRE_LIGHT_RADIUS, -o->light_delta);
+    }
     memset(o, 0, sizeof(*o));
     o->active       = 1;
     o->origin[0]    = origin[0];
@@ -331,10 +340,14 @@ static int fire_point_in_cone(const vec3_t eye, const float fxy[2], int flat_con
     return (nx*forward[0] + ny*forward[1] + nz*forward[2]) >= cone_cos;
 }
 
-// Consume a lit oil patch (Gust put it out, or it burned out). Task 4 (F5)
-// extends this to un-pair the oil-fire room-brighten light override.
+// Consume a lit oil patch (Gust put it out, or it burned out). Un-pairs the
+// room-brighten override so the lightmap delta nets to zero, then frees the slot.
 static void oil_extinguish_patch(oil_patch_t *o) {
     if (!o->active) return;
+    if (o->light_delta != 0.0f) {
+        Light_AddOverride(o->origin, OIL_FIRE_LIGHT_RADIUS, -o->light_delta);
+        o->light_delta = 0.0f;
+    }
     o->active = 0;
     o->lit    = 0;
 }
@@ -442,6 +455,15 @@ static void oil_light_patch(oil_patch_t *o) {
     o->next_dmg_time = g->time + OIL_DMG_INTERVAL;
     o->ignite_at     = 0.0f;
     eng->SV_Decal(o->origin, DECAL_SCORCH);   // burning oil scorches the floor (stacks on the oil stain)
+
+    // Room brightens while burning oil is lit -> visible lightmap delta AND the
+    // M5 AI light-tier reads brighter near the fire (the "fire reveals you"
+    // pillar). Paired: this +delta is matched by a -delta when the patch goes
+    // out (burnout / Gust-consume / recycle). Stored so the - matches the +
+    // even if the cvar changes mid-burn.
+    o->light_delta = eng->Cvar_VariableValue("fire_light");
+    if (o->light_delta != 0.0f)
+        Light_AddOverride(o->origin, OIL_FIRE_LIGHT_RADIUS, o->light_delta);
 
     for (int i = 0; i < OIL_MAX_PATCHES; i++) {
         oil_patch_t *n = &s_oil[i];
@@ -554,7 +576,7 @@ static void oil_frame(void) {
 
         // --- Lit patch ---
         if (g->time >= o->burn_until) {
-            o->active = 0;   // oil consumed
+            oil_extinguish_patch(o);   // oil consumed -> un-pair the room-brighten light
             continue;
         }
 
@@ -584,7 +606,7 @@ static void oil_frame(void) {
             vec3_t up  = { 0.0f, 0.0f, 12.0f };
             eng->SV_Fire(org, up, 4.0f);
         }
-        Wind_AddSmoke(o->origin, FIRE_SMOKE_AMOUNT, o->radius);
+        Wind_AddSmoke(o->origin, eng->Cvar_VariableValue("fire_smoke"), o->radius);
 
         // Fire stimulus so AI registers/avoids the burning oil. Throttled to
         // FIRE_STIM_INTERVAL (2 Hz) per patch (F5: stim-ring-crowding fix) — a
@@ -693,7 +715,7 @@ void Fire_Frame(void) {
         }
 
         // Feed the M4 wind/smoke grid so fire throws up a smoke screen.
-        Wind_AddSmoke(e->v.origin, FIRE_SMOKE_AMOUNT, FIRE_SMOKE_RADIUS);
+        Wind_AddSmoke(e->v.origin, eng->Cvar_VariableValue("fire_smoke"), FIRE_SMOKE_RADIUS);
 
         // Broadcast a fire stimulus so distant AI can register the threat.
         // Throttled to FIRE_STIM_INTERVAL (2 Hz) per source: at 10 Hz a dozen
