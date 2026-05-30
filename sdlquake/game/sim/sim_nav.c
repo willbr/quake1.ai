@@ -51,7 +51,8 @@ extern game_globals_t *g;
 // bake output actually changes.
 // v21: func_bossgate kept solid during bake (start.bsp) -- seats standable
 // nodes on the gate's top surface instead of on the floor beneath it.
-#define NAV_VERSION    21
+// v22: nav_edge_t gained forbids_items (gate-state conditions).
+#define NAV_VERSION    22
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -158,7 +159,8 @@ typedef struct {
     unsigned char kind;        // NAV_EDGE_*
     unsigned char phase;       // NAV_PHASE_* — which bake sub-block emitted this
     unsigned char _pad[2];
-    unsigned int  requires_items;  // bitmask matched against player.items
+    unsigned int  requires_items;  // valid only if (items & requires) == requires
+    unsigned int  forbids_items;   // invalid if forbids!=0 && (items & forbids)==forbids
 } nav_edge_t;
 
 struct sim_navmesh_s {
@@ -297,6 +299,7 @@ static int add_edge(sim_navmesh_t *m, int *cap, int from, int to,
     e->phase  = phase;
     e->_pad[0] = e->_pad[1] = 0;
     e->requires_items = req_items;
+    e->forbids_items = 0;
     return 1;
 }
 
@@ -2223,6 +2226,11 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to,
             // Locked-edge filter: skip if any required item bit is
             // missing from the caller's item set.
             if (e->requires_items & ~player_items) continue;
+            // Inverse lock: edge exists only while the player LACKS the full
+            // forbidden set (e.g. a gate's slab-top vanishes once you hold all
+            // sigils). forbids==0 means unconditional.
+            if (e->forbids_items &&
+                (player_items & e->forbids_items) == e->forbids_items) continue;
             int nb = e->to;
             if (closed[nb]) continue;
             float tentative = gscore[cur] + e->weight;
