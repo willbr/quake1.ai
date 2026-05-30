@@ -1803,10 +1803,16 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 de->v.model && de->v.model[0]) {
                 unsigned int forb =
                     (unsigned int)(((int)de->v.spawnflags & 15) << 28);
-                // Save the fields SV_SetModel populates, read bbox, restore.
+                // Transiently SV_SetModel ONLY to read the brush bbox, then
+                // restore every field it populates (modelindex, mins, maxs,
+                // size). It does NOT change `solid` (stays SOLID_NOT), so the
+                // gate keeps not colliding; it does leave the edict linked in
+                // the areagrid with the model bbox, but a SOLID_NOT entity is
+                // skipped by SV_ClipToLinks, so that residual link is inert.
                 float  save_mi   = de->v.modelindex;
                 vec3_t save_mins = { de->v.mins[0], de->v.mins[1], de->v.mins[2] };
                 vec3_t save_maxs = { de->v.maxs[0], de->v.maxs[1], de->v.maxs[2] };
+                vec3_t save_size = { de->v.size[0], de->v.size[1], de->v.size[2] };
                 eng->SV_SetModel(de, de->v.model);
                 float xmn = de->v.origin[0] + de->v.mins[0] - 8;
                 float ymn = de->v.origin[1] + de->v.mins[1] - 8;
@@ -1817,6 +1823,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                 de->v.modelindex = save_mi;
                 de->v.mins[0]=save_mins[0]; de->v.mins[1]=save_mins[1]; de->v.mins[2]=save_mins[2];
                 de->v.maxs[0]=save_maxs[0]; de->v.maxs[1]=save_maxs[1]; de->v.maxs[2]=save_maxs[2];
+                de->v.size[0]=save_size[0]; de->v.size[1]=save_size[1]; de->v.size[2]=save_size[2];
 
                 if (forb) {
                     for (int k = 0; k < m->edge_count; k++) {
@@ -2020,8 +2027,9 @@ static int bake_floodfill(sim_navmesh_t *m) {
                                      cp[2] + 1.0f };
                     vec3_t end   = { start[0], start[1], cp[2] - FALL_MAX };
                     eng->SV_TraceMove(start, player_mins, player_maxs, end, 1, NULL);
-                    // fraction==1 means open void (no floor within FALL_MAX);
-                    // allsolid/startsolid means we started inside geometry.
+                    // fraction>=1 means open void (no floor within FALL_MAX) --
+                    // reject. A startsolid trace returns fraction 0 and is
+                    // filtered below by the FALL_MIN_DZ check (dz ~= 0).
                     if (g->trace_fraction >= 0.999f) continue;
                     float land_z = g->trace_endpos[2];
                     float dz = cp[2] - land_z;

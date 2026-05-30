@@ -2030,9 +2030,12 @@ void Host_Serverflags_f (void)
 		return;
 	}
 	int v = atoi(Cmd_Argv(1));
-	svs.serverflags = v;
-	pr_global_struct->serverflags = v;
-	game_globals.serverflags = v;
+	svs.serverflags = v;			// persists into the next changelevel
+	if (sv.active)				// live globals only exist with a server up
+	{
+		pr_global_struct->serverflags = v;
+		game_globals.serverflags = v;
+	}
 	Con_Printf ("serverflags set to %d\n", v);
 }
 
