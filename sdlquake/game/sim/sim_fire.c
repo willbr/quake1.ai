@@ -38,6 +38,8 @@ extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
 #define OIL_IGNITE_SECS      3.0f      // burn duration handed to edicts a patch ignites
 #define OIL_CASCADE_RADIUS   80.0f     // a lit patch schedules unlit patches within this
 #define OIL_CASCADE_DELAY    0.35f     // delay before a scheduled neighbour catches
+#define OIL_COAT_SECS        8.0f      // how long an edict stays oil-coated
+#define OIL_COAT_BURN_SECS   8.0f      // a coated edict burns this long (vs OIL_IGNITE_SECS)
 
 typedef struct {
     int   active;
@@ -65,6 +67,9 @@ typedef struct {
 
 static oil_patch_t s_oil[OIL_MAX_PATCHES];
 
+// Coated edicts (by edict number): g->time < value => still oil-coated.
+static float s_coated_until[FIRE_MAX_BURNING];
+
 // O(MAX_EDICTS) walk — acceptable at 10 Hz over a small registry (mirrors
 // the documented O(N) pattern in sim_ai.c).
 static edict_t *fire_find_edict(int num) {
@@ -81,6 +86,7 @@ static float fire_crand(void) { return eng->Random() * 2.0f - 1.0f; }
 void Fire_Init(void) {
     memset(s_burning, 0, sizeof(s_burning));
     memset(s_oil, 0, sizeof(s_oil));
+    memset(s_coated_until, 0, sizeof(s_coated_until));
     s_next_tick = 0.0f;
     eng->Cvar_Register("sim_fire_debug",  "0");
     eng->Cvar_Register("fire_dps",        "8");
@@ -96,6 +102,7 @@ void Fire_Init(void) {
 void Fire_LevelInit(void) {
     memset(s_burning, 0, sizeof(s_burning));
     memset(s_oil, 0, sizeof(s_oil));
+    memset(s_coated_until, 0, sizeof(s_coated_until));
     s_next_tick = 0.0f;
 }
 
@@ -205,6 +212,31 @@ void Fire_AddOil(const vec3_t origin, float radius, float amount) {
     o->radius       = radius;
     o->amount       = amount;
     o->deposit_time = g->time;
+
+    // Coat edicts standing in the fresh oil so a later spark ignites them
+    // hotter/longer. (The merge branch returns early and does not coat -- a
+    // merge just tops up amount on an existing patch.)
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        if (!e->v.takedamage) continue;
+        int en = eng->ED_GetNum(e);
+        if (en < 0 || en >= FIRE_MAX_BURNING) continue;
+        float dx = e->v.origin[0] - o->origin[0];
+        float dy = e->v.origin[1] - o->origin[1];
+        if (dx*dx + dy*dy <= o->radius * o->radius)
+            s_coated_until[en] = g->time + OIL_COAT_SECS;
+    }
+}
+
+// Ignite `e`, but if it is oil-coated, burn it longer (OIL_COAT_BURN_SECS).
+// Used wherever a fire source touches an edict (oil-patch contact now; later
+// weapons/explosions in F3+).
+void Fire_IgniteMaybeCoated(edict_t *e, float base_secs, float dps, edict_t *igniter) {
+    if (!e) return;
+    int en = eng->ED_GetNum(e);
+    float secs = base_secs;
+    if (en >= 0 && en < FIRE_MAX_BURNING && g->time < s_coated_until[en])
+        secs = OIL_COAT_BURN_SECS;
+    Fire_Ignite(e, secs, dps, igniter);
 }
 
 void Fire_IgniteTraced(edict_t *player) {
@@ -359,8 +391,8 @@ static void oil_frame(void) {
                 float dy = e->v.origin[1] - o->origin[1];
                 if (dx*dx + dy*dy > o->radius * o->radius) continue;
                 T_Damage(e, g->world, g->world, OIL_PATCH_DPS * OIL_DMG_INTERVAL);
-                Fire_Ignite(e, OIL_IGNITE_SECS,
-                            eng->Cvar_VariableValue("fire_dps"), g->world);
+                Fire_IgniteMaybeCoated(e, OIL_IGNITE_SECS,
+                                       eng->Cvar_VariableValue("fire_dps"), g->world);
             }
         }
 

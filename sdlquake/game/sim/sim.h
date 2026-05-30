@@ -232,6 +232,8 @@ void Fire_IgniteTraced(edict_t *player);
 // amount<=0 use defaults. Patches persist until ignited or they time out.
 void Fire_AddOil(const vec3_t origin, float radius, float amount);
 void Fire_OilTraced(edict_t *player);   // debug: deposit oil at crosshair
+// Ignite `e`, burning longer if it is currently oil-coated.
+void Fire_IgniteMaybeCoated(edict_t *e, float base_secs, float dps, edict_t *igniter);
 
 // ---------------------------------------------------------------------------
 // Arena (test)
