@@ -110,6 +110,12 @@ static void fire_clear_slot(int n, edict_t *e) {
     if (n < 0 || n >= FIRE_MAX_BURNING) return;
     s_burning[n].active = 0;
     s_burning[n].corpse_timed = 0;
+    // Clear any oil coat too, so it can't linger onto a reused edict number
+    // when this burn ends (extinguish / timeout / free). Mirrors how the burn
+    // slot itself is cleared here. A coated-but-never-ignited edict that's
+    // freed is the one narrow case this misses; its coat is time-bounded
+    // (OIL_COAT_SECS) and harmless even if the number is reused.
+    s_coated_until[n] = 0.0f;
     if (e) e->v.effects = (float)((int)e->v.effects & ~EF_DIMLIGHT);
 }
 
@@ -305,9 +311,12 @@ static edict_t *oil_find_player(void) {
     return fire_find_edict(1);
 }
 
-// Tick the oil-patch pool at the existing 10 Hz fire cadence: test hooks,
-// TTL evaporation, unlit-sheen render. Lit-patch behaviour + cascade land in
-// Tasks 2-3.
+// Tick the oil-patch pool at the existing 10 Hz fire cadence: process the
+// deposit/ignite test hooks, evaporate expired unlit patches, render the unlit
+// sheen, cascade-schedule + light scheduled/contacted patches, and run lit
+// patch area-DOT / flame / smoke / stim. O(patches), with O(edicts) inner
+// scans for the contact/DOT checks -- fine at this tick rate for realistic
+// patch counts; would want spatial buckets if patch counts ever grow large.
 static void oil_frame(void) {
     // Test hook: deposit oil at edict N's origin once.
     {
