@@ -246,14 +246,26 @@ void Fire_OilTraced(edict_t *player) {
     }
 }
 
-// Light an oil patch. Full behaviour (cascade scheduling) is filled in by
-// Task 3; this minimal form flips it lit with a burn + DOT window.
+// Light an oil patch: flip it lit, set its burn + DOT windows, and schedule
+// nearby UNLIT patches to catch after a short delay so fire races down an oil
+// trail (discrete patch-to-patch -- no fluid solver). A just-scheduled patch
+// (ignite_at>0) is skipped so the cascade converges.
 static void oil_light_patch(oil_patch_t *o) {
     if (!o->active || o->lit) return;
     o->lit           = 1;
     o->burn_until    = g->time + OIL_BURN_SECS;
     o->next_dmg_time = g->time + OIL_DMG_INTERVAL;
     o->ignite_at     = 0.0f;
+
+    for (int i = 0; i < OIL_MAX_PATCHES; i++) {
+        oil_patch_t *n = &s_oil[i];
+        if (n == o || !n->active || n->lit || n->ignite_at > 0.0f) continue;
+        float dx = n->origin[0] - o->origin[0];
+        float dy = n->origin[1] - o->origin[1];
+        float dz = n->origin[2] - o->origin[2];
+        if (dx*dx + dy*dy + dz*dz <= OIL_CASCADE_RADIUS * OIL_CASCADE_RADIUS)
+            n->ignite_at = g->time + OIL_CASCADE_DELAY;
+    }
 }
 
 // The player edict (number 1), or NULL.
@@ -307,6 +319,11 @@ static void oil_frame(void) {
         live++;
 
         if (!o->lit) {
+            // Cascade: a scheduled neighbour catches when its delay elapses.
+            if (o->ignite_at > 0.0f && g->time >= o->ignite_at) {
+                oil_light_patch(o);
+                continue;   // already counted; handle as lit next tick
+            }
             // A burning edict standing in unlit oil sets it alight.
             for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
                 int en = eng->ED_GetNum(e);
