@@ -4,7 +4,9 @@
 
 **Goal:** Add flammable oil as a world substance — a bounded pool of floor "oil patches" you can deposit; patches persist, can be ignited (by a burning edict standing in them, or a debug trigger), do area damage-over-time while lit, ignite edicts standing in them, **cascade** fire to nearby patches (the oil-trail effect), and **coat** edicts so they ignite hotter/longer. Builds directly on F1's burn registry. No weapons yet (F3).
 
-**Architecture:** Extends `sim_fire.c` (the F1 module) with a fixed `oil_patch_t s_oil[]` pool (NOT edicts — keeps the 600-edict budget free) and a per-coated-edict side-array. A new `oil_frame()` step inside `Fire_Frame` ticks the pool at the existing 10 Hz: ignites scheduled/contacted patches, applies area DOT via F1's `Fire_Ignite` + `T_Damage`, schedules cascade, renders particles, feeds smoke. Lit oil reuses F1's flame-particle look; unlit oil is sparse dark particles. **No room-lighting** — `Lightmap_AddDelta`/M5 reveal is an F5 concern. No engine ABI change (`GAME_API_VERSION` stays 33).
+**Architecture:** Extends `sim_fire.c` (the F1 module) with a fixed `oil_patch_t s_oil[]` pool (NOT edicts — keeps the 600-edict budget free) and a per-coated-edict side-array. A new `oil_frame()` step inside `Fire_Frame` ticks the pool at the existing 10 Hz: ignites scheduled/contacted patches, applies area DOT via F1's `Fire_Ignite` + `T_Damage`, schedules cascade, renders particles, feeds smoke. Lit oil reuses F1's `SV_Fire` flame plume (rising `pt_fireblob`); unlit oil is sparse dark particles. **No room-lighting** — `Lightmap_AddDelta`/M5 reveal is an F5 concern. No engine ABI change — `GAME_API_VERSION` stays at **34** (F1 already bumped it 33→34 for `SV_Fire`; F2 adds no new ABI entries).
+
+> **Reconciliation note (2026-05-30, post-F1):** this plan was first drafted before the F1 visible-flame work landed. Two corrections were folded in afterward: (1) lit-oil flame now uses `eng->SV_Fire` (the rising `pt_fireblob` plume) instead of `eng->SV_Particle` — the latter is the falling `pt_grav` debris cone that F1 proved *cannot* read as flame; (2) the `fire_crand` particle-scatter helper is re-added (F1's cleanup dropped it as unused, F2 needs it again). Engine-API signatures used here were re-verified against the landed `game_api.h`.
 
 **Tech Stack:** C (game DLL), Zig build (`zig build game`), hot-reloadable `game.dll`, MCP rig for verification (`scripts/mcp_call.py`, port 9876).
 
@@ -92,6 +94,16 @@ typedef struct {
 } oil_patch_t;
 
 static oil_patch_t s_oil[OIL_MAX_PATCHES];
+```
+
+- [ ] **Step 2b: Restore the `fire_crand` particle-scatter helper**
+
+F1's final cleanup removed `fire_crand` as unused; F2's oil render (this task's unlit sheen + Task 2's flame) needs it again. Add it next to `fire_find_edict` near the top of `sim_fire.c`:
+
+```c
+// Centered random in [-1,1], for scattering oil/flame particles across a
+// patch. (F1 had this; its cleanup dropped it as unused -- F2 brings it back.)
+static float fire_crand(void) { return eng->Random() * 2.0f - 1.0f; }
 ```
 
 - [ ] **Step 3: Clear the oil pool in `Fire_LevelInit`**
@@ -364,16 +376,19 @@ In `oil_frame()`, replace the `// Lit-patch behaviour is added in Task 2; cascad
             }
         }
 
-        // Flame particles (reuse the F1 fire ramp) + smoke into the wind grid.
-        for (int p = 0; p < 4; p++) {
+        // Flame plume across the patch + smoke into the wind grid. MUST use
+        // SV_Fire (rising pt_fireblob -- the F1 look), NOT SV_Particle: the
+        // svc_particle/pt_grav path falls and sprays a debris cone, so it can
+        // never read as flame. This is the exact lesson F1 paid for -- see how
+        // Fire_Frame spawns its plume with eng->SV_Fire in sim_fire.c. SV_Fire
+        // takes no colour (the orange->grey ramp3 is internal); count drives
+        // how many blobs per call.
+        for (int p = 0; p < 3; p++) {
             vec3_t org = { o->origin[0] + fire_crand() * o->radius * 0.7f,
                            o->origin[1] + fire_crand() * o->radius * 0.7f,
-                           o->origin[2] + 4.0f + eng->Random() * 12.0f };
-            vec3_t dir = { fire_crand() * 10.0f,
-                           fire_crand() * 10.0f,
-                           20.0f + eng->Random() * 20.0f };
-            float color = 109.0f + (float)((int)(eng->Random() * 3.0f));
-            eng->SV_Particle(org, dir, color, 1.0f);
+                           o->origin[2] + 4.0f };
+            vec3_t up  = { 0.0f, 0.0f, 12.0f };
+            eng->SV_Fire(org, up, 4.0f);
         }
         Wind_AddSmoke(o->origin, FIRE_SMOKE_AMOUNT, o->radius);
 
