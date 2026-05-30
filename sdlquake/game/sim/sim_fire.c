@@ -307,6 +307,16 @@ static void oil_frame(void) {
         live++;
 
         if (!o->lit) {
+            // A burning edict standing in unlit oil sets it alight.
+            for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+                int en = eng->ED_GetNum(e);
+                if (en < 0 || en >= FIRE_MAX_BURNING || !Fire_IsBurning(en)) continue;
+                float dx = e->v.origin[0] - o->origin[0];
+                float dy = e->v.origin[1] - o->origin[1];
+                if (dx*dx + dy*dy <= o->radius * o->radius) { oil_light_patch(o); break; }
+            }
+            if (o->lit) continue;   // lit this tick (already counted); handle as lit next tick
+
             // Sparse dark sheen so the player can see where oil lies (a proper
             // floor decal is a later-stage upgrade; particles are the MVP).
             vec3_t org = { o->origin[0] + fire_crand() * o->radius * 0.6f,
@@ -317,7 +327,54 @@ static void oil_frame(void) {
             continue;
         }
 
-        // Lit-patch behaviour is added in Task 2; cascade in Task 3.
+        // --- Lit patch ---
+        if (g->time >= o->burn_until) {
+            o->active = 0;   // oil consumed
+            continue;
+        }
+
+        // Area damage + contact ignition for edicts standing in the patch.
+        if (g->time >= o->next_dmg_time) {
+            o->next_dmg_time = g->time + OIL_DMG_INTERVAL;
+            for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+                if (!e->v.takedamage) continue;
+                float dx = e->v.origin[0] - o->origin[0];
+                float dy = e->v.origin[1] - o->origin[1];
+                if (dx*dx + dy*dy > o->radius * o->radius) continue;
+                T_Damage(e, g->world, g->world, OIL_PATCH_DPS * OIL_DMG_INTERVAL);
+                Fire_Ignite(e, OIL_IGNITE_SECS,
+                            eng->Cvar_VariableValue("fire_dps"), g->world);
+            }
+        }
+
+        // Flame plume across the patch + smoke into the wind grid. MUST use
+        // SV_Fire (rising pt_fireblob -- the F1 look), NOT SV_Particle: the
+        // svc_particle/pt_grav path falls and sprays a debris cone, so it can
+        // never read as flame. SV_Fire takes no colour (orange->grey ramp3 is
+        // internal); count drives blobs per call.
+        for (int p = 0; p < 3; p++) {
+            vec3_t org = { o->origin[0] + fire_crand() * o->radius * 0.7f,
+                           o->origin[1] + fire_crand() * o->radius * 0.7f,
+                           o->origin[2] + 4.0f };
+            vec3_t up  = { 0.0f, 0.0f, 12.0f };
+            eng->SV_Fire(org, up, 4.0f);
+        }
+        Wind_AddSmoke(o->origin, FIRE_SMOKE_AMOUNT, o->radius);
+
+        // Fire stimulus so AI registers/avoids the burning oil. F2 note: many
+        // patches emitting at 10 Hz can crowd the 512-entry stim ring (see the
+        // F1 note in Fire_Frame) -- revisit throttling if it starves stims.
+        {
+            stimulus_t st;
+            memset(&st, 0, sizeof(st));
+            st.kind         = STIM_FIRE;
+            st.origin[0]    = o->origin[0];
+            st.origin[1]    = o->origin[1];
+            st.origin[2]    = o->origin[2];
+            st.intensity    = 0.8f;
+            st.source_edict = -1;   // world-sourced; no self-react concern
+            Stim_Emit(&st);
+        }
     }
 
     eng->Cvar_SetValue("fire_oil_count", (float)live);
