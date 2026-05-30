@@ -1668,6 +1668,7 @@ static void ImpulseCommands(void) {
     if (imp == 211) Fire_OilTraced(self);      // debug: deposit oil at crosshair
     if (imp == 212) Fire_GiveWeapons(self);    // M8/F3: grant fire weapons + cells
     if (imp == 213) Flammables_DebugSpawnBarrel(self);   // M8/F4 debug: oil barrel ahead
+    if (imp == 214) Flammables_DebugSpawnBreakable(self);   // M8/F4 debug: breakable ahead
     if (imp == 255) QuadCheat();
     self->v.impulse = 0;
 }

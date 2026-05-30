@@ -74,3 +74,71 @@ void Flammables_DebugSpawnBarrel(edict_t *player) {
     spawn_misc_oilbarrel(e);
     eng->Con_Print("fire: spawned oil barrel ahead\n");
 }
+
+// ---------------------------------------------------------------------------
+// Breakable props. Flammability is automatic: takedamage + health + th_die
+// means the fire DOT (sim_fire.c) burns them down to breakable_die. They also
+// break to bullets/axe. health is tuned so fire_dps(8) consumes one in ~3s.
+// ---------------------------------------------------------------------------
+static void breakable_die(edict_t *self) {
+    g->self = self;
+    self->v.takedamage = DAMAGE_NO;
+    self->v.solid      = SOLID_NOT;
+
+    // The AI already understands this stimulus (sim_ai.c, 768u reference).
+    stimulus_t s;
+    memset(&s, 0, sizeof(s));
+    s.kind         = STIM_PROP_BROKEN;
+    s.origin[0]    = self->v.origin[0];
+    s.origin[1]    = self->v.origin[1];
+    s.origin[2]    = self->v.origin[2];
+    s.intensity    = 0.8f;
+    s.source_edict = eng->ED_GetNum(self);
+    Stim_Emit(&s);
+
+    // Splinter puff (brown particle band) + a wood-ish crack. No wood-chunk
+    // model ships in shareware, so particles stand in for debris (MVP).
+    vec3_t up = { 0.0f, 0.0f, 0.0f };
+    eng->SV_Particle(self->v.origin, up, 116, 64);
+    eng->SV_StartSound(self, CHAN_BODY, "weapons/ax1.wav", 1, ATTN_NORM);
+
+    eng->ED_Free(self);
+}
+
+// Brush form (map-authored crates/walls): model comes from the .map ("*N").
+void spawn_func_breakable(edict_t *e) {
+    g->self = e;
+    e->v.solid    = SOLID_BSP;
+    e->v.movetype = MOVETYPE_PUSH;
+    eng->SV_SetModel(e, e->v.model);     // brush model from the map
+    if (e->v.health <= 0) e->v.health = 40;
+    e->v.takedamage = DAMAGE_AIM;
+    e->v.th_die     = breakable_die;
+}
+
+// Point form (spawn-anywhere debug/test): reuse the box bmodel.
+void spawn_misc_breakable(edict_t *e) {
+    g->self = e;
+    e->v.solid    = SOLID_BBOX;
+    e->v.movetype = MOVETYPE_NONE;
+    eng->PrecacheModel("maps/b_explob.bsp");
+    eng->SV_SetModel(e, "maps/b_explob.bsp");
+    if (e->v.health <= 0) e->v.health = 25;   // ~3s under fire_dps 8
+    e->v.takedamage = DAMAGE_AIM;
+    e->v.th_die     = breakable_die;
+    e->v.origin[2] += 2;
+    eng->SV_DropToFloor(e);
+}
+
+// Debug spawn (impulse 214): drop a breakable ~80u in front of the player.
+void Flammables_DebugSpawnBreakable(edict_t *player) {
+    eng->MakeVectors(player->v.v_angle);
+    edict_t *e = eng->ED_Alloc();
+    e->v.origin[0] = player->v.origin[0] + g->v_forward[0] * 80.0f;
+    e->v.origin[1] = player->v.origin[1] + g->v_forward[1] * 80.0f;
+    e->v.origin[2] = player->v.origin[2];
+    e->v.classname = "misc_breakable";
+    e->v.health    = 25;
+    spawn_misc_breakable(e);
+    eng->Con_Print("fire: spawned breakable ahead\n");
+}
