@@ -2013,6 +2013,31 @@ static void Host_OpenDoorsSecret_f (void)
 
 /*
 ==================
+Host_Serverflags_f
+
+Dev/test: set the episode-sigil bits directly. Writes the persistent
+store (svs.serverflags, survives changelevel), the QC global
+(pr_global_struct->serverflags, used by the items stat at sv_main.c:649),
+and the game-DLL mirror (game_globals.serverflags, read by the nav query)
+so the change takes effect immediately without a reload.
+==================
+*/
+void Host_Serverflags_f (void)
+{
+	if (Cmd_Argc() != 2)
+	{
+		Con_Printf ("serverflags is %d\n", (int)svs.serverflags);
+		return;
+	}
+	int v = atoi(Cmd_Argv(1));
+	svs.serverflags = v;
+	pr_global_struct->serverflags = v;
+	game_globals.serverflags = v;
+	Con_Printf ("serverflags set to %d\n", v);
+}
+
+/*
+==================
 Host_InitCommands
 ==================
 */
@@ -2066,4 +2091,5 @@ void Host_InitCommands (void)
 
 	Cmd_AddCommand ("opendoors",        Host_OpenDoors_f);
 	Cmd_AddCommand ("opendoors_secret", Host_OpenDoorsSecret_f);
+	Cmd_AddCommand ("serverflags", Host_Serverflags_f);
 }
