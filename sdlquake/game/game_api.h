@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 33
+#define GAME_API_VERSION 34
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -233,6 +233,13 @@ typedef struct engine_api_s {
     // not in a tracked frame.
     void  (*Perf_PushScope)(const char *name);
     void  (*Perf_PopScope) (void);
+
+    // Fire plume for a burning entity (Phase 8 / M8). Sibling of SV_Smoke:
+    // spawns engine pt_fire particles that rise (orange ramp3 -> grey, ~1.2s).
+    // The svc_particle/pt_grav path can only fall and sprays debris, so it
+    // can't read as flame. `dir` is a base velocity (per-particle ±3 swirl
+    // added); count is particles per call. Single-player only.
+    void  (*SV_Fire)(vec3_t origin, vec3_t dir, float count);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

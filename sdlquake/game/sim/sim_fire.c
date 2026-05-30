@@ -14,6 +14,9 @@ extern engine_api_t   *eng;
 extern game_globals_t *g;
 
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
+// Corpses are SOLID_TRIGGER, which eng->SV_Traceline skips; this folds any
+// closer corpse hit back into g->trace_* (same helper the weapons use).
+extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
 
 #define FIRE_MAX_BURNING     SIM_MAX_BRAINS    // one slot per possible edict
 #define FIRE_TICK_HZ         10.0f
@@ -29,12 +32,11 @@ typedef struct {
     float dps;
     int   igniter_edict;     // -1 = world / unknown
     float next_dmg_time;
+    int   corpse_timed;      // 1 once the corpse burn window has been applied
 } fire_burn_t;
 
 static fire_burn_t s_burning[FIRE_MAX_BURNING];   // indexed by edict number
 static float       s_next_tick;
-
-static float fire_crand(void) { return 2.0f * (eng->Random() - 0.5f); }
 
 // O(MAX_EDICTS) walk — acceptable at 10 Hz over a small registry (mirrors
 // the documented O(N) pattern in sim_ai.c).
@@ -52,6 +54,8 @@ void Fire_Init(void) {
     eng->Cvar_Register("fire_dps",        "8");
     eng->Cvar_Register("fire_secs",       "5");
     eng->Cvar_Register("fire_ignite_num", "-1");   // MCP/console test hook
+    eng->Cvar_Register("fire_noflee",     "0");    // debug: burning monsters stand still
+    eng->Cvar_Register("fire_corpse_secs","8");    // how long a corpse smoulders
 }
 
 void Fire_LevelInit(void) {
@@ -62,6 +66,7 @@ void Fire_LevelInit(void) {
 static void fire_clear_slot(int n, edict_t *e) {
     if (n < 0 || n >= FIRE_MAX_BURNING) return;
     s_burning[n].active = 0;
+    s_burning[n].corpse_timed = 0;
     if (e) e->v.effects = (float)((int)e->v.effects & ~EF_DIMLIGHT);
 }
 
@@ -72,6 +77,7 @@ void Fire_Ignite(edict_t *e, float seconds, float dps, edict_t *igniter) {
     fire_burn_t *f = &s_burning[n];
     float until = g->time + seconds;
     if (!f->active || until > f->burn_until) f->burn_until = until;
+    if (!f->active) f->corpse_timed = 0;   // fresh ignite re-evaluates the corpse window
     f->active        = 1;
     // Re-igniting an already-burning edict is last-writer-wins on dps/igniter
     // (the timer above only ever extends, never shortens). Intentional: a
@@ -131,6 +137,7 @@ void Fire_IgniteTraced(edict_t *player) {
                    src[1] + g->v_forward[1] * 2048.0f,
                    src[2] + g->v_forward[2] * 2048.0f };
     eng->SV_Traceline(src, end, 0, player);
+    Corpse_BulletTrace(src, end, player);   // let the trace hit SOLID_TRIGGER corpses
     edict_t *t = g->trace_ent;
     if (t && t != g->world && t->v.takedamage) {
         Fire_Ignite(t, secs, dps, player);
@@ -162,36 +169,67 @@ void Fire_Frame(void) {
         fire_burn_t *f = &s_burning[n];
         if (!f->active) continue;
 
+        // Water or slime douses the fire; lava must NOT (it is fire). Check
+        // both the origin-point contents and the physics waterlevel so the
+        // fire goes out even when the origin sits above the surface in
+        // shallower water (e.g. landing in a knee/waist-deep pool).
         int   con      = eng->SV_PointContents(e->v.origin);
-        int   inwater  = (con == CONTENT_WATER || con == CONTENT_SLIME);
+        int   wtype    = (int)e->v.watertype;
+        int   inwater  = (con == CONTENT_WATER || con == CONTENT_SLIME)
+                       || ((int)e->v.waterlevel >= 2 &&
+                           (wtype == CONTENT_WATER || wtype == CONTENT_SLIME));
         int   dead     = (e->v.health <= 0.0f || e->v.deadflag != DEAD_NO);
-        if (e->free || g->time >= f->burn_until || dead || inwater) {
+
+        // A burning body is fresh fuel: the first tick it is (or is ignited
+        // as) a corpse, give it a full finite burn window from *now* so it
+        // smoulders for a satisfying while -- independent of how little of the
+        // live burn was left when it died. One-time per ignite (corpse_timed),
+        // so it still goes out on its own afterwards.
+        if (dead && !f->corpse_timed) {
+            f->corpse_timed = 1;
+            float until = g->time + eng->Cvar_VariableValue("fire_corpse_secs");
+            if (until > f->burn_until) f->burn_until = until;
+        }
+
+        // Death does NOT extinguish: corpses are flammable and keep burning
+        // until the timer expires (or they're freed / submerged). A monster
+        // that dies from the burn therefore keeps smouldering as a corpse.
+        if (e->free || g->time >= f->burn_until || inwater) {
             fire_clear_slot(n, e->free ? 0 : e);
             continue;
         }
 
         // Damage in discrete chunks so armor/save math stays meaningful.
-        if (g->time >= f->next_dmg_time && e->v.takedamage) {
+        // Skip on corpses: a dead body just burns visually -- re-damaging it
+        // would drive health further negative and gib it mid-burn.
+        if (!dead && g->time >= f->next_dmg_time && e->v.takedamage) {
             f->next_dmg_time = g->time + FIRE_DMG_INTERVAL;
             edict_t *attacker = fire_find_edict(f->igniter_edict);
             if (!attacker || attacker->free) attacker = g->world;
             T_Damage(e, g->world, attacker, f->dps * FIRE_DMG_INTERVAL);
         }
-        // Dynamic light: a real-time dlight follows the moving fire. (Static
-        // oil-patch fires will use Lightmap_AddDelta in F2; moving burning
-        // edicts use EF_DIMLIGHT to avoid lightmap-delta accumulation.)
+        // Fire visuals: a warm dynamic-light glow plus a rising flame plume.
+        // SV_Fire spawns engine pt_fire particles (orange ramp3, drift upward,
+        // fade orange->grey over ~1.2s). The svc_particle/pt_grav path only
+        // falls and sprays a debris cone, so it can't read as flame.
         e->v.effects = (float)((int)e->v.effects | EF_DIMLIGHT);
-
-        // Flame particles — small upward jet in the Quake fire/orange ramp.
-        for (int p = 0; p < 3; p++) {
-            vec3_t org = { e->v.origin[0] + fire_crand() * 8.0f,
-                           e->v.origin[1] + fire_crand() * 8.0f,
-                           e->v.origin[2] + 8.0f + eng->Random() * 24.0f };
-            vec3_t dir = { fire_crand() * 8.0f,
-                           fire_crand() * 8.0f,
-                           24.0f + eng->Random() * 24.0f };
-            float  color = 109.0f + (float)((int)(eng->Random() * 3.0f)); // 109..111
-            eng->SV_Particle(org, dir, color, 1.0f);
+        {
+            // Spawn the plume across the entity's world bbox so it engulfs the
+            // body in any pose. Corpses are already flattened to a low prone
+            // slab by Corpse_LayProne (combat.c) -- so absmin..absmax hugs the
+            // sprawled body, while a standing monster gets a full-height
+            // column. Keying off origin+const would float the fire above a
+            // corpse, whose origin stays at standing height.
+            float *mn = e->v.absmin, *mx = e->v.absmax;
+            float cx = (mn[0] + mx[0]) * 0.5f;
+            float cy = (mn[1] + mx[1]) * 0.5f;
+            float h  = mx[2] - mn[2];
+            if (h < 8.0f) h = 8.0f;
+            vec3_t up = { 0.0f, 0.0f, 10.0f };
+            for (int s = 0; s < 3; s++) {
+                vec3_t org = { cx, cy, mn[2] + h * ((s + 0.5f) / 3.0f) };
+                eng->SV_Fire(org, up, 5.0f);
+            }
         }
 
         // Feed the M4 wind/smoke grid so fire throws up a smoke screen.

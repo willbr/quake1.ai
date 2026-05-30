@@ -163,6 +163,7 @@ void     SV_BroadcastPrintf(const char *fmt, ...);
 void     SV_StartSound(edict_t *entity, int channel, char *sample, int volume, float attenuation);
 void     SV_StartParticle(float *org, float *dir, int color, int count);
 void     R_AddSmokePuff(float *org, float *dir, int color, int count);
+void     R_AddFire(float *org, float *dir, int count);
 void     SV_LinkEdict(edict_t *ent, qboolean touch_triggers);
 void     SV_UnlinkEdict(edict_t *ent);
 void     SV_MakeStatic(edict_t *ent);
@@ -768,6 +769,11 @@ static void engine_sv_smoke(float *org, float *dir, float color, float count)
     R_AddSmokePuff(org, dir, (int)color, (int)count);
 }
 
+static void engine_sv_fire(float *org, float *dir, float count)
+{
+    R_AddFire(org, dir, (int)count);
+}
+
 void R_QueueSmokeCell(const float *org, float world_size, float density); // r_part.c
 static void engine_draw_smoke_cell(float *org, float world_size, float density)
 {
@@ -1025,6 +1031,7 @@ static engine_api_t engine_funcs = {
     engine_particles_push_tube,
     Perf_PushScope,
     Perf_PopScope,
+    engine_sv_fire,
 };
 
 // ---------------------------------------------------------------------------

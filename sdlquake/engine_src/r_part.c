@@ -477,7 +477,7 @@ if (msgcount == 255)
 	count = 1024;
 else
 	count = msgcount;
-	
+
 	R_RunParticleEffect (org, dir, color, count);
 }
 	
@@ -1117,6 +1117,56 @@ void R_AddSmokePuff (vec3_t org, vec3_t dir, int color, int count)
 		{
 			p->org[j] = org[j] + ((rand() & 7) - 4);	// ±4 unit jitter
 			p->vel[j] = dir[j] + ((rand() & 15) - 8);	// dir + ±8 noise
+		}
+	}
+}
+
+/*
+===============
+R_AddFire
+
+Sustained flame plume for a burning entity (Phase 8 / M8). Sibling of
+R_AddSmokePuff: spawns engine pt_fire particles directly so the flame can
+actually rise. The svc_particle/pt_grav path (R_RunParticleEffect) only ever
+falls and sprays a ±150 ups debris cone, so it can't read as fire. pt_fire
+seeds at the orange end of ramp3 (0x6d/0x6b), drifts upward (vel[2]+=grav each
+frame in R_DrawParticles), and fades orange->grey before dying at ramp>=6
+(~1.2 s) -- the same particle the rocket trail uses. Single-player only.
+===============
+*/
+void R_AddFire (vec3_t org, vec3_t dir, int count)
+{
+	int			i, j;
+	particle_t	*p;
+
+	// Yield to gameplay particles when the pool is below the reserve, so a
+	// sustained blaze can't starve blood / explosion particles. Same guard
+	// (and early-bail walk) as R_AddSmokePuff.
+	{
+		int need = SMOKE_GAMEPLAY_RESERVE + count;
+		particle_t *probe = free_particles;
+		while (need > 0 && probe) { probe = probe->next; need--; }
+		if (need > 0) return;
+	}
+
+	for (i=0 ; i<count ; i++)
+	{
+		if (!free_particles)
+			return;
+		p = free_particles;
+		free_particles = p->next;
+		p->next = active_particles;
+		active_particles = p;
+		p->flags = 0;
+
+		p->die   = cl.time + 2;			// ramp>=6 kills it first (~1.2 s)
+		p->ramp  = rand() & 1;			// 0/1 -> orange end of ramp3
+		p->color = ramp3[(int)p->ramp];
+		p->type  = pt_fire;
+		for (j=0 ; j<3 ; j++)
+		{
+			p->org[j] = org[j] + ((rand() & 15) - 8);	// ±8 around the source
+			p->vel[j] = dir[j] + ((rand() & 7) - 3);	// mostly dir, slight swirl
 		}
 	}
 }

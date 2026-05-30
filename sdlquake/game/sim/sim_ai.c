@@ -395,13 +395,17 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
     if (b->burning) {
         // Panic: run away from whoever set us alight (fall back to the last
         // known threat position), suppress everything else this tick.
-        vec3_t away;
-        if (!Fire_GetIgniterOrigin(b->edict_num, away)) {
-            away[0] = b->last_known_pos[0];
-            away[1] = b->last_known_pos[1];
-            away[2] = b->last_known_pos[2];
+        // fire_noflee (debug) freezes burning monsters so the fire visuals
+        // can be framed for verification.
+        if (eng->Cvar_VariableValue("fire_noflee") == 0.0f) {
+            vec3_t away;
+            if (!Fire_GetIgniterOrigin(b->edict_num, away)) {
+                away[0] = b->last_known_pos[0];
+                away[1] = b->last_known_pos[1];
+                away[2] = b->last_known_pos[2];
+            }
+            flee_from(b, e, away, 10.0f);
         }
-        flee_from(b, e, away, 10.0f);
         return;
     } else {
         // Not burning: give active fire a wide berth. Radius mirrors
