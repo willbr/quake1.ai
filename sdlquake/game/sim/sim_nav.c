@@ -1842,6 +1842,244 @@ static int bake_floodfill(sim_navmesh_t *m) {
         }
     }
 
+    // --- Phase 4.8: bossgate open-passage supplemental flood ---------------
+    // The func_bossgate slab caps a deep shaft; the boss trigger_changelevel
+    // sits at the bottom (~z=-664). The slab was kept SOLID for the main
+    // flood (Phase 4.7), so the descent staircase + shaft floor baked as
+    // DISCONNECTED components below the slab-top nodes. Here we set the
+    // bossgate NON-solid and run a bounded supplemental walk-flood from the
+    // slab-area nodes, so the flood descends the staircase that the solid
+    // slab previously walled off. New WALK edges are tagged
+    // requires=IT_ALL_SIGILS, so A* only descends once you hold all four
+    // sigils (the slab is gone). A bounded DROP-edge pass then stitches the
+    // big shaft drops (staircase bottom -> mid-shaft -> boss floor) that
+    // exceed the walk-flood's POST_WALK_MAX_DROP_Z step limit.
+    int bossgate_walk_added = 0, bossgate_drop_added = 0;
+    {
+        const float GATE_OPEN_RADIUS = 900.0f;
+        edict_t *bg = eng->ED_Find(g->world, "classname", "func_bossgate");
+        if (bg && bg->v.solid > (float)SOLID_NOT) {
+            unsigned int open_req = (unsigned int)IT_ALL_SIGILS;
+            float cx = bg->v.origin[0] + (bg->v.mins[0]+bg->v.maxs[0])*0.5f;
+            float cy = bg->v.origin[1] + (bg->v.mins[1]+bg->v.maxs[1])*0.5f;
+            float r2 = GATE_OPEN_RADIUS * GATE_OPEN_RADIUS;
+            float saved_solid = bg->v.solid;
+            bg->v.solid = (float)SOLID_NOT;
+
+            // First node index that belongs to the supplemental flood: any
+            // node added below this is NEW (used by the drop-edge pass so it
+            // only synthesizes drops touching the descent, never the rest of
+            // the level).
+            int sub_first_new = m->point_count;
+
+            int sub_head = q_tail;
+            for (int p = 0; p < m->point_count; p++) {
+                float dx = m->points[p].pos[0]-cx, dy = m->points[p].pos[1]-cy;
+                if (dx*dx + dy*dy > r2) continue;
+                if (q_tail >= q_cap) {
+                    int nc = q_cap ? q_cap*2 : 256;
+                    int *nq = realloc(queue, sizeof(int)*nc);
+                    if (!nq) break;
+                    queue = nq; q_cap = nc;
+                }
+                queue[q_tail++] = p;
+            }
+
+            int sub_iters = 0;
+            while (sub_head < q_tail && sub_iters < MAX_EXPAND_ITERS) {
+                sub_iters++;
+                int cur = queue[sub_head++];
+                if (cur < 0 || cur >= m->point_count) continue;
+                vec3_t cur_pos = { m->points[cur].pos[0], m->points[cur].pos[1],
+                                   m->points[cur].pos[2] };
+                float ddx = cur_pos[0]-cx, ddy = cur_pos[1]-cy;
+                if (ddx*ddx + ddy*ddy > r2) continue;
+
+                for (int d = 0; d < 8; d++) {
+                    vec3_t scratch;
+                    if (!seat_probe(probe, cur_pos, scratch)) break;
+                    probe->v.flags = (float)((int)probe->v.flags | FL_PARTIALGROUND);
+                    if (!eng->SV_WalkMove(probe, k_yaws[d], FLOOD_STEP)) continue;
+                    if (!eng->SV_DropToFloor(probe)) continue;
+                    vec3_t end = { probe->v.origin[0], probe->v.origin[1],
+                                   probe->v.origin[2] };
+                    float dz = end[2] - cur_pos[2];
+                    if (dz < -POST_WALK_MAX_DROP_Z || dz > POST_WALK_MAX_DROP_Z)
+                        continue;
+                    int next_idx = grid_find(&grd, m, end);
+                    int is_new = 0;
+                    if (next_idx < 0) {
+                        if (m->point_count >= MAX_NODES) continue;
+                        next_idx = add_point(m, &cap_points, &grd, end);
+                        if (next_idx < 0) continue;
+                        is_new = 1;
+                    }
+                    if (next_idx == cur) continue;
+                    int dup = 0;
+                    for (int o0 = m->edge_count-1; o0 >= 0 && o0 > m->edge_count-64; o0--) {
+                        if (m->edges[o0].from == cur && m->edges[o0].to == next_idx) { dup = 1; break; }
+                    }
+                    if (!dup) {
+                        float ex = m->points[next_idx].pos[0]-cur_pos[0];
+                        float ey = m->points[next_idx].pos[1]-cur_pos[1];
+                        float ez = m->points[next_idx].pos[2]-cur_pos[2];
+                        float w  = (float)sqrt(ex*ex+ey*ey+ez*ez);
+                        if (w < 1.0f) w = 1.0f;
+                        if (add_edge(m, &cap_edges, cur, next_idx, w,
+                                     NAV_EDGE_WALK, open_req, NAV_PHASE_BFS_WALK)) {
+                            bossgate_walk_added++;
+                        }
+                    }
+                    if (is_new) {
+                        if (q_tail >= q_cap) {
+                            int nc = q_cap ? q_cap*2 : 256;
+                            int *nq = realloc(queue, sizeof(int)*nc);
+                            if (!nq) continue;
+                            queue = nq; q_cap = nc;
+                        }
+                        queue[q_tail++] = next_idx;
+                    }
+                }
+            }
+
+            // --- Phase 4.8b: shaft fall-chain (vertical drop synthesis) ----
+            // The shaft is a stacked descent: -360 plateau -> -448 ledge ->
+            // boss floor -688, with the lower floors offset and never baked
+            // (they were unreachable while the slab walled the shaft off, so
+            // there is no node to pair a Phase-3.5-style drop against). When
+            // the slab vanishes the player walks off a ledge edge and FALLS
+            // straight down the open hole through each floor. Model that
+            // directly: from every node in the radius, sweep the player bbox
+            // straight DOWN (up to FALL_MAX) at the node's XY and at a ring of
+            // nudged XY offsets (to find the hole over the open shaft, not the
+            // floor the node already stands on). Wherever the sweep lands on a
+            // LOWER floor, snap to an existing node (grid_find) or seat a new
+            // one, add a DROP edge tagged requires=open_req, and enqueue the
+            // landing node so the chain keeps falling until it reaches the
+            // boss-floor component. Bounded to the gate radius + node cap.
+            const float FALL_MAX      = 720.0f;  // boss floor is ~688 down
+            const float FALL_MIN_DZ   = 56.0f;   // ignore tiny steps
+            vec3_t player_mins = { -16.0f, -16.0f, -24.0f };
+            vec3_t player_maxs = {  16.0f,  16.0f,  32.0f };
+            // Ring of XY probe offsets: node centre + 8 nudges one body-width
+            // out, so a node sitting at a ledge edge can find the adjacent
+            // open shaft to fall down.
+            const float NUDGE = 28.0f;
+            float ring[9][2] = {
+                {0,0}, {NUDGE,0}, {-NUDGE,0}, {0,NUDGE}, {0,-NUDGE},
+                {NUDGE,NUDGE}, {NUDGE,-NUDGE}, {-NUDGE,NUDGE}, {-NUDGE,-NUDGE}
+            };
+            int fall_head = q_tail;
+            for (int p = 0; p < m->point_count; p++) {
+                float dx = m->points[p].pos[0]-cx, dy = m->points[p].pos[1]-cy;
+                if (dx*dx + dy*dy > r2) continue;
+                if (q_tail >= q_cap) {
+                    int nc = q_cap ? q_cap*2 : 256;
+                    int *nq = realloc(queue, sizeof(int)*nc);
+                    if (!nq) break;
+                    queue = nq; q_cap = nc;
+                }
+                queue[q_tail++] = p;
+            }
+            int fall_iters = 0;
+            while (fall_head < q_tail && fall_iters < MAX_EXPAND_ITERS) {
+                fall_iters++;
+                int cur = queue[fall_head++];
+                if (cur < 0 || cur >= m->point_count) continue;
+                vec3_t cp = { m->points[cur].pos[0], m->points[cur].pos[1],
+                              m->points[cur].pos[2] };
+                float cdx = cp[0]-cx, cdy = cp[1]-cy;
+                if (cdx*cdx + cdy*cdy > r2) continue;
+                // Lift/bridge/train standing nodes must not get free fall
+                // edges (same hazard as Phase 3.5).
+                if (m->points[cur].kind == NAV_NODE_BRIDGE_END ||
+                    m->points[cur].kind == NAV_NODE_PLAT_END ||
+                    m->points[cur].kind == NAV_NODE_TRAIN_END) continue;
+
+                int landed_best = -1;
+                float best_dz = 0.0f;
+                for (int r = 0; r < 9; r++) {
+                    vec3_t start = { cp[0]+ring[r][0], cp[1]+ring[r][1],
+                                     cp[2] + 1.0f };
+                    vec3_t end   = { start[0], start[1], cp[2] - FALL_MAX };
+                    eng->SV_TraceMove(start, player_mins, player_maxs, end, 1, NULL);
+                    // fraction==1 means open void (no floor within FALL_MAX);
+                    // allsolid/startsolid means we started inside geometry.
+                    if (g->trace_fraction >= 0.999f) continue;
+                    float land_z = g->trace_endpos[2];
+                    float dz = cp[2] - land_z;
+                    if (dz < FALL_MIN_DZ) continue;            // negligible
+                    if (dz > FALL_MAX)    continue;
+                    // Prefer the DEEPEST clean landing (the true hole).
+                    if (landed_best < 0 || dz > best_dz) {
+                        best_dz = dz; landed_best = r;
+                    }
+                }
+                if (landed_best < 0) continue;
+                // Recompute the chosen landing precisely.
+                vec3_t start = { m->points[cur].pos[0]+ring[landed_best][0],
+                                 m->points[cur].pos[1]+ring[landed_best][1],
+                                 m->points[cur].pos[2] + 1.0f };
+                vec3_t end   = { start[0], start[1], start[2] - 1.0f - FALL_MAX };
+                eng->SV_TraceMove(start, player_mins, player_maxs, end, 1, NULL);
+                if (g->trace_fraction >= 0.999f) continue;
+                vec3_t land = { g->trace_endpos[0], g->trace_endpos[1],
+                                g->trace_endpos[2] };
+                // Seat the landing on its floor so it matches grid nodes that
+                // were baked by SV_DropToFloor (origin at floor + stand).
+                vec3_t seated;
+                if (!seat_probe(probe, land, seated)) {
+                    seated[0]=land[0]; seated[1]=land[1]; seated[2]=land[2];
+                }
+                int next_idx = grid_find(&grd, m, seated);
+                int is_new = 0;
+                if (next_idx < 0) {
+                    if (m->point_count >= MAX_NODES) continue;
+                    next_idx = add_point(m, &cap_points, &grd, seated);
+                    if (next_idx < 0) continue;
+                    is_new = 1;
+                }
+                if (next_idx == cur) continue;
+                // Dedup recent edges.
+                int dup = 0;
+                for (int o0 = m->edge_count-1; o0 >= 0 && o0 > m->edge_count-128; o0--) {
+                    if (m->edges[o0].from == cur && m->edges[o0].to == next_idx) { dup = 1; break; }
+                }
+                if (!dup) {
+                    float ex = m->points[next_idx].pos[0]-m->points[cur].pos[0];
+                    float ey = m->points[next_idx].pos[1]-m->points[cur].pos[1];
+                    float ez = m->points[next_idx].pos[2]-m->points[cur].pos[2];
+                    float w  = (float)sqrt(ex*ex+ey*ey+ez*ez) + DROP_COST_BIAS;
+                    if (w < 1.0f) w = 1.0f;
+                    if (add_edge(m, &cap_edges, cur, next_idx, w,
+                                 NAV_EDGE_DROP_DOWN, open_req, NAV_PHASE_JUMP_DROP)) {
+                        bossgate_drop_added++;
+                    }
+                }
+                if (is_new) {
+                    if (q_tail >= q_cap) {
+                        int nc = q_cap ? q_cap*2 : 256;
+                        int *nq = realloc(queue, sizeof(int)*nc);
+                        if (!nq) continue;
+                        queue = nq; q_cap = nc;
+                    }
+                    queue[q_tail++] = next_idx;
+                }
+            }
+
+            bg->v.solid = saved_solid;
+            (void)sub_first_new;
+            // Fold descent edges into the global tallies so the bake-summary
+            // line stays accurate (walk = total - jump - drop - teleport).
+            drop_edges_added += bossgate_drop_added;
+            char buf[128];
+            snprintf(buf, sizeof(buf),
+                "sim_nav: bossgate descent flood added %d walk, %d drop edges\n",
+                bossgate_walk_added, bossgate_drop_added);
+            eng->Con_Print(buf);
+        }
+    }
+
     {
         char buf[200];
         snprintf(buf, sizeof(buf),
