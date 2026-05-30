@@ -25,6 +25,7 @@ extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
 #define FIRE_AI_AVOID_RADIUS 160.0f            // non-burning monsters flee fire within this
 #define FIRE_SMOKE_AMOUNT    0.12f
 #define FIRE_SMOKE_RADIUS    40.0f
+#define FIRE_STIM_INTERVAL   0.5f              // 2 Hz: STIM_FIRE emit cadence per source (was 10 Hz; ring-crowding fix)
 
 // --- Oil substance (F2) ---------------------------------------------------
 #define OIL_MAX_PATCHES      256
@@ -50,6 +51,7 @@ typedef struct {
     float next_dmg_time;
     int   corpse_timed;      // 1 once the corpse burn window has been applied
     float next_scorch;       // next g->time to stamp a scorch decal under the body
+    float next_fire_stim;    // next g->time this burning edict may emit STIM_FIRE (2 Hz throttle)
 } fire_burn_t;
 
 static fire_burn_t s_burning[FIRE_MAX_BURNING];   // indexed by edict number
@@ -65,6 +67,7 @@ typedef struct {
     float  ignite_at;       // >0: scheduled cascade ignition time; 0: not scheduled
     float  burn_until;      // when lit: expiry time
     float  next_dmg_time;   // when lit: next area-DOT application
+    float  next_fire_stim;  // when lit: next g->time this patch may emit STIM_FIRE (2 Hz throttle)
 } oil_patch_t;
 
 static oil_patch_t s_oil[OIL_MAX_PATCHES];
@@ -117,6 +120,7 @@ static void fire_clear_slot(int n, edict_t *e) {
     s_burning[n].active = 0;
     s_burning[n].corpse_timed = 0;
     s_burning[n].next_scorch = 0.0f;
+    s_burning[n].next_fire_stim = 0.0f;
     // Clear any oil coat too, so it can't linger onto a reused edict number
     // when this burn ends (extinguish / timeout / free). Mirrors how the burn
     // slot itself is cleared here. A coated-but-never-ignited edict that's
@@ -501,10 +505,12 @@ static void oil_frame(void) {
         }
         Wind_AddSmoke(o->origin, FIRE_SMOKE_AMOUNT, o->radius);
 
-        // Fire stimulus so AI registers/avoids the burning oil. F2 note: many
-        // patches emitting at 10 Hz can crowd the 512-entry stim ring (see the
-        // F1 note in Fire_Frame) -- revisit throttling if it starves stims.
-        {
+        // Fire stimulus so AI registers/avoids the burning oil. Throttled to
+        // FIRE_STIM_INTERVAL (2 Hz) per patch (F5: stim-ring-crowding fix) — a
+        // burning trail of dozens of patches at 10 Hz would otherwise saturate
+        // the ring. AI avoidance is unaffected (uses Fire_NearestHazard).
+        if (g->time >= o->next_fire_stim) {
+            o->next_fire_stim = g->time + FIRE_STIM_INTERVAL;
             stimulus_t st;
             memset(&st, 0, sizeof(st));
             st.kind         = STIM_FIRE;
@@ -609,11 +615,14 @@ void Fire_Frame(void) {
         Wind_AddSmoke(e->v.origin, FIRE_SMOKE_AMOUNT, FIRE_SMOKE_RADIUS);
 
         // Broadcast a fire stimulus so distant AI can register the threat.
-        // F2 note: many simultaneous fire sources (oil patches) emitting at
-        // 10 Hz each can crowd the 512-entry stim ring within the 5 s age
-        // window and starve sound/sight stims — revisit throttling / ring
-        // size when area fire lands.
-        {
+        // Throttled to FIRE_STIM_INTERVAL (2 Hz) per source: at 10 Hz a dozen
+        // simultaneous fires would saturate the 512-entry / 5 s stim ring and
+        // evict sound/sight stims. Fire doesn't move fast, so 2 Hz is ample for
+        // distant registration; AI *avoidance* uses Fire_NearestHazard (a direct
+        // registry query), so it is unaffected by this throttle. (F5: closes the
+        // F1/F2 stim-ring-crowding carry-forward.)
+        if (g->time >= f->next_fire_stim) {
+            f->next_fire_stim = g->time + FIRE_STIM_INTERVAL;
             stimulus_t st;
             memset(&st, 0, sizeof(st));
             st.kind          = STIM_FIRE;
