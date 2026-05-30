@@ -404,7 +404,8 @@ static void behavior_tick(ai_brain_t *b, edict_t *e) {
         flee_from(b, e, away, 10.0f);
         return;
     } else {
-        // Not burning: give active fire a wide berth.
+        // Not burning: give active fire a wide berth. Radius mirrors
+        // FIRE_AI_AVOID_RADIUS in sim_fire.c (a private #define; keep in sync).
         vec3_t hazard;
         if (Fire_NearestHazard(e->v.origin, 160.0f, hazard)) {
             flee_from(b, e, hazard, 8.0f);
