@@ -1,7 +1,7 @@
 # Fire & Oil (Phase 8 / M8) — Design
 
 **Date:** 2026-05-30
-**Status:** Designed; not started
+**Status:** F1 (burn primitive) implemented 2026-05-30; F2–F6 not started
 **Phase:** 8 (Immersive-Sim Systems) — milestone **M8**, follows M1–M7
 
 ## Goal
@@ -297,3 +297,14 @@ any map because the player makes their own oil. The systems are also exercised i
   perf capture.
 - **Stretch — oil decal & fuel gauge** would be the first things to add an ABI
   bump for, once the MVP proves the feel.
+- **F1-built; carried forward (from F1 reviews):**
+  - **Igniter kill-attribution (revisit in F5).** The burn registry stores the
+    igniter as an edict *number*; `fire_find_edict` could misresolve it if a
+    *monster* igniter is freed and its slot reused mid-burn. Unreachable in F1
+    (igniters are only the player and world), but F5's "burning enemy ignites
+    allies" makes monster igniters real — stamp/validate the igniter, or accept
+    the world fallback, then.
+  - **Stim-ring crowding (revisit in F2).** Each burning source emits
+    `STIM_FIRE` at 10 Hz into the 512-entry, 5 s stim ring; many simultaneous
+    oil-patch fires could evict sound/sight stims. Throttle or coalesce when
+    area fire lands. (Also noted in a code comment by the emit site.)
