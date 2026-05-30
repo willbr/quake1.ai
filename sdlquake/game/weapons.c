@@ -4,6 +4,7 @@
 #include "game_types.h"
 #include "game_defs.h"
 #include "weapons_phase6.h"
+#include "weapons_fire.h"
 #include "sim/sim.h"
 #include <string.h>
 #include <math.h>
@@ -299,6 +300,8 @@ void W_Precache(void) {
     eng->PrecacheSound("weapons/grenade.wav");
     eng->PrecacheSound("weapons/bounce.wav");
     eng->PrecacheSound("weapons/shotgn2.wav");
+    eng->PrecacheSound("ambience/fire1.wav");   // flamethrower loop (M8/F3)
+    WeaponsFire_Init();
 
     Phase6_PrecacheCommon();
 }
@@ -1657,10 +1660,11 @@ static void ImpulseCommands(void) {
     if (imp == 10)  CycleWeaponCommand();
     if (imp == 11)  ServerflagsCommand();
     if (imp == 12)  CycleWeaponReverseCommand();
-    if (imp >= 30 && imp <= 39) Phase6_ChangeWeapon(imp);   // Wolf3D + Doom1 roster
+    if (imp >= 30 && imp <= 41) Phase6_ChangeWeapon(imp);   // Wolf3D + Doom1 roster + F3 fire weapons (40,41)
     if (imp == 100) Phase6_CheatGiveAll();
     if (imp == 210) Fire_IgniteTraced(self);   // debug: ignite entity under crosshair
     if (imp == 211) Fire_OilTraced(self);      // debug: deposit oil at crosshair
+    if (imp == 212) Fire_GiveWeapons(self);    // M8/F3: grant fire weapons + cells
     if (imp == 255) QuadCheat();
     self->v.impulse = 0;
 }

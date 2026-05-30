@@ -6,6 +6,7 @@
 // weapons untouched.
 
 #include "weapons_phase6.h"
+#include "weapons_fire.h"
 #include "game_defs.h"
 
 #include <math.h>
@@ -744,6 +745,8 @@ void W_Attack_Phase6(void) {
         case IT2_WOLF_PISTOL:    W_FirePhase6_WolfPistol();   break;
         case IT2_WOLF_MACHINEGUN: W_FirePhase6_WolfMG();      break;
         case IT2_WOLF_CHAINGUN:  W_FirePhase6_WolfChaingun(); break;
+        case IT2_OILGUN:       W_FireOilGun();       break;
+        case IT2_FLAMETHROWER: W_FireFlamethrower(); break;
         default: /* unknown — silently noop */                break;
     }
 }
@@ -791,6 +794,14 @@ void W_SetCurrentAmmo_Phase6(int it2) {
         case IT2_WOLF_CHAINGUN:
             self->v.weaponmodel = "progs/v_wolfchaingun.spr";
             self->v.currentammo = self->v.ammo_bullets;
+            break;
+        case IT2_OILGUN:
+            self->v.weaponmodel = "progs/v_rock.mdl";    // grenade launcher model = oil sprayer
+            self->v.currentammo = self->v.ammo_cells;
+            break;
+        case IT2_FLAMETHROWER:
+            self->v.weaponmodel = "progs/v_light.mdl";   // lightning gun model = flamethrower
+            self->v.currentammo = self->v.ammo_cells;
             break;
         default:
             self->v.weaponmodel = "";
@@ -845,6 +856,8 @@ void Phase6_ChangeWeapon(int impulse) {
         case 37: flag = IT2_WOLF_PISTOL;    break;
         case 38: flag = IT2_WOLF_MACHINEGUN;break;
         case 39: flag = IT2_WOLF_CHAINGUN;  break;
+        case 40: flag = IT2_OILGUN;       break;
+        case 41: flag = IT2_FLAMETHROWER; break;
         default: return;
     }
 
@@ -863,10 +876,12 @@ void Phase6_CheatGiveAll(void) {
     self->v.items2 = (float)(
         IT2_DOOM_FIST | IT2_DOOM_PISTOL | IT2_DOOM_SHOTGUN |
         IT2_DOOM_CHAINGUN | IT2_DOOM_ROCKET | IT2_DOOM_CHAINSAW |
-        IT2_WOLF_KNIFE | IT2_WOLF_PISTOL | IT2_WOLF_MACHINEGUN | IT2_WOLF_CHAINGUN
+        IT2_WOLF_KNIFE | IT2_WOLF_PISTOL | IT2_WOLF_MACHINEGUN | IT2_WOLF_CHAINGUN |
+        IT2_OILGUN | IT2_FLAMETHROWER
     );
     if (self->v.ammo_bullets < 200) self->v.ammo_bullets = 200;
     if (self->v.ammo_shells  < 50 ) self->v.ammo_shells  = 50;
     if (self->v.ammo_rockets < 20 ) self->v.ammo_rockets = 20;
+    if (self->v.ammo_cells   < 200) self->v.ammo_cells   = 200;
     eng->Con_Print("phase 6: all weapons granted\n");
 }

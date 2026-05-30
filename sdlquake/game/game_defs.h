@@ -101,6 +101,9 @@
 #define IT2_WOLF_PISTOL     (1 << 7)
 #define IT2_WOLF_MACHINEGUN (1 << 8)
 #define IT2_WOLF_CHAINGUN   (1 << 9)
+// M8 / F3 fire weapons (continue the items2 parallel roster).
+#define IT2_OILGUN          (1 << 10)
+#define IT2_FLAMETHROWER    (1 << 11)
 
 // point contents
 #define CONTENT_EMPTY  (-1)

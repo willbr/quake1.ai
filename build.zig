@@ -430,6 +430,7 @@ pub fn build(b: *std.Build) void {
             "sdlquake/game/weapons.c",
             "sdlquake/game/weapons_phase6.c",
             "sdlquake/game/player_phase6.c",
+            "sdlquake/game/weapons_fire.c",
             "sdlquake/game/fight.c",
             "sdlquake/game/ai.c",
             "sdlquake/game/misc.c",
