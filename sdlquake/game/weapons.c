@@ -651,6 +651,8 @@ static void TraceAttack(float damage, vec3_t dir) {
         // Shootable brushes still take damage.
         if (g->trace_ent->v.takedamage)
             AddMultiDamage(g->trace_ent, damage);
+        // A bullet striking a surface inside an oil patch sets it alight.
+        Fire_LightOilNear(g->trace_endpos, 0.0f);
     }
 }
 

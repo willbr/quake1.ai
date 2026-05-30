@@ -234,6 +234,10 @@ void Fire_AddOil(const vec3_t origin, float radius, float amount);
 void Fire_OilTraced(edict_t *player);   // debug: deposit oil at crosshair
 // Ignite `e`, burning longer if it is currently oil-coated.
 void Fire_IgniteMaybeCoated(edict_t *e, float base_secs, float dps, edict_t *igniter);
+// Light unlit oil within (each patch's radius + `reach`) of `pos`; returns how
+// many patches it lit. reach 0 = the point is in the oil (bullet / crosshair);
+// reach = blast radius for an explosion that engulfs the oil.
+int  Fire_LightOilNear(const vec3_t pos, float reach);
 
 // ---------------------------------------------------------------------------
 // Arena (test)

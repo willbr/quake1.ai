@@ -181,9 +181,28 @@ int Fire_NearestHazard(const vec3_t pos, float radius, vec3_t out) {
 // Deposit a patch of flammable oil at `origin`. radius<=0 / amount<=0 use
 // defaults. Merges into a nearby unlit patch so dense deposits don't thrash
 // the pool; otherwise allocates a free slot, recycling the oldest if full.
-void Fire_AddOil(const vec3_t origin, float radius, float amount) {
+void Fire_AddOil(const vec3_t origin_in, float radius, float amount) {
     if (radius <= 0.0f) radius = OIL_DEFAULT_RADIUS;
     if (amount <= 0.0f) amount = OIL_DEFAULT_AMOUNT;
+
+    // Oil floats: if the deposit point is submerged, rise to just under the
+    // water/slime surface so the patch sits on the liquid instead of sinking
+    // to the floor beneath it.
+    vec3_t origin = { origin_in[0], origin_in[1], origin_in[2] };
+    {
+        int wc = eng->SV_PointContents(origin);
+        if (wc == CONTENT_WATER || wc == CONTENT_SLIME) {
+            vec3_t probe = { origin[0], origin[1], origin[2] };
+            for (int s = 0; s < 256; s++) {
+                probe[2] += 4.0f;
+                int pc = eng->SV_PointContents(probe);
+                if (pc != CONTENT_WATER && pc != CONTENT_SLIME) {
+                    origin[2] = probe[2] - 2.0f;
+                    break;
+                }
+            }
+        }
+    }
 
     // Merge into a nearby UNLIT patch so dense deposits don't thrash the pool.
     for (int i = 0; i < OIL_MAX_PATCHES; i++) {
@@ -249,23 +268,23 @@ void Fire_IgniteMaybeCoated(edict_t *e, float base_secs, float dps, edict_t *ign
     Fire_Ignite(e, secs, dps, igniter);
 }
 
-// Light the unlit oil patch that world point `pos` falls within (nearest if
-// several overlap). Returns 1 if one was lit. Lets the crosshair igniter light
-// oil by aiming at it, not just entities.
-static int oil_light_at(const vec3_t pos) {
-    int best = -1; float best2 = 1e30f;
+// Light every unlit oil patch whose footprint (its radius, plus `reach`)
+// contains world point `pos`; returns how many it lit. Public so weapon and
+// explosion impacts (and the crosshair igniter) set oil alight by point:
+// reach 0 = "the point is in the oil" (bullet / crosshair); reach = blast
+// radius = "the explosion engulfs the oil". Each lit patch cascades as usual.
+int Fire_LightOilNear(const vec3_t pos, float reach) {
+    int lit = 0;
     for (int i = 0; i < OIL_MAX_PATCHES; i++) {
         oil_patch_t *o = &s_oil[i];
         if (!o->active || o->lit) continue;
         float dx = pos[0] - o->origin[0];
         float dy = pos[1] - o->origin[1];
         float dz = pos[2] - o->origin[2];
-        float d2 = dx*dx + dy*dy + dz*dz;
-        if (d2 <= o->radius * o->radius && d2 < best2) { best2 = d2; best = i; }
+        float r  = o->radius + reach;
+        if (dx*dx + dy*dy + dz*dz <= r * r) { oil_light_patch(o); lit++; }
     }
-    if (best < 0) return 0;
-    oil_light_patch(&s_oil[best]);
-    return 1;
+    return lit;
 }
 
 void Fire_IgniteTraced(edict_t *player) {
@@ -285,7 +304,7 @@ void Fire_IgniteTraced(edict_t *player) {
     if (t && t != g->world && t->v.takedamage) {
         Fire_Ignite(t, secs, dps, player);
         eng->Con_Print("fire: ignited entity under crosshair\n");
-    } else if (oil_light_at(g->trace_endpos)) {
+    } else if (Fire_LightOilNear(g->trace_endpos, 0.0f) > 0) {
         // No flammable entity, but the crosshair landed in oil -- light it.
         eng->Con_Print("fire: lit oil at crosshair\n");
     } else {

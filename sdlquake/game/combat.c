@@ -473,6 +473,9 @@ void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t
         }
         head = head->v.chain;
     }
+    // An explosion that engulfs oil sets it alight (rockets, grenades, and any
+    // future exploding prop -- they all funnel through T_RadiusDamage).
+    Fire_LightOilNear(inflictor->v.origin, damage);
     }
 }
 
