@@ -147,6 +147,8 @@ static float sense_intensity(ai_brain_t *b, edict_t *e, const stimulus_t *s) {
             ref = 384.0f; break;
         case STIM_SMOKE:
             ref = b->sense_sight_range; break;
+        case STIM_FIRE:
+            ref = 512.0f; break;     // fire is alarming at medium range
         default:
             return 0.0f;
     }

@@ -196,5 +196,18 @@ void Fire_Frame(void) {
 
         // Feed the M4 wind/smoke grid so fire throws up a smoke screen.
         Wind_AddSmoke(e->v.origin, FIRE_SMOKE_AMOUNT, FIRE_SMOKE_RADIUS);
+
+        // Broadcast a fire stimulus so distant AI can register the threat.
+        {
+            stimulus_t st;
+            memset(&st, 0, sizeof(st));
+            st.kind          = STIM_FIRE;
+            st.origin[0]     = e->v.origin[0];
+            st.origin[1]     = e->v.origin[1];
+            st.origin[2]     = e->v.origin[2];
+            st.intensity     = 0.8f;
+            st.source_edict  = n;
+            Stim_Emit(&st);
+        }
     }
 }
