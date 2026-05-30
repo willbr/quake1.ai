@@ -377,7 +377,41 @@ static void walk_and_track(ai_brain_t *b, edict_t *e, const vec3_t target,
     // else: still turning, leave counter unchanged.
 }
 
+// Run directly away from `threat` (2D), projecting a target point well past
+// the monster so walk_and_track has somewhere to head. Phase 8 / M8.
+static void flee_from(ai_brain_t *b, edict_t *e, const vec3_t threat, float dist) {
+    float dx = e->v.origin[0] - threat[0];
+    float dy = e->v.origin[1] - threat[1];
+    float len = (float)sqrt(dx*dx + dy*dy);
+    if (len < 1.0f) { dx = 1.0f; dy = 0.0f; len = 1.0f; }  // threat on top of us
+    vec3_t target = { e->v.origin[0] + (dx / len) * 256.0f,
+                      e->v.origin[1] + (dy / len) * 256.0f,
+                      e->v.origin[2] };
+    walk_and_track(b, e, target, dist);
+}
+
 static void behavior_tick(ai_brain_t *b, edict_t *e) {
+    // Phase 8 / M8 — fire overrides normal behavior.
+    if (b->burning) {
+        // Panic: run away from whoever set us alight (fall back to the last
+        // known threat position), suppress everything else this tick.
+        vec3_t away;
+        if (!Fire_GetIgniterOrigin(b->edict_num, away)) {
+            away[0] = b->last_known_pos[0];
+            away[1] = b->last_known_pos[1];
+            away[2] = b->last_known_pos[2];
+        }
+        flee_from(b, e, away, 10.0f);
+        return;
+    } else {
+        // Not burning: give active fire a wide berth.
+        vec3_t hazard;
+        if (Fire_NearestHazard(e->v.origin, 160.0f, hazard)) {
+            flee_from(b, e, hazard, 8.0f);
+            return;
+        }
+    }
+
     switch (b->state) {
     case AI_IDLE: {
         if (b->patrol_route_id < 0) break;
@@ -483,6 +517,10 @@ void Sim_AI_Frame(void) {
             b->alert_level = 0;
             continue;
         }
+
+        // Phase 8 / M8 — mirror the fire registry so ai.c hooks and the
+        // behavior override can read b->burning cheaply (it's already loaded).
+        b->burning = Fire_IsBurning(b->edict_num);
 
         sense_tick(b, e);
         behavior_tick(b, e);
