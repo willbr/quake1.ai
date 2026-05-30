@@ -4,7 +4,6 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
-#include "weapons_fire.h"
 #include <string.h>
 #include <math.h>
 
@@ -365,7 +364,7 @@ void weapon_touch_fire(edict_t *self, edict_t *other) {
 
     other->v.items2 = (float)((int)other->v.items2 | flag);
     other->v.ammo_cells += 30;
-    if (other->v.ammo_cells > 100) other->v.ammo_cells = 100;
+    if (other->v.ammo_cells > 200) other->v.ammo_cells = 200;   // cell ceiling (never demote >100 holders)
 
     eng->SV_SPrint(other, 0, "You got the ");
     eng->SV_SPrint(other, 0, self->v.netname);

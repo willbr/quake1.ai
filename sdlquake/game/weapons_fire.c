@@ -6,8 +6,8 @@
 
 #include "game_defs.h"
 #include "game_api.h"
+#include "game_types.h"
 #include "weapons_fire.h"
-#include "weapons_phase6.h"
 #include "sim/sim.h"
 
 extern engine_api_t  *eng;
