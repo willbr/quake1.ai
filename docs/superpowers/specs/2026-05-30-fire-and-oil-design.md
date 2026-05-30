@@ -1,7 +1,7 @@
 # Fire & Oil (Phase 8 / M8) — Design
 
 **Date:** 2026-05-30
-**Status:** F1–F5 implemented + verified + committed 2026-05-30; F6 (test level + tooling + balance) planned 2026-05-31 — see "F6 — locked decisions" below
+**Status:** F1–F6 implemented + verified + committed (2026-05-30/31); **M8 (Fire & Oil) complete** — see "F6 — locked decisions" below. No engine ABI bump in F3–F6 (`GAME_API_VERSION` stays 36).
 **Phase:** 8 (Immersive-Sim Systems) — milestone **M8**, follows M1–M7
 
 ## Goal
@@ -267,7 +267,7 @@ any map because the player makes their own oil. The systems are also exercised i
 | **F3 Weapons** ✅ | Oil gun + flamethrower (Phase 6 `weapon2`), pickups, impulses, `cells` ammo | Spray + torch in-game |
 | **F4 Flammables** ✅ | `misc_oilbarrel`, (re)lightable torches, breakable props, player-burns | Trail → barrel → boom; light a torch; burn a crate; burn self |
 | **F5 Interactions** ✅ | Gust-extinguish, contact-spread, smoke/light tuning | Gust out a fire; burning enemy lights allies |
-| **F6 Test level + tooling** | `ai_t10_fire.map`, optional `fire_query` MCP tool, balance/perf pass | Full-room playtest + MCP assertions |
+| **F6 Test level + tooling** ✅ | `ai_t10_fire.map`, zero-ABI count cvars (`fire_query` deferred), balance/perf pass | Full-room playtest + MCP assertions |
 
 ## F5 — locked decisions (2026-05-30)
 
