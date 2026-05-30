@@ -240,6 +240,14 @@ void Fire_IgniteMaybeCoated(edict_t *e, float base_secs, float dps, edict_t *ign
 // reach = blast radius for an explosion that engulfs the oil.
 int  Fire_LightOilNear(const vec3_t pos, float reach);
 
+// Gust counter (F5): put the caster out (self-rescue, always), extinguish
+// burning edicts in the forward cone, and CONSUME lit oil patches in the cone
+// (cancelling any scheduled cascade there). `eye`/`forward` are the cone apex
+// and axis; `cone_cos` is cos(half-angle); `range` is the reach. Called from
+// abilities.c::gust_fire. DLL-internal -- no ABI change.
+void Fire_ExtinguishRegion(edict_t *caster, const vec3_t eye, const vec3_t forward,
+                           float range, float cone_cos);
+
 // ---------------------------------------------------------------------------
 // Arena (test)
 // ---------------------------------------------------------------------------

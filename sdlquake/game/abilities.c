@@ -352,6 +352,10 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
         Torch_Extinguish(le, client);
     }
 
+    // Fire counter (F5): Gust puts the caster out (self-rescue) and
+    // extinguishes burning edicts + consumes lit oil in the cone.
+    Fire_ExtinguishRegion(client, eye, forward, range, cone_cos);
+
     // Spend energy + cooldown.
     s_p.energy -= CV("ph_gust_cost");
     if (s_p.energy < 0) s_p.energy = 0;

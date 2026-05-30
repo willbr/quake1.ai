@@ -311,6 +311,74 @@ int Fire_LightOilNear(const vec3_t pos, float reach) {
     return lit;
 }
 
+// True if world point (px,py,pz) is within `range` of `eye` and inside the gust
+// cone. Uses a flat horizontal cone when the aim is roughly level (so floor oil
+// ahead is caught) and a full 3D cone when looking near-vertical. `fxy` is the
+// pre-normalized horizontal forward; `flat_cone` selects the mode. Mirrors the
+// cone math in abilities.c::gust_fire.
+static int fire_point_in_cone(const vec3_t eye, const float fxy[2], int flat_cone,
+                              const vec3_t forward, float range, float cone_cos,
+                              float px, float py, float pz) {
+    float dx = px - eye[0], dy = py - eye[1], dz = pz - eye[2];
+    float d  = (float)sqrt(dx*dx + dy*dy + dz*dz);
+    if (d > range || d < 1.0f) return 0;
+    float nx = dx/d, ny = dy/d, nz = dz/d;
+    if (flat_cone) {
+        float nxy = (float)sqrt(nx*nx + ny*ny);
+        if (nxy < 0.001f) return 0;
+        return (nx*fxy[0] + ny*fxy[1]) / nxy >= cone_cos;
+    }
+    return (nx*forward[0] + ny*forward[1] + nz*forward[2]) >= cone_cos;
+}
+
+// Consume a lit oil patch (Gust put it out, or it burned out). Task 4 (F5)
+// extends this to un-pair the oil-fire room-brighten light override.
+static void oil_extinguish_patch(oil_patch_t *o) {
+    if (!o->active) return;
+    o->active = 0;
+    o->lit    = 0;
+}
+
+// Put out fire in a forward cone (Gust). Always extinguishes the caster
+// (self-rescue). Extinguishes burning edicts and CONSUMES lit oil patches in
+// the cone; cancels scheduled (not-yet-lit) cascades there so the cleared area
+// doesn't immediately re-flare. No LOS test (matches the F4 torch-snuff loop).
+void Fire_ExtinguishRegion(edict_t *caster, const vec3_t eye, const vec3_t forward,
+                           float range, float cone_cos) {
+    // Self-rescue: always put the caster out, regardless of the forward cone
+    // (the caster is at the cone apex, not in front of it).
+    if (caster) Fire_Extinguish(caster);
+
+    // Flat-cone setup: horizontal projection of forward (matches gust_fire).
+    float fxy_len = (float)sqrt(forward[0]*forward[0] + forward[1]*forward[1]);
+    int   flat_cone = (fxy_len > 0.001f);
+    float fxy[2] = { flat_cone ? forward[0]/fxy_len : 0.0f,
+                     flat_cone ? forward[1]/fxy_len : 0.0f };
+
+    // Burning edicts in the cone -> extinguish.
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        if (e == caster || e == g->world || e->free) continue;
+        int n = eng->ED_GetNum(e);
+        if (n < 0 || n >= FIRE_MAX_BURNING || !s_burning[n].active) continue;
+        if (fire_point_in_cone(eye, fxy, flat_cone, forward, range, cone_cos,
+                               e->v.origin[0], e->v.origin[1], e->v.origin[2]))
+            Fire_Extinguish(e);
+    }
+
+    // Oil patches in the cone: consume lit ones; cancel scheduled cascades.
+    for (int i = 0; i < OIL_MAX_PATCHES; i++) {
+        oil_patch_t *o = &s_oil[i];
+        if (!o->active) continue;
+        if (!fire_point_in_cone(eye, fxy, flat_cone, forward, range, cone_cos,
+                                o->origin[0], o->origin[1], o->origin[2])) continue;
+        if (o->lit) {
+            oil_extinguish_patch(o);   // consume (Task 4 adds light un-pairing here)
+        } else if (o->ignite_at > 0.0f) {
+            o->ignite_at = 0.0f;       // cancel a scheduled cascade in the cone
+        }
+    }
+}
+
 void Fire_IgniteTraced(edict_t *player) {
     if (!player) return;
     float dps  = eng->Cvar_VariableValue("fire_dps");
