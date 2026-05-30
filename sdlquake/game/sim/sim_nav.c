@@ -49,7 +49,9 @@ extern game_globals_t *g;
 // this: the change is purely additive and alters no existing (trainless) map's
 // bake, so trainless .nav caches stay valid. Bump only when an existing map's
 // bake output actually changes.
-#define NAV_VERSION    20
+// v21: func_bossgate kept solid during bake (start.bsp) -- seats standable
+// nodes on the gate's top surface instead of on the floor beneath it.
+#define NAV_VERSION    21
 
 #define FLOOD_STEP     32.0f
 #define FLOOD_DEDUPE   16.0f
@@ -972,6 +974,22 @@ static int bake_floodfill(sim_navmesh_t *m) {
                         int is_bridge  = horizontal && flat && standable &&
                                          it->v.targetname && it->v.targetname[0];
                         keep_solid = is_lift || is_secret || is_bridge;
+                    } else if (!strcmp(icn, "func_bossgate")) {
+                        // Low (16u) threshold slab at the boss slipgate.
+                        // Keep it SOLID during the bake so the flood seats
+                        // standable nodes on its TOP surface (origin+maxs.z)
+                        // and the bot walks over the threshold. Neutralizing
+                        // it instead lets the flood drop through to the floor
+                        // below (a pit ~96u down at the gate centre in
+                        // start.bsp), so the bot would path into the void
+                        // instead of over the gate during real play -- the
+                        // gate stays solid while serverflags < 15. Same
+                        // rationale as the horizontal
+                        // bridge-door above. Once all four sigils are
+                        // collected the spawn func leaves the gate non-solid,
+                        // so it never reaches this loop and no stale top
+                        // nodes are baked.
+                        keep_solid = 1;
                     }
                 }
                 if (keep_solid) { it = eng->ED_Next(it); continue; }
