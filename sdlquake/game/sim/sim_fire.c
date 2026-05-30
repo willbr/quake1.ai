@@ -120,6 +120,8 @@ void Fire_Init(void) {
     eng->Cvar_Register("fire_oil_num",    "-1");   // deposit oil at edict N (test hook)
     eng->Cvar_Register("fire_oil_ignite", "0");    // light nearest oil to player (test hook)
     eng->Cvar_Register("fire_oil_count",  "0");    // Fire_Frame writes live patch count
+    eng->Cvar_Register("fire_burning_count","0");  // F6: live burning-edict count (headless)
+    eng->Cvar_Register("fire_lit_oil_count","0");  // F6: live lit oil-patch count (headless)
     eng->Cvar_Register("fire_spread_radius", "64");// entity->entity contact-spread reach
     eng->Cvar_Register("fire_light",      "96");   // F5: lit-oil room-brighten delta (paired +/-)
     eng->Cvar_Register("fire_smoke",      "0.12"); // F5: smoke amount per fire tick (mirrors FIRE_SMOKE_AMOUNT)
@@ -627,6 +629,18 @@ static void oil_frame(void) {
     }
 
     eng->Cvar_SetValue("fire_oil_count", (float)live);
+
+    /* F6: headless-inspection counts (read via MCP get_cvar). Cheap full scans
+       once per fire tick; co-located with the existing fire_oil_count write. */
+    {
+        int lit = 0, burning = 0;
+        for (int i = 0; i < OIL_MAX_PATCHES; i++)
+            if (s_oil[i].active && s_oil[i].lit) lit++;
+        for (int n = 0; n < FIRE_MAX_BURNING; n++)
+            if (s_burning[n].active) burning++;
+        eng->Cvar_SetValue("fire_lit_oil_count", (float)lit);
+        eng->Cvar_SetValue("fire_burning_count", (float)burning);
+    }
 }
 
 void Fire_Frame(void) {
