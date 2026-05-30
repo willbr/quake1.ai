@@ -322,9 +322,10 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
         }
     }
 
-    // Light-tier hook (M5): extinguish any flammable light entity inside
-    // the cone. Adds a darkness override visible to the AI sense filter
-    // and emits a STIM_LIGHT_CHANGE; the renderer's lightmap is untouched.
+    // Light-tier hook (M5+F4): extinguish any flammable light entity inside
+    // the cone via Torch_Extinguish -- hides the (now live-edict) flame model,
+    // dims the renderer lightmap + AI sense filter via Light_AddOverride, and
+    // emits a STIM_LIGHT_CHANGE.
     for (edict_t *le = eng->ED_Next(g->world); le; le = eng->ED_Next(le)) {
         if (!le->v.classname) continue;
         const char *cn = le->v.classname;

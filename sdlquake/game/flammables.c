@@ -162,10 +162,20 @@ static void breakable_die(edict_t *self) {
     eng->SV_Particle(self->v.origin, up, 116, 64);
     eng->SV_StartSound(self, CHAN_BODY, "weapons/ax1.wav", 1, ATTN_NORM);
 
+    // Clear any burn-registry slot before freeing so the about-to-be-recycled
+    // edict number can't carry a stale "burning" entry (mirrors the AI-brain
+    // hygiene ThrowGib does). Fire_Frame would also clear it next tick from the
+    // e->free sweep, but this is the intention-revealing form.
+    Fire_Extinguish(self);
     eng->ED_Free(self);
 }
 
 // Brush form (map-authored crates/walls): model comes from the .map ("*N").
+// Caveat: a brush without an origin brush has origin (0,0,0), so flamethrower-
+// cone / oil-contact ignition (which key off v.origin distance) won't reach it
+// and breakable_die's puff would spawn at the world origin. Such a crate is
+// still ignitable by crosshair (impulse 210) / bullets / explosions (which use
+// the bbox). Add an origin brush, or use misc_breakable (point), for full cover.
 void spawn_func_breakable(edict_t *e) {
     g->self = e;
     e->v.solid    = SOLID_BSP;
