@@ -1,7 +1,7 @@
 # Fire & Oil (Phase 8 / M8) — Design
 
 **Date:** 2026-05-30
-**Status:** F1+F2+F3+F4 implemented 2026-05-30 (F4 = oil barrels, (re)lightable torches, breakable props, player backdraft); F5–F6 not started
+**Status:** F1+F2+F3+F4 implemented 2026-05-30; F5 (interactions) planned 2026-05-30 — see "F5 — locked decisions" below; F6 not started
 **Phase:** 8 (Immersive-Sim Systems) — milestone **M8**, follows M1–M7
 
 ## Goal
@@ -268,6 +268,49 @@ any map because the player makes their own oil. The systems are also exercised i
 | **F4 Flammables** ✅ | `misc_oilbarrel`, (re)lightable torches, breakable props, player-burns | Trail → barrel → boom; light a torch; burn a crate; burn self |
 | **F5 Interactions** | Gust-extinguish, contact-spread, smoke/light tuning | Gust out a fire; burning enemy lights allies |
 | **F6 Test level + tooling** | `ai_t10_fire.map`, optional `fire_query` MCP tool, balance/perf pass | Full-room playtest + MCP assertions |
+
+## F5 — locked decisions (2026-05-30)
+
+The F5 "Interactions" stage was scoped against the now-existing F1–F4 code.
+Decisions locked at planning time (all **DLL-internal, no `GAME_API_VERSION`
+bump**):
+
+1. **Gust extinguishes fire** via a new DLL-internal
+   `Fire_ExtinguishRegion(caster, eye, forward, range, cone_cos)` in
+   `sim_fire.c`, called once from `abilities.c::gust_fire` (the F4 torch-snuff
+   loop stays separate). It (a) **always puts the caster out** (self-rescue,
+   regardless of the forward cone), (b) extinguishes burning edicts in the
+   forward cone, and (c) **consumes** lit oil patches in the cone — the burning
+   oil is removed entirely (user choice: decisive put-out over a snuff-to-unlit
+   firebreak), and any *scheduled* (not-yet-lit) cascade in the cone is
+   cancelled so the just-cleared area doesn't immediately flare.
+2. **Contact-spread (entity→entity)** — a burning edict ignites *other* nearby
+   `takedamage` edicts each 10 Hz fire tick, within a **touching range
+   (~64u, `fire_spread_radius` cvar)**, immediate (user choice: touching-range
+   over generous chain-reaction; tune up via the cvar). This is the headline
+   "burning enemy lights allies" moment. Oil-contact spread already exists (F2).
+3. **Igniter kill-attribution (closes the F1 carry-forward)** — contact-spread
+   credits the **source's own igniter** (the player if they started the blaze,
+   else world/none) — *never* the burning monster itself. A monster is thus
+   never stored as an igniter, so the "freed-and-reused monster-igniter
+   misresolution" can't occur by construction. Player credit propagates
+   transitively through a spread chain.
+4. **STIM_FIRE throttle (closes the F1/F2 carry-forward)** — each fire source
+   (burning edict and lit oil patch) emits `STIM_FIRE` at **~2 Hz** instead of
+   10 Hz, so many simultaneous oil fires can't saturate the 512-entry / 5 s stim
+   ring and starve sound/sight stims. AI *avoidance* is unaffected — it queries
+   the fire registry directly (`Fire_NearestHazard`), not the ring.
+5. **Light "reveals you" tuning** — lit oil patches brighten the room via a
+   **paired ±`Light_AddOverride`** (one positive delta on ignite, the matching
+   negative on burnout / Gust-consume / pool-recycle), so the room visibly
+   brightens *and* the M5 AI light-tier reads brighter near the fire. No
+   per-tick lightmap churn. Burning edicts keep `EF_DIMLIGHT` (a render-only
+   dynamic light; cheap, but it does *not* feed the AI light-tier — acceptable
+   for MVP). Magnitudes are cvars (`fire_light`, `fire_smoke`) for in-session
+   tuning. Known MVP limit: the override table is append-only and shared with
+   torches (1024 cap) — each oil burn cycle consumes 2 slots and never frees
+   them; a pathological oil-spam session could exhaust it (overrides then no-op).
+   A reclaimable override slot is follow-up polish.
 
 ## Non-goals (YAGNI)
 
