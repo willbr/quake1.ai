@@ -250,6 +250,8 @@ static void print_usage(void)
         "                       server starts at first frame on localhost:PORT\n"
         "  --hot-reload         Poll game.dll for changes and reload at runtime\n"
         "  --list-cvars         Print all registered cvars and their values, then exit\n"
+        "  --headless           Run with no window/audio/GUI (listen server + bot\n"
+        "                       only) for automated tests. Console output -> stderr.\n"
         "  -dedicated           Run as dedicated server (no video/audio)\n"
         "  -heapsize <KB>       Engine heap size in KB (default 16384)\n"
         "  -basedir <path>      Override base directory (default: cwd)\n"
@@ -331,7 +333,10 @@ int main(int argc, char **argv)
     isDedicated = (COM_CheckParm("-dedicated") != 0);
 
     int list_cvars = COM_CheckParm("--list-cvars");
-    if (list_cvars)
+    // --headless: same window/audio/GUI suppression as --list-cvars, but falls
+    // through into the game loop (no dump_cvars_and_exit below) so the server +
+    // bot run with no display — for automated bot tests on a headless box.
+    if (list_cvars || COM_CheckParm("--headless"))
         sys_headless = true;
 
     // --mcp-http <port> just seeds the mcp_http_port cvar's default; the HTTP
@@ -379,6 +384,12 @@ int main(int argc, char **argv)
         HotReload_Frame((float)dt);
         MCP_Frame();   // unconditional: drives the mcp_http_port lazy-start
         oldtime = newtime;
+
+        // Headless has no swapchain present to pace the loop, so it would
+        // busy-spin at 100% CPU. Host_FilterTime already caps simulation at
+        // 72 fps, so a 1 ms yield costs no throughput — it just stops the spin.
+        if (sys_headless)
+            SDL_Delay(1);
     }
 
     return 0;

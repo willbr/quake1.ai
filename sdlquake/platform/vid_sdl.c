@@ -1029,12 +1029,15 @@ void VID_Init(unsigned char *palette)
 
     vid_preload_cvars_from_config();
 
-    if (!sys_headless)
     {
         // Auto-detect the largest integer scale that fits the desktop; used
         // as fallback for both render and window when their cvars are unset.
-        int auto_scale = 3;
+        // Headless has no display to query, so fall back to 1x — the smallest
+        // framebuffer the software renderer (and MCP screenshots) still work on.
+        int auto_scale = 1;
+        if (!sys_headless)
         {
+            auto_scale = 3;
             SDL_DisplayID display = SDL_GetPrimaryDisplay();
             SDL_Rect usable;
             if (SDL_GetDisplayUsableBounds(display, &usable))
@@ -1065,6 +1068,11 @@ void VID_Init(unsigned char *palette)
         vid_super_w             = vid_render_w * ss;
         vid_super_h             = vid_render_h * ss;
 
+        // Window + GPU device. Skipped entirely when headless — vid.buffer is
+        // still filled below, so CPU-side software rendering and MCP screenshots
+        // keep working; only the on-screen present is gone (VID_Update early-outs
+        // on a NULL gpu_device).
+        if (!sys_headless)
         {
             int wx = (int)vid_window_x.value;
             int wy = (int)vid_window_y.value;
@@ -1086,10 +1094,10 @@ void VID_Init(unsigned char *palette)
             SDL_DestroyProperties(props);
             if (!sdl_window)
                 Sys_Error("SDL_CreateWindow failed: %s", SDL_GetError());
-        }
 
-        if (!gpu_init(sdl_window))
-            Sys_Error("GPU init failed");
+            if (!gpu_init(sdl_window))
+                Sys_Error("GPU init failed");
+        }
     }
 
     // Fill in viddef
