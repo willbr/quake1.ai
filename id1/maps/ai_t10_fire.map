@@ -1,0 +1,182 @@
+{
+"classname" "worldspawn"
+"wad" "gfx/base.wad"
+"message" "AI-TEST t10_fire"
+{
+( 768 384 16 ) ( 768 384 0 ) ( 768 -384 0 ) sfloor4_2 0 0 0 1 1
+( -768 -384 16 ) ( -768 -384 0 ) ( -768 384 0 ) sfloor4_2 0 0 0 1 1
+( -768 384 16 ) ( -768 384 0 ) ( 768 384 0 ) sfloor4_2 0 0 0 1 1
+( 768 -384 16 ) ( 768 -384 0 ) ( -768 -384 0 ) sfloor4_2 0 0 0 1 1
+( 768 384 16 ) ( 768 -384 16 ) ( -768 -384 16 ) sfloor4_2 0 0 0 1 1
+( -768 384 0 ) ( -768 -384 0 ) ( 768 -384 0 ) sfloor4_2 0 0 0 1 1
+}
+{
+( 768 384 256 ) ( 768 384 240 ) ( 768 -384 240 ) sky1 0 0 0 1 1
+( -768 -384 256 ) ( -768 -384 240 ) ( -768 384 240 ) sky1 0 0 0 1 1
+( -768 384 256 ) ( -768 384 240 ) ( 768 384 240 ) sky1 0 0 0 1 1
+( 768 -384 256 ) ( 768 -384 240 ) ( -768 -384 240 ) sky1 0 0 0 1 1
+( 768 384 256 ) ( 768 -384 256 ) ( -768 -384 256 ) sky1 0 0 0 1 1
+( -768 384 240 ) ( -768 -384 240 ) ( 768 -384 240 ) sky1 0 0 0 1 1
+}
+{
+( 768 384 256 ) ( 768 384 16 ) ( 768 368 16 ) wbrick1_5 0 0 0 1 1
+( -768 368 256 ) ( -768 368 16 ) ( -768 384 16 ) wbrick1_5 0 0 0 1 1
+( -768 384 256 ) ( -768 384 16 ) ( 768 384 16 ) wbrick1_5 0 0 0 1 1
+( 768 368 256 ) ( 768 368 16 ) ( -768 368 16 ) wbrick1_5 0 0 0 1 1
+( 768 384 256 ) ( 768 368 256 ) ( -768 368 256 ) wbrick1_5 0 0 0 1 1
+( -768 384 16 ) ( -768 368 16 ) ( 768 368 16 ) wbrick1_5 0 0 0 1 1
+}
+{
+( 768 -368 256 ) ( 768 -368 16 ) ( 768 -384 16 ) wbrick1_5 0 0 0 1 1
+( -768 -384 256 ) ( -768 -384 16 ) ( -768 -368 16 ) wbrick1_5 0 0 0 1 1
+( -768 -368 256 ) ( -768 -368 16 ) ( 768 -368 16 ) wbrick1_5 0 0 0 1 1
+( 768 -384 256 ) ( 768 -384 16 ) ( -768 -384 16 ) wbrick1_5 0 0 0 1 1
+( 768 -368 256 ) ( 768 -384 256 ) ( -768 -384 256 ) wbrick1_5 0 0 0 1 1
+( -768 -368 16 ) ( -768 -384 16 ) ( 768 -384 16 ) wbrick1_5 0 0 0 1 1
+}
+{
+( 768 384 256 ) ( 768 384 16 ) ( 768 -384 16 ) wbrick1_5 0 0 0 1 1
+( 752 -384 256 ) ( 752 -384 16 ) ( 752 384 16 ) wbrick1_5 0 0 0 1 1
+( 752 384 256 ) ( 752 384 16 ) ( 768 384 16 ) wbrick1_5 0 0 0 1 1
+( 768 -384 256 ) ( 768 -384 16 ) ( 752 -384 16 ) wbrick1_5 0 0 0 1 1
+( 768 384 256 ) ( 768 -384 256 ) ( 752 -384 256 ) wbrick1_5 0 0 0 1 1
+( 752 384 16 ) ( 752 -384 16 ) ( 768 -384 16 ) wbrick1_5 0 0 0 1 1
+}
+{
+( -752 384 256 ) ( -752 384 16 ) ( -752 -384 16 ) wbrick1_5 0 0 0 1 1
+( -768 -384 256 ) ( -768 -384 16 ) ( -768 384 16 ) wbrick1_5 0 0 0 1 1
+( -768 384 256 ) ( -768 384 16 ) ( -752 384 16 ) wbrick1_5 0 0 0 1 1
+( -752 -384 256 ) ( -752 -384 16 ) ( -768 -384 16 ) wbrick1_5 0 0 0 1 1
+( -752 384 256 ) ( -752 -384 256 ) ( -768 -384 256 ) wbrick1_5 0 0 0 1 1
+( -768 384 16 ) ( -768 -384 16 ) ( -752 -384 16 ) wbrick1_5 0 0 0 1 1
+}
+}
+{
+"classname" "info_player_start"
+"origin" "-680 0 40"
+"angle" "0"
+}
+{
+"classname" "info_intermission"
+"origin" "0 0 210"
+"mangle" "25 0 0"
+}
+{
+"classname" "light"
+"origin" "-400 0 200"
+"light" "150"
+}
+{
+"classname" "light"
+"origin" "0 0 200"
+"light" "150"
+}
+{
+"classname" "light"
+"origin" "400 0 200"
+"light" "150"
+}
+{
+"classname" "light"
+"origin" "640 0 200"
+"light" "160"
+}
+{
+"classname" "weapon_oilgun"
+"origin" "-620 -72 30"
+}
+{
+"classname" "weapon_flamethrower"
+"origin" "-620 72 30"
+}
+{
+"classname" "item_cells"
+"origin" "-560 -48 30"
+"spawnflags" "1"
+}
+{
+"classname" "item_cells"
+"origin" "-560 48 30"
+"spawnflags" "1"
+}
+{
+"classname" "item_cells"
+"origin" "-560 0 30"
+"spawnflags" "1"
+}
+{
+"classname" "misc_oilslick"
+"origin" "-360 0 18"
+}
+{
+"classname" "light_torch_small_walltorch"
+"origin" "-200 356 96"
+"light" "200"
+}
+{
+"classname" "light_torch_small_walltorch"
+"origin" "200 356 96"
+"light" "200"
+}
+{
+"classname" "light_torch_small_walltorch"
+"origin" "-200 -356 96"
+"light" "200"
+}
+{
+"classname" "light_torch_small_walltorch"
+"origin" "200 -356 96"
+"light" "200"
+}
+{
+"classname" "misc_breakable"
+"origin" "100 -220 24"
+}
+{
+"classname" "misc_breakable"
+"origin" "160 -220 24"
+}
+{
+"classname" "misc_oilslick"
+"origin" "250 0 18"
+}
+{
+"classname" "misc_oilslick"
+"origin" "306 0 18"
+}
+{
+"classname" "misc_oilslick"
+"origin" "362 0 18"
+}
+{
+"classname" "misc_oilslick"
+"origin" "418 0 18"
+}
+{
+"classname" "misc_oilslick"
+"origin" "466 0 18"
+}
+{
+"classname" "misc_oilbarrel"
+"origin" "490 0 24"
+}
+{
+"classname" "monster_army"
+"origin" "580 -32 40"
+"angle" "180"
+}
+{
+"classname" "monster_army"
+"origin" "580 32 40"
+"angle" "180"
+}
+{
+"classname" "monster_army"
+"origin" "660 -48 40"
+"angle" "180"
+}
+{
+"classname" "monster_ogre"
+"origin" "700 0 40"
+"angle" "180"
+}
