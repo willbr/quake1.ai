@@ -2268,6 +2268,24 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to,
     return written;
 }
 
+// Dev/test entry behind the `nav_testpath` console command. Runs a
+// path query from->to with the live serverflags sigils packed into the
+// high item bits (same layout sv_main.c uses for client stats), prints
+// the waypoint count, and returns it (0 = no path).
+int Sim_Nav_TestPath(const float *from, const float *to) {
+    vec3_t out[64];
+    unsigned int items = (unsigned int)(((int)g->serverflags & 15) << 28);
+    vec3_t f = { from[0], from[1], from[2] };
+    vec3_t t = { to[0],   to[1],   to[2]   };
+    int n = Sim_Nav_PathTo(f, t, out, NULL, items, 64);
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+        "nav_testpath: %d waypoints (serverflags sigils=0x%x)\n",
+        n, items);
+    eng->Con_Print(buf);
+    return n;
+}
+
 int Sim_Nav_EdgesNear(const float center[3], float radius,
                       sim_nav_edge_record_t *out, int max_records,
                       int *truncated_out) {

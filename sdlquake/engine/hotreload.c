@@ -99,6 +99,8 @@ double Sys_FloatTime(void);
 void   Host_Error(char *error, ...);
 void   Cbuf_AddText(char *text);
 void   Cmd_AddCommand(char *cmd_name, void (*function)(void));
+int    Cmd_Argc(void);
+char  *Cmd_Argv(int arg);
 void   AngleVectors(float *angles, float *forward, float *right, float *up);
 void   R_SpawnBloodPool(vec3_t origin, float radius_max, int owner_edict);
 void   SV_SetGibBloodBudget(int idx, float budget, float settle_pool_radius);
@@ -1124,6 +1126,7 @@ static int polling_enabled = 0;
 #define RELOAD_CHECK_INTERVAL 60   // frames between mtime polls (~1 s at 60 fps)
 
 static void Nav_Rebake_f(void);
+static void Nav_TestPath_f(void);
 
 // Called from Host_Init while command registration is still allowed
 // (before host_initialized = true). HotReload_Init below runs AFTER
@@ -1131,6 +1134,7 @@ static void Nav_Rebake_f(void);
 void HotReload_RegisterCommands(void)
 {
     Cmd_AddCommand("nav_rebake", Nav_Rebake_f);
+    Cmd_AddCommand("nav_testpath", Nav_TestPath_f);
 }
 
 void HotReload_Init(void)
@@ -1202,6 +1206,25 @@ static void Nav_Rebake_f(void)
         return;
     }
     g_game_api->nav_rebake(mn);
+}
+
+// Console command: nav_testpath x1 y1 z1 x2 y2 z2 — run a graph-level
+// nav path query between two world points using the live serverflags
+// sigil set and print the resulting waypoint count (0 = no path).
+// Routes into the DLL via the same g_game_api vtable as nav_rebake.
+static void Nav_TestPath_f(void)
+{
+    if (Cmd_Argc() != 7) {
+        Con_Printf("usage: nav_testpath x1 y1 z1 x2 y2 z2\n");
+        return;
+    }
+    if (!g_game_api || !g_game_api->nav_test_path) {
+        Con_Printf("nav_testpath: game DLL not loaded or too old\n");
+        return;
+    }
+    float from[3] = { (float)atof(Cmd_Argv(1)), (float)atof(Cmd_Argv(2)), (float)atof(Cmd_Argv(3)) };
+    float to[3]   = { (float)atof(Cmd_Argv(4)), (float)atof(Cmd_Argv(5)), (float)atof(Cmd_Argv(6)) };
+    g_game_api->nav_test_path(from, to);
 }
 
 // MCP-only: route a damage event through the loaded game DLL.

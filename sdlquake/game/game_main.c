@@ -124,6 +124,11 @@ static void game_nav_rebake(const char *mapname) {
     Sim_Nav_Rebake(mapname);
 }
 
+// Console-command bridge — see game_api.h::nav_test_path.
+static int game_nav_test_path(const float *from, const float *to) {
+    return Sim_Nav_TestPath(from, to);
+}
+
 // Editor inspector query — see game_api.h for field contract.
 static int game_ai_inspect(edict_t *e,
                            int *out_state,
@@ -176,6 +181,7 @@ static game_api_t s_api = {
     game_nav_path,
     game_nav_edges_near,
     game_nav_rebake,
+    game_nav_test_path,
 };
 
 #ifdef _WIN32

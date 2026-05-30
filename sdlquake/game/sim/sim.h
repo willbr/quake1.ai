@@ -139,6 +139,12 @@ int Sim_Nav_PathTo(const vec3_t from,
                    unsigned int player_items,
                    int max_out);
 
+// Dev/test: run Sim_Nav_PathTo from->to using the live serverflags
+// sigil set (packed into the high item bits), print the waypoint count
+// to console, and return it. Backs the engine console command
+// `nav_testpath` (see hotreload.c). 0 = no path.
+int Sim_Nav_TestPath(const float *from, const float *to);
+
 // Snapshot of one nav edge for debug/inspection consumers (MCP).
 // Coords are world-space copies of mesh node positions; safe to use
 // even after a rebake.
