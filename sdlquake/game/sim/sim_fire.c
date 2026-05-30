@@ -92,6 +92,18 @@ static edict_t *fire_find_edict(int num) {
 // patch. (F1 had this; its cleanup dropped it as unused -- F2 brings it back.)
 static float fire_crand(void) { return eng->Random() * 2.0f - 1.0f; }
 
+// Resolve a burn slot's "credit" igniter for contact-spread: the source's own
+// igniter, but only if it is a live, non-world entity (today that's just the
+// player). Returns NULL otherwise (Fire_Ignite then stores -1 = world). This
+// is what keeps a *monster* from ever being stored as an igniter -> the F1
+// "freed-and-reused monster-igniter misresolution" carry-forward is closed by
+// construction, and player credit propagates transitively down a spread chain.
+static edict_t *fire_credit_igniter(const fire_burn_t *f) {
+    edict_t *src = fire_find_edict(f->igniter_edict);
+    if (src && !src->free && src != g->world) return src;
+    return 0;
+}
+
 void Fire_Init(void) {
     memset(s_burning, 0, sizeof(s_burning));
     memset(s_oil, 0, sizeof(s_oil));
@@ -106,6 +118,7 @@ void Fire_Init(void) {
     eng->Cvar_Register("fire_oil_num",    "-1");   // deposit oil at edict N (test hook)
     eng->Cvar_Register("fire_oil_ignite", "0");    // light nearest oil to player (test hook)
     eng->Cvar_Register("fire_oil_count",  "0");    // Fire_Frame writes live patch count
+    eng->Cvar_Register("fire_spread_radius", "64");// entity->entity contact-spread reach
 }
 
 void Fire_LevelInit(void) {
@@ -641,6 +654,36 @@ void Fire_Frame(void) {
             f->next_scorch = g->time + 1.0f;
             vec3_t feet = { e->v.origin[0], e->v.origin[1], e->v.absmin[2] + 1.0f };
             eng->SV_Decal(feet, DECAL_SCORCH);
+        }
+
+        // Contact-spread (F5): a burning edict ignites OTHER nearby flammable
+        // edicts (monsters, props, barrels, even the player) within a touching
+        // radius. This is the "burning enemy lights allies" moment. Bounded by
+        // radius and per-tick; the burning set is small. Credit goes to the
+        // source's igniter (player-or-world via fire_credit_igniter), never to
+        // this burning monster -> attribution stays correct and a monster is
+        // never stored as an igniter. Healthy monsters flee fire at ~160u
+        // (sim_ai.c), so this mostly catches enemies that are cornered/packed
+        // or a panicking burner crashing through them.
+        {
+            float sr = eng->Cvar_VariableValue("fire_spread_radius");
+            if (sr > 0.0f) {
+                float sr2 = sr * sr;
+                float dps = f->dps;
+                float secs = eng->Cvar_VariableValue("fire_secs");
+                edict_t *credit = fire_credit_igniter(f);
+                for (edict_t *o = eng->ED_Next(g->world); o; o = eng->ED_Next(o)) {
+                    if (o == e || o == g->world || o->free) continue;
+                    if (!o->v.takedamage) continue;
+                    int on = eng->ED_GetNum(o);
+                    if (on < 0 || on >= FIRE_MAX_BURNING || Fire_IsBurning(on)) continue;
+                    float dx = o->v.origin[0] - e->v.origin[0];
+                    float dy = o->v.origin[1] - e->v.origin[1];
+                    float dz = o->v.origin[2] - e->v.origin[2];
+                    if (dx*dx + dy*dy + dz*dz > sr2) continue;
+                    Fire_IgniteMaybeCoated(o, secs, dps, credit);
+                }
+            }
         }
     }
 
