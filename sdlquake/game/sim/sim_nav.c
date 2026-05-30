@@ -977,7 +977,8 @@ static int bake_floodfill(sim_navmesh_t *m) {
                         int is_bridge  = horizontal && flat && standable &&
                                          it->v.targetname && it->v.targetname[0];
                         keep_solid = is_lift || is_secret || is_bridge;
-                    } else if (!strcmp(icn, "func_bossgate")) {
+                    } else if (!strcmp(icn, "func_bossgate") ||
+                               !strcmp(icn, "func_episodegate")) {
                         // Low (16u) threshold slab at the boss slipgate.
                         // Keep it SOLID during the bake so the flood seats
                         // standable nodes on its TOP surface (origin+maxs.z)
@@ -1729,6 +1730,63 @@ static int bake_floodfill(sim_navmesh_t *m) {
             snprintf(buf, sizeof(buf),
                 "sim_nav: %d edges tagged with key requirements\n",
                 locked_edges_tagged);
+            eng->Con_Print(buf);
+        }
+    }
+
+    // --- Phase 4.7: conditional-gate slab-top tagging (closed state) -------
+    // Each func_bossgate / func_episodegate was kept SOLID for the bake, so
+    // the flood seated standable nodes on its TOP surface. Those nodes vanish
+    // once the gate opens, so tag their edges with the gate's "solid"
+    // predicate. Polarity differs: bossgate is solid while you LACK all 4
+    // sigils (forbids ALL); an episode gate is solid while you HOLD its rune
+    // (requires that bit).
+    {
+        int slab_edges_tagged = 0;
+        edict_t *ge = eng->ED_Next(g->world);
+        while (ge) {
+            const char *cn = ge->v.classname;
+            int is_boss = cn && !strcmp(cn, "func_bossgate");
+            int is_ep   = cn && !strcmp(cn, "func_episodegate");
+            if (is_boss || is_ep) {
+                unsigned int req = 0, forb = 0;
+                if (is_boss) forb = (unsigned int)IT_ALL_SIGILS;
+                else         req  = (unsigned int)(((int)ge->v.spawnflags & 15) << 28);
+
+                // Absolute top-surface footprint (origin + maxs), expanded.
+                float xmn = ge->v.origin[0] + ge->v.mins[0] - 8;
+                float ymn = ge->v.origin[1] + ge->v.mins[1] - 8;
+                float xmx = ge->v.origin[0] + ge->v.maxs[0] + 8;
+                float ymx = ge->v.origin[1] + ge->v.maxs[1] + 8;
+                float topz = ge->v.origin[2] + ge->v.maxs[2];  // slab top
+                // Node origin of a player standing on top ~= topz + 24.
+                float zlo = topz + 8, zhi = topz + 40;
+
+                for (int k = 0; k < m->edge_count; k++) {
+                    nav_edge_t *e = &m->edges[k];
+                    int on_top = 0;
+                    for (int end = 0; end < 2 && !on_top; end++) {
+                        int p = end ? e->to : e->from;
+                        float px = m->points[p].pos[0];
+                        float py = m->points[p].pos[1];
+                        float pz = m->points[p].pos[2];
+                        if (px >= xmn && px <= xmx && py >= ymn && py <= ymx &&
+                            pz >= zlo && pz <= zhi) on_top = 1;
+                    }
+                    if (on_top) {
+                        e->requires_items |= req;
+                        e->forbids_items  |= forb;
+                        slab_edges_tagged++;
+                    }
+                }
+            }
+            ge = eng->ED_Next(ge);
+        }
+        if (slab_edges_tagged > 0) {
+            char buf[96];
+            snprintf(buf, sizeof(buf),
+                "sim_nav: %d gate slab-top edges tagged (closed)\n",
+                slab_edges_tagged);
             eng->Con_Print(buf);
         }
     }
