@@ -107,7 +107,12 @@ static int game_nav_path(const float *from, const float *to,
     if (!from || !to || !out_waypoints_xyz || max_waypoints <= 0) return 0;
     f[0] = from[0]; f[1] = from[1]; f[2] = from[2];
     t[0] = to[0];   t[1] = to[1];   t[2] = to[2];
-    return Sim_Nav_PathTo(f, t, out, out_kinds, player_items, max_waypoints);
+    // OR in the live episode sigils (bits 28..31): the player's items never
+    // carry them (they live in serverflags), but the union navmesh gates
+    // conditional-gate edges on them, so the bot must path with them set.
+    unsigned int items = player_items |
+                         (unsigned int)(((int)g->serverflags & 15) << 28);
+    return Sim_Nav_PathTo(f, t, out, out_kinds, items, max_waypoints);
 }
 
 // MCP debug bridge — see game_api.h::nav_edges_near.
