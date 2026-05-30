@@ -1,7 +1,7 @@
 # Fire & Oil (Phase 8 / M8) — Design
 
 **Date:** 2026-05-30
-**Status:** F1 (burn primitive) implemented 2026-05-30; F2–F6 not started
+**Status:** F1+F2+F3 implemented 2026-05-30 (F3 = oil gun + flamethrower); F4–F6 not started
 **Phase:** 8 (Immersive-Sim Systems) — milestone **M8**, follows M1–M7
 
 ## Goal
@@ -264,7 +264,7 @@ any map because the player makes their own oil. The systems are also exercised i
 |---|---|---|
 | **F1 Burn primitive** | Burn registry + 10 Hz DOT tick + fire particles/light/smoke + `STIM_FIRE` emission | MCP-ignite a monster → it takes DOT, panics, others avoid |
 | **F2 Oil substance** | Oil-patch pool, deposit/coat, cascade, ignite-on-contact | MCP-spawn oil + ignite → trail races, edicts in it ignite |
-| **F3 Weapons** | Oil gun + flamethrower (Phase 6 `weapon2`), pickups, impulses, `cells` ammo | Spray + torch in-game |
+| **F3 Weapons** ✅ | Oil gun + flamethrower (Phase 6 `weapon2`), pickups, impulses, `cells` ammo | Spray + torch in-game |
 | **F4 Flammables** | `misc_oilbarrel`, (re)lightable torches, breakable props, player-burns | Trail → barrel → boom; light a torch; burn a crate; burn self |
 | **F5 Interactions** | Gust-extinguish, contact-spread, smoke/light tuning | Gust out a fire; burning enemy lights allies |
 | **F6 Test level + tooling** | `ai_t10_fire.map`, optional `fire_query` MCP tool, balance/perf pass | Full-room playtest + MCP assertions |
