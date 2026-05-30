@@ -177,6 +177,19 @@ static int Flamethrower_DoFire(edict_t *self) {
         vec3_t p = { eye[0] + fwd[0]*t, eye[1] + fwd[1]*t, eye[2] + fwd[2]*t };
         Fire_LightOilNear(p, 32.0f);
     }
+
+    // Visible flame stream: fire-blobs along the near cone axis each tick.
+    {
+        vec3_t up = { 0.0f, 0.0f, 12.0f };
+        float reach = range * 0.6f;          // flame visibly reaches ~60% of cone length
+        for (int i = 1; i <= 3; i++) {
+            float t = (float)i / 3.0f * reach;
+            vec3_t fp = { eye[0] + fwd[0]*t,
+                          eye[1] + fwd[1]*t,
+                          eye[2] + fwd[2]*t };
+            eng->SV_Fire(fp, up, 3.0f);
+        }
+    }
     return 1;
 }
 
