@@ -116,7 +116,97 @@ void W_FireOilGun(void) {
     oilgun_think(self);
 }
 
+// Small vector length helper (gust_fire uses its own vlen; keep this local).
+static float wf_vlen(const vec3_t v) {
+    return (float)sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+}
+
+// One flamethrower tick: ignite damageable edicts in a forward cone (with LOS)
+// and light oil along the cone axis. Returns 0 when out of fuel.
+static int Flamethrower_DoFire(edict_t *self) {
+    int cost = (int)eng->Cvar_VariableValue("fire_flame_cost");
+    if (self->v.ammo_cells < cost) {
+        self->v.weapon2 = 0;
+        self->v.weapon  = W_BestWeapon();
+        W_SetCurrentAmmo();
+        return 0;
+    }
+    self->v.ammo_cells -= cost;
+    self->v.currentammo = self->v.ammo_cells;
+
+    if (self->v.t_width < g->time) {          // throttled flame loop sound
+        eng->SV_StartSound(self, CHAN_WEAPON, "ambience/fire1.wav", 1, ATTN_NORM);
+        self->v.t_width = g->time + 0.5f;
+    }
+    weaponsfire_sound_stim(self, 0.7f);
+
+    float range    = eng->Cvar_VariableValue("fire_flame_range");
+    float cone_cos = (float)cos(eng->Cvar_VariableValue("fire_flame_cone") * 3.14159265f / 180.0f);
+    float secs     = eng->Cvar_VariableValue("fire_flame_secs");
+    float dps      = eng->Cvar_VariableValue("fire_dps");
+
+    eng->MakeVectors(self->v.v_angle);
+    vec3_t eye = { self->v.origin[0],
+                   self->v.origin[1],
+                   self->v.origin[2] + self->v.view_ofs[2] };
+    vec3_t fwd = { g->v_forward[0], g->v_forward[1], g->v_forward[2] };
+
+    // Ignite damageable edicts inside the cone (LOS-gated). Mirrors gust_fire.
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        if (e == self || !e->v.takedamage) continue;
+
+        vec3_t to = { e->v.origin[0] - eye[0],
+                      e->v.origin[1] - eye[1],
+                      e->v.origin[2] - eye[2] };
+        float d = wf_vlen(to);
+        if (d > range || d < 1.0f) continue;
+
+        vec3_t dirn = { to[0]/d, to[1]/d, to[2]/d };
+        if (dirn[0]*fwd[0] + dirn[1]*fwd[1] + dirn[2]*fwd[2] < cone_cos) continue;
+
+        // Don't ignite through walls.
+        eng->SV_Traceline(eye, e->v.origin, 1, self);
+        if (g->trace_fraction != 1.0f && g->trace_ent != e) continue;
+
+        Fire_IgniteMaybeCoated(e, secs, dps, self);   // oil-coated targets burn longer
+    }
+
+    // Light oil patches the cone sweeps over (sample down the axis).
+    for (int i = 1; i <= 4; i++) {
+        float t = (float)i / 4.0f * range;
+        vec3_t p = { eye[0] + fwd[0]*t, eye[1] + fwd[1]*t, eye[2] + fwd[2]*t };
+        Fire_LightOilNear(p, 32.0f);
+    }
+    return 1;
+}
+
+static void flamethrower_think(edict_t *self) {
+    g->self = self;
+    if (!self->v.button0 || (int)self->v.weapon2 != IT2_FLAMETHROWER) {
+        player_run(self);
+        return;
+    }
+    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);   // muzzle glow
+    self->v.frame = FR_FIRE_BODY;
+    self->v.weaponframe++;
+    if (self->v.weaponframe > 4) self->v.weaponframe = 1;
+    if (!Flamethrower_DoFire(self)) {
+        player_run(self);
+        return;
+    }
+    self->v.nextthink       = g->time + eng->Cvar_VariableValue("fire_flame_tick");
+    self->v.think           = flamethrower_think;
+    self->v.attack_finished = g->time + 0.2f;
+}
+
 void W_FireFlamethrower(void) {
     edict_t *self = g->self;
-    self->v.attack_finished = g->time + 0.2f;
+    if (self->v.ammo_cells < 1) {
+        eng->SV_StartSound(self, CHAN_WEAPON, "weapons/guncock.wav", 1, ATTN_NORM);
+        self->v.attack_finished = g->time + 0.5f;
+        return;
+    }
+    eng->SV_StartSound(self, CHAN_AUTO, "weapons/lstart.wav", 1, ATTN_NORM);   // spin-up, once
+    self->v.attack_finished = g->time + 0.1f;
+    flamethrower_think(self);
 }
