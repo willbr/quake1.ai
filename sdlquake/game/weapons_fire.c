@@ -28,6 +28,7 @@ void WeaponsFire_Init(void) {
     eng->Cvar_Register("fire_flame_secs",  "3");     // ignite duration on a direct hit
     eng->Cvar_Register("fire_flame_tick",  "0.1");   // think interval = fire/drain rate
     eng->Cvar_Register("fire_flame_cost",  "1");     // cells drained per tick
+    eng->Cvar_Register("fire_flame_backdraft", "40");  // wall within Nu point-blank ignites you; 0=off
     // Oil gun.
     eng->Cvar_Register("fire_oilgun_tick", "0.12");  // think interval
     eng->Cvar_Register("fire_oilgun_cost", "1");     // cells drained per deposit
@@ -193,6 +194,17 @@ static int Flamethrower_DoFire(edict_t *self) {
                           eye[1] + fwd[1]*t,
                           eye[2] + fwd[2]*t };
             eng->SV_Fire(fp, up, 3.0f);
+        }
+    }
+
+    // Backdraft: spraying point-blank into a wall ignites the player.
+    {
+        float bd = eng->Cvar_VariableValue("fire_flame_backdraft");
+        if (bd > 0.0f) {
+            vec3_t wall = { eye[0] + fwd[0]*bd, eye[1] + fwd[1]*bd, eye[2] + fwd[2]*bd };
+            eng->SV_Traceline(eye, wall, 1, self);
+            if (g->trace_fraction < 1.0f)              // solid within bd units
+                Fire_IgniteMaybeCoated(self, secs, dps, self);
         }
     }
     return 1;
