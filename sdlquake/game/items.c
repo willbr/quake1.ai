@@ -4,6 +4,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
+#include "weapons_fire.h"
 #include <string.h>
 #include <math.h>
 
@@ -77,7 +78,7 @@ static void PlaceItem(edict_t *self) {
     }
 }
 
-static void StartItem(edict_t *self) {
+void StartItem(edict_t *self) {
     self->v.nextthink = g->time + 0.2f;
     self->v.think     = PlaceItem;
 }
@@ -345,6 +346,43 @@ static void weapon_touch(edict_t *self, edict_t *other) {
     if (g->deathmatch == 1)
         self->v.nextthink = g->time + 30;
     self->v.think = SUB_regen;
+
+    g->activator = other;
+    SUB_UseTargets();
+}
+
+// M8 / F3: touch handler for the fire-weapon pickups (items2/weapon2 roster).
+void weapon_touch_fire(edict_t *self, edict_t *other) {
+    g->self = self; g->other = other;
+    if (!((int)other->v.flags & FL_CLIENT)) return;
+    if (other->v.health <= 0) return;
+
+    int flag = 0;
+    const char *cn = self->v.classname;
+    if (cn && strcmp(cn, "weapon_oilgun") == 0)            flag = IT2_OILGUN;
+    else if (cn && strcmp(cn, "weapon_flamethrower") == 0) flag = IT2_FLAMETHROWER;
+    else { eng->Host_Error("weapon_touch_fire: unknown classname"); return; }
+
+    other->v.items2 = (float)((int)other->v.items2 | flag);
+    other->v.ammo_cells += 30;
+    if (other->v.ammo_cells > 100) other->v.ammo_cells = 100;
+
+    eng->SV_SPrint(other, 0, "You got the ");
+    eng->SV_SPrint(other, 0, self->v.netname);
+    eng->SV_SPrint(other, 0, "\n");
+    eng->SV_StartSound(other, CHAN_ITEM, "weapons/pkup.wav", 1, ATTN_NORM);
+    eng->SV_StuffCmd(other, "bf\n");
+
+    edict_t *stemp = g->self;
+    g->self = other;
+    g->self->v.weapon  = 0;
+    g->self->v.weapon2 = (float)flag;
+    W_SetCurrentAmmo();
+    g->self = stemp;
+
+    self->v.model = NULL;
+    self->v.solid = SOLID_NOT;
+    if (g->deathmatch == 1) { self->v.nextthink = g->time + 30; self->v.think = SUB_regen; }
 
     g->activator = other;
     SUB_UseTargets();

@@ -185,6 +185,8 @@ void spawn_weapon_supernailgun(edict_t *e);
 void spawn_weapon_grenadelauncher(edict_t *e);
 void spawn_weapon_rocketlauncher(edict_t *e);
 void spawn_weapon_lightning(edict_t *e);
+void spawn_weapon_oilgun(edict_t *e);
+void spawn_weapon_flamethrower(edict_t *e);
 void spawn_item_shells(edict_t *e);
 void spawn_item_spikes(edict_t *e);
 void spawn_item_rockets(edict_t *e);
@@ -299,6 +301,8 @@ static const spawn_entry_t s_spawns[] = {
     { "weapon_grenadelauncher",           spawn_weapon_grenadelauncher          },
     { "weapon_rocketlauncher",            spawn_weapon_rocketlauncher           },
     { "weapon_lightning",                 spawn_weapon_lightning                },
+    { "weapon_oilgun",                    spawn_weapon_oilgun                   },
+    { "weapon_flamethrower",              spawn_weapon_flamethrower             },
     { "item_shells",                      spawn_item_shells                     },
     { "item_spikes",                      spawn_item_spikes                     },
     { "item_rockets",                     spawn_item_rockets                    },

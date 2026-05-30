@@ -223,3 +223,35 @@ void W_FireFlamethrower(void) {
     self->v.attack_finished = g->time + 0.1f;
     flamethrower_think(self);
 }
+
+// ---------------------------------------------------------------------------
+// M8 / F3: World pickup spawn functions.
+// ---------------------------------------------------------------------------
+extern void StartItem(edict_t *e);
+extern void weapon_touch_fire(edict_t *self, edict_t *other);
+
+// Reuse existing world models (no new precache asset): grenade-launcher box for
+// the oil gun, lightning box for the flamethrower.
+void spawn_weapon_oilgun(edict_t *e) {
+    g->self = e;
+    eng->PrecacheModel("progs/g_rock.mdl");
+    eng->SV_SetModel(e, "progs/g_rock.mdl");
+    e->v.weapon  = 0;
+    e->v.netname = "Oil Gun";
+    e->v.touch   = weapon_touch_fire;
+    vec3_t wmin = {-16,-16,0}, wmax = {16,16,56};
+    eng->SV_SetSize(e, wmin, wmax);
+    StartItem(e);
+}
+
+void spawn_weapon_flamethrower(edict_t *e) {
+    g->self = e;
+    eng->PrecacheModel("progs/g_light.mdl");
+    eng->SV_SetModel(e, "progs/g_light.mdl");
+    e->v.weapon  = 0;
+    e->v.netname = "Flamethrower";
+    e->v.touch   = weapon_touch_fire;
+    vec3_t wmin = {-16,-16,0}, wmax = {16,16,56};
+    eng->SV_SetSize(e, wmin, wmax);
+    StartItem(e);
+}
