@@ -70,6 +70,10 @@ static oil_patch_t s_oil[OIL_MAX_PATCHES];
 // Coated edicts (by edict number): g->time < value => still oil-coated.
 static float s_coated_until[FIRE_MAX_BURNING];
 
+// Defined later (cascade version); Fire_IgniteTraced's oil fallback below
+// needs it to light a patch the player aims at.
+static void oil_light_patch(oil_patch_t *o);
+
 // O(MAX_EDICTS) walk — acceptable at 10 Hz over a small registry (mirrors
 // the documented O(N) pattern in sim_ai.c).
 static edict_t *fire_find_edict(int num) {
@@ -245,6 +249,25 @@ void Fire_IgniteMaybeCoated(edict_t *e, float base_secs, float dps, edict_t *ign
     Fire_Ignite(e, secs, dps, igniter);
 }
 
+// Light the unlit oil patch that world point `pos` falls within (nearest if
+// several overlap). Returns 1 if one was lit. Lets the crosshair igniter light
+// oil by aiming at it, not just entities.
+static int oil_light_at(const vec3_t pos) {
+    int best = -1; float best2 = 1e30f;
+    for (int i = 0; i < OIL_MAX_PATCHES; i++) {
+        oil_patch_t *o = &s_oil[i];
+        if (!o->active || o->lit) continue;
+        float dx = pos[0] - o->origin[0];
+        float dy = pos[1] - o->origin[1];
+        float dz = pos[2] - o->origin[2];
+        float d2 = dx*dx + dy*dy + dz*dz;
+        if (d2 <= o->radius * o->radius && d2 < best2) { best2 = d2; best = i; }
+    }
+    if (best < 0) return 0;
+    oil_light_patch(&s_oil[best]);
+    return 1;
+}
+
 void Fire_IgniteTraced(edict_t *player) {
     if (!player) return;
     float dps  = eng->Cvar_VariableValue("fire_dps");
@@ -262,8 +285,11 @@ void Fire_IgniteTraced(edict_t *player) {
     if (t && t != g->world && t->v.takedamage) {
         Fire_Ignite(t, secs, dps, player);
         eng->Con_Print("fire: ignited entity under crosshair\n");
+    } else if (oil_light_at(g->trace_endpos)) {
+        // No flammable entity, but the crosshair landed in oil -- light it.
+        eng->Con_Print("fire: lit oil at crosshair\n");
     } else {
-        eng->Con_Print("fire: no flammable entity under crosshair\n");
+        eng->Con_Print("fire: no flammable entity or oil under crosshair\n");
     }
 }
 
