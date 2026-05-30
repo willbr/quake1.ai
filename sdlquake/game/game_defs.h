@@ -78,6 +78,15 @@
 #define IT_SUIT             2097152
 #define IT_QUAD             4194304
 
+// Sigil/rune bits — NOT inventory. Reserved (bits 28..31) so nav-edge
+// conditions can gate on serverflags. Mirrors the engine's
+// `serverflags << 28` client-stat packing (sv_main.c:649).
+#define IT_SIGIL1           (1<<28)
+#define IT_SIGIL2           (1<<29)
+#define IT_SIGIL3           (1<<30)
+#define IT_SIGIL4           (1u<<31)
+#define IT_ALL_SIGILS       (IT_SIGIL1|IT_SIGIL2|IT_SIGIL3|IT_SIGIL4)  /* == 15<<28 */
+
 // Phase 6 weapons live in a separate items2 bitfield + weapon2 selector,
 // so the existing 8-weapon Quake roster stays untouched. See
 // docs/superpowers/plans/2026-05-04-immersive-sim-m1-m2-ai-substrate.md
