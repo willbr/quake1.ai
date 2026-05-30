@@ -122,6 +122,26 @@ void spawn_misc_oilbarrel(edict_t *e) {
 }
 
 // ---------------------------------------------------------------------------
+// misc_oilslick (F6) — a map-spawn oil seed for the ai_t10_fire showcase. Not a
+// visible prop: it deposits an oil patch at its origin via Fire_AddOil, deferred
+// one frame so the sim/oil pool is fully live at level start, then re-pours
+// before the 60s OIL_TTL_SECS so a pre-placed slick stays available across
+// repeated demos. Passing 0/0 lets Fire_AddOil default the radius/amount.
+// ---------------------------------------------------------------------------
+static void oilslick_think(edict_t *self) {
+    Fire_AddOil(self->v.origin, 0.0f, 0.0f);
+    self->v.nextthink = g->time + 40.0f;   // < OIL_TTL_SECS (60) so it never lapses
+}
+
+void spawn_misc_oilslick(edict_t *e) {
+    g->self        = e;
+    e->v.solid     = SOLID_NOT;
+    e->v.movetype  = MOVETYPE_NONE;
+    e->v.think     = oilslick_think;
+    e->v.nextthink = g->time + 0.5f;       // after frame 1: sim is initialised
+}
+
+// ---------------------------------------------------------------------------
 // Debug spawn helpers. Place a test prop on reachable floor in front of the
 // player: flatten the aim to horizontal (so looking up/down doesn't matter),
 // trace forward and stop short of any wall, and seat at the player's own
