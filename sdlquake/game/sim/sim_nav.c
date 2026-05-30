@@ -1866,10 +1866,9 @@ static int bake_floodfill(sim_navmesh_t *m) {
             float saved_solid = bg->v.solid;
             bg->v.solid = (float)SOLID_NOT;
 
-            // First node index that belongs to the supplemental flood: any
-            // node added below this is NEW (used by the drop-edge pass so it
-            // only synthesizes drops touching the descent, never the rest of
-            // the level).
+            // First node index belonging to the supplemental flood:
+            // any node added at index >= sub_first_new is NEW (baked only
+            // during this pass, not by the main flood).
             int sub_first_new = m->point_count;
 
             int sub_head = q_tail;
@@ -1915,6 +1914,20 @@ static int bake_floodfill(sim_navmesh_t *m) {
                         is_new = 1;
                     }
                     if (next_idx == cur) continue;
+                    float ez = m->points[next_idx].pos[2] - cur_pos[2];
+                    // Skip flat/upward links where BOTH nodes are PRE-EXISTING
+                    // AND the current node was itself pre-existing before this
+                    // supplemental flood started (i.e. cur < sub_first_new).
+                    // Those hub-to-hub links already have an untagged main-flood
+                    // edge, so a tagged duplicate is pure bloat.
+                    // Keep: (a) edges to NEW nodes, (b) any edge FROM a new node
+                    // (sub-flood node → anything stitches the descent component),
+                    // (c) genuine descents even between pre-existing nodes (the
+                    // shaft-floor nodes were isolated below the slab; they need
+                    // lateral walk edges to be fully connected to each other).
+                    int cur_is_old = (cur < sub_first_new);
+                    int next_is_old = (!is_new && next_idx < sub_first_new);
+                    if (cur_is_old && next_is_old && ez >= -2.0f) continue;
                     int dup = 0;
                     for (int o0 = m->edge_count-1; o0 >= 0 && o0 > m->edge_count-64; o0--) {
                         if (m->edges[o0].from == cur && m->edges[o0].to == next_idx) { dup = 1; break; }
@@ -1922,7 +1935,6 @@ static int bake_floodfill(sim_navmesh_t *m) {
                     if (!dup) {
                         float ex = m->points[next_idx].pos[0]-cur_pos[0];
                         float ey = m->points[next_idx].pos[1]-cur_pos[1];
-                        float ez = m->points[next_idx].pos[2]-cur_pos[2];
                         float w  = (float)sqrt(ex*ex+ey*ey+ez*ez);
                         if (w < 1.0f) w = 1.0f;
                         if (add_edge(m, &cap_edges, cur, next_idx, w,
@@ -2068,7 +2080,6 @@ static int bake_floodfill(sim_navmesh_t *m) {
             }
 
             bg->v.solid = saved_solid;
-            (void)sub_first_new;
             // Fold descent edges into the global tallies so the bake-summary
             // line stays accurate (walk = total - jump - drop - teleport).
             drop_edges_added += bossgate_drop_added;
