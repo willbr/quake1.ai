@@ -977,8 +977,7 @@ static int bake_floodfill(sim_navmesh_t *m) {
                         int is_bridge  = horizontal && flat && standable &&
                                          it->v.targetname && it->v.targetname[0];
                         keep_solid = is_lift || is_secret || is_bridge;
-                    } else if (!strcmp(icn, "func_bossgate") ||
-                               !strcmp(icn, "func_episodegate")) {
+                    } else if (!strcmp(icn, "func_bossgate")) {
                         // Low (16u) threshold slab at the boss slipgate.
                         // Keep it SOLID during the bake so the flood seats
                         // standable nodes on its TOP surface (origin+maxs.z)
@@ -1734,24 +1733,19 @@ static int bake_floodfill(sim_navmesh_t *m) {
         }
     }
 
-    // --- Phase 4.7: conditional-gate slab-top tagging (closed state) -------
-    // Each func_bossgate / func_episodegate was kept SOLID for the bake, so
-    // the flood seated standable nodes on its TOP surface. Those nodes vanish
-    // once the gate opens, so tag their edges with the gate's "solid"
-    // predicate. Polarity differs: bossgate is solid while you LACK all 4
-    // sigils (forbids ALL); an episode gate is solid while you HOLD its rune
-    // (requires that bit).
+    // --- Phase 4.7: bossgate slab-top tagging (closed state) --------------
+    // The func_bossgate was kept SOLID for the bake, so the flood seated
+    // standable nodes on its TOP surface. Those nodes vanish once the gate
+    // opens, so tag their edges with the gate's "solid" predicate: the
+    // bossgate is solid while you LACK all 4 sigils (forbids ALL).
     {
         int slab_edges_tagged = 0;
         edict_t *ge = eng->ED_Next(g->world);
         while (ge) {
             const char *cn = ge->v.classname;
             int is_boss = cn && !strcmp(cn, "func_bossgate");
-            int is_ep   = cn && !strcmp(cn, "func_episodegate");
-            if (is_boss || is_ep) {
-                unsigned int req = 0, forb = 0;
-                if (is_boss) forb = (unsigned int)IT_ALL_SIGILS;
-                else         req  = (unsigned int)(((int)ge->v.spawnflags & 15) << 28);
+            if (is_boss) {
+                unsigned int req = 0, forb = (unsigned int)IT_ALL_SIGILS;
 
                 // Absolute top-surface footprint (origin + maxs), expanded.
                 float xmn = ge->v.origin[0] + ge->v.mins[0] - 8;
@@ -1787,6 +1781,63 @@ static int bake_floodfill(sim_navmesh_t *m) {
             snprintf(buf, sizeof(buf),
                 "sim_nav: %d gate slab-top edges tagged (closed)\n",
                 slab_edges_tagged);
+            eng->Con_Print(buf);
+        }
+    }
+
+    // --- Phase 4.7b: episode-gate entry-passage tagging -------------------
+    // Episode gates are vertical bar-walls that seal a completed episode's
+    // entrance (solid once you hold that episode's rune). They are non-solid
+    // at bake time (you hold no rune), so the flood baked the entry passage
+    // as plain edges. They have no linked model here, so transiently
+    // SV_SetModel them ONLY to read their world bbox (this does NOT change
+    // solid, so nothing else is affected), restore the touched fields, then
+    // tag every edge crossing the bbox with forbids = that rune bit. A*
+    // drops the entry once you hold the rune (gate would be a solid wall).
+    {
+        int ep_edges_tagged = 0;
+        edict_t *de = eng->ED_Next(g->world);
+        while (de) {
+            const char *cn = de->v.classname;
+            if (cn && !strcmp(cn, "func_episodegate") &&
+                de->v.model && de->v.model[0]) {
+                unsigned int forb =
+                    (unsigned int)(((int)de->v.spawnflags & 15) << 28);
+                // Save the fields SV_SetModel populates, read bbox, restore.
+                float  save_mi   = de->v.modelindex;
+                vec3_t save_mins = { de->v.mins[0], de->v.mins[1], de->v.mins[2] };
+                vec3_t save_maxs = { de->v.maxs[0], de->v.maxs[1], de->v.maxs[2] };
+                eng->SV_SetModel(de, de->v.model);
+                float xmn = de->v.origin[0] + de->v.mins[0] - 8;
+                float ymn = de->v.origin[1] + de->v.mins[1] - 8;
+                float zmn = de->v.origin[2] + de->v.mins[2] - 8;
+                float xmx = de->v.origin[0] + de->v.maxs[0] + 8;
+                float ymx = de->v.origin[1] + de->v.maxs[1] + 8;
+                float zmx = de->v.origin[2] + de->v.maxs[2] + 8;
+                de->v.modelindex = save_mi;
+                de->v.mins[0]=save_mins[0]; de->v.mins[1]=save_mins[1]; de->v.mins[2]=save_mins[2];
+                de->v.maxs[0]=save_maxs[0]; de->v.maxs[1]=save_maxs[1]; de->v.maxs[2]=save_maxs[2];
+
+                if (forb) {
+                    for (int k = 0; k < m->edge_count; k++) {
+                        nav_edge_t *e = &m->edges[k];
+                        float ax=m->points[e->from].pos[0], ay=m->points[e->from].pos[1], az=m->points[e->from].pos[2];
+                        float bx=m->points[e->to].pos[0],   by=m->points[e->to].pos[1],   bz=m->points[e->to].pos[2];
+                        float mx=(ax+bx)*0.5f, my=(ay+by)*0.5f, mz=(az+bz)*0.5f;
+                        int hit = 0;
+                        if (mx>=xmn&&mx<=xmx&&my>=ymn&&my<=ymx&&mz>=zmn&&mz<=zmx) hit=1;
+                        else if (ax>=xmn&&ax<=xmx&&ay>=ymn&&ay<=ymx&&az>=zmn&&az<=zmx) hit=1;
+                        else if (bx>=xmn&&bx<=xmx&&by>=ymn&&by<=ymx&&bz>=zmn&&bz<=zmx) hit=1;
+                        if (hit) { e->forbids_items |= forb; ep_edges_tagged++; }
+                    }
+                }
+            }
+            de = eng->ED_Next(de);
+        }
+        if (ep_edges_tagged > 0) {
+            char buf[96];
+            snprintf(buf, sizeof(buf),
+                "sim_nav: %d episode-gate entry edges tagged\n", ep_edges_tagged);
             eng->Con_Print(buf);
         }
     }
