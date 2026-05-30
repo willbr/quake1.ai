@@ -122,14 +122,33 @@ void spawn_misc_oilbarrel(edict_t *e) {
 }
 
 // ---------------------------------------------------------------------------
-// Debug spawn (impulse 213): drop an oil barrel ~96u in front of the player.
+// Debug spawn helpers. Place a test prop on reachable floor in front of the
+// player: flatten the aim to horizontal (so looking up/down doesn't matter),
+// trace forward and stop short of any wall, and seat at the player's own
+// height so spawn_*'s DropToFloor lands on the same floor the player stands on
+// rather than over a ledge (the naive "forward*96" placement silently fell out
+// of the level via the >250-drop guard, depending on where the player faced).
 // ---------------------------------------------------------------------------
-void Flammables_DebugSpawnBarrel(edict_t *player) {
+static void flammables_place_ahead(edict_t *player, edict_t *e) {
     eng->MakeVectors(player->v.v_angle);
-    edict_t *e = eng->ED_Alloc();
-    e->v.origin[0] = player->v.origin[0] + g->v_forward[0] * 96.0f;
-    e->v.origin[1] = player->v.origin[1] + g->v_forward[1] * 96.0f;
+    float fx = g->v_forward[0], fy = g->v_forward[1];
+    float fl = (float)sqrt(fx*fx + fy*fy);
+    if (fl > 0.001f) { fx /= fl; fy /= fl; }
+    vec3_t eye   = { player->v.origin[0], player->v.origin[1],
+                     player->v.origin[2] + player->v.view_ofs[2] };
+    vec3_t ahead = { eye[0] + fx * 80.0f, eye[1] + fy * 80.0f, eye[2] };
+    eng->SV_Traceline(eye, ahead, 1, player);
+    float d = 80.0f * g->trace_fraction - 20.0f;   // stop short of the wall hit
+    if (d < 28.0f) d = 28.0f;
+    e->v.origin[0] = player->v.origin[0] + fx * d;
+    e->v.origin[1] = player->v.origin[1] + fy * d;
     e->v.origin[2] = player->v.origin[2];
+}
+
+// Debug spawn (impulse 213): drop an oil barrel on the floor ahead of the player.
+void Flammables_DebugSpawnBarrel(edict_t *player) {
+    edict_t *e = eng->ED_Alloc();
+    flammables_place_ahead(player, e);
     e->v.classname = "misc_oilbarrel";
     spawn_misc_oilbarrel(e);
     eng->Con_Print("fire: spawned oil barrel ahead\n");
@@ -200,13 +219,10 @@ void spawn_misc_breakable(edict_t *e) {
     eng->SV_DropToFloor(e);
 }
 
-// Debug spawn (impulse 214): drop a breakable ~80u in front of the player.
+// Debug spawn (impulse 214): drop a breakable on the floor ahead of the player.
 void Flammables_DebugSpawnBreakable(edict_t *player) {
-    eng->MakeVectors(player->v.v_angle);
     edict_t *e = eng->ED_Alloc();
-    e->v.origin[0] = player->v.origin[0] + g->v_forward[0] * 80.0f;
-    e->v.origin[1] = player->v.origin[1] + g->v_forward[1] * 80.0f;
-    e->v.origin[2] = player->v.origin[2];
+    flammables_place_ahead(player, e);
     e->v.classname = "misc_breakable";
     e->v.health    = 25;
     spawn_misc_breakable(e);
