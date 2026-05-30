@@ -12,6 +12,66 @@
 extern engine_api_t   *eng;
 extern game_globals_t *g;
 
+static int is_flammable_light(const char *cn) {
+    return cn && (strncmp(cn, "light_torch", 11) == 0 ||
+                  strncmp(cn, "light_flame", 11) == 0);
+}
+
+// Emit the "lights changed" stimulus the AI sense filter already consumes.
+static void torch_light_stim(edict_t *t, edict_t *source) {
+    stimulus_t s;
+    memset(&s, 0, sizeof(s));
+    s.kind         = STIM_LIGHT_CHANGE;
+    s.origin[0]    = t->v.origin[0];
+    s.origin[1]    = t->v.origin[1];
+    s.origin[2]    = t->v.origin[2];
+    s.intensity    = 0.6f;
+    s.source_edict = source ? eng->ED_GetNum(source) : -1;
+    Stim_Emit(&s);
+}
+
+// Hide the flame, darken the room (AI + renderer via Light_AddOverride),
+// stim. No-op unless this is a currently-lit flammable light.
+void Torch_Extinguish(edict_t *t, edict_t *source) {
+    if (!t || t->free || !is_flammable_light(t->v.classname)) return;
+    if ((int)t->v.modelindex == 0) return;     // already out
+    t->v.modelindex = 0;                        // model string preserved
+    Light_AddOverride(t->v.origin, 192.0f, -80.0f);
+    torch_light_stim(t, source);
+}
+
+// Restore the flame (re-resolve modelindex from the preserved model string),
+// brighten (cancels a prior -80), stim. No-op unless currently extinguished.
+void Torch_Relight(edict_t *t, edict_t *source) {
+    if (!t || t->free || !is_flammable_light(t->v.classname)) return;
+    if ((int)t->v.modelindex != 0) return;     // already lit
+    eng->SV_SetModel(t, t->v.model);            // model string never cleared
+    Light_AddOverride(t->v.origin, 192.0f, 80.0f);
+    torch_light_stim(t, source);
+}
+
+// Debug (impulse 215): toggle the nearest flammable light to the player.
+void Flammables_DebugToggleNearestTorch(edict_t *player) {
+    edict_t *best = NULL;
+    float bestd = 1e18f;
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        if (!is_flammable_light(e->v.classname)) continue;
+        float dx = e->v.origin[0] - player->v.origin[0];
+        float dy = e->v.origin[1] - player->v.origin[1];
+        float dz = e->v.origin[2] - player->v.origin[2];
+        float d = dx*dx + dy*dy + dz*dz;
+        if (d < bestd) { bestd = d; best = e; }
+    }
+    if (!best) { eng->Con_Print("fire: no torch found\n"); return; }
+    if ((int)best->v.modelindex != 0) {
+        Torch_Extinguish(best, player);
+        eng->Con_Print("fire: extinguished nearest torch\n");
+    } else {
+        Torch_Relight(best, player);
+        eng->Con_Print("fire: relit nearest torch\n");
+    }
+}
+
 // Defined in misc.c (de-static'd by this task) and combat.c.
 extern void barrel_explode(edict_t *self);
 extern void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t *ignore);

@@ -111,32 +111,44 @@ void spawn_light_globe(edict_t *e) {
 }
 
 void spawn_light_torch_small_walltorch(edict_t *e) {
+    e->v.solid    = SOLID_NOT;
+    e->v.movetype = MOVETYPE_NONE;
     eng->PrecacheModel("progs/flame.mdl");
-    eng->SV_SetModel(e, "progs/flame.mdl");
+    eng->SV_SetModel(e, "progs/flame.mdl");   // SV_SetModel links the edict
     fire_ambient(e);
-    eng->SV_MakeStatic(e);
+    // NOT SV_MakeStatic: stays a live edict so the flame can be hidden
+    // (Gust) and restored (fire). "lit" state == (modelindex != 0).
 }
 
 void spawn_light_flame_large_yellow(edict_t *e) {
+    e->v.solid    = SOLID_NOT;
+    e->v.movetype = MOVETYPE_NONE;
     eng->PrecacheModel("progs/flame2.mdl");
-    eng->SV_SetModel(e, "progs/flame2.mdl");
+    eng->SV_SetModel(e, "progs/flame2.mdl");   // SV_SetModel links the edict
     e->v.frame = 1;
     fire_ambient(e);
-    eng->SV_MakeStatic(e);
+    // NOT SV_MakeStatic: stays a live edict so the flame can be hidden
+    // (Gust) and restored (fire). "lit" state == (modelindex != 0).
 }
 
 void spawn_light_flame_small_yellow(edict_t *e) {
+    e->v.solid    = SOLID_NOT;
+    e->v.movetype = MOVETYPE_NONE;
     eng->PrecacheModel("progs/flame2.mdl");
-    eng->SV_SetModel(e, "progs/flame2.mdl");
+    eng->SV_SetModel(e, "progs/flame2.mdl");   // SV_SetModel links the edict
     fire_ambient(e);
-    eng->SV_MakeStatic(e);
+    // NOT SV_MakeStatic: stays a live edict so the flame can be hidden
+    // (Gust) and restored (fire). "lit" state == (modelindex != 0).
 }
 
 void spawn_light_flame_small_white(edict_t *e) {
+    e->v.solid    = SOLID_NOT;
+    e->v.movetype = MOVETYPE_NONE;
     eng->PrecacheModel("progs/flame2.mdl");
-    eng->SV_SetModel(e, "progs/flame2.mdl");
+    eng->SV_SetModel(e, "progs/flame2.mdl");   // SV_SetModel links the edict
     fire_ambient(e);
-    eng->SV_MakeStatic(e);
+    // NOT SV_MakeStatic: stays a live edict so the flame can be hidden
+    // (Gust) and restored (fire). "lit" state == (modelindex != 0).
 }
 
 // ---------------------------------------------------------------------------

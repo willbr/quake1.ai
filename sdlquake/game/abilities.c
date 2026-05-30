@@ -15,6 +15,7 @@
 #include "game_types.h"
 #include "game_defs.h"
 #include "sim/sim.h"
+#include "flammables.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -347,18 +348,7 @@ static void gust_fire(edict_t *client, const vec3_t eye, const vec3_t forward) {
             if (vdot(dirn, forward) < cone_cos) continue;
         }
 
-        Light_AddOverride(le->v.origin, 192.0f, -80.0f);
-
-        // Stim emission so AI can react to "lights just went out".
-        stimulus_t ls;
-        memset(&ls, 0, sizeof(ls));
-        ls.kind        = STIM_LIGHT_CHANGE;
-        ls.origin[0]   = le->v.origin[0];
-        ls.origin[1]   = le->v.origin[1];
-        ls.origin[2]   = le->v.origin[2];
-        ls.intensity   = 0.6f;
-        ls.source_edict = eng->ED_GetNum(client);
-        Stim_Emit(&ls);
+        Torch_Extinguish(le, client);
     }
 
     // Spend energy + cooldown.
