@@ -312,9 +312,12 @@ void Fire_IgniteTraced(edict_t *player) {
     }
 }
 
-// Debug: trace from the player's view to the floor and deposit oil there.
-void Fire_OilTraced(edict_t *player) {
-    if (!player) return;
+// Deposit oil at the player's crosshair floor-trace. Silent; returns 1 if it
+// deposited. The held +pouroil command drives this each tick to paint a trail
+// (the deposit's merge logic keeps a stationary pour as one patch and a moving
+// pour as an overlapping trail). Fire_OilTraced wraps it with a console print.
+int Fire_PourOil(edict_t *player) {
+    if (!player) return 0;
     eng->MakeVectors(player->v.v_angle);
     vec3_t src = { player->v.origin[0],
                    player->v.origin[1],
@@ -325,8 +328,15 @@ void Fire_OilTraced(edict_t *player) {
     eng->SV_Traceline(src, end, 1, player);   // nomonsters: hit the floor
     if (g->trace_fraction < 1.0f) {
         Fire_AddOil(g->trace_endpos, OIL_DEFAULT_RADIUS, OIL_DEFAULT_AMOUNT);
-        eng->Con_Print("fire: oil deposited\n");
+        return 1;
     }
+    return 0;
+}
+
+// Debug (impulse 211): one-shot crosshair deposit with a console confirmation.
+void Fire_OilTraced(edict_t *player) {
+    if (Fire_PourOil(player))
+        eng->Con_Print("fire: oil deposited\n");
 }
 
 // Light an oil patch: flip it lit, set its burn + DOT windows, and schedule

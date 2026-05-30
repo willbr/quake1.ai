@@ -52,6 +52,7 @@ kbutton_t	in_lookup, in_lookdown, in_moveleft, in_moveright;
 kbutton_t	in_strafe, in_speed, in_use, in_jump, in_attack;
 kbutton_t	in_up, in_down;
 kbutton_t	in_blink, in_gust;   /* Phase 8 / M3 -- Blink and Gust abilities */
+kbutton_t	in_pouroil;          /* Phase 8 / M8 F2 -- hold to paint oil */
 
 int			in_impulse;
 
@@ -161,6 +162,8 @@ void IN_BlinkDown (void) {KeyDown(&in_blink);}
 void IN_BlinkUp (void) {KeyUp(&in_blink);}
 void IN_GustDown (void) {KeyDown(&in_gust);}
 void IN_GustUp (void) {KeyUp(&in_gust);}
+void IN_PourOilDown (void) {KeyDown(&in_pouroil);}
+void IN_PourOilUp (void) {KeyUp(&in_pouroil);}
 
 void IN_Impulse (void) {in_impulse=Q_atoi(Cmd_Argv(1));}
 
@@ -383,6 +386,10 @@ void CL_SendMove (usercmd_t *cmd)
 		bits |= 8;
 	in_gust.state &= ~2;
 
+	if (in_pouroil.state & 3)
+		bits |= 16;
+	in_pouroil.state &= ~2;
+
     MSG_WriteByte (&buf, bits);
 
     MSG_WriteByte (&buf, in_impulse);
@@ -456,6 +463,8 @@ void CL_InitInput (void)
 	Cmd_AddCommand ("-blink", IN_BlinkUp);
 	Cmd_AddCommand ("+gust",  IN_GustDown);
 	Cmd_AddCommand ("-gust",  IN_GustUp);
+	Cmd_AddCommand ("+pouroil", IN_PourOilDown);
+	Cmd_AddCommand ("-pouroil", IN_PourOilUp);
 	Cmd_AddCommand ("impulse", IN_Impulse);
 	Cmd_AddCommand ("+klook", IN_KLookDown);
 	Cmd_AddCommand ("-klook", IN_KLookUp);

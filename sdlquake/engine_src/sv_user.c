@@ -463,6 +463,7 @@ void SV_ReadClientMove (usercmd_t *move)
 	host_client->edict->v.button2 = (bits & 2)>>1;
 	host_client->edict->v.button3 = (bits & 4)>>2;   /* Blink (Phase 8) */
 	host_client->edict->v.button4 = (bits & 8)>>3;   /* Gust  (Phase 8) */
+	host_client->edict->v.button5 = (bits & 16)>>4;  /* Pour oil (Phase 8 / M8 F2) */
 
 	i = MSG_ReadByte ();
 	if (i)

@@ -60,6 +60,7 @@ typedef struct {
     int      blink_active;
     int      blink_valid;
     vec3_t   blink_endpoint;
+    float    pour_next;       // M8 F2: next g->time the held +pouroil may deposit
 } player_abil_t;
 
 static player_abil_t s_p;
@@ -423,6 +424,18 @@ void Abilities_Frame(edict_t *client) {
         gust_fire(client, eye, forward);
     }
     s_p.prev_button_gust = gbtn;
+
+    // Pour oil -- held +pouroil paints a continuous trail. Throttled to ~16 Hz;
+    // the deposit merge logic keeps a stationary pour as one growing patch and
+    // a moving pour as an overlapping trail. button5 = bit 4 of the clc_move
+    // button byte (sv_user.c). No energy cost (sandbox tool).
+    if (client->v.button5 > 0.5f) {
+        if (s_p.pour_next > g->time + 1.0f) s_p.pour_next = g->time; // level-reset guard
+        if (g->time >= s_p.pour_next) {
+            s_p.pour_next = g->time + 0.06f;
+            Fire_PourOil(client);
+        }
+    }
 
     // Mirror energy to the dev panels.
     CVSet("ph_energy", s_p.energy);
