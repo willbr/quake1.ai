@@ -198,6 +198,10 @@ void Fire_Frame(void) {
         Wind_AddSmoke(e->v.origin, FIRE_SMOKE_AMOUNT, FIRE_SMOKE_RADIUS);
 
         // Broadcast a fire stimulus so distant AI can register the threat.
+        // F2 note: many simultaneous fire sources (oil patches) emitting at
+        // 10 Hz each can crowd the 512-entry stim ring within the 5 s age
+        // window and starve sound/sight stims — revisit throttling / ring
+        // size when area fire lands.
         {
             stimulus_t st;
             memset(&st, 0, sizeof(st));
