@@ -431,6 +431,96 @@ void D_DrawSmokeParticle (particle_t *pparticle)
 
 /*
 ==============
+draw_fire_blob
+
+Solid-colour sibling of draw_smoke_blob: stamps a filled ellipse of (pix x
+rows) pixels in `color`, z-tested and z-written against izi, straight into the
+framebuffer (no fog-density accumulation). Backs the ADSR fire plume so each
+ember is a small growing/shrinking blob rather than a 1px dot.
+==============
+*/
+static void draw_fire_blob (int cu, int cv, int pix, int rows, int izi, byte color)
+{
+	if (pix < 1 || rows < 1) return;
+
+	int u = cu - pix  / 2;
+	int v = cv - rows / 2;
+
+	int u0 = (u < d_vrectx)                    ? d_vrectx - u             : 0;
+	int u1 = (u + pix  > r_refdef.vrectright)   ? r_refdef.vrectright  - u : pix;
+	int v0 = (v < d_vrecty)                    ? d_vrecty - v             : 0;
+	int v1 = (v + rows > r_refdef.vrectbottom)  ? r_refdef.vrectbottom - v : rows;
+	if (u0 >= u1 || v0 >= v1) return;
+
+	float rx = pix * 0.5f, ry = rows * 0.5f;
+	float inv_rx2 = 1.0f / (rx * rx);
+	float inv_ry2 = 1.0f / (ry * ry);
+
+	short *pz    = d_pzbuffer   + d_zwidth * (v + v0) + u;
+	byte  *pdest = d_viewbuffer + d_scantable[v + v0] + u;
+
+	for (int row = v0; row < v1; row++, pz += d_zwidth, pdest += screenwidth)
+	{
+		float dy   = ((float)row + 0.5f) - ry;
+		float dy2n = (dy * dy) * inv_ry2;
+		for (int i = u0; i < u1; i++)
+		{
+			float dx = ((float)i + 0.5f) - rx;
+			if (dx * dx * inv_rx2 + dy2n >= 1.0f) continue;
+			if (pz[i] <= izi) { pz[i] = izi; pdest[i] = color; }
+		}
+	}
+}
+
+
+/*
+==============
+D_DrawFireParticle
+
+pt_fireblob renderer: an ADSR (grow-then-shrink) size envelope keyed off the
+fire ramp (0 at birth -> 6 at death). A fast attack to a peak early in life,
+then a long release, so each ember puffs up and shrinks away rather than
+holding a constant size. Colour is the ramp3 fire colour the physics step
+already animates; r_fire_size sets the peak size.
+==============
+*/
+void D_DrawFireParticle (particle_t *pparticle)
+{
+	vec3_t	local, transformed;
+
+	VectorSubtract (pparticle->org, r_origin, local);
+	transformed[0] = DotProduct(local, r_pright);
+	transformed[1] = DotProduct(local, r_pup);
+	transformed[2] = DotProduct(local, r_ppn);
+	if (transformed[2] < PARTICLE_Z_CLIP)
+		return;
+
+	float zi  = 1.0f / transformed[2];
+	int   u   = (int)(xcenter + zi * transformed[0] + 0.5f);
+	int   v   = (int)(ycenter - zi * transformed[1] + 0.5f);
+	int   izi = (int)(zi * 0x8000);
+
+	// ADSR size: a in [0,1] over the ramp life; fast attack to a peak at
+	// a=0.25, linear release to ~0 by death. Floor at 0.25 so it never
+	// vanishes to sub-pixel before its colour has faded.
+	float a = pparticle->ramp * (1.0f / 6.0f);
+	if (a < 0) a = 0; else if (a > 1) a = 1;
+	float env = (a < 0.25f) ? (a / 0.25f) : (1.0f - (a - 0.25f) / 0.75f);
+	float size_scale = 0.25f + 0.75f * env;
+
+	extern cvar_t r_fire_size;
+	float ramp_eff = r_fire_size.value * size_scale;
+	int pix = ((int)(izi * ramp_eff)) >> d_pix_shift;
+	if (pix < 1) pix = 1;
+	if (pix > d_pix_max * 3) pix = d_pix_max * 3;
+	int rows = pix << d_y_aspect_shift;
+
+	draw_fire_blob (u, v, pix, rows, izi, (byte)pparticle->color);
+}
+
+
+/*
+==============
 Smoke-cell voxel-haze (Phase 8).
 
 sim_wind calls eng->Draw_SmokeCell(pos, world_size, density) once per

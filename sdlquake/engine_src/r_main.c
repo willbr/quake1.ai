@@ -158,6 +158,7 @@ cvar_t	r_smoke_ramp_min  = {"r_smoke_ramp_min",  "16"};
 cvar_t	r_smoke_ramp_max  = {"r_smoke_ramp_max",  "32"};
 cvar_t	r_smoke_emit_div  = {"r_smoke_emit_div",  "8"};
 cvar_t	r_smoke_lifetime  = {"r_smoke_lifetime",  "2.5"};
+cvar_t	r_fire_size       = {"r_fire_size",       "11"};   // pt_fireblob ADSR peak size
 cvar_t	r_smoke_cell_mode = {"r_smoke_cell_mode", "0"};	// voxel-haze pass; off by default since the grenade drives puffs directly
 cvar_t	r_smoke_cell_threshold = {"r_smoke_cell_threshold", "0.02"};
 cvar_t	r_sparks_count_mul     = {"r_sparks_count_mul",     "1"};	// 0 disables sparks; 2 doubles per-burst count
@@ -267,6 +268,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_smoke_ramp_max);
 	Cvar_RegisterVariable (&r_smoke_emit_div);
 	Cvar_RegisterVariable (&r_smoke_lifetime);
+	Cvar_RegisterVariable (&r_fire_size);
 	Cvar_RegisterVariable (&r_smoke_cell_mode);
 	Cvar_RegisterVariable (&r_smoke_cell_threshold);
 	Cvar_RegisterVariable (&r_sparks_count_mul);

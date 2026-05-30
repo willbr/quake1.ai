@@ -226,6 +226,7 @@ static const float wind_drag_k[] = {
     [pt_fire]     = 0.4f,   // used by R_RocketTrail; spawns at zero vel,
                             // so any strong drag yanks the trail off the
                             // rocket's path. Keep this low.
+    [pt_fireblob] = 0.4f,   // R_AddFire plume; same low drag (lets wind lean it)
     [pt_explode]  = 0.6f,
     [pt_explode2] = 0.6f,
     [pt_blob]     = 0.4f,
@@ -247,6 +248,7 @@ vec3_t			r_pright, r_pup, r_ppn;
 // colormap to every pixel that got smoke density written into it.
 void D_DrawSmokeCells (void);
 void D_CompositeSmoke (void);
+void D_DrawFireParticle (particle_t *p);   // ADSR fire blob (d_part.c)
 
 
 /*
@@ -1162,7 +1164,8 @@ void R_AddFire (vec3_t org, vec3_t dir, int count)
 		p->die   = cl.time + 2;			// ramp>=6 kills it first (~1.2 s)
 		p->ramp  = rand() & 1;			// 0/1 -> orange end of ramp3
 		p->color = ramp3[(int)p->ramp];
-		p->type  = pt_fire;
+		p->type  = pt_fireblob;			// ADSR size billboard (D_DrawFireParticle)
+		p->birth = cl.time;
 		for (j=0 ; j<3 ; j++)
 		{
 			p->org[j] = org[j] + ((rand() & 15) - 8);	// ±8 around the source
@@ -1966,6 +1969,8 @@ void R_DrawParticles (void)
 		}
 		else if (p->type == pt_smoke)
 			D_DrawSmokeParticle (p);
+		else if (p->type == pt_fireblob)
+			D_DrawFireParticle (p);
 		else
 			D_DrawParticle (p);
 #endif
@@ -2151,6 +2156,7 @@ void R_DrawParticles (void)
 			}
 			break;
 		case pt_fire:
+		case pt_fireblob:
 			p->ramp += time1;
 			if (p->ramp >= 6)
 				p->die = -1;
