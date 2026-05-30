@@ -469,11 +469,13 @@ static const int K1x1_solid[1] = { 1 };
 #define K_BULLET_DIM   4
 #define K_GAUSS28_DIM  28
 #define K_GAUSS52_DIM  52
+#define K_OIL_DIM      40
 
 static int K_bullet      [K_BULLET_DIM  * K_BULLET_DIM ];  /* 4×4 solid square */
 static int K_blood_splat [K_GAUSS28_DIM * K_GAUSS28_DIM];  /* 28u Gaussian */
 static int K_scorch      [K_GAUSS52_DIM * K_GAUSS52_DIM];  /* 52u Gaussian */
 static int K_lightning   [K_GAUSS28_DIM * K_GAUSS28_DIM];  /* 28u Gaussian (same shape as splat) */
+static int K_oil         [K_OIL_DIM     * K_OIL_DIM    ];  /* 40u solid -- bold oil slick (M8 F2) */
 
 static int K_bullet_norm;
 static int K_blood_splat_norm;
@@ -528,6 +530,8 @@ static void DecalKernels_Init (void)
 	Kernel_Init_Solid (K_bullet, K_BULLET_DIM);
 	K_bullet_norm = Kernel_Sum (K_bullet, K_BULLET_DIM);
 
+	Kernel_Init_Gauss (K_oil, K_OIL_DIM, 9.0f);   /* soft-edged slick (sigma 9 over 40u) */
+
 	/* sigma ≈ 6 for a 28-cell kernel: peak holds, edges fade smoothly. */
 	Kernel_Init_Gauss (K_blood_splat, K_GAUSS28_DIM, 6.0f);
 	K_blood_splat_norm = Kernel_Sum (K_blood_splat, K_GAUSS28_DIM);
@@ -545,7 +549,10 @@ static void DecalKernels_Init (void)
 	decal_kernels[DECAL_BULLET]        = (decal_kernel_t){ K_bullet,      K_BULLET_DIM,  K_bullet_norm,      -150, -150, -150 };
 	decal_kernels[DECAL_SPIKE]         = (decal_kernel_t){ K1x1_solid,    1,             1,                  -150, -150, -150 };
 	decal_kernels[DECAL_BLOOD_SPLAT]   = (decal_kernel_t){ K_blood_splat, K_GAUSS28_DIM, K_blood_splat_norm, -200, -500, -500 };
-	decal_kernels[DECAL_SCORCH]        = (decal_kernel_t){ K_scorch,      K_GAUSS52_DIM, K_scorch_norm,      -200, -200, -200 };
+	/* Scorch: knorm=256 (the Gaussian PEAK), not the full sum -- with the sum the
+	   centre delta dilutes to ~0 and the mark is invisible. Peak knorm => centre
+	   darkens by ~dr, fading via the Gaussian. Used by explosions AND M8 fire. */
+	decal_kernels[DECAL_SCORCH]        = (decal_kernel_t){ K_scorch,      K_GAUSS52_DIM, 256,                -120, -120, -120 };
 	decal_kernels[DECAL_LIGHTNING]     = (decal_kernel_t){ K_lightning,   K_GAUSS28_DIM, K_lightning_norm,    -50,  -60,  -40 };
 	/* Spatter delta is mixed-sign: ADDITIVE on red, subtractive on G/B.
 	   This forces the cell toward pure-red regardless of the base texture
@@ -553,11 +560,13 @@ static void DecalKernels_Init (void)
 	   (e.g. base r=20 minus delta -50 = 0). With +50 to R the cell stays
 	   visibly red even on the darkest wall pixels. */
 	decal_kernels[DECAL_BLOOD_SPATTER] = (decal_kernel_t){ K1x1_solid,    1,             1,                   +50, -100, -100 };
-	/* Oil (M8 F2): a wide dark stain, faintly cool/blue (B darkened least), so a
-	   poured patch reads as a slick on the floor and a poured trail overlaps into
-	   a line. Reuses the 52-cell scorch footprint; a burning patch then stacks a
-	   DECAL_SCORCH on top (additive -> burnt-oil look). */
-	decal_kernels[DECAL_OIL]           = (decal_kernel_t){ K_scorch,      K_GAUSS52_DIM, K_scorch_norm,      -340, -340, -310 };
+	/* Oil (M8 F2): a soft dark slick. 40u GAUSSIAN with knorm=256 (the peak), so
+	   the centre darkens by ~dr with a soft round falloff -- NOT a hard black
+	   square (knorm=1 solid) and NOT invisible (knorm=full-sum dilutes the centre
+	   to ~0). Moderate dr so the floor texture still reads through as an oily
+	   sheen, faintly cool (B darkened least). A burning patch stacks DECAL_SCORCH
+	   on top (additive -> burnt-oil look). */
+	decal_kernels[DECAL_OIL]           = (decal_kernel_t){ K_oil,         K_OIL_DIM,     256,                 -55,  -55,  -45 };
 }
 
 // ---------------------------------------------------------------------------
