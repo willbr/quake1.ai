@@ -306,7 +306,8 @@ void ai_painforward(float dist) {
 void ai_walk(float dist) {
     {
         ai_brain_t *b = Sim_AI_GetBrain(g->self);
-        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
+        if (b && (b->burning ||
+                  b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
                   (b->state == AI_IDLE && b->patrol_route_id >= 0)))
             return;
     }
@@ -326,7 +327,8 @@ void ai_stand(edict_t *self) {
     g->self = self;
     {
         ai_brain_t *b = Sim_AI_GetBrain(self);
-        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
+        if (b && (b->burning ||
+                  b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
                   (b->state == AI_IDLE && b->patrol_route_id >= 0)))
             return;
     }
@@ -383,6 +385,10 @@ static int FacingIdeal(void) {
 // ---------------------------------------------------------------------------
 static int CheckAnyAttack(void) {
     if (!enemy_vis) return 0;
+    {
+        ai_brain_t *b = Sim_AI_GetBrain(g->self);
+        if (b && b->burning) return 0;   // panicking, on fire — no attacks
+    }
     edict_t    *self = g->self;
     const char *cn   = self->v.classname;
     if (!cn)                          return CheckAttack();
@@ -440,7 +446,8 @@ static void ai_run_slide(void) {
 void ai_run(float dist) {
     {
         ai_brain_t *b = Sim_AI_GetBrain(g->self);
-        if (b && (b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
+        if (b && (b->burning ||
+                  b->state == AI_SUSPICIOUS || b->state == AI_SEARCHING ||
                   (b->state == AI_IDLE && b->patrol_route_id >= 0)))
             return;
     }
