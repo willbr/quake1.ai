@@ -19,6 +19,7 @@ void Sim_Init(void) {
     Sim_Nav_Init();
     Wind_Init();
     Light_Init();
+    Fire_Init();
     Sim_Arena_Init();
 }
 
@@ -29,6 +30,7 @@ void Sim_LevelInit(const char *mapname) {
     Sim_Patrol_Resolve();
     Wind_LevelInit();
     Light_LevelInit();
+    Fire_LevelInit();
     Sim_Retrofit_LevelInit();
     Abilities_LevelInit();
 }
@@ -53,6 +55,7 @@ void Sim_Frame(void) {
     }
 
     SIM_PERF("Sim_Retrofit") Sim_Retrofit_Frame();
+    SIM_PERF("Fire")         Fire_Frame();
     SIM_PERF("Sim_AI")       Sim_AI_Frame();
     SIM_PERF("Wind")         Wind_Frame();
     // Sim_Nav_Frame is now driven by game_api->debug_draw_overlays so the

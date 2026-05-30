@@ -34,6 +34,7 @@ typedef enum {
     STIM_LIGHT_CHANGE,
     STIM_CORPSE,
     STIM_PROP_BROKEN,
+    STIM_FIRE,            // Phase 8 / M8 — active fire / burning entity
 } stim_kind_t;
 
 typedef struct {
@@ -91,6 +92,10 @@ typedef struct {
     // movement). Reset on state change so re-entering IDLE/SEARCHING
     // re-triggers the kick if vanilla took the monster elsewhere.
     int         walking;
+    // 1 while this monster is on fire (mirrored from the fire registry each
+    // AI tick). Drives panic-flee in behavior_tick and suppresses vanilla
+    // movement/attacks in ai.c. Phase 8 / M8.
+    int          burning;
 } ai_brain_t;
 
 void        Sim_AI_Init(void);
@@ -201,6 +206,27 @@ void  Wind_AddTubeImpulse(const vec3_t origin, const vec3_t axis,
 void  Wind_AddSmoke(const vec3_t origin, float amount, float radius);
 void  Wind_ClearSmoke(const vec3_t origin, float amount, float radius);
 void  Wind_RegisterSource(edict_t *e, const vec3_t velocity);
+
+// ---------------------------------------------------------------------------
+// Fire & oil (Phase 8 / M8)
+// ---------------------------------------------------------------------------
+void Fire_Init(void);
+void Fire_LevelInit(void);
+void Fire_Frame(void);
+
+// Set an edict on fire for `seconds`, doing `dps` damage/second, attributed
+// to `igniter` (NULL = world). Extends the burn if already alight.
+void Fire_Ignite(edict_t *e, float seconds, float dps, edict_t *igniter);
+void Fire_Extinguish(edict_t *e);
+
+int  Fire_IsBurning(int edict_num);                          // 1 if alight
+int  Fire_GetIgniterOrigin(int edict_num, vec3_t out);       // 1 if igniter known
+// Nearest active fire within `radius` of `pos`; writes its origin to `out`.
+// Returns 1 if one was found. Used by AI to flee/avoid.
+int  Fire_NearestHazard(const vec3_t pos, float radius, vec3_t out);
+
+// Debug trigger: trace from the player's view and ignite whatever's hit.
+void Fire_IgniteTraced(edict_t *player);
 
 // ---------------------------------------------------------------------------
 // Arena (test)
