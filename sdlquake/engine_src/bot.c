@@ -29,6 +29,7 @@ typedef enum {
     BS_GOTO_KEY,
     BS_GOTO_BUTTON,
     BS_GOTO_EXIT,
+    BS_WANDER,     // nothing path-reachable — roam to explore/find new goals
     BS_DEAD,
 } bot_state_t;
 
@@ -66,6 +67,30 @@ static struct {
     float        next_replan;      // host_time of next goal re-evaluation
 
     char         map_at_init[64];  // detect map change for state reset
+
+    // Stuck recovery: sampled displacement; when the bot keeps trying to walk
+    // but isn't moving, briefly reverse+strafe+hop to unwedge.
+    vec3_t       last_pos;
+    float        stuck_sample_time;
+    int          stuck_count;
+    float        recover_until;
+    int          recover_sign;
+
+    // Wander/explore: ring of recently chosen roam targets, so the fallback
+    // doesn't ping-pong between the same two spots.
+    vec3_t       visited[8];
+    int          visited_head;
+
+    // Combat give-up: the bot has no combat pathing, so an enemy across a gap
+    // (or an unkillable one) would pin it forever. Track how long we've fought
+    // one target and whether we're hurting it; if not, blacklist it and move
+    // on so navigation resumes.
+    int          combat_target;     // edict num currently engaged, or -1
+    float        combat_since;      // host_time we locked onto it
+    float        combat_tgt_hp0;    // its health when we engaged
+    int          bl_ent[8];         // blacklisted enemy edict nums
+    float        bl_until[8];       // host_time the blacklist entry expires
+    int          bl_head;
 } b;
 
 // in_attack / in_jump live in cl_input.c (kbutton_t globals)
@@ -348,16 +373,118 @@ static int Bot_CurrentWaypointKind(void)
 // Perception + goal selection
 // ---------------------------------------------------------------------------
 
-static void Bot_DecideGoal(void)
+typedef struct { int ent; float d2; } bot_cand_t;
+
+// Sort candidates ascending by squared distance (insertion sort — n is tiny),
+// then return the edict number of the NEAREST one the navmesh can actually
+// reach, having committed that path into b.waypoints / b.target_pos. This is
+// what stops the bot locking onto the closest goal and freezing when it has no
+// path to it — e.g. start.bsp's four episode slipgates where only e1m1 is
+// reachable (e2/e3/e4 sit behind registered-only gates), or a far key that is
+// itself walled off behind the door it would open. `use_center` paths to the
+// bbox centre (exits are brush triggers with no origin) vs the origin
+// (keys/items). Returns -1 if none are reachable.
+static int Bot_PickReachable(bot_cand_t *c, int n, int use_center, vec3_t out_pos)
+{
+    int i, j;
+    for (i = 1; i < n; i++) {
+        bot_cand_t key = c[i];
+        for (j = i - 1; j >= 0 && c[j].d2 > key.d2; j--) c[j+1] = c[j];
+        c[j+1] = key;
+    }
+    for (i = 0; i < n; i++) {
+        edict_t *e = Bot_Edict(c[i].ent);
+        vec3_t to;
+        if (!e || e->free) continue;
+        if (use_center) Bot_EntityCenter(e, to); else Bot_VecCopy(e->v.origin, to);
+        if (Bot_RequestPath(to)) {
+            Bot_VecCopy(to, out_pos);
+            return c[i].ent;
+        }
+    }
+    return -1;
+}
+
+#define BOT_MAX_CAND 64
+
+static int Bot_IsBlacklisted(int ent)
 {
     int i;
-    edict_t *best_enemy = NULL, *best_key = NULL, *best_item = NULL;
-    edict_t *best_exit = NULL;
-    float best_enemy_d2 = 1e30f, best_key_d2 = 1e30f;
-    float best_item_d2  = 1e30f, best_exit_d2 = 1e30f;
+    for (i = 0; i < 8; i++)
+        if (b.bl_ent[i] == ent && host_time < b.bl_until[i]) return 1;
+    return 0;
+}
+
+static void Bot_Blacklist(int ent, float secs)
+{
+    b.bl_ent[b.bl_head]   = ent;
+    b.bl_until[b.bl_head] = host_time + secs;
+    b.bl_head = (b.bl_head + 1) & 7;
+}
+
+// When no real goal is path-reachable, roam: probe several compass directions
+// at a couple of ranges, nav_path to each, and head for the best reachable
+// end-point. If we know where the level exit is (`lure`, even when it's not yet
+// path-reachable), bias strongly toward reachable frontier nodes nearest it —
+// so exploration trends toward progress and tends to cross the one-way drop /
+// lift that finally puts the exit region within pathing range. Otherwise just
+// favour long fresh paths. Recently-visited spots are penalised so the fallback
+// doesn't ping-pong. This keeps the bot moving and fighting on large maps
+// instead of freezing when the only known goal sits behind a navmesh gap.
+static int Bot_PickWander(vec3_t out_pos, const float *lure)
+{
+    static const float dirs[8][2] = {
+        { 1.f, 0.f}, { 0.f, 1.f}, {-1.f, 0.f}, { 0.f,-1.f},
+        { 0.7f,0.7f},{-0.7f,0.7f},{0.7f,-0.7f},{-0.7f,-0.7f} };
+    static const float ranges[2] = { 448.f, 960.f };
+    static unsigned wander_tick = 0;
+    vec3_t scratch[BOT_MAX_WAYPOINTS];
+    unsigned char skind[BOT_MAX_WAYPOINTS];
+    unsigned int items = (unsigned int)sv_player->v.items;
+    float best_score = -1e30f;
+    int found = 0, di, ri, h;
+    vec3_t best; best[0] = best[1] = best[2] = 0.f;
+
+    if (!g_game_api || !g_game_api->nav_path) return 0;
+
+    for (di = 0; di < 8; di++) for (ri = 0; ri < 2; ri++) {
+        vec3_t cand, end;
+        float score;
+        int n;
+        cand[0] = sv_player->v.origin[0] + dirs[di][0] * ranges[ri];
+        cand[1] = sv_player->v.origin[1] + dirs[di][1] * ranges[ri];
+        cand[2] = sv_player->v.origin[2];
+        n = g_game_api->nav_path((float *)sv_player->v.origin, cand,
+                                 (float *)scratch, skind, items, BOT_MAX_WAYPOINTS);
+        if (n <= 1) continue;                          // no/trivial path
+        Bot_VecCopy(scratch[n - 1], end);
+        // Coverage-primary (path length + revisit penalty) with a gentle pull
+        // toward the exit. A strong pull beelines toward the exit's coordinates,
+        // which backfires when the topological entry to the exit region is in a
+        // different direction (true on real maps) — so keep the lure weak.
+        score = (float)n;
+        if (lure) score -= 0.012f * sqrtf(Bot_Dist2(end, lure));
+        for (h = 0; h < 8; h++)
+            if (Bot_Dist2(end, b.visited[h]) < (320.f * 320.f)) score -= 30.f;
+        score += (float)((wander_tick + di) & 3) * 0.25f;   // break ties
+        if (score > best_score) { best_score = score; Bot_VecCopy(end, best); found = 1; }
+    }
+    wander_tick++;
+    if (found) { Bot_VecCopy(best, out_pos); return 1; }
+    return 0;
+}
+
+static void Bot_DecideGoal(void)
+{
+    int i, ent;
+    edict_t *best_enemy = NULL;
+    float best_enemy_d2 = 1e30f;
     float aware2  = bot_aware_radius.value  * bot_aware_radius.value;
     float pickup2 = bot_pickup_radius.value * bot_pickup_radius.value;
     vec3_t ppos;
+
+    bot_cand_t keys[BOT_MAX_CAND], items[BOT_MAX_CAND], exits[16];
+    int nkeys = 0, nitems = 0, nexits = 0;
 
     if (!sv_player) return;
     Bot_VecCopy(sv_player->v.origin, ppos);
@@ -375,59 +502,87 @@ static void Bot_DecideGoal(void)
         d2 = Bot_Dist2(ppos, e->v.origin);
 
         if (Bot_IsEnemy(e)) {
+            if (Bot_IsBlacklisted(i)) continue;     // gave up on this one recently
             if (d2 < aware2 && d2 < best_enemy_d2 && Bot_LineOfSight(ppos, e->v.origin)) {
                 best_enemy = e;
                 best_enemy_d2 = d2;
             }
         } else if (Bot_IsKey(e)) {
-            if (d2 < best_key_d2) {
-                best_key = e;
-                best_key_d2 = d2;
-            }
+            if (nkeys < BOT_MAX_CAND) { keys[nkeys].ent = i; keys[nkeys].d2 = d2; nkeys++; }
         } else if (Bot_IsItem(e)) {
-            if (d2 < pickup2 && d2 < best_item_d2) {
-                best_item = e;
-                best_item_d2 = d2;
+            if (d2 < pickup2 && Bot_ItemUseful(e) && nitems < BOT_MAX_CAND) {
+                items[nitems].ent = i; items[nitems].d2 = d2; nitems++;
             }
         } else if (Bot_IsExit(e)) {
             vec3_t c;
             Bot_EntityCenter(e, c);
-            d2 = Bot_Dist2(ppos, c);
-            if (d2 < best_exit_d2) {
-                best_exit = e;
-                best_exit_d2 = d2;
+            if (nexits < 16) {
+                exits[nexits].ent = i;
+                exits[nexits].d2  = Bot_Dist2(ppos, c);
+                nexits++;
             }
         }
     }
 
-    if (best_item && !Bot_ItemUseful(best_item)) best_item = NULL;
-
+    // Enemies first (combat is straight-line, no nav path needed). Then the
+    // nearest REACHABLE key > exit > useful item.
+    if (best_enemy) {
+        int en = NUM_FOR_EDICT(best_enemy);
+        if (en == b.combat_target) {
+            // Still locked on the same enemy. If we've fought it a while
+            // without drawing blood (it's across a gap / behind a grate) or
+            // far too long overall, give up: blacklist it and resume nav so a
+            // single unreachable monster can't pin the bot for the whole map.
+            float dmg = b.combat_tgt_hp0 - best_enemy->v.health;
+            if ((host_time - b.combat_since > 6.0f && dmg <= 0.f) ||
+                (host_time - b.combat_since > 14.0f)) {
+                Bot_Blacklist(en, 12.0f);
+                if (bot_debug.value) Con_Printf("[bot] give up enemy %d\n", en);
+                best_enemy = NULL;
+            }
+        } else {
+            b.combat_target  = en;
+            b.combat_since   = host_time;
+            b.combat_tgt_hp0 = best_enemy->v.health;
+        }
+    }
     if (best_enemy) {
         b.state = BS_COMBAT;
         b.target_edict = NUM_FOR_EDICT(best_enemy);
         Bot_VecCopy(best_enemy->v.origin, b.target_pos);
         return;
     }
-    if (best_key) {
-        b.state = BS_GOTO_KEY;
-        b.target_edict = NUM_FOR_EDICT(best_key);
-        Bot_VecCopy(best_key->v.origin, b.target_pos);
-        Bot_RequestPath(b.target_pos);
-        return;
+    b.combat_target = -1;   // not fighting — reset the engage timer
+    if ((ent = Bot_PickReachable(keys, nkeys, 0, b.target_pos)) >= 0) {
+        b.state = BS_GOTO_KEY; b.target_edict = ent; return;
     }
-    if (best_exit) {
-        b.state = BS_GOTO_EXIT;
-        b.target_edict = NUM_FOR_EDICT(best_exit);
-        Bot_EntityCenter(best_exit, b.target_pos);
-        Bot_RequestPath(b.target_pos);
-        return;
+    if ((ent = Bot_PickReachable(exits, nexits, 1, b.target_pos)) >= 0) {
+        b.state = BS_GOTO_EXIT; b.target_edict = ent; return;
     }
-    if (best_item) {
-        b.state = BS_GOTO_ITEM;
-        b.target_edict = NUM_FOR_EDICT(best_item);
-        Bot_VecCopy(best_item->v.origin, b.target_pos);
-        Bot_RequestPath(b.target_pos);
-        return;
+    if ((ent = Bot_PickReachable(items, nitems, 0, b.target_pos)) >= 0) {
+        b.state = BS_GOTO_ITEM; b.target_edict = ent; return;
+    }
+
+    // Nothing reachable to pursue — wander instead of freezing, biased toward
+    // the nearest known exit (exits[] was sorted ascending by Bot_PickReachable)
+    // so exploration trends toward the level's goal.
+    {
+        vec3_t wp, lurepos;
+        const float *lure = NULL;
+        if (nexits > 0) {
+            edict_t *xe = Bot_Edict(exits[0].ent);
+            if (xe && !xe->free) { Bot_EntityCenter(xe, lurepos); lure = lurepos; }
+        }
+        if (Bot_PickWander(wp, lure) && Bot_RequestPath(wp)) {
+            b.state = BS_WANDER;
+            b.target_edict = -1;
+            Bot_VecCopy(wp, b.target_pos);
+            Bot_VecCopy(wp, b.visited[b.visited_head]);
+            b.visited_head = (b.visited_head + 1) & 7;
+            if (bot_debug.value)
+                Con_Printf("[bot] WANDER -> (%.0f %.0f %.0f)\n", wp[0], wp[1], wp[2]);
+            return;
+        }
     }
 
     if (bot_debug.value) Con_Printf("[bot] no goal -> IDLE\n");
@@ -541,6 +696,7 @@ static void Bot_DriveFrame(usercmd_t *cmd)
 
     // Map change — reset all per-map state (waypoints, target, etc.)
     if (strncmp(b.map_at_init, sv.name, sizeof(b.map_at_init)) != 0) {
+        int q;
         if (bot_debug.value)
             Con_Printf("[bot] map change %s -> %s, resetting\n",
                        b.map_at_init, sv.name);
@@ -549,8 +705,29 @@ static void Bot_DriveFrame(usercmd_t *cmd)
         b.waypoint_count = 0;
         b.waypoint_idx = 0;
         b.next_replan = 0.f;
+        b.combat_target = -1;
+        for (q = 0; q < 8; q++) b.bl_until[q] = 0.f;   // edict nums differ per map
+        b.recover_until = 0.f;
+        b.stuck_count = 0;
+        b.visited_head = 0;
+        Bot_VecCopy(sv_player->v.origin, b.last_pos);
+        b.stuck_sample_time = host_time;
+        Bot_SetButtons(0, 0);   // release any attack held from intermission
         Q_strncpy(b.map_at_init, sv.name, sizeof(b.map_at_init) - 1);
         b.map_at_init[sizeof(b.map_at_init) - 1] = '\0';
+        return;
+    }
+
+    // Intermission: a real (non-spawnflags-1) trigger_changelevel freezes the
+    // player on the end-of-level camera until a button is pressed
+    // (IntermissionThink in game.dll waits on button0/1/2 after exittime).
+    // The test maps skip this via spawnflags 1, but every id1 episode map goes
+    // through it — so without pressing attack here the bot sits on the
+    // scoreboard forever and never advances start->e1m1->...  key_dest stays
+    // key_game during intermission, so Bot_Frame still reaches us.
+    if (cl.intermission) {
+        cmd->forwardmove = cmd->sidemove = cmd->upmove = 0;
+        Bot_SetButtons(1, 0);
         return;
     }
 
@@ -667,7 +844,34 @@ static void Bot_DriveFrame(usercmd_t *cmd)
     }
     // else: no waypoint (no path or IDLE). Stand still.
 
+    // Stuck recovery: if we've been trying to walk but not displacing, override
+    // with a brief reverse + strafe + hop to break free of a geometry snag.
+    if (host_time < b.recover_until) {
+        cmd->forwardmove = -cl_forwardspeed.value * 0.8f;
+        cmd->sidemove    = (float)b.recover_sign * cl_sidespeed.value;
+        cl.viewangles[YAW] = anglemod(cl.viewangles[YAW] + (float)b.recover_sign * 8.f);
+        do_jump = 1;
+    }
+
     Bot_SetButtons(do_attack, do_jump);
+
+    // Stuck bookkeeping (sampled ~3x/sec). Only counts while actually trying to
+    // move, so deliberate holds (lift wait, train ride, button wait with zeroed
+    // movement) don't false-trigger recovery.
+    if (host_time - b.stuck_sample_time > 0.34f) {
+        float dd = Bot_Dist2(sv_player->v.origin, b.last_pos);
+        int tried = (cmd->forwardmove != 0.f || cmd->sidemove != 0.f);
+        if (tried && dd < (18.f * 18.f)) b.stuck_count++;
+        else                             b.stuck_count = 0;
+        Bot_VecCopy(sv_player->v.origin, b.last_pos);
+        b.stuck_sample_time = host_time;
+        if (b.stuck_count >= 3 && host_time >= b.recover_until) {   // ~1s wedged
+            b.recover_until = host_time + 0.5f;
+            b.recover_sign  = (b.recover_sign <= 0) ? 1 : -1;
+            b.stuck_count   = 0;
+            if (bot_debug.value) Con_Printf("[bot] stuck -> recover\n");
+        }
+    }
 
     if (bot_debug.value && b.state != BS_IDLE &&
         ((int)(host_time*2.f) != (int)((host_time - host_frametime)*2.f)))
@@ -679,6 +883,7 @@ static void Bot_DriveFrame(usercmd_t *cmd)
             case BS_GOTO_ITEM:   stname = "GOTO_ITEM";   break;
             case BS_GOTO_EXIT:   stname = "GOTO_EXIT";   break;
             case BS_GOTO_BUTTON: stname = "GOTO_BUTTON"; break;
+            case BS_WANDER:      stname = "WANDER";      break;
             case BS_IDLE:        stname = "IDLE";        break;
             case BS_DEAD:        stname = "DEAD";        break;
         }
