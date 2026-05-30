@@ -553,6 +553,11 @@ static void DecalKernels_Init (void)
 	   (e.g. base r=20 minus delta -50 = 0). With +50 to R the cell stays
 	   visibly red even on the darkest wall pixels. */
 	decal_kernels[DECAL_BLOOD_SPATTER] = (decal_kernel_t){ K1x1_solid,    1,             1,                   +50, -100, -100 };
+	/* Oil (M8 F2): a wide dark stain, faintly cool/blue (B darkened least), so a
+	   poured patch reads as a slick on the floor and a poured trail overlaps into
+	   a line. Reuses the 52-cell scorch footprint; a burning patch then stacks a
+	   DECAL_SCORCH on top (additive -> burnt-oil look). */
+	decal_kernels[DECAL_OIL]           = (decal_kernel_t){ K_scorch,      K_GAUSS52_DIM, K_scorch_norm,      -340, -340, -310 };
 }
 
 // ---------------------------------------------------------------------------

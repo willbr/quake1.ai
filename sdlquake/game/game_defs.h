@@ -144,6 +144,10 @@
 #define TE_SHELLEJECT  19
 #define TE_DEBUGBLOOD  20
 
+// Decal types (mirror of decal_type_t in r_local.h) passed to eng->SV_Decal.
+#define DECAL_SCORCH   3
+#define DECAL_OIL      6
+
 // sound channels
 #define CHAN_AUTO   0
 #define CHAN_WEAPON 1

@@ -183,6 +183,7 @@ void     SV_StartSound(edict_t *entity, int channel, char *sample, int volume, f
 void     SV_StartParticle(float *org, float *dir, int color, int count);
 void     R_AddSmokePuff(float *org, float *dir, int color, int count);
 void     R_AddFire(float *org, float *dir, int count);
+void     R_SpawnDecal(float *pos, int type);   /* r_decals.c; vec3_t/decal_type_t */
 void     SV_LinkEdict(edict_t *ent, qboolean touch_triggers);
 void     SV_UnlinkEdict(edict_t *ent);
 void     SV_MakeStatic(edict_t *ent);
@@ -793,6 +794,14 @@ static void engine_sv_fire(float *org, float *dir, float count)
     R_AddFire(org, dir, (int)count);
 }
 
+// Stamp a decal at `pos` (R_SpawnDecal self-finds the surface). `type` is a
+// decal_type_t value (mirrored as DECAL_* in game_defs.h). Main-thread only;
+// silently drops if no surface is near or the server isn't up.
+static void engine_sv_decal(float *pos, int type)
+{
+    R_SpawnDecal(pos, type);
+}
+
 void R_QueueSmokeCell(const float *org, float world_size, float density); // r_part.c
 static void engine_draw_smoke_cell(float *org, float world_size, float density)
 {
@@ -1051,6 +1060,7 @@ static engine_api_t engine_funcs = {
     Perf_PushScope,
     Perf_PopScope,
     engine_sv_fire,
+    engine_sv_decal,
 };
 
 // ---------------------------------------------------------------------------

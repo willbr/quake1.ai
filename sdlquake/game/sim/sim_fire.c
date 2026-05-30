@@ -48,6 +48,7 @@ typedef struct {
     int   igniter_edict;     // -1 = world / unknown
     float next_dmg_time;
     int   corpse_timed;      // 1 once the corpse burn window has been applied
+    float next_scorch;       // next g->time to stamp a scorch decal under the body
 } fire_burn_t;
 
 static fire_burn_t s_burning[FIRE_MAX_BURNING];   // indexed by edict number
@@ -114,6 +115,7 @@ static void fire_clear_slot(int n, edict_t *e) {
     if (n < 0 || n >= FIRE_MAX_BURNING) return;
     s_burning[n].active = 0;
     s_burning[n].corpse_timed = 0;
+    s_burning[n].next_scorch = 0.0f;
     // Clear any oil coat too, so it can't linger onto a reused edict number
     // when this burn ends (extinguish / timeout / free). Mirrors how the burn
     // slot itself is cleared here. A coated-but-never-ignited edict that's
@@ -242,6 +244,10 @@ void Fire_AddOil(const vec3_t origin_in, float radius, float amount) {
     o->amount       = amount;
     o->deposit_time = g->time;
 
+    // Persistent dark floor stain marking where the oil lies (replaces the old
+    // per-tick smoke puff). When the patch burns, a scorch stacks on top.
+    eng->SV_Decal(o->origin, DECAL_OIL);
+
     // Coat edicts standing in the fresh oil so a later spark ignites them
     // hotter/longer. (The merge branch returns early and does not coat -- a
     // merge just tops up amount on an existing patch.)
@@ -349,6 +355,7 @@ static void oil_light_patch(oil_patch_t *o) {
     o->burn_until    = g->time + OIL_BURN_SECS;
     o->next_dmg_time = g->time + OIL_DMG_INTERVAL;
     o->ignite_at     = 0.0f;
+    eng->SV_Decal(o->origin, DECAL_SCORCH);   // burning oil scorches the floor (stacks on the oil stain)
 
     for (int i = 0; i < OIL_MAX_PATCHES; i++) {
         oil_patch_t *n = &s_oil[i];
@@ -430,13 +437,8 @@ static void oil_frame(void) {
             }
             if (o->lit) continue;   // lit this tick (already counted); handle as lit next tick
 
-            // Sparse dark sheen so the player can see where oil lies (a proper
-            // floor decal is a later-stage upgrade; particles are the MVP).
-            vec3_t org = { o->origin[0] + fire_crand() * o->radius * 0.6f,
-                           o->origin[1] + fire_crand() * o->radius * 0.6f,
-                           o->origin[2] + 2.0f };
-            vec3_t dir = { 0, 0, 0 };
-            eng->SV_Smoke(org, dir, 4.0f, 1.0f);   // colour 4 = dark grey
+            // Unlit oil is shown by the persistent DECAL_OIL stain stamped at
+            // deposit (Fire_AddOil) -- no per-tick particle render.
             continue;
         }
 
@@ -596,6 +598,15 @@ void Fire_Frame(void) {
             st.intensity     = 0.8f;
             st.source_edict  = n;
             Stim_Emit(&st);
+        }
+
+        // Scorch the ground under a burning body, throttled to ~1 Hz so a
+        // moving burner leaves a trail of marks (like blood spills). absmin[2]
+        // is the body's feet; R_SpawnDecal self-finds the floor near it.
+        if (g->time >= f->next_scorch) {
+            f->next_scorch = g->time + 1.0f;
+            vec3_t feet = { e->v.origin[0], e->v.origin[1], e->v.absmin[2] + 1.0f };
+            eng->SV_Decal(feet, DECAL_SCORCH);
         }
     }
 

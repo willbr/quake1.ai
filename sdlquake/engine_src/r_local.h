@@ -370,6 +370,7 @@ typedef enum {
 	DECAL_SCORCH,
 	DECAL_LIGHTNING,
 	DECAL_BLOOD_SPATTER,   // single-cell blood dot left by a stuck pt_blood particle
+	DECAL_OIL,             // M8 F2: dark floor stain where oil lies (eng->SV_Decal)
 	DECAL_NUM_TYPES
 } decal_type_t;
 
