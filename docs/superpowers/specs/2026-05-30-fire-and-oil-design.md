@@ -1,7 +1,7 @@
 # Fire & Oil (Phase 8 / M8) — Design
 
 **Date:** 2026-05-30
-**Status:** F1+F2+F3+F4 implemented 2026-05-30; F5 (interactions) planned 2026-05-30 — see "F5 — locked decisions" below; F6 not started
+**Status:** F1–F5 implemented + verified + committed 2026-05-30; F6 (test level + tooling + balance) planned 2026-05-31 — see "F6 — locked decisions" below
 **Phase:** 8 (Immersive-Sim Systems) — milestone **M8**, follows M1–M7
 
 ## Goal
@@ -266,7 +266,7 @@ any map because the player makes their own oil. The systems are also exercised i
 | **F2 Oil substance** | Oil-patch pool, deposit/coat, cascade, ignite-on-contact | MCP-spawn oil + ignite → trail races, edicts in it ignite |
 | **F3 Weapons** ✅ | Oil gun + flamethrower (Phase 6 `weapon2`), pickups, impulses, `cells` ammo | Spray + torch in-game |
 | **F4 Flammables** ✅ | `misc_oilbarrel`, (re)lightable torches, breakable props, player-burns | Trail → barrel → boom; light a torch; burn a crate; burn self |
-| **F5 Interactions** | Gust-extinguish, contact-spread, smoke/light tuning | Gust out a fire; burning enemy lights allies |
+| **F5 Interactions** ✅ | Gust-extinguish, contact-spread, smoke/light tuning | Gust out a fire; burning enemy lights allies |
 | **F6 Test level + tooling** | `ai_t10_fire.map`, optional `fire_query` MCP tool, balance/perf pass | Full-room playtest + MCP assertions |
 
 ## F5 — locked decisions (2026-05-30)
@@ -311,6 +311,57 @@ bump**):
    torches (1024 cap) — each oil burn cycle consumes 2 slots and never frees
    them; a pathological oil-spam session could exhaust it (overrides then no-op).
    A reclaimable override slot is follow-up polish.
+
+## F6 — locked decisions (2026-05-31)
+
+The final M8 stage — a dedicated test level, headless-inspection tooling, and a
+balance/perf pass — scoped against the now-complete F1–F5 code. **All DLL-internal;
+`GAME_API_VERSION` stays 36 (no ABI bump — the streak held since F2 survives the whole
+milestone).**
+
+1. **Test level — single showcase arena.** `id1/maps/ai_t10_fire.map` is one room
+   (~`m7_skeleton` scale, standard box-room convention: sky ceiling, brick walls, flat
+   floor) holding *every* fire/oil system at once, so a single load exercises the whole
+   feature without level transitions:
+   - a **pre-placed oil slick** the player can light immediately (seeded by a tiny new
+     map-spawn entity `misc_oilslick` that calls `Fire_AddOil` at spawn — DLL-side, no ABI);
+   - an **oil-trail → `misc_oilbarrel` → boom** lane (the headline emergent moment);
+   - **wall torches** (`light_torch_small_walltorch`) for Gust-snuff + flamethrower-relight
+     + lit-torch-ignites-oil;
+   - **breakable crates** (`misc_breakable`) that burn down to `STIM_PROP_BROKEN`;
+   - a **monster cluster** (grunts + an ogre) to show contact-spread + panic-flee + the
+     M4 smoke screen breaking LOS;
+   - open floor for the oil-gun / flamethrower fantasy.
+   The map places `weapon_oilgun` + `weapon_flamethrower` pickups (F3 entities) and
+   `item_cells`, so the player is armed on entry and MCP/playtest can verify immediately.
+   Worldspawn carries `"message" "AI-TEST t10_fire"` (the t01–t09 marker convention).
+   **Multi-area vignettes were rejected** — more brush-authoring risk (leaks/windings) for
+   marginal demonstration gain. The map is **not** added to `run_ai_tests.sh`'s gating
+   t01–t09 list: fire is not a navigation test, and the bot chain already strands at t08.
+   t10 is MCP/playtest-verified (and survives a plain `+map ai_t10_fire +bot 1` smoke run).
+
+2. **Tooling — zero-ABI read-only count cvars, not a `fire_query` MCP tool.** F6 adds
+   DLL-registered read cvars — `fire_burning_count` (live burning-edict count) and
+   `fire_lit_oil_count` (lit oil-patch count), peers of the existing `fire_oil_count` —
+   refreshed each `Fire_Frame` tick and read over MCP via the existing `get_cvar`. This
+   gives headless pass/fail assertions ("N edicts burning", "M oil patches lit") that close
+   the F5 gap where burning had to be *inferred* from health deltas (the stale-read
+   gotcha). **No ABI bump.** A full `fire_query` MCP tool (per-patch / per-edict positions
+   & state, like `nav_edges_near`) was considered and **deferred as polish**: it needs a
+   `game_api_t` vtable fn + `hotreload.c` bridge + `mcp_server.c` tool (`GAME_API_VERSION`
+   36→37), and counts + `inspect_entity` + screenshots already carried F1–F5.
+
+3. **Balance — control / area-denial, light retune only.** Fire stays tuned toward the
+   spec headline (monsters panic & flee, smoke breaks LOS — emergent disruption), **not** a
+   fast-kill weapon. The pass verifies the current defaults (`fire_dps` 8, `fire_secs` 5,
+   `fire_corpse_secs` 8, `OIL_BURN_SECS` 4, `fire_spread_radius` 64, `fire_light` 96) read
+   as "threatening, not instant" against grunt (30 hp) / ogre (200 hp) health, retunes a
+   default only if it reads clearly wrong in the showcase playtest, and **documents the
+   final numbers** (CLAUDE.md + here). **Perf:** a `profile` capture in the showcase room
+   with many simultaneous oil fires confirms the per-tick `oil_frame` O(patches×edicts)
+   scan and the `Lightmap_AddDelta` churn stay within frame budget; any hotspot is noted
+   (spatial buckets / reclaimable override slots remain the documented follow-ups from the
+   F5 carry-forward), not necessarily fixed in this MVP.
 
 ## Non-goals (YAGNI)
 
