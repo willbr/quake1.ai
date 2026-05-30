@@ -1858,7 +1858,12 @@ static int bake_floodfill(sim_navmesh_t *m) {
     {
         const float GATE_OPEN_RADIUS = 900.0f;
         edict_t *bg = eng->ED_Find(g->world, "classname", "func_bossgate");
-        if (bg && bg->v.solid > (float)SOLID_NOT) {
+        // ED_Find returns the world edict (not NULL) when nothing matches, and
+        // the world is SOLID_BSP -- guard against that so this descent flood
+        // only runs on maps that actually contain a bossgate (e.g. start.bsp),
+        // never on gate-free maps where it would briefly null the world's solid
+        // and bake junk edges.
+        if (bg && bg != g->world && bg->v.solid > (float)SOLID_NOT) {
             unsigned int open_req = (unsigned int)IT_ALL_SIGILS;
             float cx = bg->v.origin[0] + (bg->v.mins[0]+bg->v.maxs[0])*0.5f;
             float cy = bg->v.origin[1] + (bg->v.mins[1]+bg->v.maxs[1])*0.5f;
