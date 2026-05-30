@@ -8,6 +8,7 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "weapons_fire.h"
+#include "flammables.h"
 #include "sim/sim.h"
 
 extern engine_api_t  *eng;
@@ -151,9 +152,11 @@ static int Flamethrower_DoFire(edict_t *self) {
                    self->v.origin[2] + self->v.view_ofs[2] };
     vec3_t fwd = { g->v_forward[0], g->v_forward[1], g->v_forward[2] };
 
-    // Ignite damageable edicts inside the cone (LOS-gated). Mirrors gust_fire.
+    // Ignite damageable edicts inside the cone (LOS-gated); relight extinguished
+    // torches in the same pass. Mirrors gust_fire but drops the takedamage filter
+    // so non-damageable torch edicts reach Torch_Relight (no-ops on non-torches).
     for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
-        if (e == self || !e->v.takedamage) continue;
+        if (e == self) continue;
 
         vec3_t to = { e->v.origin[0] - eye[0],
                       e->v.origin[1] - eye[1],
@@ -164,11 +167,13 @@ static int Flamethrower_DoFire(edict_t *self) {
         vec3_t dirn = { to[0]/d, to[1]/d, to[2]/d };
         if (dirn[0]*fwd[0] + dirn[1]*fwd[1] + dirn[2]*fwd[2] < cone_cos) continue;
 
-        // Don't ignite through walls.
         eng->SV_Traceline(eye, e->v.origin, 1, self);
         if (g->trace_fraction != 1.0f && g->trace_ent != e) continue;
 
-        Fire_IgniteMaybeCoated(e, secs, dps, self);   // oil-coated targets burn longer
+        if (e->v.takedamage)
+            Fire_IgniteMaybeCoated(e, secs, dps, self);   // oil-coated targets burn longer
+        else
+            Torch_Relight(e, self);                        // no-op unless an extinguished torch
     }
 
     // Light oil patches the cone sweeps over (sample down the axis).

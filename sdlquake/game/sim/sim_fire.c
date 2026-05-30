@@ -40,6 +40,7 @@ extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
 #define OIL_CASCADE_DELAY    0.35f     // delay before a scheduled neighbour catches
 #define OIL_COAT_SECS        8.0f      // how long an edict stays oil-coated
 #define OIL_COAT_BURN_SECS   8.0f      // a coated edict burns this long (vs OIL_IGNITE_SECS)
+#define TORCH_OIL_REACH      40.0f     // a lit torch lights oil within radius+this
 
 typedef struct {
     int   active;
@@ -427,9 +428,33 @@ static void oil_frame(void) {
                 oil_light_patch(o);
                 continue;   // already counted; handle as lit next tick
             }
-            // A burning edict standing in unlit oil sets it alight.
+            // A burning edict standing in unlit oil lights it; a nearby lit
+            // torch (modelindex!=0) lights it within radius+TORCH_OIL_REACH.
+            // ORDERING: torch check runs before the Fire_IsBurning continue so
+            // non-burning torch edicts are not skipped.
             for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
                 int en = eng->ED_GetNum(e);
+
+                // Lit-torch check (runs for EVERY edict, before burning filter).
+                {
+                    const char *cn = e->v.classname;
+                    int lit_torch = cn &&
+                        (strncmp(cn, "light_torch", 11) == 0 ||
+                         strncmp(cn, "light_flame", 11) == 0) &&
+                        (int)e->v.modelindex != 0;
+                    if (lit_torch) {
+                        float tdx = e->v.origin[0] - o->origin[0];
+                        float tdy = e->v.origin[1] - o->origin[1];
+                        float tdz = e->v.origin[2] - o->origin[2];
+                        float reach = o->radius + TORCH_OIL_REACH;
+                        if (tdx*tdx + tdy*tdy + tdz*tdz <= reach*reach) {
+                            oil_light_patch(o);
+                            break;
+                        }
+                    }
+                }
+
+                // Burning-edict check (original logic).
                 if (en < 0 || en >= FIRE_MAX_BURNING || !Fire_IsBurning(en)) continue;
                 float dx = e->v.origin[0] - o->origin[0];
                 float dy = e->v.origin[1] - o->origin[1];
