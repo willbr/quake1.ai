@@ -177,6 +177,24 @@ void Fire_Frame(void) {
             if (!attacker || attacker->free) attacker = g->world;
             T_Damage(e, g->world, attacker, f->dps * FIRE_DMG_INTERVAL);
         }
-        // Visuals + STIM_FIRE added in Tasks 3 and 4.
+        // Dynamic light: a real-time dlight follows the moving fire. (Static
+        // oil-patch fires will use Lightmap_AddDelta in F2; moving burning
+        // edicts use EF_DIMLIGHT to avoid lightmap-delta accumulation.)
+        e->v.effects = (float)((int)e->v.effects | EF_DIMLIGHT);
+
+        // Flame particles — small upward jet in the Quake fire/orange ramp.
+        for (int p = 0; p < 3; p++) {
+            vec3_t org = { e->v.origin[0] + fire_crand() * 8.0f,
+                           e->v.origin[1] + fire_crand() * 8.0f,
+                           e->v.origin[2] + 8.0f + eng->Random() * 24.0f };
+            vec3_t dir = { fire_crand() * 8.0f,
+                           fire_crand() * 8.0f,
+                           24.0f + eng->Random() * 24.0f };
+            float  color = 109.0f + (float)((int)(eng->Random() * 3.0f)); // 109..111
+            eng->SV_Particle(org, dir, color, 1.0f);
+        }
+
+        // Feed the M4 wind/smoke grid so fire throws up a smoke screen.
+        Wind_AddSmoke(e->v.origin, FIRE_SMOKE_AMOUNT, FIRE_SMOKE_RADIUS);
     }
 }
