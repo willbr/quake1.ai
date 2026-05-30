@@ -73,13 +73,16 @@ void Fire_Ignite(edict_t *e, float seconds, float dps, edict_t *igniter) {
     float until = g->time + seconds;
     if (!f->active || until > f->burn_until) f->burn_until = until;
     f->active        = 1;
+    // Re-igniting an already-burning edict is last-writer-wins on dps/igniter
+    // (the timer above only ever extends, never shortens). Intentional: a
+    // fresher/hotter ignition source takes over the ongoing burn.
     f->dps           = dps;
     f->igniter_edict = (igniter && !igniter->free) ? eng->ED_GetNum(igniter) : -1;
     if (f->next_dmg_time < g->time) f->next_dmg_time = g->time + FIRE_DMG_INTERVAL;
 }
 
 void Fire_Extinguish(edict_t *e) {
-    if (!e) return;
+    if (!e || e->free) return;
     fire_clear_slot(eng->ED_GetNum(e), e);
 }
 
