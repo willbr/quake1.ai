@@ -2312,9 +2312,11 @@ int Sim_Nav_EdgesNear(const float center[3], float radius,
         }
         out[written].from[0] = a[0]; out[written].from[1] = a[1]; out[written].from[2] = a[2];
         out[written].to[0]   = b[0]; out[written].to[1]   = b[1]; out[written].to[2]   = b[2];
-        out[written].weight  = e->weight;
-        out[written].kind    = e->kind;
-        out[written].phase   = e->phase;
+        out[written].weight         = e->weight;
+        out[written].kind           = e->kind;
+        out[written].phase          = e->phase;
+        out[written].requires_items = e->requires_items;
+        out[written].forbids_items  = e->forbids_items;
         written++;
     }
     return written;

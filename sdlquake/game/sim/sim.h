@@ -154,6 +154,9 @@ typedef struct {
     float weight;
     unsigned char kind;   // NAV_EDGE_*
     unsigned char phase;  // NAV_PHASE_*
+    unsigned char _pad[2]; // align to 4-byte boundary before unsigned int fields
+    unsigned int requires_items;
+    unsigned int forbids_items;
 } sim_nav_edge_record_t;
 
 // Fill `out` with edges whose either endpoint is within `radius` of

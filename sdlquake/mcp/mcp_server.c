@@ -1278,6 +1278,9 @@ typedef struct {
     float weight;
     unsigned char kind;
     unsigned char phase;
+    unsigned char _pad[2]; // matches sim_nav_edge_record_t layout
+    unsigned int requires_items;
+    unsigned int forbids_items;
 } mcp_nav_edge_record_t;
 
 static const char *nav_edge_kind_name(unsigned char k) {
@@ -1337,7 +1340,7 @@ static void tool_nav_edges_near(const char *id_json, const char *args)
     // exposed by mcp_text_result. Worst-case bytes: ~180 per edge
     // (coords, names, weight, formatting) x 200 = 36 KB. Use a heap
     // buffer to stay off the thread stack.
-    size_t cap = (size_t)NAV_EDGES_NEAR_CAP * 200 + 256;
+    size_t cap = (size_t)NAV_EDGES_NEAR_CAP * 260 + 256;
     char *raw = (char *)malloc(cap);
     if (!raw) { mcp_error(id_json, -32603, "oom"); return; }
 
@@ -1349,13 +1352,15 @@ static void tool_nav_edges_near(const char *id_json, const char *args)
         off += snprintf(raw + off, cap - (size_t)off,
             "%s{\"from\":[%.2f,%.2f,%.2f],"
             "\"to\":[%.2f,%.2f,%.2f],"
-            "\"kind\":\"%s\",\"phase\":\"%s\",\"weight\":%.3f}",
+            "\"kind\":\"%s\",\"phase\":\"%s\",\"weight\":%.3f,"
+            "\"requires\":%u,\"forbids\":%u}",
             i ? "," : "",
             r->from[0], r->from[1], r->from[2],
             r->to[0],   r->to[1],   r->to[2],
             nav_edge_kind_name(r->kind),
             nav_phase_name(r->phase),
-            (double)r->weight);
+            (double)r->weight,
+            r->requires_items, r->forbids_items);
     }
     if ((size_t)off < cap) {
         off += snprintf(raw + off, cap - (size_t)off, "]}");
