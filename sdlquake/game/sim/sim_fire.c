@@ -36,6 +36,8 @@ static float       s_next_tick;
 
 static float fire_crand(void) { return 2.0f * (eng->Random() - 0.5f); }
 
+// O(MAX_EDICTS) walk — acceptable at 10 Hz over a small registry (mirrors
+// the documented O(N) pattern in sim_ai.c).
 static edict_t *fire_find_edict(int num) {
     if (num < 0) return 0;
     for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e))
@@ -57,15 +59,121 @@ void Fire_LevelInit(void) {
     s_next_tick = 0.0f;
 }
 
-void Fire_Ignite(edict_t *e, float seconds, float dps, edict_t *igniter) { (void)e; (void)seconds; (void)dps; (void)igniter; }
-void Fire_Extinguish(edict_t *e) { (void)e; }
-int  Fire_IsBurning(int edict_num) { (void)edict_num; return 0; }
-int  Fire_GetIgniterOrigin(int edict_num, vec3_t out) { (void)edict_num; (void)out; return 0; }
-int  Fire_NearestHazard(const vec3_t pos, float radius, vec3_t out) { (void)pos; (void)radius; (void)out; return 0; }
-void Fire_IgniteTraced(edict_t *player) { (void)player; }
+static void fire_clear_slot(int n, edict_t *e) {
+    if (n < 0 || n >= FIRE_MAX_BURNING) return;
+    s_burning[n].active = 0;
+    if (e) e->v.effects = (float)((int)e->v.effects & ~EF_DIMLIGHT);
+}
+
+void Fire_Ignite(edict_t *e, float seconds, float dps, edict_t *igniter) {
+    if (!e || e->free) return;
+    int n = eng->ED_GetNum(e);
+    if (n < 0 || n >= FIRE_MAX_BURNING) return;
+    fire_burn_t *f = &s_burning[n];
+    float until = g->time + seconds;
+    if (!f->active || until > f->burn_until) f->burn_until = until;
+    f->active        = 1;
+    f->dps           = dps;
+    f->igniter_edict = (igniter && !igniter->free) ? eng->ED_GetNum(igniter) : -1;
+    if (f->next_dmg_time < g->time) f->next_dmg_time = g->time + FIRE_DMG_INTERVAL;
+}
+
+void Fire_Extinguish(edict_t *e) {
+    if (!e) return;
+    fire_clear_slot(eng->ED_GetNum(e), e);
+}
+
+int Fire_IsBurning(int edict_num) {
+    if (edict_num < 0 || edict_num >= FIRE_MAX_BURNING) return 0;
+    return s_burning[edict_num].active;
+}
+
+int Fire_GetIgniterOrigin(int edict_num, vec3_t out) {
+    if (edict_num < 0 || edict_num >= FIRE_MAX_BURNING) return 0;
+    if (!s_burning[edict_num].active) return 0;
+    edict_t *ig = fire_find_edict(s_burning[edict_num].igniter_edict);
+    if (!ig) return 0;
+    out[0] = ig->v.origin[0]; out[1] = ig->v.origin[1]; out[2] = ig->v.origin[2];
+    return 1;
+}
+
+int Fire_NearestHazard(const vec3_t pos, float radius, vec3_t out) {
+    float best2 = radius * radius;
+    int found = 0;
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        int n = eng->ED_GetNum(e);
+        if (n < 0 || n >= FIRE_MAX_BURNING || !s_burning[n].active) continue;
+        float dx = pos[0] - e->v.origin[0];
+        float dy = pos[1] - e->v.origin[1];
+        float dz = pos[2] - e->v.origin[2];
+        float d2 = dx*dx + dy*dy + dz*dz;
+        if (d2 < best2) {
+            best2 = d2;
+            out[0] = e->v.origin[0]; out[1] = e->v.origin[1]; out[2] = e->v.origin[2];
+            found = 1;
+        }
+    }
+    return found;
+}
+
+void Fire_IgniteTraced(edict_t *player) {
+    if (!player) return;
+    float dps  = eng->Cvar_VariableValue("fire_dps");
+    float secs = eng->Cvar_VariableValue("fire_secs");
+    eng->MakeVectors(player->v.v_angle);
+    vec3_t src = { player->v.origin[0],
+                   player->v.origin[1],
+                   player->v.origin[2] + player->v.view_ofs[2] };
+    vec3_t end = { src[0] + g->v_forward[0] * 2048.0f,
+                   src[1] + g->v_forward[1] * 2048.0f,
+                   src[2] + g->v_forward[2] * 2048.0f };
+    eng->SV_Traceline(src, end, 0, player);
+    edict_t *t = g->trace_ent;
+    if (t && t != g->world && t->v.takedamage) {
+        Fire_Ignite(t, secs, dps, player);
+        eng->Con_Print("fire: ignited entity under crosshair\n");
+    } else {
+        eng->Con_Print("fire: no flammable entity under crosshair\n");
+    }
+}
 
 void Fire_Frame(void) {
     if (g->time < s_next_tick) return;
     s_next_tick = g->time + (1.0f / FIRE_TICK_HZ);
-    // Tick body added in Task 2.
+
+    // MCP/console test hook: `fire_ignite_num <N>` ignites edict N once.
+    {
+        int req = (int)eng->Cvar_VariableValue("fire_ignite_num");
+        if (req >= 0) {
+            edict_t *e = fire_find_edict(req);
+            if (e && !e->free && e->v.takedamage)
+                Fire_Ignite(e, eng->Cvar_VariableValue("fire_secs"),
+                               eng->Cvar_VariableValue("fire_dps"), g->world);
+            eng->Cvar_SetValue("fire_ignite_num", -1.0f);
+        }
+    }
+
+    for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
+        int n = eng->ED_GetNum(e);
+        if (n < 0 || n >= FIRE_MAX_BURNING) continue;
+        fire_burn_t *f = &s_burning[n];
+        if (!f->active) continue;
+
+        int   con      = eng->SV_PointContents(e->v.origin);
+        int   inwater  = (con == CONTENT_WATER || con == CONTENT_SLIME);
+        int   dead     = (e->v.health <= 0.0f || e->v.deadflag != DEAD_NO);
+        if (e->free || g->time >= f->burn_until || dead || inwater) {
+            fire_clear_slot(n, e->free ? 0 : e);
+            continue;
+        }
+
+        // Damage in discrete chunks so armor/save math stays meaningful.
+        if (g->time >= f->next_dmg_time && e->v.takedamage) {
+            f->next_dmg_time = g->time + FIRE_DMG_INTERVAL;
+            edict_t *attacker = fire_find_edict(f->igniter_edict);
+            if (!attacker || attacker->free) attacker = g->world;
+            T_Damage(e, g->world, attacker, f->dps * FIRE_DMG_INTERVAL);
+        }
+        // Visuals + STIM_FIRE added in Tasks 3 and 4.
+    }
 }
