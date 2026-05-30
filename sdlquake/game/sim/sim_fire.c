@@ -26,6 +26,19 @@ extern void Corpse_BulletTrace(vec3_t start, vec3_t end, edict_t *skip);
 #define FIRE_SMOKE_AMOUNT    0.12f
 #define FIRE_SMOKE_RADIUS    40.0f
 
+// --- Oil substance (F2) ---------------------------------------------------
+#define OIL_MAX_PATCHES      256
+#define OIL_DEFAULT_RADIUS   48.0f
+#define OIL_DEFAULT_AMOUNT   1.0f
+#define OIL_MERGE_DIST       40.0f     // deposit within this of an unlit patch merges in
+#define OIL_TTL_SECS         60.0f     // unlit oil evaporates after this (generous)
+#define OIL_BURN_SECS        4.0f      // how long a lit patch burns before the oil is spent
+#define OIL_DMG_INTERVAL     0.5f      // seconds between area-DOT applications
+#define OIL_PATCH_DPS        6.0f      // damage/sec to edicts standing in burning oil
+#define OIL_IGNITE_SECS      3.0f      // burn duration handed to edicts a patch ignites
+#define OIL_CASCADE_RADIUS   80.0f     // a lit patch schedules unlit patches within this
+#define OIL_CASCADE_DELAY    0.35f     // delay before a scheduled neighbour catches
+
 typedef struct {
     int   active;
     float burn_until;
@@ -38,6 +51,20 @@ typedef struct {
 static fire_burn_t s_burning[FIRE_MAX_BURNING];   // indexed by edict number
 static float       s_next_tick;
 
+typedef struct {
+    int    active;
+    int    lit;
+    vec3_t origin;
+    float  radius;
+    float  amount;
+    float  deposit_time;
+    float  ignite_at;       // >0: scheduled cascade ignition time; 0: not scheduled
+    float  burn_until;      // when lit: expiry time
+    float  next_dmg_time;   // when lit: next area-DOT application
+} oil_patch_t;
+
+static oil_patch_t s_oil[OIL_MAX_PATCHES];
+
 // O(MAX_EDICTS) walk — acceptable at 10 Hz over a small registry (mirrors
 // the documented O(N) pattern in sim_ai.c).
 static edict_t *fire_find_edict(int num) {
@@ -47,8 +74,13 @@ static edict_t *fire_find_edict(int num) {
     return 0;
 }
 
+// Centered random in [-1,1], for scattering oil/flame particles across a
+// patch. (F1 had this; its cleanup dropped it as unused -- F2 brings it back.)
+static float fire_crand(void) { return eng->Random() * 2.0f - 1.0f; }
+
 void Fire_Init(void) {
     memset(s_burning, 0, sizeof(s_burning));
+    memset(s_oil, 0, sizeof(s_oil));
     s_next_tick = 0.0f;
     eng->Cvar_Register("sim_fire_debug",  "0");
     eng->Cvar_Register("fire_dps",        "8");
@@ -56,10 +88,14 @@ void Fire_Init(void) {
     eng->Cvar_Register("fire_ignite_num", "-1");   // MCP/console test hook
     eng->Cvar_Register("fire_noflee",     "0");    // debug: burning monsters stand still
     eng->Cvar_Register("fire_corpse_secs","8");    // how long a corpse smoulders
+    eng->Cvar_Register("fire_oil_num",    "-1");   // deposit oil at edict N (test hook)
+    eng->Cvar_Register("fire_oil_ignite", "0");    // light nearest oil to player (test hook)
+    eng->Cvar_Register("fire_oil_count",  "0");    // Fire_Frame writes live patch count
 }
 
 void Fire_LevelInit(void) {
     memset(s_burning, 0, sizeof(s_burning));
+    memset(s_oil, 0, sizeof(s_oil));
     s_next_tick = 0.0f;
 }
 
@@ -125,6 +161,52 @@ int Fire_NearestHazard(const vec3_t pos, float radius, vec3_t out) {
     return found;
 }
 
+// Deposit a patch of flammable oil at `origin`. radius<=0 / amount<=0 use
+// defaults. Merges into a nearby unlit patch so dense deposits don't thrash
+// the pool; otherwise allocates a free slot, recycling the oldest if full.
+void Fire_AddOil(const vec3_t origin, float radius, float amount) {
+    if (radius <= 0.0f) radius = OIL_DEFAULT_RADIUS;
+    if (amount <= 0.0f) amount = OIL_DEFAULT_AMOUNT;
+
+    // Merge into a nearby UNLIT patch so dense deposits don't thrash the pool.
+    for (int i = 0; i < OIL_MAX_PATCHES; i++) {
+        oil_patch_t *o = &s_oil[i];
+        if (!o->active || o->lit) continue;
+        float dx = origin[0] - o->origin[0];
+        float dy = origin[1] - o->origin[1];
+        float dz = origin[2] - o->origin[2];
+        if (dx*dx + dy*dy + dz*dz <= OIL_MERGE_DIST * OIL_MERGE_DIST) {
+            o->amount += amount;
+            if (radius > o->radius) o->radius = radius;
+            o->deposit_time = g->time;
+            return;
+        }
+    }
+
+    // Allocate a free slot; if none, recycle the oldest patch (logged, never silent).
+    int slot = -1;
+    for (int i = 0; i < OIL_MAX_PATCHES; i++) {
+        if (!s_oil[i].active) { slot = i; break; }
+    }
+    if (slot < 0) {
+        float oldest = 1e30f;
+        for (int i = 0; i < OIL_MAX_PATCHES; i++) {
+            if (s_oil[i].deposit_time < oldest) { oldest = s_oil[i].deposit_time; slot = i; }
+        }
+        eng->Con_DPrintf("sim_fire: oil pool full, recycling oldest patch\n");
+    }
+
+    oil_patch_t *o = &s_oil[slot];
+    memset(o, 0, sizeof(*o));
+    o->active       = 1;
+    o->origin[0]    = origin[0];
+    o->origin[1]    = origin[1];
+    o->origin[2]    = origin[2];
+    o->radius       = radius;
+    o->amount       = amount;
+    o->deposit_time = g->time;
+}
+
 void Fire_IgniteTraced(edict_t *player) {
     if (!player) return;
     float dps  = eng->Cvar_VariableValue("fire_dps");
@@ -145,6 +227,100 @@ void Fire_IgniteTraced(edict_t *player) {
     } else {
         eng->Con_Print("fire: no flammable entity under crosshair\n");
     }
+}
+
+// Debug: trace from the player's view to the floor and deposit oil there.
+void Fire_OilTraced(edict_t *player) {
+    if (!player) return;
+    eng->MakeVectors(player->v.v_angle);
+    vec3_t src = { player->v.origin[0],
+                   player->v.origin[1],
+                   player->v.origin[2] + player->v.view_ofs[2] };
+    vec3_t end = { src[0] + g->v_forward[0] * 2048.0f,
+                   src[1] + g->v_forward[1] * 2048.0f,
+                   src[2] + g->v_forward[2] * 2048.0f };
+    eng->SV_Traceline(src, end, 1, player);   // nomonsters: hit the floor
+    if (g->trace_fraction < 1.0f) {
+        Fire_AddOil(g->trace_endpos, OIL_DEFAULT_RADIUS, OIL_DEFAULT_AMOUNT);
+        eng->Con_Print("fire: oil deposited\n");
+    }
+}
+
+// Light an oil patch. Full behaviour (cascade scheduling) is filled in by
+// Task 3; this minimal form flips it lit with a burn + DOT window.
+static void oil_light_patch(oil_patch_t *o) {
+    if (!o->active || o->lit) return;
+    o->lit           = 1;
+    o->burn_until    = g->time + OIL_BURN_SECS;
+    o->next_dmg_time = g->time + OIL_DMG_INTERVAL;
+    o->ignite_at     = 0.0f;
+}
+
+// The player edict (number 1), or NULL.
+static edict_t *oil_find_player(void) {
+    return fire_find_edict(1);
+}
+
+// Tick the oil-patch pool at the existing 10 Hz fire cadence: test hooks,
+// TTL evaporation, unlit-sheen render. Lit-patch behaviour + cascade land in
+// Tasks 2-3.
+static void oil_frame(void) {
+    // Test hook: deposit oil at edict N's origin once.
+    {
+        int req = (int)eng->Cvar_VariableValue("fire_oil_num");
+        if (req >= 0) {
+            edict_t *e = fire_find_edict(req);
+            if (e && !e->free) Fire_AddOil(e->v.origin, OIL_DEFAULT_RADIUS, OIL_DEFAULT_AMOUNT);
+            eng->Cvar_SetValue("fire_oil_num", -1.0f);
+        }
+    }
+
+    // Test hook: light the unlit oil patch nearest the player once.
+    if (eng->Cvar_VariableValue("fire_oil_ignite") != 0.0f) {
+        eng->Cvar_SetValue("fire_oil_ignite", 0.0f);
+        edict_t *p = oil_find_player();
+        if (p) {
+            int best = -1; float best2 = 1e30f;
+            for (int i = 0; i < OIL_MAX_PATCHES; i++) {
+                if (!s_oil[i].active || s_oil[i].lit) continue;
+                float dx = s_oil[i].origin[0] - p->v.origin[0];
+                float dy = s_oil[i].origin[1] - p->v.origin[1];
+                float dz = s_oil[i].origin[2] - p->v.origin[2];
+                float d2 = dx*dx + dy*dy + dz*dz;
+                if (d2 < best2) { best2 = d2; best = i; }
+            }
+            if (best >= 0) oil_light_patch(&s_oil[best]);
+        }
+    }
+
+    int live = 0;
+    for (int i = 0; i < OIL_MAX_PATCHES; i++) {
+        oil_patch_t *o = &s_oil[i];
+        if (!o->active) continue;
+
+        // Unlit oil evaporates after its TTL.
+        if (!o->lit && g->time - o->deposit_time > OIL_TTL_SECS) {
+            o->active = 0;
+            continue;
+        }
+
+        live++;
+
+        if (!o->lit) {
+            // Sparse dark sheen so the player can see where oil lies (a proper
+            // floor decal is a later-stage upgrade; particles are the MVP).
+            vec3_t org = { o->origin[0] + fire_crand() * o->radius * 0.6f,
+                           o->origin[1] + fire_crand() * o->radius * 0.6f,
+                           o->origin[2] + 2.0f };
+            vec3_t dir = { 0, 0, 0 };
+            eng->SV_Smoke(org, dir, 4.0f, 1.0f);   // colour 4 = dark grey
+            continue;
+        }
+
+        // Lit-patch behaviour is added in Task 2; cascade in Task 3.
+    }
+
+    eng->Cvar_SetValue("fire_oil_count", (float)live);
 }
 
 void Fire_Frame(void) {
@@ -252,4 +428,6 @@ void Fire_Frame(void) {
             Stim_Emit(&st);
         }
     }
+
+    oil_frame();
 }

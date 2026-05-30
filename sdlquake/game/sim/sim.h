@@ -228,6 +228,11 @@ int  Fire_NearestHazard(const vec3_t pos, float radius, vec3_t out);
 // Debug trigger: trace from the player's view and ignite whatever's hit.
 void Fire_IgniteTraced(edict_t *player);
 
+// Deposit a patch of flammable oil on the floor at `origin`. radius<=0 and
+// amount<=0 use defaults. Patches persist until ignited or they time out.
+void Fire_AddOil(const vec3_t origin, float radius, float amount);
+void Fire_OilTraced(edict_t *player);   // debug: deposit oil at crosshair
+
 // ---------------------------------------------------------------------------
 // Arena (test)
 // ---------------------------------------------------------------------------

@@ -1658,6 +1658,7 @@ static void ImpulseCommands(void) {
     if (imp >= 30 && imp <= 39) Phase6_ChangeWeapon(imp);   // Wolf3D + Doom1 roster
     if (imp == 100) Phase6_CheatGiveAll();
     if (imp == 210) Fire_IgniteTraced(self);   // debug: ignite entity under crosshair
+    if (imp == 211) Fire_OilTraced(self);      // debug: deposit oil at crosshair
     if (imp == 255) QuadCheat();
     self->v.impulse = 0;
 }
