@@ -74,6 +74,7 @@ solid_edge items only clip against bsp models.
 cvar_t	sv_friction = {"sv_friction","4",false,true};
 cvar_t	sv_stopspeed = {"sv_stopspeed","100"};
 cvar_t	sv_gravity = {"sv_gravity","800",false,true};
+cvar_t	sv_bodysplash = {"sv_bodysplash","1"};	// monster/corpse water-entry splash (0=off)
 cvar_t	sv_maxvelocity = {"sv_maxvelocity","2000"};
 cvar_t	sv_nostep = {"sv_nostep","0"};
 
@@ -1342,7 +1343,8 @@ void SV_CheckWaterTransition (edict_t *ent)
 			float vy = ent->v.velocity[1];
 			float vz = ent->v.velocity[2];
 			float vmag = (float)sqrt(vx*vx + vy*vy + vz*vz);
-			if (vmag >= 100.0f)
+			int is_body = ((int)ent->v.flags & FL_MONSTER) && sv_bodysplash.value;
+			if (is_body || vmag >= 100.0f)
 			{
 				vec3_t up_probe;
 				up_probe[0] = ent->v.origin[0];
@@ -1374,19 +1376,33 @@ void SV_CheckWaterTransition (edict_t *ent)
 					// multiple bursts at offset XY positions so their
 					// larger physical footprint produces more droplets
 					// spread over a body-sized patch.
-					int strength = (int)(vmag * 0.03f);
-					if (strength > 16) strength = 16;
-					if (strength < 8)  strength = 8;
-					int n_bursts = 1;
-					float offset_r = 0.0f;
-					if (ent->v.classname && strcmp (ent->v.classname, "missile") == 0) {
-						n_bursts = 4;            // rocket
-						offset_r = 12.0f;
-						strength = 16;
-					} else if (ent->v.classname && strcmp (ent->v.classname, "grenade") == 0) {
-						n_bursts = 3;            // grenade
+					int strength;
+					int n_bursts;
+					float offset_r;
+					if (is_body) {
+						// Person-sized, speed-scaled plunk. Ceiling 96 == the player's
+						// fixed entry splash; floor 32 keeps slow wade-ins / corpse
+						// slumps visible. Hits full strength around ~400 u/s entry.
+						strength = (int)(32.0f + vmag * 0.16f);
+						if (strength > 96) strength = 96;
+						if (strength < 32) strength = 32;
+						n_bursts = 2;            // body-sized footprint
 						offset_r = 10.0f;
-						strength = 16;
+					} else {
+						strength = (int)(vmag * 0.03f);
+						if (strength > 16) strength = 16;
+						if (strength < 8)  strength = 8;
+						n_bursts = 1;
+						offset_r = 0.0f;
+						if (ent->v.classname && strcmp (ent->v.classname, "missile") == 0) {
+							n_bursts = 4;            // rocket
+							offset_r = 12.0f;
+							strength = 16;
+						} else if (ent->v.classname && strcmp (ent->v.classname, "grenade") == 0) {
+							n_bursts = 3;            // grenade
+							offset_r = 10.0f;
+							strength = 16;
+						}
 					}
 					int kind = 0; // water
 					if (cont == CONTENTS_SLIME) kind = 1;

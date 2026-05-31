@@ -42,6 +42,7 @@ void SV_Init (void)
 	int		i;
 	extern	cvar_t	sv_maxvelocity;
 	extern	cvar_t	sv_gravity;
+	extern	cvar_t	sv_bodysplash;
 	extern	cvar_t	sv_nostep;
 	extern	cvar_t	sv_friction;
 	extern	cvar_t	sv_edgefriction;
@@ -53,6 +54,7 @@ void SV_Init (void)
 
 	Cvar_RegisterVariable (&sv_maxvelocity);
 	Cvar_RegisterVariable (&sv_gravity);
+	Cvar_RegisterVariable (&sv_bodysplash);
 	Cvar_RegisterVariable (&sv_friction);
 	Cvar_RegisterVariable (&sv_edgefriction);
 	Cvar_RegisterVariable (&sv_stopspeed);
