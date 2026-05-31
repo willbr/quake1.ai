@@ -386,6 +386,12 @@ static int s_hide_cat[EDIT_CAT_COUNT] = {
     [EDIT_CAT_INFO]    = 1,
 };
 
+// Cross-cutting "sim" hide. Phase 8 immersive-sim entities live in their
+// natural categories (func_grate is a func, misc_oilbarrel is a misc, ...),
+// so this is a flag OR'd alongside the per-category filter rather than a
+// category of its own. Off by default.
+static int s_hide_sim = 0;
+
 // "Visible only" toggle — when on, anything outside the camera frustum
 // or occluded by world geometry is hidden, regardless of category. Useful
 // for "what's actually in front of me right now" while authoring a room.
@@ -436,6 +442,24 @@ static int entity_hidden_by_skill(const edit_entity_t *e)
     return 0;
 }
 
+// True if `e` is a Phase 8 immersive-sim entity (wind / smoke / oil /
+// breakables / grates). Drives the cross-cutting "sim" hide toggle, which
+// hides these regardless of their natural category.
+static int entity_is_sim(const edit_entity_t *e)
+{
+    const char *cls;
+    if (!e || e->classname_idx < 0) return 0;
+    cls = e->kv[e->classname_idx].value;
+    if (!cls) return 0;
+    return !strcmp(cls, "info_wind_source")
+        || !strcmp(cls, "misc_smokegrenade")
+        || !strcmp(cls, "misc_oilbarrel")
+        || !strcmp(cls, "misc_oilslick")
+        || !strcmp(cls, "func_grate")
+        || !strcmp(cls, "func_breakable")
+        || !strcmp(cls, "misc_breakable");
+}
+
 int Editor_EntityHiddenByCategory(int e_idx)
 {
     int cat;
@@ -444,6 +468,7 @@ int Editor_EntityHiddenByCategory(int e_idx)
     e = &edit_scene.entities[e_idx];
     cat = Editor_EntityCategory(e);
     if (cat > 0 && cat < EDIT_CAT_COUNT && s_hide_cat[cat]) return 1;
+    if (s_hide_sim && entity_is_sim(e)) return 1;
     if (s_visible_only && !Editor_EntityInView(e_idx)) return 1;
     if (entity_hidden_by_skill(e)) return 1;
     return 0;
@@ -603,6 +628,8 @@ static void draw_brush_list(void)
             { EDIT_CAT_PATH,    "paths"    },
             { EDIT_CAT_MISC,    "misc"     },
             { EDIT_CAT_INFO,    "info"     },
+            { EDIT_CAT_GIB,     "gibs"     },
+            { EDIT_CAT_TRAP,    "traps"    },
         };
         IG_TextUnformatted("Hide:");
         for (int k = 0; k < ARRAY_LEN(hide_cats); k++) {
@@ -611,7 +638,10 @@ static void draw_brush_list(void)
             if (IG_Checkbox(hide_cats[k].label, &v))
                 s_hide_cat[hide_cats[k].cat] = v;
         }
-        // "Visible only" — orthogonal to category filters; AND'd with them.
+        // "sim" hides Phase 8 sim entities regardless of their natural
+        // category; "visible only" is orthogonal too. Both AND with the
+        // per-category filters above.
+        IG_Checkbox("sim", &s_hide_sim);
         IG_Checkbox("visible only", &s_visible_only);
     }
     IG_Separator();

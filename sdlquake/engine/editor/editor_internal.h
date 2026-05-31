@@ -51,6 +51,8 @@ enum {
     EDIT_CAT_PATH,          // path_corner, path_*
     EDIT_CAT_MISC,          // misc_*
     EDIT_CAT_INFO,          // info_null, info_notnull, info_command, etc.
+    EDIT_CAT_GIB,           // runtime "gib" (gibs + thrown heads)
+    EDIT_CAT_TRAP,          // trap_* (trap_spikeshooter, trap_shooter, ...)
     EDIT_CAT_COUNT
 };
 
