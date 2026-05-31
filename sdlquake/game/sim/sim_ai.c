@@ -391,6 +391,19 @@ static void flee_from(ai_brain_t *b, edict_t *e, const vec3_t threat, float dist
 }
 
 static void behavior_tick(ai_brain_t *b, edict_t *e) {
+    // A zombie in its knockdown/pain sequence runs its own scripted "paine"
+    // think chain (fall, lie still ~5 s, then get up). It must stay put while
+    // down — but once COMBAT loses sight of the player it flips to SEARCHING
+    // (see sense_tick), and SEARCHING's walk_and_track would both overwrite the
+    // paine think chain via th_walk *and* SV_MoveToGoal the body across the
+    // floor, so the "downed" zombie pops up and slides toward last_known_pos.
+    // Leave any in-pain zombie entirely to its own think chain. INPAIN is
+    // monster_zombie's v.cnt (0 = upright, 1 = stagger, 2 = knocked down);
+    // scoped by classname since other classes reuse v.cnt for their own state.
+    if (e->v.classname && strcmp(e->v.classname, "monster_zombie") == 0 &&
+        e->v.cnt != 0.0f)
+        return;
+
     // Phase 8 / M8 — fire overrides normal behavior.
     if (b->burning) {
         // Panic: run away from whoever set us alight (fall back to the last
