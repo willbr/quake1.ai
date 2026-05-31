@@ -678,6 +678,16 @@ void R_AliasSetupLighting (alight_t *plighting)
 
 	r_shadelight *= VID_GRADES;
 
+// fullbright: draw alias models (monsters, items, and the view-model gun, which
+// all funnel through here) at the brightest flat shade, mirroring the world
+// surfaces' r_fullbright path. LIGHT_MIN is the post-transform brightest end of
+// the ambient range; zeroing shadelight removes the per-vertex normal falloff.
+	if (r_fullbright.value)
+	{
+		r_ambientlight = LIGHT_MIN;
+		r_shadelight = 0;
+	}
+
 // rotate the lighting vector into the model's frame of reference
 	r_plightvec[0] = DotProduct (plighting->plightvec, alias_forward);
 	r_plightvec[1] = -DotProduct (plighting->plightvec, alias_right);
