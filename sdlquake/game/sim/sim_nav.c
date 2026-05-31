@@ -2434,7 +2434,7 @@ void Sim_Nav_LevelInit(const char *mapname) {
         snprintf(buf, sizeof(buf),
                  "sim_nav: loaded %d pts %d edges from cache\n",
                  s_mesh->point_count, s_mesh->edge_count);
-        eng->Con_Print(buf);
+        eng->Con_DPrintf(buf);   // developer-channel only -- silent in normal play
         push_to_imgui(s_mesh);
         s_ready = 1;
         return;
