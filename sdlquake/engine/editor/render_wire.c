@@ -303,8 +303,15 @@ int Editor_EntityCategory(const edit_entity_t *e)
     if (!strncmp(cls, "path_",    5))                return EDIT_CAT_PATH;
     if (!strncmp(cls, "misc_",    5))                return EDIT_CAT_MISC;
     if (!strncmp(cls, "trap_",    5))                return EDIT_CAT_TRAP;
-    if (!strcmp (cls, "gib"))                        return EDIT_CAT_GIB;
+    if (!strcmp (cls, "gib") || !strcmp (cls, "zombie_gib"))                        return EDIT_CAT_GIB;
     if (!strcmp (cls, "player"))                     return EDIT_CAT_PLAYER;
+    // func_door/func_plat/func_train rename themselves to these short
+    // runtime classnames on spawn (stock Quake), so group live ones with
+    // funcs instead of letting them fall into "other"; dropped packs → items.
+    if (!strcmp (cls, "door") || !strcmp (cls, "plat") || !strcmp (cls, "train"))
+        return EDIT_CAT_FUNC;
+    if (!strcmp (cls, "backpack"))
+        return EDIT_CAT_ITEM;
     return EDIT_CAT_OTHER;
 }
 
