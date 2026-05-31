@@ -2033,7 +2033,8 @@ static int mcp_start_http(int port)
     {
         mcp_sock_close(mcp_listen_sock);
         mcp_listen_sock = (mcp_raw_sock_t)MCP_SOCK_INVALID;
-        Con_Printf("mcp: failed to bind port %d\n", port);
+        mcp_http_port = 0;   // undo the speculative set at the top of this fn
+        Con_Printf("mcp: failed to bind port %d (already in use?)\n", port);
         return 0;
     }
 
@@ -2077,7 +2078,14 @@ void MCP_Frame(void)
                 {
                     mcp_active = 1;
                     if (!mcp_mutex) mcp_mutex = SDL_CreateMutex();
-                    if (mcp_start_http(desired)) mcp_http_started_port = desired;
+                    if (mcp_start_http(desired))
+                        mcp_http_started_port = desired;
+                    else
+                        // Bind failed (e.g. a second engine instance: the port
+                        // is already held). Revert to 0 so we don't re-attempt
+                        // -- and re-spam the failure -- every frame. Set the
+                        // cvar again (to a free port) to retry.
+                        Cvar_Set("mcp_http_port", "0");
                 }
             }
         }
