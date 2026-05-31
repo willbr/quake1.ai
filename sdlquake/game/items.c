@@ -938,6 +938,9 @@ void DropBackpack(void) {
         return;
 
     edict_t *item    = eng->ED_Alloc();
+    item->v.classname = "backpack";   // stock QuakeC leaves this empty; set it so
+                                      // the editor labels dropped packs "backpack"
+                                      // instead of the NULL-classname "(runtime)".
     item->v.origin[0] = self->v.origin[0];
     item->v.origin[1] = self->v.origin[1];
     item->v.origin[2] = self->v.origin[2] - 24;
