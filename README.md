@@ -1,6 +1,6 @@
 # quake1.ai
 
-WinQuake (1996 software renderer) ported to SDL3 + Zig, with a hot-reloading game layer, in-game 3D map editor, and an MCP server for Claude Code integration.
+WinQuake (1996 software renderer) ported to SDL3 + Zig, with a hot-reloading game layer, in-game 3D map editor, immersive-sim gameplay systems (reactive AI, player abilities, fire propagation), and an MCP server for Claude Code integration.
 
 ## Phases
 
@@ -13,7 +13,7 @@ WinQuake (1996 software renderer) ported to SDL3 + Zig, with a hot-reloading gam
 | 5 | done | QuakeC → C (progs ported to hot-reloadable game.dll) |
 | 6 | done | Wolf3D + Doom1 guns (sprites, sounds, fire rates) |
 | 7 | done | In-game 3D map editor (F2) |
-| 8 | M3–M6 done, M7 stub | Immersive-sim systems (stimulus bus, FSM AI + navmesh, Blink + Gust, wind/smoke, light tier) |
+| 8 | M3–M6, M8 done; M7 stub | Immersive-sim systems (stimulus bus, FSM AI + navmesh, Blink + Gust, wind/smoke, light tier, Fire & Oil) |
 
 ## Build
 
@@ -33,6 +33,9 @@ zig build game                              # rebuild game.dll only (fast iterat
 | `--mcp-http <port>` | MCP server over HTTP/SSE on `localhost:<port>` (connect to running game) |
 | `--hot-reload` | Poll `game.dll` for changes and reload without restart |
 | `+map <name>` | Load map on startup (e.g. `+map e1m1`) |
+| `+bot 1` | Spawn the navmesh-driven AI bot on startup |
+| `--headless` | Run the server + bot with no window/audio/GUI (automated tests) |
+| `-nofocus` | Open the window in the background without stealing focus |
 | `--list-cvars` | Print all registered cvars and exit |
 
 ## Scripts
@@ -42,6 +45,11 @@ zig build game                              # rebuild game.dll only (fast iterat
   python scripts/mcp_call.py screenshot
   python scripts/mcp_call.py console_exec '{"command":"r_decals_debug 1"}'
   python scripts/mcp_call.py get_player_state
+  ```
+- `scripts/run_ai_tests.sh` — drive the AI bot through the chained `ai_t01..t09` nav test maps and check every map's marker is reached. `HEADLESS=1` runs windowless.
+  ```sh
+  ./scripts/run_ai_tests.sh             # windowed
+  HEADLESS=1 ./scripts/run_ai_tests.sh  # headless
   ```
 
 ## Source
