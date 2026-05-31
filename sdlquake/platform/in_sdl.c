@@ -326,11 +326,16 @@ void IN_ProcessEvents(void)
 void IN_Init(void)
 {
     extern SDL_Window *VID_GetWindow(void);
+    extern qboolean sys_nofocus;
     Cvar_RegisterVariable(&m_filter);
     SDL_Window *win = VID_GetWindow();
-    if (win)
+    // -nofocus: the window launches unfocused, so don't grab the mouse here.
+    // IN_SyncMouseMode engages relative mode once a real FOCUS_GAINED arrives
+    // (i.e. when the user clicks the window); starting mouse_active=false keeps
+    // IN_WantRelativeMouse() false until then.
+    if (win && !sys_nofocus)
         SDL_SetWindowRelativeMouseMode(win, true);
-    mouse_active = true;
+    mouse_active = sys_nofocus ? false : true;
     discard_next_motion = true;
 }
 

@@ -25,6 +25,7 @@
 
 qboolean isDedicated;
 qboolean sys_headless;  // set when running in --list-cvars mode (no window, no audio)
+qboolean sys_nofocus;   // -nofocus: window opens without stealing focus / grabbing the mouse
 
 // ---------------------------------------------------------------------------
 // File I/O
@@ -338,6 +339,10 @@ int main(int argc, char **argv)
     // bot run with no display — for automated bot tests on a headless box.
     if (list_cvars || COM_CheckParm("--headless"))
         sys_headless = true;
+
+    // -nofocus: open the window in the background — don't steal keyboard focus
+    // on launch and don't grab the mouse until the user clicks in (FOCUS_GAINED).
+    sys_nofocus = (COM_CheckParm("-nofocus") != 0);
 
     // --mcp-http <port> just seeds the mcp_http_port cvar's default; the HTTP
     // listener is started lazily from MCP_Frame once Host_Init has registered

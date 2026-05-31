@@ -981,6 +981,7 @@ static void VID_MenuKey(int key)
 // ---------------------------------------------------------------------------
 
 extern qboolean sys_headless;
+extern qboolean sys_nofocus;
 
 // Pre-load the video cvars we need at window-creation time. The engine
 // doesn't exec config.cfg until after VID_Init returns (via deferred
@@ -1090,6 +1091,11 @@ void VID_Init(unsigned char *palette)
                 SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, wx);
                 SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, wy);
             }
+            // -nofocus: don't let the window grab keyboard focus when it first
+            // appears, so launching from a terminal doesn't interrupt the user.
+            // Only affects the initial show — clicking the window focuses it.
+            if (sys_nofocus)
+                SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
             sdl_window = SDL_CreateWindowWithProperties(props);
             SDL_DestroyProperties(props);
             if (!sdl_window)
