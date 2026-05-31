@@ -304,6 +304,7 @@ int Editor_EntityCategory(const edit_entity_t *e)
     if (!strncmp(cls, "misc_",    5))                return EDIT_CAT_MISC;
     if (!strncmp(cls, "trap_",    5))                return EDIT_CAT_TRAP;
     if (!strcmp (cls, "gib"))                        return EDIT_CAT_GIB;
+    if (!strcmp (cls, "player"))                     return EDIT_CAT_PLAYER;
     return EDIT_CAT_OTHER;
 }
 
@@ -324,6 +325,7 @@ static byte category_color(const edit_entity_t *e)
         case EDIT_CAT_INFO:    return EDIT_COLOR_INFO;
         case EDIT_CAT_GIB:     return EDIT_COLOR_TRIGGER; // blood-red (reuses trigger palette slot)
         case EDIT_CAT_TRAP:    return EDIT_COLOR_PATH;    // hazard orange (reuses path palette slot)
+        case EDIT_CAT_PLAYER:  return EDIT_COLOR_SPAWN;   // player-blue (reuses spawn palette slot)
         default:               return EDIT_COLOR_DEFAULT;
     }
 }

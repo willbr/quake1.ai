@@ -451,7 +451,8 @@ static int entity_is_sim(const edit_entity_t *e)
     if (!e || e->classname_idx < 0) return 0;
     cls = e->kv[e->classname_idx].value;
     if (!cls) return 0;
-    return !strcmp(cls, "info_wind_source")
+    return !strncmp(cls, "sim_", 4)        // sim_walkgoal (AI walk target) + any future sim_* ent
+        || !strcmp(cls, "info_wind_source")
         || !strcmp(cls, "misc_smokegrenade")
         || !strcmp(cls, "misc_oilbarrel")
         || !strcmp(cls, "misc_oilslick")
@@ -630,6 +631,7 @@ static void draw_brush_list(void)
             { EDIT_CAT_INFO,    "info"     },
             { EDIT_CAT_GIB,     "gibs"     },
             { EDIT_CAT_TRAP,    "traps"    },
+            { EDIT_CAT_PLAYER,  "player"   },
         };
         IG_TextUnformatted("Hide:");
         for (int k = 0; k < ARRAY_LEN(hide_cats); k++) {
