@@ -484,7 +484,9 @@ extern void ImguiLayer_RenderGPU (SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *
 static void gpu_render_frame(void) {
     // GPU texture is sized to the *super* buffer dims (the actual extent the
     // software renderer fills). With ss=1 these equal vid_render_w/h; with
-    // ss>1 they are larger and the GPU sampler effectively box-down at present.
+    // ss>1 they are larger and palette.frag.glsl averages each ss×ss block of
+    // expanded texels down to the render grid (true SSAA — the sampler is
+    // NEAREST and the R8_UINT index texture can't be hardware-filtered).
     int tex_w = vid_super_w;
     int tex_h = vid_super_h;
     if (tex_w != gpu_fb_tex_w || tex_h != gpu_fb_tex_h)
@@ -592,9 +594,11 @@ static void gpu_render_frame(void) {
     bindings[2].texture = gpu_palette_tex;    bindings[2].sampler = gpu_sampler;
     SDL_BindGPUFragmentSamplers(pass, 0, bindings, 3);
 
-    // Scanline overlay parameters. Layout matches the std140 UBO in
-    // palette.frag.glsl (two floats + two pad floats = 16 bytes).
-    struct { float intensity, size, pad0, pad1; } scan_params;
+    // Fragment params: scanline overlay + supersample factor. Layout matches
+    // the std140 UBO in palette.frag.glsl (four floats = 16 bytes). The shader
+    // averages each ss×ss block of expanded texels down to one render texel, so
+    // it needs the live ss to know the block size (ss=1 → single fetch).
+    struct { float intensity, size, supersample, pad1; } scan_params;
     float intensity = vid_scanline_intensity.value;
     float size      = vid_scanline_size.value;
     if (vid_scanlines.value == 0.0f) intensity = 0.0f;
@@ -602,10 +606,10 @@ static void gpu_render_frame(void) {
     if (intensity > 1.0f) intensity = 1.0f;
     if (size < 1.0f) size = 1.0f;
     if (size > 8.0f) size = 8.0f;
-    scan_params.intensity = intensity;
-    scan_params.size      = size;
-    scan_params.pad0      = 0.0f;
-    scan_params.pad1      = 0.0f;
+    scan_params.intensity   = intensity;
+    scan_params.size        = size;
+    scan_params.supersample = (float)vid_supersample_active;
+    scan_params.pad1        = 0.0f;
     SDL_PushGPUFragmentUniformData(cmd, 0, &scan_params, sizeof(scan_params));
 
     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);

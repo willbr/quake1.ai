@@ -21,19 +21,41 @@ layout(set = 2, binding = 2) uniform sampler2D  u_palette;     // RGBA8 256×N
 layout(set = 3, binding = 0) uniform Params {
     // intensity: 0 disables the overlay; >0 darkens the "dark" band by that
     // fraction (1 = pure black between bands). size: physical-pixel band
-    // height (>=1). pad0/pad1: keep std140 layout at 16 bytes.
+    // height (>=1). supersample: ss factor (1..4) — average each ss×ss block
+    // of expanded texels down to one render-res texel (true SSAA). pad1: keep
+    // std140 layout at 16 bytes.
     float scanline_intensity;
     float scanline_size;
-    float pad0;
+    float supersample;
     float pad1;
 } u_params;
 
 void main() {
-    ivec2 fb_size = textureSize(u_framebuffer, 0);
-    ivec2 px      = ivec2(v_uv * vec2(fb_size));
-    uint  idx     = texelFetch(u_framebuffer, px, 0).r;
-    uint  slot    = texelFetch(u_palette_id,  px, 0).r;
-    vec4  color   = texelFetch(u_palette, ivec2(int(idx), int(slot)), 0);
+    // The framebuffer is the *super* buffer (render_size * ss). Supersample by
+    // averaging each ss×ss block of palette-EXPANDED RGB texels down to one
+    // render-resolution texel — true SSAA. The expansion must happen BEFORE the
+    // average: palette indices are non-linear, so averaging raw indices is
+    // meaningless (and the R8_UINT texture can't be hardware-filtered anyway).
+    // With ss=1 the block is 1×1, i.e. a single point fetch — byte-identical to
+    // the pre-SSAA path.
+    int   ss      = clamp(int(u_params.supersample + 0.5), 1, 4);
+    ivec2 fb_size = textureSize(u_framebuffer, 0);     // super dims (render*ss)
+    ivec2 rsize   = fb_size / ss;                       // render dims (exact)
+    ivec2 rpx     = clamp(ivec2(v_uv * vec2(rsize)), ivec2(0), rsize - 1);
+    ivec2 base    = rpx * ss;                           // top-left super texel
+
+    vec4 acc = vec4(0.0);
+    for (int j = 0; j < 4; ++j) {
+        if (j >= ss) break;
+        for (int i = 0; i < 4; ++i) {
+            if (i >= ss) break;
+            ivec2 p    = base + ivec2(i, j);
+            uint  idx  = texelFetch(u_framebuffer, p, 0).r;
+            uint  slot = texelFetch(u_palette_id,  p, 0).r;
+            acc += texelFetch(u_palette, ivec2(int(idx), int(slot)), 0);
+        }
+    }
+    vec4 color = acc / float(ss * ss);
 
     if (u_params.scanline_intensity > 0.0) {
         // gl_FragCoord is in swapchain pixels regardless of viewport offset,
