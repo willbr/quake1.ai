@@ -130,6 +130,7 @@ static void ShalMissile(edict_t *e) {
     eng->SV_StartSound(e, CHAN_WEAPON, "shalrath/attack2.wav", 1, ATTN_NORM);
 
     edict_t *missile = eng->ED_Alloc();
+    missile->v.classname = "shalrath_missile";
     missile->v.owner = e;
     missile->v.solid = SOLID_BBOX;
     missile->v.movetype = MOVETYPE_FLYMISSILE;

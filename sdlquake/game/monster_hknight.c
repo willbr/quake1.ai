@@ -120,6 +120,7 @@ static void hknight_shot(edict_t *e, float offset) {
     g->newmis->v.velocity[1] = vec[1]*300;
     g->newmis->v.velocity[2] = vec[2]*300;
     eng->SV_SetModel(g->newmis, "progs/k_spike.mdl");
+    g->newmis->v.classname = "hknight_spike";   // override launch_spike's "spike"
     vec3_t z = {0,0,0};
     eng->SV_SetSize(g->newmis, z, z);
     eng->SV_StartSound(e, CHAN_WEAPON, "hknight/attack1.wav", 1, ATTN_NORM);

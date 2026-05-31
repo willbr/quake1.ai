@@ -125,6 +125,7 @@ static void OgreFireGrenade(void) {
     eng->SV_StartSound(self, CHAN_WEAPON, "weapons/grenade.wav", 1, ATTN_NORM);
     eng->MakeVectors(self->v.angles);
     edict_t *missile = eng->ED_Alloc();
+    missile->v.classname = "ogre_grenade";
     missile->v.owner    = self;
     missile->v.movetype = MOVETYPE_BOUNCE;
     missile->v.solid    = SOLID_BBOX;

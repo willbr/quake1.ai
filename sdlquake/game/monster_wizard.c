@@ -224,8 +224,8 @@ static void Wiz_FastFire(edict_t *self) {
         g->newmis->v.velocity[1] = vec[1]*600;
         g->newmis->v.velocity[2] = vec[2]*600;
         g->newmis->v.owner = self->v.owner;
-        // set classname and model
         eng->SV_SetModel(g->newmis, "progs/w_spike.mdl");
+        g->newmis->v.classname = "wizard_spike";   // override launch_spike's "spike"
         vec3_t z = {0,0,0};
         eng->SV_SetSize(g->newmis, z, z);
     }

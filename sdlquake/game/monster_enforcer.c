@@ -84,6 +84,7 @@ void LaunchLaser(vec3_t org, vec3_t vec) {
     float len = sqrtf(vec[0]*vec[0]+vec[1]*vec[1]+vec[2]*vec[2]);
     if (len > 0) { vec[0]/=len; vec[1]/=len; vec[2]/=len; }
     edict_t *mis = eng->ED_Alloc();
+    mis->v.classname = "enforcer_laser";
     mis->v.owner    = owner;
     mis->v.movetype = MOVETYPE_FLY;
     mis->v.solid    = SOLID_BBOX;

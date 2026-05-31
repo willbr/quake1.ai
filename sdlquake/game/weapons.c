@@ -114,7 +114,14 @@ void Spike_GibPathScan(void) {
     for (edict_t *e = eng->ED_Next(g->world); e; e = eng->ED_Next(e)) {
         if (e->v.movetype != MOVETYPE_FLYMISSILE) continue;
         const char *cn = e->v.classname;
-        if (!cn || strcmp(cn, "spike") != 0) continue;
+        // launch_spike()'s family: player nails ("spike") plus the monster
+        // projectiles that reuse it (wizard/hknight spit, Chthon's lavaball).
+        // They now carry distinct classnames for editor labels, but all must
+        // stay in this nail-path gib/pickup sweep -- match the whole family so
+        // behavior is identical to the old single-classname "spike" check.
+        if (!cn) continue;
+        if (strcmp(cn, "spike") && strcmp(cn, "wizard_spike") &&
+            strcmp(cn, "hknight_spike") && strcmp(cn, "boss_lavaball")) continue;
         float dmg = (e->v.touch == superspike_touch) ? 18.0f : 9.0f;
 
         vec3_t start = { e->v.origin[0], e->v.origin[1], e->v.origin[2] };

@@ -128,6 +128,7 @@ static void boss_fire_missile(edict_t *e, float px, float py, float pz) {
     edict_t *mis = g->newmis;
     if (!mis) return;
     eng->SV_SetModel(mis, "progs/lavaball.mdl");
+    mis->v.classname = "boss_lavaball";   // override launch_spike's "spike"
     mis->v.avelocity[0] = 200.0f; mis->v.avelocity[1] = 100.0f; mis->v.avelocity[2] = 300.0f;
     vec3_t zero = {0,0,0};
     eng->SV_SetSize(mis, zero, zero);

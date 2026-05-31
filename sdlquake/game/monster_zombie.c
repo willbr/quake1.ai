@@ -207,6 +207,7 @@ static void ZombieFireGrenade(vec3_t st) {
         self->v.origin[2] + st[0]*g->v_forward[2] + st[1]*g->v_right[2] + (st[2]-24)*g->v_up[2]
     };
     edict_t *missile = eng->ED_Alloc();
+    missile->v.classname = "zombie_gib";
     missile->v.owner     = self;
     missile->v.movetype  = MOVETYPE_BOUNCE;
     missile->v.solid     = SOLID_BBOX;
