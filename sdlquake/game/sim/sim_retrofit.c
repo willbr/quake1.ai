@@ -282,6 +282,6 @@ void Sim_Retrofit_Frame(void) {
         snprintf(buf, sizeof(buf),
                  "sim_retrofit: assigned patrols to %d monsters (%d from BSP)\n",
                  assigned, from_bsp);
-        eng->Con_Print(buf);
+        eng->Con_DPrintf(buf);   // developer-channel only -- silent in normal play
     }
 }
