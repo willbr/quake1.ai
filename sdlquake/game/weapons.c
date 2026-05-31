@@ -1546,6 +1546,22 @@ static void CheatCommand(void) {
 }
 
 // ---------------------------------------------------------------------------
+// W_InfiniteAmmoRefill -- called every frame from PlayerPreThink while the
+// player has FL_INFINITE_AMMO set (the `infinite-ammo` console cheat). Tops up
+// every ammo pool (stock + Doom/Wolf bullets + cells for the fire weapons) so
+// currentammo never reaches 0 and the active weapon never auto-switches. Pools
+// only -- no W_SetCurrentAmmo() call, so the viewmodel/fire animation is left
+// untouched; the fire functions already resync currentammo from the pool.
+// ---------------------------------------------------------------------------
+void W_InfiniteAmmoRefill(edict_t *self) {
+    if (self->v.ammo_shells  < 100) self->v.ammo_shells  = 100;
+    if (self->v.ammo_nails   < 200) self->v.ammo_nails   = 200;
+    if (self->v.ammo_rockets < 100) self->v.ammo_rockets = 100;
+    if (self->v.ammo_cells   < 200) self->v.ammo_cells   = 200;
+    if (self->v.ammo_bullets < 200) self->v.ammo_bullets = 200;
+}
+
+// ---------------------------------------------------------------------------
 // Unified weapon cycle (impulse 10 / 12) — covers stock Quake + Phase 6.
 // Order: 8 stock Quake, 6 Doom, 4 Wolf3D. Cycler walks forward/back through
 // the array, skipping slots the player doesn't own or doesn't have enough

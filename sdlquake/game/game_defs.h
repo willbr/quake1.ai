@@ -16,6 +16,7 @@
 #define FL_PARTIALGROUND    1024
 #define FL_WATERJUMP        2048
 #define FL_JUMPRELEASED     4096
+#define FL_INFINITE_AMMO    16384   // infinite-ammo cheat
 
 // movetype
 #define MOVETYPE_NONE        0

@@ -20,6 +20,7 @@ extern edict_t *lastspawn;      // world.c
 
 void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage); // combat.c
 extern void splash_underwater_explosion(vec3_t org, int strength_q4); // weapons.c
+void W_InfiniteAmmoRefill(edict_t *self); // weapons.c
 
 // player.c (Task 12) — weak stubs until ported
 __attribute__((weak)) void player_pain(edict_t *self, edict_t *attacker, float damage)
@@ -718,6 +719,9 @@ void PlayerPreThink(edict_t *client)
 
     if (g->self->v.deadflag >= DEAD_DEAD) { PlayerDeathThink(); return; }
     if (g->self->v.deadflag == DEAD_DYING) return;
+
+    if ((int)g->self->v.flags & FL_INFINITE_AMMO)
+        W_InfiniteAmmoRefill(g->self);
 
     if (g->self->v.button2)
         PlayerJump();

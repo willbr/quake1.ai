@@ -166,6 +166,7 @@ typedef struct client_s
 #define	FL_PARTIALGROUND		1024	// not all corners are valid
 #define	FL_WATERJUMP			2048	// player jumping out of water
 #define	FL_JUMPRELEASED			4096	// for jump debouncing
+#define	FL_INFINITE_AMMO		16384	// infinite-ammo cheat (Host_InfiniteAmmo_f)
 #ifdef QUAKE2
 #define FL_FLASHLIGHT			8192
 #define FL_ARCHIVE_OVERRIDE		1048576

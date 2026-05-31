@@ -129,6 +129,33 @@ void Host_God_f (void)
 		SV_ClientPrintf ("godmode ON\n");
 }
 
+/*
+==================
+Host_InfiniteAmmo_f
+
+Toggles infinite ammo for the client. While FL_INFINITE_AMMO is set the game
+DLL refills every ammo pool each frame (see PlayerPreThink), so the active
+weapon never runs dry. Modeled on Host_God_f.
+==================
+*/
+void Host_InfiniteAmmo_f (void)
+{
+	if (cmd_source == src_command)
+	{
+		Cmd_ForwardToServer ();
+		return;
+	}
+
+	if (pr_global_struct->deathmatch && !host_client->privileged)
+		return;
+
+	sv_player->v.flags = (int)sv_player->v.flags ^ FL_INFINITE_AMMO;
+	if (!((int)sv_player->v.flags & FL_INFINITE_AMMO) )
+		SV_ClientPrintf ("infinite ammo OFF\n");
+	else
+		SV_ClientPrintf ("infinite ammo ON\n");
+}
+
 // Set when +notarget is invoked from the command line before the local
 // client has connected. Host_ApplyPendingClientCmds (called once per
 // frame from _Host_Frame) flushes this once cls.state hits ca_active.
@@ -2049,6 +2076,7 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("status", Host_Status_f);
 	Cmd_AddCommand ("quit", Host_Quit_f);
 	Cmd_AddCommand ("god", Host_God_f);
+	Cmd_AddCommand ("infinite-ammo", Host_InfiniteAmmo_f);
 	Cmd_AddCommand ("notarget", Host_Notarget_f);
 	Cmd_AddCommand ("fly", Host_Fly_f);
 	Cmd_AddCommand ("map", Host_Map_f);
