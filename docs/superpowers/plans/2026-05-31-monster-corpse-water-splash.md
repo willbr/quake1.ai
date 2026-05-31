@@ -1,192 +1,257 @@
-# Monster & Corpse Water-Entry Splash — Implementation Plan
+# Monster & Corpse Water-Entry Splash Implementation Plan
 
-## Goal
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Give `FL_MONSTER` bodies (live monsters, corpses, thrown heads) a person-sized,
-speed-scaled, per-liquid water-entry splash matching the player's, by extending the
-existing `TE_WATERSPLASH` system in one engine function. No protocol or `game_api`
-ABI change.
+**Goal:** Give `FL_MONSTER` bodies (live monsters, corpses, thrown heads) a person-sized, speed-scaled, per-liquid water-entry splash matching the player's.
 
-## Context
+**Architecture:** Extend the one existing engine chokepoint, `SV_CheckWaterTransition` in `sdlquake/engine_src/sv_phys.c`, with a `FL_MONSTER` "body" branch that reuses the existing `TE_WATERSPLASH` emit path (surface-find, per-liquid `kind`, datagram budget). Add an `sv_bodysplash` kill-switch cvar. No protocol change, no `game_api` ABI bump, no client change.
 
-- **Design/spec:** `docs/superpowers/specs/2026-05-31-monster-corpse-water-splash-design.md`
-  (read it for the *why*, the current-state survey, and edge-case rationale).
-- **Single touched file:** `sdlquake/engine_src/sv_phys.c`.
-- **Build:** `zig build run -- +map e1m1` (builds engine + game.dll and runs).
-- **No test suite** — verification is build success + in-game behaviour, per
-  `CLAUDE.md`.
-- **Approach (approved):** Approach A — one new branch in `SV_CheckWaterTransition`
-  keyed on `FL_MONSTER`, plus an `sv_bodysplash` kill-switch cvar.
-
-### Key facts established during design (so the implementer needn't rediscover)
-
-- `SV_CheckWaterTransition` (around `sv_phys.c:1305`) is the single chokepoint for
-  air→liquid crossings. It already: plays `misc/h2ohit1.wav`; gates the visual
-  splash behind `vmag >= 100`; finds the surface (4096u "air above" probe + 14-step
-  binary search into `hi_z`); picks `kind` (0 water / 1 slime / 2 lava) from the
-  contents entered; and emits `n_bursts` × `TE_WATERSPLASH` with a per-burst
-  datagram-budget break. Rockets (`classname "missile"`) emit 4 bursts, grenades
-  (`"grenade"`) 3, else 1.
-- It runs for monsters and corpses (Step physics) and thrown heads (Toss physics).
-  The **player does not** go through it; the player's splash is a separate game-side
-  path and is out of scope here.
-- `FL_MONSTER` is the same flag family as `FL_SWIM` / `FL_FLY` / `FL_ONGROUND`, which
-  are already used inside `sv_phys.c` — so `FL_MONSTER` is in scope engine-side.
-- Per-liquid tinting and the positional splash sound are already handled by the
-  client when it receives `TE_WATERSPLASH` (`cl_tent.c:301`). Nothing client-side
-  needs to change.
-
-> **Tooling note for this session:** Bash/grep output was intermittently dropping or
-> returning garbled content while this plan was written. Treat every concrete line
-> number here as approximate — confirm by reading the file. Stage 1 begins with an
-> explicit current-state check for exactly this reason.
+**Tech Stack:** C (engine, compiled `-std=gnu89`), Zig build (`zig build run`). No unit-test harness exists for engine C in this repo — per `CLAUDE.md`, verification is **build success + in-game behaviour**. Steps therefore use build + console + visual smoke-test as the "test", not red-green-refactor.
 
 ---
 
-## Stage 1: Add the `sv_bodysplash` cvar
+## Context (read before starting)
 
-**Goal:** A registered server cvar `sv_bodysplash` (float, default `1`) usable from
-the console, with current state confirmed before editing.
+- **Design/spec:** `docs/superpowers/specs/2026-05-31-monster-corpse-water-splash-design.md` — the *why*, the current-state survey, and edge-case rationale.
+- **Build & run:** `zig build run -- +map e1m1` builds engine + game.dll and launches. Open the console with `~`.
+- **This is an engine change** (`sdlquake/engine_src/`), not the hot-reloadable game DLL, so a full `zig build run` is required; `zig build game` will not pick it up.
 
-**First — confirm current state (guards against partial/pre-existing work):**
+### Confirmed facts (verified in-tree; don't re-derive)
 
-1. `grep -rn bodysplash sdlquake/` — expect matches **only** in the design doc, none
-   in `.c` files. If `sv_bodysplash` already exists in `sv_phys.c`, stop and
-   reconcile against this plan (it may be partly implemented); skip whatever is
-   already done.
-2. Read `SV_CheckWaterTransition` in `sdlquake/engine_src/sv_phys.c` in full and
-   confirm it matches the "Key facts" above before Stage 2.
+- `SV_CheckWaterTransition` begins at `sdlquake/engine_src/sv_phys.c:1305`. The air→liquid case is the `if (cont <= CONTENTS_WATER)` → `if (ent->v.watertype == CONTENTS_EMPTY)` block (~lines 1325-1411). It already: plays `misc/h2ohit1.wav`; computes `vmag`; gates the visual splash behind `if (vmag >= 100.0f)`; probes for air within 4096u above; binary-searches the surface into `hi_z`; picks `kind` (`0` water / `1` slime / `2` lava) from `cont`; and emits `n_bursts` × `TE_WATERSPLASH` in a datagram-budgeted loop. Rockets (`classname "missile"`) → 4 bursts, grenades (`"grenade"`) → 3, else 1.
+- It runs for monsters/corpses (`SV_Physics_Step`) and thrown heads (`SV_Physics_Toss`). The **player does not** go through it (`SV_Physics_Client`'s `MOVETYPE_WALK` path uses `SV_WalkMove`/`SV_CheckWater`). Player splash is a separate game-side path — out of scope.
+- `FL_MONSTER` is defined engine-side: `sdlquake/engine_src/server.h:161` (`#define FL_MONSTER 32`); already used as `(int)ent->v.flags & FL_MONSTER` in `world.c:863`. In scope in `sv_phys.c`.
+- `FL_MONSTER` is never cleared on death and is kept by thrown heads (`game/weapons.c:642`), so it identifies live monsters + corpses + heads, while excluding gibs (`classname "gib"`) and projectiles.
+- Server cvars are declared in `sv_phys.c` (e.g. `sv_phys.c:76: cvar_t sv_gravity = {"sv_gravity","800",false,true};`) and registered in `SV_Init` (`sv_main.c:55: Cvar_RegisterVariable (&sv_gravity);`).
+- `TE_WATERSPLASH` is `16` (`protocol.h:174`); the client parse at `cl_tent.c:301` already renders the per-`kind` tint **and** plays a positional `h2ohit`. Nothing client-side changes.
 
-**Changes (`sdlquake/engine_src/sv_phys.c`):**
+## File Structure
 
-- Declare the cvar next to the other server cvars at the top of the file (where
-  `sv_gravity`, `sv_maxvelocity`, `sv_nostep` are declared). Match the short
-  `cvar_t` initializer form used by `sv_nostep`:
+- **Modify only:** `sdlquake/engine_src/sv_phys.c`
+  - cvar declaration (top, beside other `sv_` cvars)
+  - the `FL_MONSTER` branch inside `SV_CheckWaterTransition`
+- **Modify:** `sdlquake/engine_src/sv_main.c` — one `Cvar_RegisterVariable` line in `SV_Init`.
 
-  ```c
-  cvar_t  sv_bodysplash = {"sv_bodysplash","1"};
-  ```
-
-- Register it wherever the sibling server cvars are registered. Find the site with
-  `grep -n "Cvar_RegisterVariable (&sv_nostep" sdlquake/engine_src/*.c` (same place
-  `sv_gravity`/`sv_nostep` are registered — `SV_Init` in `sv_main.c` in stock
-  WinQuake; confirm in this tree). Add:
-
-  ```c
-  Cvar_RegisterVariable (&sv_bodysplash);
-  ```
-
-**Verification:**
-
-- [ ] `zig build run -- +map e1m1` compiles and launches.
-- [ ] At the console (`~`), typing `sv_bodysplash` prints `"1"`; `sv_bodysplash 0`
-      then `sv_bodysplash` prints `"0"`. (No behavioural change yet.)
+No new files. No headers change (`FL_MONSTER` already in `server.h`).
 
 ---
 
-## Stage 2: Body branch in `SV_CheckWaterTransition`
+## Task 1: Add and register the `sv_bodysplash` cvar
 
-**Goal:** Bodies emit a person-sized, speed-scaled, 2-burst, per-liquid splash on any
-air→liquid entry; gibs and projectiles are unchanged.
+**Files:**
+- Modify: `sdlquake/engine_src/sv_phys.c` (cvar declaration near line 76)
+- Modify: `sdlquake/engine_src/sv_main.c` (registration in `SV_Init`, near line 55)
 
-**Changes (`sdlquake/engine_src/sv_phys.c`, inside `SV_CheckWaterTransition`, in the
-`cont <= CONTENTS_WATER` → `watertype == CONTENTS_EMPTY` block):**
+- [ ] **Step 1: Confirm the feature isn't already present**
 
-1. After `vmag` is computed, derive the body flag:
+Run:
+```bash
+grep -rn "bodysplash" /Users/wjbr/src/quake1.ai/sdlquake/
+```
+Expected: **no matches** (the token currently lives only in the design doc under `docs/`). If anything prints from a `.c`/`.h` file, the feature is partly implemented — stop and reconcile against this plan before continuing.
 
-   ```c
-   int is_body = ((int)ent->v.flags & FL_MONSTER) && sv_bodysplash.value;
-   ```
+- [ ] **Step 2: Declare the cvar**
 
-2. Relax the speed gate so bodies are not subject to the `>= 100` threshold:
+In `sdlquake/engine_src/sv_phys.c`, immediately after the existing `sv_gravity` declaration (line ~76), add:
 
-   ```c
-   // was: if (vmag >= 100.0f)
-   if (is_body || vmag >= 100.0f)
-   ```
+```c
+cvar_t	sv_bodysplash = {"sv_bodysplash","1"};	// monster/corpse water-entry splash (0=off)
+```
 
-3. Keep the existing "air within 4096u above" guard and the binary search to the
-   surface (`hi_z`) exactly as-is — both paths share them.
+- [ ] **Step 3: Register the cvar**
 
-4. Replace the strength / burst-count selection (currently: clamp `vmag*0.03` to
-   [8,16], then bump for `missile`/`grenade`) with a body-first branch. Declare the
-   three values once, then choose:
+In `sdlquake/engine_src/sv_main.c`, in `SV_Init`, immediately after `Cvar_RegisterVariable (&sv_gravity);` (line ~55), add:
 
-   ```c
-   int   strength;
-   int   n_bursts;
-   float offset_r;
-   if (is_body)
-   {
-       // Person-sized, speed-scaled plunk. Ceiling 96 == the player's
-       // fixed entry splash; floor 32 keeps slow wade-ins/slumps visible.
-       strength = (int)(32.0f + vmag * 0.16f);
-       if (strength > 96) strength = 96;
-       if (strength < 32) strength = 32;
-       n_bursts = 2;          // body-sized footprint, like the player's two bursts
-       offset_r = 10.0f;
-   }
-   else
-   {
-       // Unchanged projectile path.
-       strength = (int)(vmag * 0.03f);
-       if (strength > 16) strength = 16;
-       if (strength < 8)  strength = 8;
-       n_bursts = 1;
-       offset_r = 0.0f;
-       if (ent->v.classname && strcmp (ent->v.classname, "missile") == 0) {
-           n_bursts = 4; offset_r = 12.0f; strength = 16;
-       } else if (ent->v.classname && strcmp (ent->v.classname, "grenade") == 0) {
-           n_bursts = 3; offset_r = 10.0f; strength = 16;
-       }
-   }
-   ```
+```c
+	Cvar_RegisterVariable (&sv_bodysplash);
+```
 
-5. Leave the `kind` selection and the `for (bi = 0; bi < n_bursts; bi++)` emit loop
-   (with its `cursize >= MAX_DATAGRAM - 16` break and `n_bursts > 1` offset jitter)
-   unchanged — they already consume `strength`, `n_bursts`, `offset_r`, and `kind`.
+If `sv_bodysplash` is declared `static` or not visible to `sv_main.c`, add `extern cvar_t sv_bodysplash;` beside the existing `extern cvar_t sv_gravity;` at `sv_main.c:44`. (Stock layout declares these non-static in `sv_phys.c` and `extern`s them in `sv_main.c`; match whatever the sibling cvars do.)
 
-**Notes / gotchas:**
+- [ ] **Step 4: Build**
 
-- `strength` max is 96 → fits in the single `MSG_WriteByte` already used. Fine.
-- `is_body` short-circuits on `sv_bodysplash.value == 0`, so the kill-switch makes
-  bodies fall straight back to the old behaviour (projectile path, `vmag >= 100`
-  only). No separate code path needed for the off case.
-- `FL_MONSTER` covers live monsters, corpses, and thrown heads (it is never cleared
-  on death — see spec). Gibs (`classname "gib"`, no `FL_MONSTER`) and the player are
-  unaffected.
-- Do not touch the `SV_StartSound (ent, 0, "misc/h2ohit1.wav", ...)` call — the entry
-  sound is intentionally kept (spec "Sound" edge case).
+Run:
+```bash
+zig build run -- +map e1m1
+```
+Expected: compiles and launches into `e1m1` with no new warnings/errors about `sv_bodysplash`.
 
-**Verification (build + in-game smoke test — required, not just compilation):**
+- [ ] **Step 5: Verify the cvar exists at runtime**
 
-- [ ] `zig build run -- +map e1m1` compiles and launches.
-- [ ] Pick/seed a map with water, slime, and lava (e.g. fight near a pool, or use the
-      MCP tools to position monsters / teleport). For each liquid, with
-      `sv_bodysplash 1`:
-  - [ ] A live monster (grunt and ogre) falling/walking into the liquid throws a
-        clearly visible, correctly-tinted splash.
-  - [ ] The **corpse** going under (kill it over/at the liquid) also splashes.
-  - [ ] A slow wade-in produces a smaller — but still visible — splash (floor works).
-- [ ] **Gibs unchanged:** gib a monster over water; gib splashes stay subtle (no
-      person-sized burst).
-- [ ] **Player unchanged:** the player's own entry splash looks as before.
-- [ ] **Kill-switch:** `sv_bodysplash 0` → monster/corpse entries go back to
-      near-invisible; `sv_bodysplash 1` restores the splash. (Same session, no
-      restart needed.)
-- [ ] No console errors; no perf complaints (transitions are rare; the binary search
-      runs only on the crossing frame).
+In-game, press `~` and type:
+```
+sv_bodysplash
+```
+Expected console output: `"sv_bodysplash" is "1"`. Then `sv_bodysplash 0` followed by `sv_bodysplash` prints `"0"`. Set it back to `1`. (No behavioural change yet — that's Task 2.) Close the game.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add sdlquake/engine_src/sv_phys.c sdlquake/engine_src/sv_main.c
+git commit -m "feat(engine): add sv_bodysplash cvar (monster/corpse water splash toggle)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+## Task 2: Body branch in `SV_CheckWaterTransition`
+
+**Files:**
+- Modify: `sdlquake/engine_src/sv_phys.c` (`SV_CheckWaterTransition`, the `watertype == CONTENTS_EMPTY` block, ~lines 1340-1390)
+
+The three edits below are inside the `if (ent->v.watertype == CONTENTS_EMPTY)` block, after the `SV_StartSound(... "misc/h2ohit1.wav" ...)` line. Apply them in order.
+
+- [ ] **Step 1: Derive the body flag (insert)**
+
+Find the `vmag` computation:
+
+```c
+			float vx = ent->v.velocity[0];
+			float vy = ent->v.velocity[1];
+			float vz = ent->v.velocity[2];
+			float vmag = (float)sqrt(vx*vx + vy*vy + vz*vz);
+			if (vmag >= 100.0f)
+```
+
+Insert one line so it reads:
+
+```c
+			float vx = ent->v.velocity[0];
+			float vy = ent->v.velocity[1];
+			float vz = ent->v.velocity[2];
+			float vmag = (float)sqrt(vx*vx + vy*vy + vz*vz);
+			// Live monsters, corpses, and thrown heads (all keep FL_MONSTER)
+			// get a person-sized splash like the player; gibs/projectiles do not.
+			int is_body = ((int)ent->v.flags & FL_MONSTER) && sv_bodysplash.value;
+			if (is_body || vmag >= 100.0f)
+```
+
+(That single edit both adds `is_body` and relaxes the speed gate for bodies.)
+
+- [ ] **Step 2: Branch the strength/burst selection (replace)**
+
+Find the existing strength/burst block:
+
+```c
+					int strength = (int)(vmag * 0.03f);
+					if (strength > 16) strength = 16;
+					if (strength < 8)  strength = 8;
+					int n_bursts = 1;
+					float offset_r = 0.0f;
+					if (ent->v.classname && strcmp (ent->v.classname, "missile") == 0) {
+						n_bursts = 4;            // rocket
+						offset_r = 12.0f;
+						strength = 16;
+					} else if (ent->v.classname && strcmp (ent->v.classname, "grenade") == 0) {
+						n_bursts = 3;            // grenade
+						offset_r = 10.0f;
+						strength = 16;
+					}
+```
+
+Replace it with:
+
+```c
+					int strength;
+					int n_bursts;
+					float offset_r;
+					if (is_body) {
+						// Person-sized, speed-scaled plunk. Ceiling 96 ==
+						// the player's fixed entry splash; floor 32 keeps
+						// slow wade-ins / corpse slumps visible. Hits full
+						// strength around ~400 u/s entry speed.
+						strength = (int)(32.0f + vmag * 0.16f);
+						if (strength > 96) strength = 96;
+						if (strength < 32) strength = 32;
+						n_bursts = 2;            // body-sized footprint
+						offset_r = 10.0f;
+					} else {
+						strength = (int)(vmag * 0.03f);
+						if (strength > 16) strength = 16;
+						if (strength < 8)  strength = 8;
+						n_bursts = 1;
+						offset_r = 0.0f;
+						if (ent->v.classname && strcmp (ent->v.classname, "missile") == 0) {
+							n_bursts = 4;            // rocket
+							offset_r = 12.0f;
+							strength = 16;
+						} else if (ent->v.classname && strcmp (ent->v.classname, "grenade") == 0) {
+							n_bursts = 3;            // grenade
+							offset_r = 10.0f;
+							strength = 16;
+						}
+					}
+```
+
+- [ ] **Step 3: Confirm the emit loop is untouched**
+
+Verify the code after your replacement still reads (do **not** change it — it already consumes `strength`, `n_bursts`, `offset_r`, `kind`):
+
+```c
+					int kind = 0; // water
+					if (cont == CONTENTS_SLIME) kind = 1;
+					if (cont == CONTENTS_LAVA)  kind = 2;
+					for (int bi = 0; bi < n_bursts; bi++) {
+						if (sv.datagram.cursize >= MAX_DATAGRAM - 16) break;
+						...
+						MSG_WriteByte  (&sv.datagram, TE_WATERSPLASH);
+						...
+						MSG_WriteByte  (&sv.datagram, kind);
+						MSG_WriteByte  (&sv.datagram, strength);
+					}
+```
+
+Also confirm you did **not** alter the `SV_StartSound (ent, 0, "misc/h2ohit1.wav", 255, 1);` line above — the entry sound is intentionally kept.
+
+- [ ] **Step 4: Build**
+
+Run:
+```bash
+zig build run -- +map e1m1
+```
+Expected: compiles and launches, no errors. (`strength` max 96 fits the existing single `MSG_WriteByte`.)
+
+- [ ] **Step 5: Smoke-test — live monsters in each liquid**
+
+`e1m1` has water near the start. For slime/lava, either fight near a known pool or use the MCP tools / `noclip` + `impulse`-spawns to stage monsters over each liquid. With `sv_bodysplash 1`:
+
+- [ ] A grunt and an ogre **falling** into water throw a clearly visible, blue, body-sized splash (two bursts).
+- [ ] Same over **slime** → green-tinted splash; over **lava** → lava-tinted splash.
+- [ ] A monster **walking slowly** into water still makes a smaller but visible splash (floor of 32 works — not "nothing").
+
+Tip: the existing MCP `screenshot` tool + teleport (see the smoke-test rig) can stage and capture these.
+
+- [ ] **Step 6: Smoke-test — corpses, gibs, player, kill-switch**
+
+- [ ] Kill a monster so its **corpse drops into** water/slime/lava → corpse entry splashes.
+- [ ] **Gib** a monster over water (rockets/SSG) → gib splashes stay small/subtle (no body-sized burst); this confirms gibs are excluded.
+- [ ] The **player's own** entry splash looks unchanged.
+- [ ] `sv_bodysplash 0` → monster/corpse entries revert to near-invisible; `sv_bodysplash 1` restores the splash (same session, no restart).
+- [ ] No console errors; framerate steady (transitions are rare; the binary search runs only on the crossing frame).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add sdlquake/engine_src/sv_phys.c
+git commit -m "feat(engine): person-sized water splash for monsters & corpses
+
+SV_CheckWaterTransition now gives FL_MONSTER bodies a speed-scaled
+(32..96), 2-burst, per-liquid TE_WATERSPLASH on any air->liquid entry,
+matching the player. Gibs/projectiles unchanged; gated by sv_bodysplash.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
 
 ---
 
 ## Out of scope (do not implement)
 
 - Unifying the player's fixed-96 plunk with this speed curve.
-- Any AI/stimulus reaction to the splash.
+- Any AI / stimulus reaction to the splash.
 - Gib splash tuning.
-- Promoting the floor/ceiling/scale/burst constants to cvars (leave as named
-  literals; only `sv_bodysplash` is a cvar).
+- Promoting the floor/ceiling/scale/burst constants to cvars (leave as named literals; only `sv_bodysplash` is a cvar).
 
 ## Done when
 
-Both stages' verification checklists pass, and the change is committed to `master`.
+Task 1 and Task 2 verification checkboxes pass and both commits are on `master`.
