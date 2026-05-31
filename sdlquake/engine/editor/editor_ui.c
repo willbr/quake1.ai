@@ -368,10 +368,10 @@ static void draw_toolbar(void)
 // -----------------------------------------------------------------------------
 
 // Per-category hide flag, indexed by EDIT_CAT_*. Persists across panel
-// re-opens within a session. The "OTHER" slot covers worldspawn /
-// misc_* / etc — we don't expose a checkbox for it (hiding worldspawn
-// would render the level invisible), but the array entry exists so
-// EDIT_CAT_OTHER indexing is uniform.
+// re-opens within a session. The "OTHER" slot covers worldspawn plus
+// uncategorised runtime junk (projectiles, backpacks, bubbles, ...). It
+// has an "other" checkbox, but worldspawn is special-cased never-hideable
+// in Editor_EntityHiddenByCategory (hiding it would blank the geometry).
 //
 // Default hides triggers, lights, ambient sounds, path corners, and
 // info_* metadata -- none of these have a model the engine actually
@@ -468,7 +468,13 @@ int Editor_EntityHiddenByCategory(int e_idx)
     if (e_idx < 0 || e_idx >= edit_scene.numentities) return 0;
     e = &edit_scene.entities[e_idx];
     cat = Editor_EntityCategory(e);
-    if (cat > 0 && cat < EDIT_CAT_COUNT && s_hide_cat[cat]) return 1;
+    if (cat >= 0 && cat < EDIT_CAT_COUNT && s_hide_cat[cat]) {
+        // worldspawn lands in OTHER but owns the level's editable brushes,
+        // so hiding it would blank the geometry — keep it always visible.
+        const char *cls = (e->classname_idx >= 0) ? e->kv[e->classname_idx].value : 0;
+        if (cat != EDIT_CAT_OTHER || !cls || strcmp(cls, "worldspawn"))
+            return 1;
+    }
     if (s_hide_sim && entity_is_sim(e)) return 1;
     if (s_visible_only && !Editor_EntityInView(e_idx)) return 1;
     if (entity_hidden_by_skill(e)) return 1;
@@ -632,6 +638,7 @@ static void draw_brush_list(void)
             { EDIT_CAT_GIB,     "gibs"     },
             { EDIT_CAT_TRAP,    "traps"    },
             { EDIT_CAT_PLAYER,  "player"   },
+            { EDIT_CAT_OTHER,   "other"    },
         };
         IG_TextUnformatted("Hide:");
         for (int k = 0; k < ARRAY_LEN(hide_cats); k++) {
