@@ -18,6 +18,7 @@ extern void ai_painforward(float dist);
 extern void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, float damage);
 extern void ThrowHead(const char *model, float damage);
 extern void ThrowGib(const char *model, float damage);
+extern void gib_blood_burst(vec3_t origin);
 extern void walkmonster_start(edict_t *self);
 extern void SUB_Remove(edict_t *e);
 static void zb_grenade_touch_remove(edict_t *self, edict_t *other) { (void)other; SUB_Remove(self); }
@@ -515,8 +516,13 @@ static void zombie_pain(edict_t *self, edict_t *attacker, float take) {
 
 static void zombie_die(edict_t *self) {
     g->self = self;
-    // Zombie always gibs
+    // Zombie always gibs. Unlike other monsters (whose th_die only gibs when
+    // health < the per-classname gib_threshold, so Killed() fires the shared
+    // blood burst for them), the zombie gibs unconditionally and is absent
+    // from k_corpse_gibs — so Killed()'s gated burst never runs for it. Fire
+    // it here directly, mirroring GibCorpse, so a dying zombie sprays blood.
     eng->SV_StartSound(self, CHAN_VOICE, "zombie/z_gib.wav", 1, ATTN_NORM);
+    gib_blood_burst(self->v.origin);
     ThrowHead("progs/h_zombie.mdl", self->v.health);
     ThrowGib("progs/gib1.mdl", self->v.health);
     ThrowGib("progs/gib2.mdl", self->v.health);
