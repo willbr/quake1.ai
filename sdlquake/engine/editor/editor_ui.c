@@ -1309,6 +1309,23 @@ static void draw_live_state(edit_entity_t *e)
         IG_TextUnformatted(buf);
     }
 
+    // Bounding box — the one gib-relevant field that wasn't surfaced. The
+    // world AABB (absmin..absmax) is exactly what hitscan (Corpse_BulletTrace)
+    // and explosions (T_RadiusDamage/CanDamage) test against; size.z ~16 on a
+    // corpse is the flattened prone slab from Corpse_LayProne. A corpse that
+    // refuses to gib despite TRIGGER + takedamage + DEAD usually has that slab
+    // embedded in / occluded by world geometry, so shots hit the world first
+    // and never reach it.
+    {
+        const float *mn = ed->v.absmin;
+        const float *mx = ed->v.absmax;
+        const float *sz = ed->v.size;
+        snprintf(buf, sizeof(buf),
+                 "bbox abs (%.1f %.1f %.1f)..(%.1f %.1f %.1f)  size (%.0f %.0f %.0f)",
+                 mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], sz[0], sz[1], sz[2]);
+        IG_TextUnformatted(buf);
+    }
+
     // Velocity — always shown, even sub-unit. Sliding-corpse debugging
     // hinges on seeing drift that would have been hidden by the old
     // `> 0.5` gate.
