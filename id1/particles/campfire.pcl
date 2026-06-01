@@ -1,0 +1,22 @@
+particle_effect
+{
+	"name"         "campfire"
+	"emission"     "continuous"
+	"rate"         "40"
+	"duration"     "0"
+	"shape"        "cone"
+	"cone_angle"   "12"
+	"dir_mode"     "up"
+	"speed"        "55"
+	"speed_jitter" "15"
+	"spread"       "12"
+	"gravity"      "-0.25"
+	"drag"         "0.5"
+	"life_min"     "0.9"
+	"life_max"     "1.5"
+	"style"        "blob"
+	"size_start"   "1"
+	"size_peak"    "6"
+	"size_end"     "0"
+	"ramp"         "0.0:111 0.45:107 1.0:97"
+}

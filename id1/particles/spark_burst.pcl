@@ -1,0 +1,17 @@
+particle_effect
+{
+	"name"         "spark_burst"
+	"emission"     "burst"
+	"count"        "40"
+	"shape"        "point"
+	"dir_mode"     "along_shape"
+	"speed"        "180"
+	"speed_jitter" "60"
+	"spread"       "75"
+	"gravity"      "1.0"
+	"drag"         "1.5"
+	"life_min"     "0.3"
+	"life_max"     "0.7"
+	"style"        "dot"
+	"ramp"         "0.0:244 0.4:241 1.0:0"
+}

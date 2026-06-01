@@ -299,14 +299,208 @@ static void R_ParticleSpawn_f(void)
     R_SpawnEffectIdx(idx, org, dir);
 }
 
-// ---- persistence (Slice 3 fills these in) -------------------------------
-void R_EmitterLoadAll(void) {}
-int  R_EmitterSave(int idx) { (void)idx; return 0; }
+// ---- persistence: .pcl (Quake KV-block, parsed with COM_Parse) ----------
+static const char *EMIT_MODE_NAMES[]  = { "burst", "continuous" };
+static const char *EMIT_SHAPE_NAMES[] = { "point", "sphere", "cone", "box" };
+static const char *EMIT_DIR_NAMES[]   = { "along_shape", "inherit", "up" };
+static const char *EMIT_STYLE_NAMES[] = { "dot", "blob", "smoke" };
+
+static int parse_enum(const char *s, const char * const *names, int n, int fallback)
+{
+    int i;
+    for (i = 0; i < n; i++) if (!strcmp(s, names[i])) return i;
+    return fallback;
+}
+
+// "0.0:111 0.4:107 1.0:8" -> ramp stops
+static void parse_ramp(emitter_def_t *d, const char *s)
+{
+    int n = 0;
+    while (*s && n < EMIT_MAX_RAMP) {
+        const char *colon;
+        float frac;
+        while (*s == ' ' || *s == '\t') s++;
+        if (!*s) break;
+        frac = (float)atof(s);
+        colon = strchr(s, ':');
+        if (!colon) break;
+        d->ramp_frac[n] = frac;
+        d->ramp_pal[n]  = (byte)(atoi(colon + 1) & 0xff);
+        n++;
+        while (*s && *s != ' ' && *s != '\t') s++;   // advance past token
+    }
+    if (n == 0) { d->ramp_frac[0] = 0; d->ramp_pal[0] = 15; n = 1; }
+    d->ramp_count = n;
+}
+
+// Parse one "particle_effect { "k" "v" ... }" block from relpath into a slot.
+static void emitter_load_file(const char *relpath)
+{
+    char *buf = (char *)COM_LoadTempFile((char *)relpath);
+    char *data, key[128];
+    int idx;
+    emitter_def_t *d;
+    char stem[EMIT_NAME_LEN];
+    const char *base, *p2;
+
+    if (!buf) return;
+    data = buf;
+
+    data = COM_Parse(data); if (!data) return;                       // "particle_effect"
+    data = COM_Parse(data); if (!data || com_token[0] != '{') return; // "{"
+
+    // Name defaults to the file stem; a "name" key overrides.
+    base = relpath;
+    for (p2 = relpath; *p2; p2++) if (*p2 == '/' || *p2 == '\\') base = p2 + 1;
+    strncpy(stem, base, EMIT_NAME_LEN - 1); stem[EMIT_NAME_LEN - 1] = 0;
+    { char *dot = strrchr(stem, '.'); if (dot) *dot = 0; }
+    idx = R_EmitterFind(stem);
+    if (idx < 0) idx = R_EmitterNew(stem);
+    if (idx < 0) return;
+    d = R_EmitterGetDef(idx);
+
+    while (1) {
+        data = COM_Parse(data);
+        if (!data || com_token[0] == '}') break;
+        strncpy(key, com_token, sizeof(key) - 1); key[sizeof(key) - 1] = 0;
+        data = COM_Parse(data);
+        if (!data) break;
+        if      (!strcmp(key,"name"))         { strncpy(d->name, com_token, EMIT_NAME_LEN-1); d->name[EMIT_NAME_LEN-1]=0; }
+        else if (!strcmp(key,"emission"))     d->mode = parse_enum(com_token, EMIT_MODE_NAMES, 2, EMIT_BURST);
+        else if (!strcmp(key,"count"))        d->count = atoi(com_token);
+        else if (!strcmp(key,"rate"))         d->rate = atof(com_token);
+        else if (!strcmp(key,"duration"))     d->duration = atof(com_token);
+        else if (!strcmp(key,"shape"))        d->shape = parse_enum(com_token, EMIT_SHAPE_NAMES, 4, SHAPE_POINT);
+        else if (!strcmp(key,"shape_size"))   d->shape_size = atof(com_token);
+        else if (!strcmp(key,"cone_angle"))   d->cone_angle = atof(com_token);
+        else if (!strcmp(key,"speed"))        d->speed = atof(com_token);
+        else if (!strcmp(key,"speed_jitter")) d->speed_jitter = atof(com_token);
+        else if (!strcmp(key,"dir_mode"))     d->dir_mode = parse_enum(com_token, EMIT_DIR_NAMES, 3, DIR_ALONG_SHAPE);
+        else if (!strcmp(key,"spread"))       d->spread = atof(com_token);
+        else if (!strcmp(key,"radial_bias"))  d->radial_bias = atof(com_token);
+        else if (!strcmp(key,"gravity"))      d->gravity_scale = atof(com_token);
+        else if (!strcmp(key,"drag"))         d->drag = atof(com_token);
+        else if (!strcmp(key,"life_min"))     d->life_min = atof(com_token);
+        else if (!strcmp(key,"life_max"))     d->life_max = atof(com_token);
+        else if (!strcmp(key,"style"))        d->style = parse_enum(com_token, EMIT_STYLE_NAMES, 3, STYLE_DOT);
+        else if (!strcmp(key,"size_start"))   d->size_start = atof(com_token);
+        else if (!strcmp(key,"size_peak"))    d->size_peak = atof(com_token);
+        else if (!strcmp(key,"size_end"))     d->size_end = atof(com_token);
+        else if (!strcmp(key,"ramp"))         parse_ramp(d, com_token);
+        // unknown keys silently ignored (forward-compat)
+    }
+}
+
+void R_EmitterLoadAll(void)
+{
+    // index.txt lists effect names (one per line); we load particles/<name>.pcl.
+    // COM_LoadTempFile reuses the temp hunk, so copy the index out before the
+    // per-file loads clobber it.
+    char *raw = (char *)COM_LoadTempFile("particles/index.txt");
+    char index[4096];
+    char *p;
+    int n;
+    if (!raw) { Con_DPrintf("R_EmitterLoadAll: no particles/index.txt\n"); return; }
+    strncpy(index, raw, sizeof(index) - 1); index[sizeof(index) - 1] = 0;
+
+    p = index;
+    while (*p) {
+        char line[EMIT_NAME_LEN + 16];
+        n = 0;
+        while (*p && *p != '\n' && *p != '\r' && n < (int)sizeof(line) - 1) line[n++] = *p++;
+        line[n] = 0;
+        while (*p == '\n' || *p == '\r') p++;
+        while (n > 0 && (line[n-1] == ' ' || line[n-1] == '\t')) line[--n] = 0;
+        if (n == 0 || line[0] == '#') continue;
+        {
+            char rel[EMIT_NAME_LEN + 32];
+            snprintf(rel, sizeof(rel), "particles/%s.pcl", line);
+            emitter_load_file(rel);
+        }
+    }
+}
+
+int R_EmitterSave(int idx)
+{
+    emitter_def_t *d = R_EmitterGetDef(idx);
+    char path[256], body[2048], ramp[256];
+    int i, n;
+
+    if (!d) return 0;
+
+    ramp[0] = 0;
+    for (i = 0; i < d->ramp_count; i++) {
+        char seg[32];
+        snprintf(seg, sizeof(seg), "%s%.3g:%d", i ? " " : "", d->ramp_frac[i], (int)d->ramp_pal[i]);
+        strncat(ramp, seg, sizeof(ramp) - strlen(ramp) - 1);
+    }
+
+    n = snprintf(body, sizeof(body),
+        "particle_effect\n{\n"
+        "\t\"name\"         \"%s\"\n"
+        "\t\"emission\"     \"%s\"\n"
+        "\t\"count\"        \"%d\"\n"
+        "\t\"rate\"         \"%.3g\"\n"
+        "\t\"duration\"     \"%.3g\"\n"
+        "\t\"shape\"        \"%s\"\n"
+        "\t\"shape_size\"   \"%.3g\"\n"
+        "\t\"cone_angle\"   \"%.3g\"\n"
+        "\t\"dir_mode\"     \"%s\"\n"
+        "\t\"speed\"        \"%.3g\"\n"
+        "\t\"speed_jitter\" \"%.3g\"\n"
+        "\t\"spread\"       \"%.3g\"\n"
+        "\t\"radial_bias\"  \"%.3g\"\n"
+        "\t\"gravity\"      \"%.3g\"\n"
+        "\t\"drag\"         \"%.3g\"\n"
+        "\t\"life_min\"     \"%.3g\"\n"
+        "\t\"life_max\"     \"%.3g\"\n"
+        "\t\"style\"        \"%s\"\n"
+        "\t\"size_start\"   \"%.3g\"\n"
+        "\t\"size_peak\"    \"%.3g\"\n"
+        "\t\"size_end\"     \"%.3g\"\n"
+        "\t\"ramp\"         \"%s\"\n"
+        "}\n",
+        d->name, EMIT_MODE_NAMES[d->mode], d->count, d->rate, d->duration,
+        EMIT_SHAPE_NAMES[d->shape], d->shape_size, d->cone_angle,
+        EMIT_DIR_NAMES[d->dir_mode], d->speed, d->speed_jitter, d->spread, d->radial_bias,
+        d->gravity_scale, d->drag, d->life_min, d->life_max,
+        EMIT_STYLE_NAMES[d->style], d->size_start, d->size_peak, d->size_end, ramp);
+
+    snprintf(path, sizeof(path), "particles/%s.pcl", d->name);
+    COM_WriteFile(path, body, n);   // writes under com_gamedir (id1/)
+
+    // Keep index.txt in sync so the effect reloads next launch. Rebuild from
+    // the live registry (simple + correct).
+    {
+        char acc[4096];
+        int j, m = 0;
+        m += snprintf(acc + m, sizeof(acc) - m, "# auto-maintained by R_EmitterSave\n");
+        for (j = 0; j < EMIT_MAX_DEFS && m < (int)sizeof(acc) - EMIT_NAME_LEN; j++)
+            if (s_defs[j].used) m += snprintf(acc + m, sizeof(acc) - m, "%s\n", s_defs[j].name);
+        COM_WriteFile("particles/index.txt", acc, m);
+    }
+    return 1;
+}
+
+// Reload from disk with reload-safety: free in-flight pt_emitter particles and
+// stop live instances BEFORE rebuilding s_defs (stale def indices would be UB).
+static void R_ParticleReload_f(void)
+{
+    particle_t *p;
+    int i;
+    R_EmitterStopAll();
+    for (p = active_particles; p; p = p->next)
+        if (p->type == pt_emitter) p->die = -1;  // reaped next R_DrawParticles pass
+    for (i = 0; i < EMIT_MAX_DEFS; i++) s_defs[i].used = 0;
+    R_EmitterLoadAll();
+    Con_Printf("particle_reload: %d effect(s)\n", R_EmitterCount());
+}
 
 void R_EmitterInit(void)
 {
     Cvar_RegisterVariable(&r_emitter_active);
     Cmd_AddCommand("particle_spawn", R_ParticleSpawn_f);
+    Cmd_AddCommand("particle_reload", R_ParticleReload_f);
     R_EmitterLoadAll();
 
     // Bootstrap test def if none loaded yet (Slice 3 replaces with real .pcl).
