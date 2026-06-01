@@ -221,6 +221,13 @@ R1–R5 (runtime) + E1–E3 (in-engine editor) + C1 (content), built one at a ti
     `actor_spawn <f.iqm> [x y z]` / `actor_clear` (persistent client-side entity
     injected into `cl_visedicts`, no server). Test asset
     `id1/actors/dummy.iqm` (5-cube figure) via `scripts/make_test_actor_iqm.py`.
+- **R2 done** (animation playback). `lm_load_iqm` decodes poses/anims/frames →
+  per-frame per-joint local TRS (`lm_iqm_t.frametrs`/`numframes`/`framerate`).
+  `R_IQMDrawModel` builds a per-joint **skin matrix** each frame
+  (bind-world-inverse ∘ animated-world via `IQM_QuatMat`/`IQM_LocalMat`/
+  `IQM_Invert34` + `R_ConcatTransforms`), rigid-skins each vertex (1 bone), and
+  loops the clip off `cl.time`. Bootstrap asset bakes a "look" clip (head yaw
+  ±30°). Static (bind-only) models keep the identity-skin fast path.
 
 ## Perf instrumentation
 
