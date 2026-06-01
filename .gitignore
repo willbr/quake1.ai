@@ -6,6 +6,7 @@ id1/history.txt
 id1/cache/
 .superpowers/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 crash_*.txt
 test_*.txt
 .DS_Store
