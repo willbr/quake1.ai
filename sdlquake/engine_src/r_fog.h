@@ -32,7 +32,9 @@ unsigned char *R_Fog_RowFromZi (float zi);
 // Returns the two adjacent fog LUT rows (floor and ceil of the fog level) plus
 // a 0..3 quantized fractional threshold for 2x2 Bayer dithering. Caller picks
 // row_hi when bayer[y&1][x&1] < *thresh4, row_lo otherwise. Assumes r_fog_active.
-void R_Fog_GetRows (float zi, unsigned char **row_lo,
+// (sx,sy) is the pixel's screen position; it converts camera-space 1/zi into true
+// (range-based) distance so the fog gradient doesn't swim as the view rotates.
+void R_Fog_GetRows (float zi, int sx, int sy, unsigned char **row_lo,
 		    unsigned char **row_hi, int *thresh4);
 
 // 2x2 Bayer threshold matrix, flat-indexed by ((y&1)<<1) | (x&1).

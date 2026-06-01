@@ -340,8 +340,12 @@ void Turbulent8 (espan_t *pspan)
 			r_turb_t = r_turb_t & ((CYCLE<<16)-1);
 
 			if (r_fog_active)
-				R_Fog_GetRows (zi, &r_turb_fog_lo, &r_turb_fog_hi,
+			{
+				int off = (int)(r_turb_pdest - (unsigned char *)d_viewbuffer);
+				R_Fog_GetRows (zi, off % screenwidth, off / screenwidth,
+				               &r_turb_fog_lo, &r_turb_fog_hi,
 				               &r_turb_fog_thresh4);
+			}
 
 			if (r_water_sheen_active)
 			{
@@ -498,9 +502,9 @@ void D_DrawSpans8 (espan_t *pspan)
 				{
 					unsigned char *fog_lo, *fog_hi;
 					int thresh4, x, yrow;
-					R_Fog_GetRows (zi, &fog_lo, &fog_hi, &thresh4);
 					x    = (int)(pdest - (unsigned char *)d_viewbuffer) - screenwidth * pspan->v;
 					yrow = (pspan->v & 1) << 1;
+					R_Fog_GetRows (zi, x, pspan->v, &fog_lo, &fog_hi, &thresh4);
 					do
 					{
 						unsigned char texel = *(pbase + (s >> 16) + (t >> 16) * cachewidth);
@@ -534,11 +538,11 @@ void D_DrawSpans8 (espan_t *pspan)
 				int           thresh4;
 				int           x;       /* screen x for Bayer dither */
 				int           yrow;    /* 0 or 2: (y&1)<<1 */
-				R_Fog_GetRows (zi, &fog_lo, &fog_hi, &thresh4);
 				/* recover initial screen-x of this sub-span from pdest */
 				x    = (int)(pdest - (unsigned char *)d_viewbuffer)
 				       - screenwidth * pspan->v;
 				yrow = (pspan->v & 1) << 1;
+				R_Fog_GetRows (zi, x, pspan->v, &fog_lo, &fog_hi, &thresh4);
 				do
 				{
 					unsigned char texel = *(pbase + (s >> 16) + (t >> 16) * cachewidth);

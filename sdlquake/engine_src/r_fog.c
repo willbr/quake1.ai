@@ -30,6 +30,12 @@ static float     r_fog_density_eff = 0.0f;
 extern mleaf_t  *r_viewleaf;                              /* set in R_SetupFrame */
 extern cshift_t  cshift_water, cshift_slime, cshift_lava; /* view.c content tints */
 
+/* Renderer projection globals — used to convert camera-space depth (1/zi) into
+   true Euclidean distance so distance fog does not swim as the view rotates
+   (range-based fog). Same correction the water sheen uses (d_scan.c). */
+extern float     xcenter, ycenter, xscaleinv, yscaleinv;
+extern qboolean  r_dowarp;
+
 
 static int FindClosestPaletteIndex (int r, int g, int b)
 {
@@ -209,7 +215,25 @@ unsigned char *R_Fog_RowFromZi (float zi)
 const unsigned char r_fog_bayer2x2[4] = { 0, 2, 3, 1 };
 
 
-void R_Fog_GetRows (float zi, unsigned char **row_lo,
+/* Camera-space depth (1/zi) is the perpendicular distance to the view plane, so
+   it shrinks toward the screen edges and the fog gradient rotates with the view.
+   Multiplying by sqrt(1+tan^2) of the pixel's view angle recovers the true
+   (range-based) distance, which is rotation-invariant. Under r_dowarp the warp
+   buffer's pixels don't map to xcenter/xscaleinv, so fall back to planar 1/zi
+   (the warp already wobbles the scene, masking any residual swim). */
+static float FogDist (float zi, int sx, int sy)
+{
+	float tanx, tany;
+
+	if (r_dowarp)
+		return 1.0f / zi;
+	tanx = ((float)sx - xcenter) * xscaleinv;
+	tany = ((float)sy - ycenter) * yscaleinv;
+	return (float)(sqrt (1.0 + tanx*tanx + tany*tany) / zi);
+}
+
+
+void R_Fog_GetRows (float zi, int sx, int sy, unsigned char **row_lo,
                     unsigned char **row_hi, int *thresh4)
 {
 	float depth, f, row_f, frac;
@@ -223,7 +247,7 @@ void R_Fog_GetRows (float zi, unsigned char **row_lo,
 		return;
 	}
 
-	depth = 1.0f / zi;
+	depth = FogDist (zi, sx, sy);
 	if (depth < 0.0f) depth = 0.0f;
 	f = 1.0f - expf (-r_fog_density_eff * depth);
 	if (f < 0.0f) f = 0.0f;

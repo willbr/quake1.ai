@@ -173,7 +173,7 @@ void D_PolysetDrawFinalVerts (finalvert_t *fv, int numverts)
 					unsigned char *fog_lo, *fog_hi, *row;
 					int thresh4, bidx;
 					R_Fog_GetRows ((float)fv->v[5] * (1.0f / 2147483648.0f),
-					               &fog_lo, &fog_hi, &thresh4);
+					               fv->v[0], fv->v[1], &fog_lo, &fog_hi, &thresh4);
 					bidx = ((fv->v[1] & 1) << 1) | (fv->v[0] & 1);
 					row  = (r_fog_bayer2x2[bidx] < thresh4) ? fog_hi : fog_lo;
 					pix  = row[pix];
@@ -391,7 +391,7 @@ split:
 			unsigned char *fog_lo, *fog_hi, *row;
 			int thresh4, bidx;
 			R_Fog_GetRows ((float)new[5] * (1.0f / 2147483648.0f),
-			               &fog_lo, &fog_hi, &thresh4);
+			               new[0], new[1], &fog_lo, &fog_hi, &thresh4);
 			bidx = ((new[1] & 1) << 1) | (new[0] & 1);
 			row  = (r_fog_bayer2x2[bidx] < thresh4) ? fog_hi : fog_lo;
 			pix  = row[pix];
@@ -672,12 +672,13 @@ void D_PolysetDrawSpans8 (spanpackage_t *pspanpackage)
 			/* lzi == zi * 2^31; convert back so R_Fog_GetRows sees float 1/z. */
 			if (r_fog_active) {
 				int linear;
-				R_Fog_GetRows ((float)lzi * (1.0f / 2147483648.0f),
-				               &fog_lo, &fog_hi, &fog_thresh4);
 				/* pspanpackage->pdest is the screen pixel pointer; recover x,y */
 				linear   = (int)(lpdest - (unsigned char *)d_viewbuffer);
 				fog_x    = linear % screenwidth;
 				fog_yrow = ((linear / screenwidth) & 1) << 1;
+				R_Fog_GetRows ((float)lzi * (1.0f / 2147483648.0f),
+				               fog_x, linear / screenwidth,
+				               &fog_lo, &fog_hi, &fog_thresh4);
 			}
 
 			do
