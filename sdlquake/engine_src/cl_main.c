@@ -863,6 +863,8 @@ int CL_ReadFromServer (void)
 	CL_RelinkEntities ();
 	CL_UpdateTEnts ();
 
+	IQMDev_AddToScene ();	// dev: inject the client-side IQM test actor
+
 //
 // bring the links up to date
 //
