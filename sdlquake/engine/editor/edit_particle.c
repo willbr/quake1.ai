@@ -236,6 +236,16 @@ static void panel_inspector(void)
         }
         IG_SameLine(0, -1);
         if (IG_Button("Stop all")) { R_EmitterStopAll(); s_loop_handle = -1; }
+
+        // Viewport backdrop: hide the loaded map behind the preview so the
+        // effect is judged on its own. Bound to the editor_particle_hide_world
+        // cvar (r_main.c paints the 3D view to r_clearcolor before particles).
+        {
+            cvar_t *cv = Cvar_FindVar("editor_particle_hide_world");
+            int on = cv && cv->value != 0.0f;
+            if (IG_Checkbox("Hide world", &on))
+                Cvar_SetValue("editor_particle_hide_world", on ? 1.0f : 0.0f);
+        }
         IG_TextUnformatted("Camera: RMB-drag orbit  -  wheel / W,S zoom  -  A,D spin");
     }
 

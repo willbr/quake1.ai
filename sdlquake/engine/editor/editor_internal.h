@@ -283,4 +283,9 @@ int  Editor_ParticlePreviewState(void);   // 0 none, 1 playing, 2 paused
 void Editor_GetOrbitFocus(vec3_t out);
 void Editor_SetOrbitFocus(vec3_t p);
 
+// 1 when open in Particle mode with the `editor_particle_hide_world` toggle on.
+// r_main.c paints the 3D view over with a clean backdrop before the particle
+// pass when this is set, so effects preview against an empty canvas.
+int  Editor_ParticleHideWorld(void);
+
 #endif // EDITOR_INTERNAL_H

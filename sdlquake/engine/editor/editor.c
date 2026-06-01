@@ -105,6 +105,15 @@ cvar_t      editor_view_mode     = { "editor_view_mode", "0" };
 cvar_t      editor_show_angles   = { "editor_show_angles", "0" };
 cvar_t      editor_show_links    = { "editor_show_links",  "1" };
 
+// Particle-editor viewport: hide the game world (BSP + entities) behind the
+// preview so an effect is judged against a clean backdrop instead of whatever
+// map happens to be loaded. The 3D view is painted over with r_clearcolor just
+// before the particle pass (see r_main.c R_RenderView_ + D_ClearViewToBackdrop).
+// Default on — a clean canvas is the point of the particle editor; toggle off
+// to preview an effect in-context against the live map. Only consulted while
+// the editor is open in Particle mode (Editor_ParticleHideWorld).
+cvar_t      editor_particle_hide_world = { "editor_particle_hide_world", "1" };
+
 // Face mode: 0 = clicks select brushes (default), 1 = clicks set the active
 // face on the singly-selected brush. Toggled via toolbar Faces button.
 // Active-face state lives in edit_scene; this cvar is just the UI flag.
@@ -2048,6 +2057,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_view_mode);
     Cvar_RegisterVariable(&editor_show_angles);
     Cvar_RegisterVariable(&editor_show_links);
+    Cvar_RegisterVariable(&editor_particle_hide_world);
     Cvar_RegisterVariable(&editor_face_mode);
     Cvar_RegisterVariable(&editor_brush_tex);
     Cvar_RegisterVariable(&editor_brush_hollow_thickness);
@@ -2864,4 +2874,15 @@ int Editor_ShouldDrawPlayer(void)
     const editor_mode_t *m = Editor_ActiveMode();
     if (m->should_draw_player) return m->should_draw_player();
     return 0;
+}
+
+// 1 when the editor is open in Particle mode and the user has opted to hide the
+// game world. r_main.c consults this right before the particle pass and, when
+// set, paints the 3D view over with a clean backdrop (D_ClearViewToBackdrop) so
+// the effect previews against an empty canvas rather than the loaded map.
+int Editor_ParticleHideWorld(void)
+{
+    return s_open
+        && Editor_ActiveMode() == &particle_mode
+        && editor_particle_hide_world.value != 0.0f;
 }

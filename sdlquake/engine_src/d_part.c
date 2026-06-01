@@ -48,6 +48,54 @@ void D_StartParticles (void)
 }
 
 
+/*
+==============
+D_ClearViewToBackdrop
+
+Particle editor "hide world" support. The software renderer assumes the world
+fills every view pixel, so it never clears the framebuffer; to show particles
+against an empty canvas we paint the 3D view rect over with r_clearcolor and
+reset the matching z-buffer span to 0 (== farthest, since the buffer holds
+1/z) so every subsequently-drawn particle passes its z-test. Called from
+R_RenderView_ just before the particle pass when Editor_ParticleHideWorld().
+
+Skipped when r_dowarp is set: underwater the view is composited through the
+small warp buffer with different strides, so a vid-space clear would be wrong
+(an unlikely case in the orbit-camera preview — documented, not handled).
+==============
+*/
+void D_ClearViewToBackdrop (void)
+{
+	int   v, x0, y0, x1, y1, w;
+	byte  color;
+
+	if (r_dowarp)
+		return;
+
+	color = (byte)((int)r_clearcolor.value & 0xFF);
+
+	x0 = r_refdef.vrect.x;
+	y0 = r_refdef.vrect.y;
+	x1 = x0 + r_refdef.vrect.width;   // exclusive
+	y1 = y0 + r_refdef.vrect.height;  // exclusive
+	if (x0 < 0) x0 = 0;
+	if (y0 < 0) y0 = 0;
+	if (x1 > (int)vid.width)  x1 = (int)vid.width;
+	if (y1 > (int)vid.height) y1 = (int)vid.height;
+	w = x1 - x0;
+	if (w <= 0 || y1 <= y0)
+		return;
+
+	for (v = y0; v < y1; v++)
+	{
+		byte  *dest = d_viewbuffer + d_scantable[v] + x0;
+		short *zp   = d_pzbuffer + d_zwidth * v + x0;
+		memset (dest, color, (size_t)w);
+		memset (zp,   0,     (size_t)w * sizeof(short));
+	}
+}
+
+
 #if	!id386
 
 /*

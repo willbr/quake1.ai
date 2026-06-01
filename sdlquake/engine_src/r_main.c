@@ -1196,8 +1196,14 @@ SetVisibilityByPassages ();
 
 	{
 		extern int Editor_HideTransientFX(void);
+		extern int Editor_ParticleHideWorld(void);
 		extern void R_UpdateEmitters(void);
+		extern void D_ClearViewToBackdrop(void);
 		if (!Editor_HideTransientFX()) {
+			// Particle editor: optionally wipe the world+entities just drawn
+			// to a clean backdrop so the effect previews against empty space.
+			if (Editor_ParticleHideWorld())
+				D_ClearViewToBackdrop ();
 			R_UpdateEmitters ();   // spawn live data-driven emitters this frame
 			PERF_SCOPE("R_DrawParticles") R_DrawParticles ();
 		}
