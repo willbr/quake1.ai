@@ -198,6 +198,30 @@ The emitter runtime is engine-side in `sdlquake/engine_src/r_emitter.c`: a name-
 - `brush_compile.c`, `map_io.c` — `.map` ↔ in-memory scene; `editor_compile_export` writes `.bsp` + `.lit`.
 - `light_bake_thread.c` — async progressive light baking on a worker thread.
 
+## Skeletal actors (IQM, TR1-style — in progress)
+
+Expressive multi-part characters: an actor is one **IQM** file (geometry +
+skeleton + animation clips), authored in-engine (no Blender; cubes-first), with
+runtime layers for procedural face (look-at / eye-gaze / jaw-flap lipsync /
+breathing), self-animating ponytail dynamics, and protocol pose sync. Design:
+`docs/superpowers/specs/2026-06-01-skeletal-actors-design.md`; sub-projects
+R1–R5 (runtime) + E1–E3 (in-engine editor) + C1 (content), built one at a time.
+
+- **R1 done** (IQM load + static bind-pose render). New model type `mod_iqm`:
+  - `sdlquake/libmodel/iqm.{c,h}` — portable IQM v2 reader (`lm_load_iqm` →
+    `lm_iqm_t`): meshes, bind-pose joints (48-byte `iqmjoint`), triangles,
+    POSITION/TEXCOORD/BLENDINDEXES. Animation lumps skipped until R2.
+  - `model.c::Mod_LoadIQMModel` dispatches on the 16-byte `INTERQUAKEMODEL`
+    magic and keeps the parsed `lm_iqm_t` on the hunk (`model_t.iqmdata`).
+  - `r_alias.c::R_IQMDrawModel` (+ `R_IQMSetUpTransform`, identity model scale)
+    renders rigid parts (1 bone/vertex, **bind pose = no joint math**) through
+    the shared `D_PolysetDraw`; flat-lit, solid-colour synth skin per mesh;
+    clipped triangles skipped (R1). Dispatched from `R_DrawEntitiesOnList`.
+  - `iqm_dev.c` dev harness: `actor_dump <f.iqm>` (prints parsed structure),
+    `actor_spawn <f.iqm> [x y z]` / `actor_clear` (persistent client-side entity
+    injected into `cl_visedicts`, no server). Test asset
+    `id1/actors/dummy.iqm` (5-cube figure) via `scripts/make_test_actor_iqm.py`.
+
 ## Perf instrumentation
 
 `sdlquake/engine/perf.{c,h}` — scoped per-frame timers feeding both a live
