@@ -309,7 +309,7 @@ typedef struct {
 // Whole model
 //
 
-typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
+typedef enum {mod_brush, mod_sprite, mod_alias, mod_iqm} modtype_t;
 
 #define	EF_ROCKET	1			// leave a trail
 #define	EF_GRENADE	2			// leave a trail
@@ -399,6 +399,8 @@ typedef struct model_s
 // additional model data
 //
 	cache_user_t	cache;		// only access through Mod_Extradata
+
+	struct lm_iqm_s	*iqmdata;	// mod_iqm: parsed IQM, hunk-allocated (R1)
 
 // PHASE 6: source palette for paletted sprite rendering. 0 = Quake (default),
 // 1 = Doom, 2 = Wolf3D (reserved). Set by Mod_LoadSpriteModel via filename

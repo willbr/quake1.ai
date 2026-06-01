@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "libmodel.h"
+#include "iqm.h"
 #include "qalloc_hunk.h"
 
 model_t	*loadmodel;
@@ -33,6 +34,7 @@ char	loadname[32];	// for hunk tags
 void Mod_LoadSpriteModel (model_t *mod, void *buffer);
 void Mod_LoadBrushModel (model_t *mod, void *buffer);
 void Mod_LoadAliasModel (model_t *mod, void *buffer);
+void Mod_LoadIQMModel (model_t *mod, void *buffer);
 model_t *Mod_LoadModel (model_t *mod, qboolean crash);
 
 byte	mod_novis[MAX_MAP_LEAFS/8];
@@ -302,6 +304,13 @@ model_t *Mod_LoadModel (model_t *mod, qboolean crash)
 
 // call the apropriate loader
 	mod->needload = NL_PRESENT;
+
+// IQM actors use a 16-byte string magic, not a 4-byte id; check before the switch
+	if (com_filesize >= 16 && !Q_strncmp ((char *)buf, "INTERQUAKEMODEL", 15))
+	{
+		Mod_LoadIQMModel (mod, buf);
+		return mod;
+	}
 
 	switch (LittleLong(*(unsigned *)buf))
 	{
@@ -1447,6 +1456,42 @@ on-disk parsing lives in libmodel now; everything below is the engine-specific
 format -> cache-layout translation, reproducing the original Hunk layout.
 =================
 */
+/*
+=================
+Mod_LoadIQMModel
+
+Parses an IQM actor into a hunk-resident lm_iqm_t and points mod->iqmdata at it.
+Unlike the alias path there is no cache copy: the model stays on the hunk for the
+map's lifetime and is reparsed after a map change (Mod_ClearAll sets needload).
+=================
+*/
+void Mod_LoadIQMModel (model_t *mod, void *buffer)
+{
+	lm_iqm_t	*iqm;
+	lm_result_t	lr;
+	qalloc_t	scratch;
+	int			j;
+
+	scratch = qalloc_hunk (loadname);
+	lr = lm_load_iqm (buffer, (size_t)com_filesize, &scratch, &iqm);
+	if (lr != LM_OK)
+		Sys_Error ("Mod_LoadIQMModel: %s: %s", mod->name, lm_strerror (lr));
+
+	mod->type      = mod_iqm;
+	mod->iqmdata   = iqm;
+	mod->flags     = 0;
+	mod->numframes = 1;
+	mod->synctype  = ST_SYNC;
+
+	for (j = 0; j < 3; j++)
+	{
+		mod->mins[j] = iqm->mins[j];
+		mod->maxs[j] = iqm->maxs[j];
+	}
+	mod->radius = Length (mod->maxs);
+}
+
+
 void Mod_LoadAliasModel (model_t *mod, void *buffer)
 {
 	int					i;
