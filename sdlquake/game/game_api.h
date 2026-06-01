@@ -4,7 +4,7 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 36
+#define GAME_API_VERSION 37
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -246,6 +246,11 @@ typedef struct engine_api_s {
     // `pos`; single-player, main thread. Used for the oil floor stain and the
     // scorch a fire leaves behind.
     void  (*SV_Decal)(vec3_t pos, int type);
+
+    // Spawn an authored particle effect by name (particle editor / r_emitter.c).
+    // org = world position; dir = forward direction (used by inherit/cone shapes).
+    // Unknown name = no-op. ABI 36->37.
+    void  (*SpawnParticleEffect)(const char *name, vec3_t org, vec3_t dir);
 } engine_api_t;
 
 // ---------------------------------------------------------------------------

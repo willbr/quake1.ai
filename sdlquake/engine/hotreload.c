@@ -184,6 +184,7 @@ void     SV_StartParticle(float *org, float *dir, int color, int count);
 void     R_AddSmokePuff(float *org, float *dir, int color, int count);
 void     R_AddFire(float *org, float *dir, int count);
 void     R_SpawnDecal(float *pos, int type);   /* r_decals.c; vec3_t/decal_type_t */
+void     R_SpawnParticleEffectByName(const char *name, float *org, float *dir); /* r_emitter.c */
 void     SV_LinkEdict(edict_t *ent, qboolean touch_triggers);
 void     SV_UnlinkEdict(edict_t *ent);
 void     SV_MakeStatic(edict_t *ent);
@@ -1061,6 +1062,7 @@ static engine_api_t engine_funcs = {
     Perf_PopScope,
     engine_sv_fire,
     engine_sv_decal,
+    R_SpawnParticleEffectByName,
 };
 
 // ---------------------------------------------------------------------------

@@ -1693,6 +1693,10 @@ static void ImpulseCommands(void) {
     if (imp == 213) Flammables_DebugSpawnBarrel(self);   // M8/F4 debug: oil barrel ahead
     if (imp == 214) Flammables_DebugSpawnBreakable(self);   // M8/F4 debug: breakable ahead
     if (imp == 215) Flammables_DebugToggleNearestTorch(self);   // M8/F4 debug: toggle nearest torch
+    if (imp == 216 && eng->SpawnParticleEffect) {   // particle editor: prove the SpawnParticleEffect ABI route
+        vec3_t up = { 0, 0, 1 };
+        eng->SpawnParticleEffect("campfire", self->v.origin, up);
+    }
     if (imp == 255) QuadCheat();
     self->v.impulse = 0;
 }
