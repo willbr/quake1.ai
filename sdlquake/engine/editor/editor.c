@@ -1996,7 +1996,8 @@ static int Editor_CompleteMapName(const char *partial, char **out, int max, int 
 // Lifecycle
 // -----------------------------------------------------------------------------
 
-static void Editor_Cmd_Mode_f(void);   // defined with the mode registry at EOF
+static void Editor_Cmd_Mode_f(void);    // defined with the mode registry at EOF
+static void Editor_Cmd_Orbit_f(void);   // defined with the orbit camera below
 
 void Editor_Init(void)
 {
@@ -2006,6 +2007,7 @@ void Editor_Init(void)
 
     Cmd_AddCommand("editor",        Editor_Cmd_Toggle_f);
     Cmd_AddCommand("editor_mode",   Editor_Cmd_Mode_f);
+    Cmd_AddCommand("editor_orbit",  Editor_Cmd_Orbit_f);
     Cmd_AddCommand("editor_load",   Editor_Cmd_Open_f);
     Cmd_AddCommand("editor_new",    Editor_Cmd_New_f);
     Cmd_AddCommand("editor_save",   Editor_Cmd_Save_f);
@@ -2377,6 +2379,106 @@ void Editor_RefreshDlights(void)
     (void)s_light_pref_origin_idx;  /* suppress -Wunused */
 }
 
+// ---- Particle-mode orbit camera -----------------------------------------
+// In particle mode the editor camera ORBITS a fixed focus point (the effect
+// location) instead of free-flying: hold RMB and drag to rotate, mouse wheel
+// or W/S to zoom, A/D to nudge yaw. The preview spawns at the focus so the
+// camera circles the effect. Driven by polling (SDL_GetMouseState /
+// GetRelativeMouseState / GetKeyboardState) here in the pre-render hook, so it
+// needs no per-mode SDL event plumbing.
+extern const editor_mode_t particle_mode;   // defined in edit_particle.c
+
+static vec3_t s_orbit_focus   = { 0, 0, 0 };
+static float  s_orbit_yaw     = 0.0f;
+static float  s_orbit_pitch   = 20.0f;
+static float  s_orbit_dist    = 160.0f;
+static int    s_orbit_inited  = 0;
+static int    s_orbit_prev_rmb = 0;
+static float  s_cam_wheel     = 0.0f;   // wheel delta accumulated by Editor_ProcessEvent
+
+void Editor_GetOrbitFocus(vec3_t out) { VectorCopy(s_orbit_focus, out); }
+void Editor_SetOrbitFocus(vec3_t p)   { VectorCopy(p, s_orbit_focus); s_orbit_inited = 1; }
+
+// Console: editor_orbit <yaw> <pitch> <dist> -- set the particle-mode orbit
+// camera angles/distance directly. Handy for headless/MCP verification.
+static void Editor_Cmd_Orbit_f(void)
+{
+    if (Cmd_Argc() < 4) {
+        Con_Printf("editor_orbit <yaw> <pitch> <dist>  (current: %.0f %.0f %.0f)\n",
+                   s_orbit_yaw, s_orbit_pitch, s_orbit_dist);
+        return;
+    }
+    s_orbit_yaw    = atof(Cmd_Argv(1));
+    s_orbit_pitch  = atof(Cmd_Argv(2));
+    s_orbit_dist   = atof(Cmd_Argv(3));
+    s_orbit_inited = 1;
+}
+
+static void editor_orbit_camera(void)
+{
+    extern double host_frametime;
+    extern cvar_t sensitivity, m_yaw, m_pitch;
+    const bool *keys;
+    Uint32 mb;
+    vec3_t ang, fwd, right, up;
+    float  dt = (float)host_frametime;
+    int    rmb;
+
+    // Lazy init: focus a bit in front of where the camera currently is.
+    if (!s_orbit_inited)
+    {
+        AngleVectors(s_cam_angles, fwd, right, up);
+        s_orbit_yaw   = s_cam_angles[YAW];
+        s_orbit_pitch = 20.0f;
+        s_orbit_dist  = 160.0f;
+        VectorMA(s_cam_origin, s_orbit_dist, fwd, s_orbit_focus);
+        s_orbit_inited = 1;
+    }
+
+    // RMB drag captures the mouse (relative mode) and orbits.
+    mb  = SDL_GetMouseState(NULL, NULL);
+    rmb = (mb & SDL_BUTTON_RMASK) != 0;
+    if (rmb && !s_orbit_prev_rmb && IG_WantCaptureMouse()) rmb = 0; // press began over a panel
+    if (rmb && !s_lookmode)  set_lookmode(1);
+    if (!rmb && s_lookmode)  set_lookmode(0);
+    s_orbit_prev_rmb = (mb & SDL_BUTTON_RMASK) != 0;
+
+    if (s_lookmode)
+    {
+        float dx = 0.0f, dy = 0.0f;
+        SDL_GetRelativeMouseState(&dx, &dy);
+        s_orbit_yaw   += m_yaw.value   * dx * sensitivity.value;
+        s_orbit_pitch += m_pitch.value * dy * sensitivity.value;
+        if (s_orbit_pitch >  89.0f) s_orbit_pitch =  89.0f;
+        if (s_orbit_pitch < -89.0f) s_orbit_pitch = -89.0f;
+    }
+
+    // Zoom: mouse wheel (accumulated by the dispatcher) + W/S. A/D nudge yaw.
+    if (s_cam_wheel != 0.0f)
+    {
+        s_orbit_dist *= (1.0f - 0.12f * s_cam_wheel);
+        s_cam_wheel = 0.0f;
+    }
+    keys = SDL_GetKeyboardState(NULL);
+    if (keys[SDL_SCANCODE_W]) s_orbit_dist -= 200.0f * dt;
+    if (keys[SDL_SCANCODE_S]) s_orbit_dist += 200.0f * dt;
+    if (keys[SDL_SCANCODE_A]) s_orbit_yaw  -=  90.0f * dt;
+    if (keys[SDL_SCANCODE_D]) s_orbit_yaw  +=  90.0f * dt;
+    if (s_orbit_dist <   16.0f) s_orbit_dist =   16.0f;
+    if (s_orbit_dist > 2000.0f) s_orbit_dist = 2000.0f;
+
+    // Position the camera 'dist' back from the focus, looking at it.
+    ang[PITCH] = s_orbit_pitch;
+    ang[YAW]   = s_orbit_yaw;
+    ang[ROLL]  = 0.0f;
+    AngleVectors(ang, fwd, right, up);
+    VectorMA(s_orbit_focus, -s_orbit_dist, fwd, s_cam_origin);
+    VectorCopy(ang, s_cam_angles);
+
+    VectorCopy(s_cam_origin, r_refdef.vieworg);
+    VectorCopy(s_cam_angles, r_refdef.viewangles);
+}
+
 void Editor_PreRender(void)
 {
     extern double host_frametime;
@@ -2438,6 +2540,13 @@ void Editor_PreRender(void)
         VectorCopy(r_refdef.vieworg,    s_cam_origin);
         VectorCopy(r_refdef.viewangles, s_cam_angles);
         s_camera_inited = 1;
+    }
+
+    // Particle mode uses an orbit camera (around the effect), not free-fly.
+    if (Editor_ActiveMode() == &particle_mode)
+    {
+        editor_orbit_camera();
+        return;
     }
 
     if ((int)editor_camera.value != 0) return;     // FPS mode: no override
@@ -2664,6 +2773,7 @@ void Editor_SetMode(int idx)
     if (idx < 0 || idx >= EDITOR_NUM_MODES || idx == s_active_mode) return;
     if (s_modes[s_active_mode]->exit) s_modes[s_active_mode]->exit();
     s_active_mode = idx;
+    if (s_modes[s_active_mode] == &particle_mode) s_orbit_inited = 0; // re-center orbit on entry
     if (s_modes[s_active_mode]->enter) s_modes[s_active_mode]->enter();
 }
 
@@ -2731,6 +2841,11 @@ void Editor_RenderScene(void)
 int Editor_ProcessEvent(void *evp)
 {
     const editor_mode_t *m = Editor_ActiveMode();
+    SDL_Event *ev = (SDL_Event *)evp;
+    // Particle orbit zoom: accumulate wheel here (the orbit camera polls it),
+    // unless the cursor is over an ImGui panel (let the panel scroll instead).
+    if (ev->type == SDL_EVENT_MOUSE_WHEEL && m == &particle_mode && !IG_WantCaptureMouse())
+        s_cam_wheel += ev->wheel.y;
     if (m->process_event) return m->process_event(evp);
     return 0;
 }

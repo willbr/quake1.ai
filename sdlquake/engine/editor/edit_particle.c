@@ -211,23 +211,22 @@ static void panel_inspector(void)
     IG_Separator();
     IG_TextUnformatted("Preview");
     {
-        vec3_t fwd, right, up, org;
+        vec3_t org, up = { 0, 0, 1 };
         int paused = Editor_GetParticlePaused();
-        AngleVectors(r_refdef.viewangles, fwd, right, up);
-        VectorMA(r_refdef.vieworg, 200, fwd, org);   // 200u in front of the view
+        Editor_GetOrbitFocus(org);   // spawn at the orbit centre so the camera circles the effect
 
         // Play/pause toggle for the live preview clock (world sim stays paused).
         if (IG_Button(paused ? "Play"  : "Pause"))
             Editor_SetParticlePaused(!paused);
         IG_SameLine(0, -1);
-        if (IG_Button("Spawn at view"))
-            R_SpawnEffectIdx(s_sel, org, fwd);
+        if (IG_Button("Spawn"))
+            R_SpawnEffectIdx(s_sel, org, up);
         IG_SameLine(0, -1);
         if (s_loop_handle < 0) {
             if (IG_Button("Loop preview")) {
                 int saved = d->mode;
                 d->mode = EMIT_CONTINUOUS;
-                s_loop_handle = R_SpawnEffectIdx(s_sel, org, fwd);
+                s_loop_handle = R_SpawnEffectIdx(s_sel, org, up);
                 d->mode = saved;
             }
         } else {
@@ -235,6 +234,7 @@ static void panel_inspector(void)
         }
         IG_SameLine(0, -1);
         if (IG_Button("Stop all")) { R_EmitterStopAll(); s_loop_handle = -1; }
+        IG_TextUnformatted("Camera: RMB-drag orbit  -  wheel / W,S zoom  -  A,D spin");
     }
 
     IG_End();

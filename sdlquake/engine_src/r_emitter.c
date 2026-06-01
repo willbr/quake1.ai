@@ -24,7 +24,8 @@ cvar_t r_emitter_active = { "r_emitter_active", "0" }; // reports live-instance 
 // (pause). r_part.c (R_DrawParticles) + d_part.c (D_DrawEmitterParticle) read
 // R_PartTime()/R_PartFrameTime(); particle_clock_update() runs once per frame
 // at the top of R_UpdateEmitters (which always precedes R_DrawParticles).
-extern int Editor_ParticlePreviewState(void);  // editor.c: 0 none, 1 play, 2 pause
+extern int  Editor_ParticlePreviewState(void); // editor.c: 0 none, 1 play, 2 pause
+extern void Editor_GetOrbitFocus(vec3_t out);  // editor.c: particle-mode orbit centre
 
 static double s_part_time = 0.0;
 static float  s_part_frametime = 0.0f;
@@ -335,6 +336,9 @@ static void R_ParticleSpawn_f(void)
     if (idx < 0) { Con_Printf("no effect '%s' (have %d)\n", Cmd_Argv(1), R_EmitterCount()); return; }
     if (Cmd_Argc() >= 5) {
         org[0]=atof(Cmd_Argv(2)); org[1]=atof(Cmd_Argv(3)); org[2]=atof(Cmd_Argv(4));
+    } else if (Editor_ParticlePreviewState() != 0) {
+        // In the particle editor: spawn at the orbit centre so the camera circles it.
+        Editor_GetOrbitFocus(org);   // dir stays up {0,0,1}
     } else {
         // place ~80u in front of the view
         AngleVectors(r_refdef.viewangles, fwd, right, up);

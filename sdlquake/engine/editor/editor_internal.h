@@ -278,4 +278,9 @@ void Editor_SetParticlePaused(int p);
 int  Editor_GetParticlePaused(void);
 int  Editor_ParticlePreviewState(void);   // 0 none, 1 playing, 2 paused
 
+// Particle-mode orbit camera focus (the point the camera circles). The
+// inspector spawns previews at this point so the camera orbits the effect.
+void Editor_GetOrbitFocus(vec3_t out);
+void Editor_SetOrbitFocus(vec3_t p);
+
 #endif // EDITOR_INTERNAL_H
