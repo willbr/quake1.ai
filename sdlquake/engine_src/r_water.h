@@ -30,8 +30,12 @@ void R_Water_Init   (void);
 // Cheap when nothing changed. Call each frame.
 void R_Water_Update (void);
 
-// Maps 1/z to a sheen base row 0..63 (near = 0 clear, far = 63 full sheen).
-// Assumes r_water_sheen_active; caller checks.
-int  R_Water_RowFromZi (float zi);
+// Returns the sheen base row (floor, 0..62) for the given Euclidean distance
+// from the eye to the liquid point, plus a 0..3 quantized fractional threshold
+// for 2x2 Bayer dithering toward base+1 (smooths the gradient -- no hard
+// row-step lines). Distance (not camera-space depth) keeps the gradient
+// rotation-invariant, so it doesn't swim as you turn the view. Near = 0
+// (clear), far = 63 (full sheen). Assumes r_water_sheen_active; caller checks.
+void R_Water_GetRows (float dist, int *base_lo, int *thresh4);
 
 #endif

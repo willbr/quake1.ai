@@ -121,18 +121,25 @@ void R_Water_Init (void)
 }
 
 
-int R_Water_RowFromZi (float zi)
+// Floor row + Bayer threshold from Euclidean eye->liquid distance. Mirrors
+// R_Fog_GetRows but (a) takes distance, not 1/z, so the gradient is
+// rotation-invariant (doesn't swim as you turn), and (b) returns a row index
+// (we add the per-pixel ripple offset before indexing the LUT), not a pointer.
+void R_Water_GetRows (float dist, int *base_lo, int *thresh4)
 {
-	float depth, f;
-	int   row;
+	float f, row_f, frac;
+	int   lo;
 
-	if (zi <= 1e-6f)
-		return 63;                       // extremely far -> full sheen
+	if (dist < 0.0f) dist = 0.0f;
+	f = 1.0f - expf (-r_water_sheen_dist.value * dist);   // near -> 0, far -> 1
+	if (f < 0.0f) f = 0.0f; else if (f > 1.0f) f = 1.0f;
 
-	depth = 1.0f / zi;
-	if (depth < 0.0f) depth = 0.0f;
-	f = 1.0f - expf (-r_water_sheen_dist.value * depth);   // near -> 0, far -> 1
-	row = (int)(f * 63.0f + 0.5f);
-	if (row < 0) row = 0; else if (row > 63) row = 63;
-	return row;
+	row_f = f * 63.0f;
+	lo = (int)row_f;
+	if (lo > 62) lo = 62;                // so base+1 stays <= 63
+	frac = row_f - (float)lo;
+
+	*base_lo = lo;
+	*thresh4 = (int)(frac * 4.0f);       // 0..3
+	if (*thresh4 > 3) *thresh4 = 3;
 }

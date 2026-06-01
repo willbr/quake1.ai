@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d_local.h"
 #include "r_fog.h"
 #include "r_water.h"
+#include <math.h>
 
 unsigned char	*r_turb_pbase, *r_turb_pdest;
 fixed16_t		r_turb_s, r_turb_t, r_turb_sstep, r_turb_tstep;
@@ -36,7 +37,7 @@ int				r_turb_spancount;
 unsigned char	*r_turb_fog_lo, *r_turb_fog_hi;
 int				r_turb_fog_thresh4;
 
-int				r_turb_sheen_base;	/* sheen base row 0..63 from 1/z, set in Turbulent8 */
+int				r_turb_sheen_base, r_turb_sheen_thresh4;	/* sheen base row + Bayer thresh, set in Turbulent8 */
 
 void D_DrawTurbulent8Span (void);
 
@@ -113,27 +114,28 @@ Composes with fog (tint first, then fog). See r_water.c.
 void D_DrawTurbulent8Span_Sheen (void)
 {
 	int	sturb, tturb;
-	int	rscale = r_water_ripple_scale;
-	int	base   = r_turb_sheen_base;
+	int	rscale  = r_water_ripple_scale;
+	int	base    = r_turb_sheen_base;
+	int	thresh4 = r_turb_sheen_thresh4;	/* Bayer dither toward base+1 (smooths the gradient) */
+	int	x_orig   = (int)(r_turb_pdest - (unsigned char *)d_viewbuffer) % screenwidth;
+	int	y_linear = (int)(r_turb_pdest - (unsigned char *)d_viewbuffer) / screenwidth;
+	int	yrow     = (y_linear & 1) << 1;
+	int	x        = x_orig;
 
 	if (r_fog_active && r_turb_fog_lo && r_turb_fog_hi)
 	{
-		int x_orig    = (int)(r_turb_pdest - (unsigned char *)d_viewbuffer) % screenwidth;
-		int y_linear  = (int)(r_turb_pdest - (unsigned char *)d_viewbuffer) / screenwidth;
-		int yrow      = (y_linear & 1) << 1;
-		int x         = x_orig;
 		do
 		{
-			unsigned char *fog =
-				(r_fog_bayer2x2[yrow | (x & 1)] < r_turb_fog_thresh4)
-					? r_turb_fog_hi : r_turb_fog_lo;
+			int bx    = r_fog_bayer2x2[yrow | (x & 1)];
 			int turbs = r_turb_turb[(r_turb_t>>16)&(CYCLE-1)];
 			int turbt = r_turb_turb[(r_turb_s>>16)&(CYCLE-1)];
-			int texel, row;
+			unsigned char *fog = (bx < r_turb_fog_thresh4) ? r_turb_fog_hi : r_turb_fog_lo;
+			int texel, row, dbase;
 			sturb = ((r_turb_s + turbs)>>16)&63;
 			tturb = ((r_turb_t + turbt)>>16)&63;
 			texel = *(r_turb_pbase + (tturb<<6) + sturb);
-			row = base + ((((turbs - AMP) >> 8) * rscale) >> 16);
+			dbase = (bx < thresh4) ? base + 1 : base;
+			row = dbase + ((((turbs - AMP) >> 8) * rscale) >> 16);
 			if (row < 0) row = 0; else if (row > 63) row = 63;
 			*r_turb_pdest++ = fog[r_water_sheenmap[(row<<8) + texel]];
 			r_turb_s += r_turb_sstep;
@@ -145,17 +147,20 @@ void D_DrawTurbulent8Span_Sheen (void)
 	{
 		do
 		{
+			int bx    = r_fog_bayer2x2[yrow | (x & 1)];
 			int turbs = r_turb_turb[(r_turb_t>>16)&(CYCLE-1)];
 			int turbt = r_turb_turb[(r_turb_s>>16)&(CYCLE-1)];
-			int texel, row;
+			int texel, row, dbase;
 			sturb = ((r_turb_s + turbs)>>16)&63;
 			tturb = ((r_turb_t + turbt)>>16)&63;
 			texel = *(r_turb_pbase + (tturb<<6) + sturb);
-			row = base + ((((turbs - AMP) >> 8) * rscale) >> 16);
+			dbase = (bx < thresh4) ? base + 1 : base;
+			row = dbase + ((((turbs - AMP) >> 8) * rscale) >> 16);
 			if (row < 0) row = 0; else if (row > 63) row = 63;
 			*r_turb_pdest++ = r_water_sheenmap[(row<<8) + texel];
 			r_turb_s += r_turb_sstep;
 			r_turb_t += r_turb_tstep;
+			x++;
 		} while (--r_turb_spancount > 0);
 	}
 }
@@ -338,7 +343,19 @@ void Turbulent8 (espan_t *pspan)
 				               &r_turb_fog_thresh4);
 
 			if (r_water_sheen_active)
-				r_turb_sheen_base = R_Water_RowFromZi (zi);
+			{
+					float dist;
+					if (r_dowarp)
+						dist = 1.0f / zi;	/* warp buffer: pixel coords don't match xcenter */
+					else
+					{
+						int   off  = (int)(r_turb_pdest - (unsigned char *)d_viewbuffer);
+						float tanx = ((float)(off % screenwidth) - xcenter) * xscaleinv;
+						float tany = ((float)(off / screenwidth) - ycenter) * yscaleinv;
+						dist = sqrt (1.0 + tanx*tanx + tany*tany) / zi;
+					}
+					R_Water_GetRows (dist, &r_turb_sheen_base, &r_turb_sheen_thresh4);
+				}
 
 			D_DrawTurbulent8Span ();
 

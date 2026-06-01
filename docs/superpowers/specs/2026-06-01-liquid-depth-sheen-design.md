@@ -63,9 +63,22 @@ per-pixel ripple offset."
   — auto-off in the `r_drawflat` debug views (they swap `cacheblock`).
 - `r_water_ripple_scale` — ripple strength as an int row-offset scale.
 
-`R_Water_RowFromZi(zi)` returns the **base row 0..63** from distance:
-`f = 1 - exp(-r_water_sheen_dist·depth); row = f·63` (near→0, far→63). Set
-per sub-span in `Turbulent8` (`d_scan.c:266`), right beside the fog row pick.
+`R_Water_GetRows(dist, &base, &thresh4)` returns the **floor base row 0..62**
+plus a 0..3 Bayer threshold from the **Euclidean eye→liquid distance**:
+`f = 1 - exp(-r_water_sheen_dist·dist); base = floor(f·63)` (near→0, far→63),
+`thresh4` = fractional part for 2×2 Bayer dithering toward `base+1` (smooths the
+gradient — no hard row-step lines, exactly like the fog path). Set per sub-span
+in `Turbulent8`, beside the fog row pick.
+
+**Why Euclidean distance, not camera-space `1/z`:** keying to view-forward depth
+made the gradient *swim* as you rotate (a fixed water point's `z` changes with
+view direction). Euclidean distance is rotation-invariant — turning in place
+doesn't change it — and for a flat liquid plane it *is* the true fresnel cue
+(grazing angle is a function of distance at fixed eye height). Computed per
+sub-span from `1/z` × the screen-ray secant (`sqrt(1 + tanθx² + tanθy²)` via the
+projection constants `xscale`/`yscale`/`xcenter`/`ycenter`); one `sqrt` per
+≤16-px span. The underwater-warp buffer (`r_dowarp`) falls back to plain `1/z`
+(its pixel coords don't share the `xcenter` frame; full-screen warp hides it).
 
 ### Integration in the span filler (`d_scan.c`)
 
@@ -76,14 +89,17 @@ cost; same hoist-the-branch discipline as fog).
 
 The new `D_DrawTurbulent8Span_Sheen` reuses the same warp, then per pixel:
 ```
-row   = base + (((turbs - AMP) >> 8) * ripple_scale >> 16);   // ripple glint; AMP=8<<16 centers it
+dbase = (bayer2x2[y,x] < thresh4) ? base + 1 : base;          // dither the gradient
+row   = dbase + (((turbs - AMP) >> 8) * ripple_scale >> 16);  // ripple glint; AMP=8<<16 centers it
 clamp row to 0..63
 idx   = r_water_sheenmap[(row<<8) + texel];                   // depth-graded sheen
 *dest = fog_active ? fog[idx] : idx;                          // tint then fog
 ```
 `turbs` (the s-axis turbulence) is already computed for the warp, so ripple is
-near-free. `ripple_scale == 0` ⇒ `row == base` ⇒ gradient only. Fog branch
-hoisted (2 sub-loops). C path only (`#if !id386`; asm path not built).
+near-free. `ripple_scale == 0` ⇒ ripple off (gradient only). The Bayer value is
+shared with the fog dither; screen x/y for it are hoisted to the function top so
+both fog/non-fog sub-loops use them. Fog branch hoisted (2 sub-loops). C path
+only (`#if !id386`; asm path not built).
 
 ## Cvars (`r_water.c`, registered in `R_Water_Init`)
 
