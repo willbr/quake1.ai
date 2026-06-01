@@ -49,7 +49,7 @@ gaze, jaw-flap lipsync, breathing) and **self-animating secondary motion**
 | Networking | **Extend protocol** for pose intent (clip+time, head/eye/jaw, talk, expression); root rides origin/angles | game.dll is the brain; works in demos/MP. Dynamics + lipsync amplitude stay client-derived |
 | Coexistence | Additive **dual system** — new `mod_iqm` alongside untouched `mod_alias` | Stock content keeps working |
 | **Authoring** | **In-engine editor; no Blender; cubes-first** | The editor is the pipeline. Rigid+boxes removes the hard DCC problems (no skinning/UV/sculpt) |
-| Editor ↔ format | Editor **round-trips IQM ↔ editable scene** (+ `.actor`) | Mirrors the map editor → `.bsp` pattern: scene is the source, IQM is the artifact |
+| Editor ↔ format | Editor **round-trips IQM ↔ editable scene**; semantics embedded in the IQM (one file) | Mirrors the map editor → `.bsp` pattern: scene is the source, IQM is the artifact |
 
 ## Why "full in-engine tool" is actually feasible
 
@@ -79,17 +79,29 @@ reference.
 
 ## Architecture
 
-### An actor is two files
+### An actor is ONE file
 
 ```
-actors/dummy.iqm     # geometry + skeleton + clips (authored in our editor)
-actors/dummy.actor   # small KV manifest: game semantics IQM can't carry
+actors/dummy.iqm     # geometry + skeleton + clips + embedded semantics
 ```
 
-The `.iqm` is what an entity references via `SV_SetModel`. The engine loads it as
-`mod_iqm` and, if a sibling `.actor` exists, attaches the parsed semantics.
+Originally this was going to be two files (`.iqm` + a `.actor` KV sidecar),
+because an external authoring tool (Blender) can't write our game semantics. But
+authoring is now **our own editor**, which owns the IQM writer — so we carry the
+semantics *inside* the single `.iqm`:
 
-### `.actor` manifest (KV, lineage of `.pcl`/`.map`)
+- **Roles by joint-name convention** — a joint named `jaw`, `eye.L`, `chest`, or
+  `ponytail_01` is self-describing; no extra data needed.
+- **Tunable scalars in the IQM `comment` lump** — gaze limits, stiffness/damping,
+  mouth-skin indices live in IQM's free-form comment text block (KV), written by
+  our editor.
+
+The `.iqm` is what an entity references via `SV_SetModel`. **R1 reads no
+semantics at all** (geometry only); the concrete carrier (comment-lump vs
+convention) is finalized when **R3** (the face) is planned. The "semantics
+schema" below describes *what* we carry, regardless of where it's stored.
+
+### Semantics schema (carried in joint-names + IQM comment lump)
 
 ```
 actor {

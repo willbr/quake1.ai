@@ -37,7 +37,12 @@
 
 **Files:**
 - Create: `scripts/make_test_actor_iqm.py`
-- Create (generated): `id1/actors/dummy.iqm`, `id1/actors/dummy.actor`
+- Create (generated): `id1/actors/dummy.iqm`
+
+> **Update:** the `.actor` sidecar was dropped — actor semantics will be embedded
+> in the IQM itself (joint-name conventions + the IQM `comment` lump); see the
+> design doc. R1 reads no semantics, so the generator emits only `dummy.iqm`.
+> (`iqmjoint` is **48 bytes**, not 56 — the size used below.)
 
 - [ ] **Step 1: Write the generator script**
 
