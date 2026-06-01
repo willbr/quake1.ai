@@ -6,6 +6,7 @@
 #include "r_emitter.h"
 #include "imgui_bridge.h"
 #include "editor_mode.h"
+#include "editor_internal.h"   // Editor_GetParticlePaused / Editor_SetParticlePaused
 #include <stdio.h>
 #include <string.h>
 
@@ -211,9 +212,14 @@ static void panel_inspector(void)
     IG_TextUnformatted("Preview");
     {
         vec3_t fwd, right, up, org;
+        int paused = Editor_GetParticlePaused();
         AngleVectors(r_refdef.viewangles, fwd, right, up);
         VectorMA(r_refdef.vieworg, 200, fwd, org);   // 200u in front of the view
 
+        // Play/pause toggle for the live preview clock (world sim stays paused).
+        if (IG_Button(paused ? "Play"  : "Pause"))
+            Editor_SetParticlePaused(!paused);
+        IG_SameLine(0, -1);
         if (IG_Button("Spawn at view"))
             R_SpawnEffectIdx(s_sel, org, fwd);
         IG_SameLine(0, -1);

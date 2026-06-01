@@ -59,6 +59,14 @@ typedef struct {
 void  R_EmitterInit (void);            // called from R_InitParticles
 void  R_UpdateEmitters (void);         // called each frame before R_DrawParticles
 
+// ---- particle clock ------------------------------------------------------
+// Particle time/frametime. Tracks cl.time during normal play; advances on an
+// independent real-time delta when the editor previews an effect (so the
+// preview animates while the world sim is paused). Updated once per frame by
+// R_UpdateEmitters; read by R_DrawParticles + D_DrawEmitterParticle.
+double R_PartTime (void);
+float  R_PartFrameTime (void);
+
 // ---- registry access ----------------------------------------------------
 int             R_EmitterCount (void);              // number of used slots
 emitter_def_t  *R_EmitterGetDef (int idx);          // NULL if idx invalid/unused

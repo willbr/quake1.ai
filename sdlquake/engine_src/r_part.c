@@ -1903,7 +1903,7 @@ void R_DrawParticles (void)
 	VectorScale (vup, yscaleshrink, r_pup);
 	VectorCopy (vpn, r_ppn);
 #endif
-	frametime = cl.time - cl.oldtime;
+	frametime = R_PartFrameTime();   // particle clock: == cl.time delta in play, real-time in editor preview
 	time3 = frametime * 15;
 	time2 = frametime * 10; // 15;
 	time1 = frametime * 5;
@@ -1921,7 +1921,7 @@ void R_DrawParticles (void)
 	for ( ;; )
 	{
 		kill = active_particles;
-		if (kill && kill->die < cl.time)
+		if (kill && kill->die < R_PartTime())
 		{
 			active_particles = kill->next;
 			kill->next = free_particles;
@@ -1936,7 +1936,7 @@ void R_DrawParticles (void)
 		for ( ;; )
 		{
 			kill = p->next;
-			if (kill && kill->die < cl.time)
+			if (kill && kill->die < R_PartTime())
 			{
 				p->next = kill->next;
 				kill->next = free_particles;

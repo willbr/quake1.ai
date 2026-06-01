@@ -2681,6 +2681,22 @@ static void Editor_Cmd_Mode_f(void)
     Con_Printf("editor_mode: %s\n", Editor_ActiveMode()->name);
 }
 
+// ---- Particle preview play/pause ----------------------------------------
+// The world sim stays paused while the editor is open (cl.time is frozen), so
+// the particle preview runs on an independent real-time clock in r_emitter.c.
+// This toggle controls that clock: play = clock advances, pause = clock frozen.
+static int s_particle_paused = 0;   // 0 = play, 1 = pause
+void Editor_SetParticlePaused(int p) { s_particle_paused = p ? 1 : 0; }
+int  Editor_GetParticlePaused(void)  { return s_particle_paused; }
+
+// 0 = not previewing (normal play / map mode), 1 = preview playing,
+// 2 = preview paused. Read by r_emitter.c's particle clock each frame.
+int Editor_ParticlePreviewState(void)
+{
+    if (!s_open || Editor_ActiveMode() != &particle_mode) return 0;
+    return s_particle_paused ? 2 : 1;
+}
+
 // ---- public engine-boundary dispatchers ---------------------------------
 void Editor_DrawUI(void)
 {

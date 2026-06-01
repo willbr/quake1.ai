@@ -272,4 +272,10 @@ const struct editor_mode_s *Editor_ActiveMode(void);
 int  Editor_ActiveModeIdx(void);
 void Editor_SetMode(int idx);
 
+// Particle preview play/pause (consumed by the inspector UI in edit_particle.c
+// and the particle clock in r_emitter.c).
+void Editor_SetParticlePaused(int p);
+int  Editor_GetParticlePaused(void);
+int  Editor_ParticlePreviewState(void);   // 0 none, 1 playing, 2 paused
+
 #endif // EDITOR_INTERNAL_H

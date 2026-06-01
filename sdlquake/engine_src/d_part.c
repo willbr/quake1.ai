@@ -626,9 +626,9 @@ void D_DrawEmitterParticle (particle_t *pparticle)
 
 	if (!d) return;
 
-	// normalized age
+	// normalized age (particle clock: animates during editor preview)
 	life = pparticle->die - pparticle->birth;
-	t    = (life > 0.001f) ? (cl.time - pparticle->birth) / life : 1.0f;
+	t    = (life > 0.001f) ? (R_PartTime() - pparticle->birth) / life : 1.0f;
 	if (t < 0) t = 0; else if (t > 1) t = 1;
 
 	// color from ramp (write into the particle so the DOT path picks it up)

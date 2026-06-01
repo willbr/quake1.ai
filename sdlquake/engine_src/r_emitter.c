@@ -14,6 +14,45 @@ extern particle_t *active_particles, *free_particles;
 
 cvar_t r_emitter_active = { "r_emitter_active", "0" }; // reports live-instance count
 
+// ---- particle clock ------------------------------------------------------
+// Particles are normally driven by cl.time. But while the in-game editor is
+// open the world sim is paused (cl.time is frozen via CL_LerpPoint's clamp to
+// server message times), which would freeze the preview. So the particle
+// subsystem reads time through this clock instead: it tracks cl.time during
+// normal play (byte-identical), but advances on an independent real-time
+// delta when the editor is previewing a particle effect (play), or freezes
+// (pause). r_part.c (R_DrawParticles) + d_part.c (D_DrawEmitterParticle) read
+// R_PartTime()/R_PartFrameTime(); particle_clock_update() runs once per frame
+// at the top of R_UpdateEmitters (which always precedes R_DrawParticles).
+extern int Editor_ParticlePreviewState(void);  // editor.c: 0 none, 1 play, 2 pause
+
+static double s_part_time = 0.0;
+static float  s_part_frametime = 0.0f;
+
+double R_PartTime(void)      { return s_part_time; }
+float  R_PartFrameTime(void) { return s_part_frametime; }
+
+static void particle_clock_update(void)
+{
+    static double last_real = 0.0;
+    double now = Sys_FloatTime();
+    int    st  = Editor_ParticlePreviewState();
+
+    if (st == 0) {
+        // Normal play (or map mode): track the client clock exactly.
+        s_part_time     = cl.time;
+        s_part_frametime = cl.time - cl.oldtime;
+    } else {
+        // Editor preview: advance on wall-clock time (world is paused).
+        float dt = (last_real > 0.0) ? (float)(now - last_real) : 0.0f;
+        if (dt > 0.1f) dt = 0.1f;     // clamp big hitches
+        if (st == 2)   dt = 0.0f;     // paused
+        s_part_time     += dt;
+        s_part_frametime = dt;
+    }
+    last_real = now;
+}
+
 // ---- registry -----------------------------------------------------------
 static emitter_def_t s_defs[EMIT_MAX_DEFS];
 
@@ -187,9 +226,10 @@ static void spawn_one(int def_idx, const vec3_t base_org, const vec3_t base_dir)
     VectorCopy(vel, p->vel);
     {
         float life = d->life_min + frand() * (d->life_max - d->life_min);
+        double now = R_PartTime();
         if (life < 0.05f) life = 0.05f;
-        p->birth = cl.time;
-        p->die   = cl.time + life;
+        p->birth = now;
+        p->die   = now + life;
     }
     p->ramp  = 0;
     p->color = R_EmitterRampColor(d, 0.0f);
@@ -223,7 +263,7 @@ int R_SpawnEffectIdx(int idx, vec3_t org, vec3_t dir)
             VectorCopy(org, s_live[i].org);
             VectorCopy(dir, s_live[i].dir);
             s_live[i].accum = 0.0f;
-            s_live[i].expire = (d->duration > 0.0f) ? (cl.time + d->duration) : 0.0f;
+            s_live[i].expire = (d->duration > 0.0f) ? (R_PartTime() + d->duration) : 0.0f;
             return i;
         }
     }
@@ -255,9 +295,11 @@ void R_EmitterStopAll(void)
 // ---- per-frame update ----------------------------------------------------
 void R_UpdateEmitters(void)
 {
-    float dt = cl.time - cl.oldtime;
+    float dt;
     int i, live = 0;
-    if (dt <= 0.0f) { Cvar_SetValue("r_emitter_active", 0); return; }
+
+    particle_clock_update();      // advance the particle clock once per frame
+    dt = R_PartFrameTime();
 
     for (i = 0; i < EMIT_MAX_LIVE; i++) {
         live_emitter_t *e = &s_live[i];
@@ -266,15 +308,18 @@ void R_UpdateEmitters(void)
         if (!e->used) continue;
         d = R_EmitterGetDef(e->def_idx);
         if (!d || d->mode != EMIT_CONTINUOUS) { e->used = 0; continue; }
-        if (e->expire != 0.0f && cl.time > e->expire) { e->used = 0; continue; }
+        if (e->expire != 0.0f && R_PartTime() > e->expire) { e->used = 0; continue; }
 
-        e->accum += d->rate * dt;
-        want = (int)e->accum;
-        if (want > 0) {
-            e->accum -= want;
-            burst(e->def_idx, e->org, e->dir, want);
+        // Spawn this tick's quota (skipped when the clock is frozen / paused).
+        if (dt > 0.0f) {
+            e->accum += d->rate * dt;
+            want = (int)e->accum;
+            if (want > 0) {
+                e->accum -= want;
+                burst(e->def_idx, e->org, e->dir, want);
+            }
         }
-        live++;
+        live++;   // still a live instance even while paused
     }
     Cvar_SetValue("r_emitter_active", (float)live);
 }
