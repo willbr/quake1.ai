@@ -154,6 +154,7 @@ pub fn build(b: *std.Build) void {
         .files = &.{
             "sdlquake/libqalloc/qalloc.c",
             "sdlquake/libmodel/mdl.c",
+            "sdlquake/libmodel/iqm.c",
         },
         .flags = lib_core_flags,
     });
