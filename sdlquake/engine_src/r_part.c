@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_local.h"
 #include "hotreload.h"   // g_game_api + game_api_t (NATIVE_GAME guard)
 #include "debug_lines.h" // DebugLines_Add — debug overlay for r_particle_wind_debug
+#include "r_emitter.h"   // data-driven emitter defs (pt_emitter)
 #include <math.h>        // expf
 
 #define MAX_PARTICLES			32768	// default max # of particles at one
@@ -233,6 +234,7 @@ static const float wind_drag_k[] = {
     [pt_blob2]    = 0.4f,
     [pt_grav]     = 0.0f,
     [pt_slowgrav] = 2.5f,
+    [pt_emitter]  = 0.5f,   // data-driven FX lean in wind moderately (per-effect tuning lives in the def)
 };
 
 particle_t	*active_particles, *free_particles;
@@ -249,6 +251,7 @@ vec3_t			r_pright, r_pup, r_ppn;
 void D_DrawSmokeCells (void);
 void D_CompositeSmoke (void);
 void D_DrawFireParticle (particle_t *p);   // ADSR fire blob (d_part.c)
+void D_DrawEmitterParticle (particle_t *p); // data-driven emitter draw (d_part.c)
 
 
 /*
@@ -275,6 +278,8 @@ void R_InitParticles (void)
 
 	particles = (particle_t *)
 			Hunk_AllocName (r_numparticles * sizeof(particle_t), "particles");
+
+	R_EmitterInit ();   // data-driven emitter registry + particle_spawn cmd
 }
 
 #ifdef QUAKE2
@@ -1971,6 +1976,8 @@ void R_DrawParticles (void)
 			D_DrawSmokeParticle (p);
 		else if (p->type == pt_fireblob)
 			D_DrawFireParticle (p);
+		else if (p->type == pt_emitter)
+			D_DrawEmitterParticle (p);
 		else
 			D_DrawParticle (p);
 #endif
@@ -2234,6 +2241,23 @@ void R_DrawParticles (void)
 			else
 				p->color = ramp_blood[(int)p->ramp];
 			break;
+		case pt_emitter:
+		{
+			// Data-driven: gravity + drag from the def. Color/size are sampled
+			// at draw time (D_DrawEmitterParticle), NOT here -- no ramp walk.
+			emitter_def_t *d = R_EmitterGetDef(p->def);
+			if (d) {
+				// grav here is frametime*sv_gravity*0.05; pt_grav uses grav*20
+				// for "full" gravity, so 1.0 ~= a falling particle, <0 rises.
+				p->vel[2] -= grav * 20.0f * d->gravity_scale;
+				if (d->drag > 0.0f) {
+					float k = 1.0f - d->drag * frametime;
+					if (k < 0.0f) k = 0.0f;
+					p->vel[0] *= k; p->vel[1] *= k; p->vel[2] *= k;
+				}
+			}
+			break;
+		}
 		case pt_grav:
 			// Blood-from-gib trails use pt_grav; pt_slowgrav is the 5% drift
 			// used for everything else. Original WinQuake fell through here

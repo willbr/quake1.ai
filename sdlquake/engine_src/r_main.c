@@ -1196,8 +1196,11 @@ SetVisibilityByPassages ();
 
 	{
 		extern int Editor_HideTransientFX(void);
-		if (!Editor_HideTransientFX())
+		extern void R_UpdateEmitters(void);
+		if (!Editor_HideTransientFX()) {
+			R_UpdateEmitters ();   // spawn live data-driven emitters this frame
 			PERF_SCOPE("R_DrawParticles") R_DrawParticles ();
+		}
 	}
 
 	// PHASE 6: 2D sprite viewmodel pass. Runs after particles so they sit on

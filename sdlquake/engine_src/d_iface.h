@@ -36,7 +36,8 @@ typedef enum {
 	pt_smoke,	// pt_static behaviour, but D_DrawSmokeParticle scales size by ramp and dithers
 	pt_spark,	// bouncing electrical ember; cyan birth, ramp1 cool-down, stick on 2nd hit
 	pt_blood,	// heavy gib droplet; pt_grav physics + ramp_blood fade to black
-	pt_fireblob	// R_AddFire plume: pt_fire physics, ADSR size billboard in D_DrawFireParticle
+	pt_fireblob,	// R_AddFire plume: pt_fire physics, ADSR size billboard in D_DrawFireParticle
+	pt_emitter	// data-driven emitter particle: physics + size + color from emitter_def_t (r_emitter.c)
 } ptype_t;
 
 // Per-particle behaviour flags. Stored in particle_t::flags. Recycled
@@ -71,6 +72,11 @@ typedef struct particle_s
 	float		birth;
 	// Per-particle collision/state bits. See PARTFL_* above.
 	byte		flags;
+	// pt_emitter only: index into r_emitter.c's effect-def table (s_defs).
+	// Other types: unused. Engine-internal field; not part of the game ABI,
+	// and the id386 asm path (d_ifacea.h) is dormant in the SDL build, so
+	// growing this struct is safe.
+	short		def;
 } particle_t;
 
 #define PARTICLE_Z_CLIP	8.0

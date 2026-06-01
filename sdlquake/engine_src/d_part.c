@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d_local.h"
 #include "r_shared.h"	// xscaleshrink, yscaleshrink, r_pright/r_pup/r_ppn
+#include "r_emitter.h"	// emitter_def_t + sampling (pt_emitter draw)
 #include <stdint.h>	// uintptr_t (per-particle salt in D_DrawSmokeParticle)
 
 
@@ -601,5 +602,67 @@ void D_DrawSmokeCells (void)
 	}
 
 	s_smoke_cell_count = 0;
+}
+
+
+/*
+==============
+D_DrawEmitterParticle
+
+Data-driven emitter particle (pt_emitter). Samples the def's palette ramp and
+size envelope at the particle's normalized age, then draws via the style's
+existing rasteriser:
+  STYLE_DOT   -> classic distance-scaled splat (set color, reuse D_DrawParticle)
+  STYLE_BLOB  -> solid ellipse (draw_fire_blob), size from the envelope
+  STYLE_SMOKE -> fog-density ellipse (draw_smoke_blob), size from the envelope
+==============
+*/
+void D_DrawEmitterParticle (particle_t *pparticle)
+{
+	emitter_def_t *d = R_EmitterGetDef(pparticle->def);
+	vec3_t local, transformed;
+	float life, t, zi, ramp_eff;
+	int u, v, izi, pix, rows;
+
+	if (!d) return;
+
+	// normalized age
+	life = pparticle->die - pparticle->birth;
+	t    = (life > 0.001f) ? (cl.time - pparticle->birth) / life : 1.0f;
+	if (t < 0) t = 0; else if (t > 1) t = 1;
+
+	// color from ramp (write into the particle so the DOT path picks it up)
+	pparticle->color = R_EmitterRampColor(d, t);
+
+	if (d->style == STYLE_DOT) {
+		D_DrawParticle(pparticle);
+		return;
+	}
+
+	// project for blob/smoke
+	VectorSubtract (pparticle->org, r_origin, local);
+	transformed[0] = DotProduct(local, r_pright);
+	transformed[1] = DotProduct(local, r_pup);
+	transformed[2] = DotProduct(local, r_ppn);
+	if (transformed[2] < PARTICLE_Z_CLIP) return;
+
+	zi  = 1.0f / transformed[2];
+	u   = (int)(xcenter + zi * transformed[0] + 0.5f);
+	v   = (int)(ycenter - zi * transformed[1] + 0.5f);
+	izi = (int)(zi * 0x8000);
+
+	ramp_eff = R_EmitterSizeEnv(d, t);
+	pix = ((int)(izi * ramp_eff)) >> d_pix_shift;
+	if (pix < 1) pix = 1;
+	if (pix > d_pix_max * 3) pix = d_pix_max * 3;
+	rows = pix << d_y_aspect_shift;
+
+	if (d->style == STYLE_SMOKE) {
+		float tt = (t - 0.5f) / 0.5f;
+		float density = (t < 0.5f) ? 1.0f : (1.0f - tt * tt);
+		draw_smoke_blob(u, v, pix, rows, izi, density, 0u, (byte)pparticle->color);
+	} else { // STYLE_BLOB
+		draw_fire_blob(u, v, pix, rows, izi, (byte)pparticle->color);
+	}
 }
 
