@@ -705,6 +705,36 @@ void R_DrawEntitiesOnList (void)
 
 			break;
 
+		case mod_iqm:
+			VectorCopy (currententity->origin, r_entorigin);
+			VectorSubtract (r_origin, r_entorigin, modelorg);
+
+			j = R_LightPoint (currententity->origin);
+			lighting.ambientlight = j;
+			lighting.shadelight = j;
+			lighting.plightvec = lightvec;
+
+			for (lnum=0 ; lnum<MAX_DLIGHTS ; lnum++)
+			{
+				if (cl_dlights[lnum].die >= cl.time)
+				{
+					VectorSubtract (currententity->origin,
+									cl_dlights[lnum].origin,
+									dist);
+					add = cl_dlights[lnum].radius - Length(dist);
+					if (add > 0)
+						lighting.ambientlight += add;
+				}
+			}
+
+			if (lighting.ambientlight > 128)
+				lighting.ambientlight = 128;
+			if (lighting.ambientlight + lighting.shadelight > 192)
+				lighting.shadelight = 192 - lighting.ambientlight;
+
+			R_IQMDrawModel (&lighting);
+			break;
+
 		default:
 			break;
 		}
