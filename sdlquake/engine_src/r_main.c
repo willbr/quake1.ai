@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "r_fog.h"
+#include "r_water.h"
 #include "r_drawflat.h"
 #include "perf.h"
 
@@ -335,6 +336,7 @@ void R_Init (void)
 	}
 
 	R_Fog_Init ();
+	R_Water_Init ();
 }
 
 /*
@@ -1123,6 +1125,7 @@ void R_RenderView_ (void)
 	PERF_SCOPE("R_SetupFrame")   R_SetupFrame ();
 	PERF_SCOPE("R_DecalsFrame")  R_DecalsFrame ();
 	PERF_SCOPE("R_Fog_Update")   R_Fog_Update ();
+	PERF_SCOPE("R_Water_Update") R_Water_Update ();
 
 #ifdef PASSAGES
 SetVisibilityByPassages ();
