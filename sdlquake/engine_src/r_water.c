@@ -11,9 +11,7 @@
 extern cvar_t r_drawflat;   // defined in r_main.c; sheen auto-disables under it
 
 cvar_t r_water_sheen       = {"r_water_sheen",       "0.4",   false};
-cvar_t r_water_sheen_red   = {"r_water_sheen_red",   "0.80",  false};
-cvar_t r_water_sheen_green = {"r_water_sheen_green", "0.90",  false};
-cvar_t r_water_sheen_blue  = {"r_water_sheen_blue",  "1.0",   false};
+cvar_t r_water_sheen_gain  = {"r_water_sheen_gain",  "2.0",   false};
 cvar_t r_water_sheen_dist  = {"r_water_sheen_dist",  "0.004", false};
 cvar_t r_water_ripple      = {"r_water_ripple",      "0.3",   false};
 
@@ -28,7 +26,7 @@ int r_water_ripple_scale = 0;
 #define RIPPLE_MAX_ROWS 12
 
 static float cached_strength = -1.0f;
-static float cached_r = -1.0f, cached_g = -1.0f, cached_b = -1.0f;
+static float cached_gain = -1.0f;
 
 
 static int FindClosestPaletteIndex (int r, int g, int b)
@@ -48,19 +46,16 @@ static int FindClosestPaletteIndex (int r, int g, int b)
 }
 
 
-static void BuildSheenmap (float strength, float sr, float sg, float sb)
+// The sheen highlight is each texel's OWN colour brightened by `gain`
+// (hue-preserving), so the sheen reflects the water texture rather than pushing
+// everything toward a fixed (blue) tint. Row N blends the texel toward that
+// brightened target by t = (N/63)*strength; row 0 is identity.
+static void BuildSheenmap (float strength, float gain)
 {
 	int level, c;
-	int shr, shg, shb;
-
-	shr = (int)(sr * 255.0f + 0.5f);
-	shg = (int)(sg * 255.0f + 0.5f);
-	shb = (int)(sb * 255.0f + 0.5f);
-	if (shr < 0) shr = 0; else if (shr > 255) shr = 255;
-	if (shg < 0) shg = 0; else if (shg > 255) shg = 255;
-	if (shb < 0) shb = 0; else if (shb > 255) shb = 255;
 
 	if (strength < 0.0f) strength = 0.0f; else if (strength > 1.0f) strength = 1.0f;
+	if (gain < 1.0f) gain = 1.0f;   // sheen brightens; <1 would darken the surface
 
 	for (level = 0; level < 64; level++)
 	{
@@ -70,9 +65,16 @@ static void BuildSheenmap (float strength, float sr, float sg, float sb)
 			int pr = host_basepal[c*3 + 0];
 			int pg = host_basepal[c*3 + 1];
 			int pb = host_basepal[c*3 + 2];
-			int br = (int)(pr + (shr - pr) * t + 0.5f);
-			int bg = (int)(pg + (shg - pg) * t + 0.5f);
-			int bb = (int)(pb + (shb - pb) * t + 0.5f);
+			int tr = (int)(pr * gain + 0.5f);
+			int tg = (int)(pg * gain + 0.5f);
+			int tb = (int)(pb * gain + 0.5f);
+			int br, bg, bb;
+			if (tr > 255) tr = 255;
+			if (tg > 255) tg = 255;
+			if (tb > 255) tb = 255;
+			br = (int)(pr + (tr - pr) * t + 0.5f);
+			bg = (int)(pg + (tg - pg) * t + 0.5f);
+			bb = (int)(pb + (tb - pb) * t + 0.5f);
 			r_water_sheenmap[level*256 + c] = (unsigned char)FindClosestPaletteIndex (br, bg, bb);
 		}
 	}
@@ -81,16 +83,14 @@ static void BuildSheenmap (float strength, float sr, float sg, float sb)
 
 void R_Water_Update (void)
 {
-	float s  = r_water_sheen.value;
-	float sr = r_water_sheen_red.value;
-	float sg = r_water_sheen_green.value;
-	float sb = r_water_sheen_blue.value;
+	float s    = r_water_sheen.value;
+	float gain = r_water_sheen_gain.value;
 	float rip;
 
-	if (s != cached_strength || sr != cached_r || sg != cached_g || sb != cached_b)
+	if (s != cached_strength || gain != cached_gain)
 	{
-		cached_strength = s; cached_r = sr; cached_g = sg; cached_b = sb;
-		BuildSheenmap (s, sr, sg, sb);
+		cached_strength = s; cached_gain = gain;
+		BuildSheenmap (s, gain);
 	}
 
 	r_water_sheen_active = (s > 0.00001f) && (r_drawflat.value == 0.0f);
@@ -104,18 +104,13 @@ void R_Water_Update (void)
 void R_Water_Init (void)
 {
 	Cvar_RegisterVariable (&r_water_sheen);
-	Cvar_RegisterVariable (&r_water_sheen_red);
-	Cvar_RegisterVariable (&r_water_sheen_green);
-	Cvar_RegisterVariable (&r_water_sheen_blue);
+	Cvar_RegisterVariable (&r_water_sheen_gain);
 	Cvar_RegisterVariable (&r_water_sheen_dist);
 	Cvar_RegisterVariable (&r_water_ripple);
 
-	BuildSheenmap (r_water_sheen.value, r_water_sheen_red.value,
-	               r_water_sheen_green.value, r_water_sheen_blue.value);
+	BuildSheenmap (r_water_sheen.value, r_water_sheen_gain.value);
 	cached_strength = r_water_sheen.value;
-	cached_r = r_water_sheen_red.value;
-	cached_g = r_water_sheen_green.value;
-	cached_b = r_water_sheen_blue.value;
+	cached_gain = r_water_sheen_gain.value;
 
 	R_Water_Update ();
 }

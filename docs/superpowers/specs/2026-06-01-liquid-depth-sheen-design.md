@@ -106,11 +106,15 @@ only (`#if !id386`; asm path not built).
 | Cvar | Default | Meaning |
 |---|---|---|
 | `r_water_sheen` | `0.4` | Master sheen strength 0..1. `0` = off / classic opaque. |
-| `r_water_sheen_red` | `0.80` | Sheen highlight color R. |
-| `r_water_sheen_green` | `0.90` | Sheen highlight color G. |
-| `r_water_sheen_blue` | `1.0` | Sheen highlight color B (cool/sky-ish). |
+| `r_water_sheen_gain` | `2.0` | Highlight = the texel's own colour × gain (≥1, hue-preserving). |
 | `r_water_sheen_dist` | `0.004` | Distance falloff — how fast water reaches full sheen. |
 | `r_water_ripple` | `0.3` | Ripple-relief strength 0..1. `0` = gradient only. |
+
+> **Revision (2026-06-01):** the original fixed RGB highlight (`r_water_sheen_red/green/blue`
+> = 0.80/0.90/1.0) pushed every liquid toward a cool blue-white, which read as "too blue"
+> and ignored the water's actual colour. Replaced by `r_water_sheen_gain`: the highlight is
+> now each texel's **own** colour brightened (hue-preserving), so the sheen reflects the water
+> texture — and self-corrects per liquid (slime brightens green, lava orange, etc.).
 
 Default **on** so the effect shows immediately; defaults to be tuned in-game.
 Applies to all liquids (incl. teleporters, which bucket as water — harmless).

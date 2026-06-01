@@ -11,14 +11,13 @@
 // Consumers include quakedef.h first; we forward-declare cvar_s like r_fog.h.
 struct cvar_s;
 extern struct cvar_s r_water_sheen;        // master strength 0..1, 0 = off
-extern struct cvar_s r_water_sheen_red;
-extern struct cvar_s r_water_sheen_green;
-extern struct cvar_s r_water_sheen_blue;
+extern struct cvar_s r_water_sheen_gain;   // highlight = texel colour * gain (>=1)
 extern struct cvar_s r_water_sheen_dist;   // distance falloff (like fog density)
 extern struct cvar_s r_water_ripple;       // ripple-relief strength 0..1, 0 = off
 
-// 64-row x 256 palette LUT: row N maps each index to the nearest palette index
-// of lerp(color, sheen, (N/63)*strength). Row 0 is identity (no tint).
+// 64-row x 256 palette LUT: row N maps each texel to the nearest palette index of
+// lerp(texel, texel*gain, (N/63)*strength) -- the texel's own colour brightened,
+// so the sheen reflects the water texture. Row 0 is identity (no sheen).
 extern unsigned char r_water_sheenmap[64*256];
 
 extern int r_water_sheen_active;   // sheen on AND not in r_drawflat debug mode
