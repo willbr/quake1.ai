@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d_local.h"	// FIXME: shouldn't be needed (is needed for patch
 						// right now, but that should move)
 #include "r_drawflat.h"
+#include "iqm.h"
 
 #define LIGHT_MIN	5		// lowest light value we'll allow, to avoid the
 							//  need for inner-loop light clamping
@@ -863,5 +864,154 @@ void R_AliasDrawModel (alight_t *plighting)
 		R_AliasPrepareUnclippedPoints ();
 	else
 		R_AliasPreparePoints ();
+}
+
+
+/*
+================
+R_IQMSetUpTransform
+
+Like R_AliasSetUpTransform, but identity model scale: IQM verts are float
+model-units already in actor space at bind pose.
+================
+*/
+static void R_IQMSetUpTransform (void)
+{
+	int				i;
+	float			rotationmatrix[3][4];
+	static float	viewmatrix[3][4];
+	vec3_t			angles;
+
+	angles[ROLL]  = currententity->angles[ROLL];
+	angles[PITCH] = -currententity->angles[PITCH];
+	angles[YAW]   = currententity->angles[YAW];
+	AngleVectors (angles, alias_forward, alias_right, alias_up);
+
+	for (i = 0; i < 3; i++)
+	{
+		rotationmatrix[i][0] = alias_forward[i];
+		rotationmatrix[i][1] = -alias_right[i];
+		rotationmatrix[i][2] = alias_up[i];
+	}
+	rotationmatrix[0][3] = -modelorg[0];
+	rotationmatrix[1][3] = -modelorg[1];
+	rotationmatrix[2][3] = -modelorg[2];
+
+	VectorCopy (vright, viewmatrix[0]);
+	VectorCopy (vup,    viewmatrix[1]);
+	VectorInverse (viewmatrix[1]);
+	VectorCopy (vpn,    viewmatrix[2]);
+	// viewmatrix is static => [*][3] stay zero-initialised
+
+	R_ConcatTransforms (viewmatrix, rotationmatrix, aliastransform);
+}
+
+/*
+================
+R_IQMDrawModel
+
+Bind-pose rigid render: transform each actor-space vertex to view space,
+project, and rasterize each mesh's triangles with a flat per-mesh skin colour
+through the shared D_PolysetDraw rasterizer. R1 skips any triangle touching the
+near plane or screen edge (no clipping) and uses solid-colour synth skins.
+================
+*/
+void R_IQMDrawModel (alight_t *plighting)
+{
+	finalvert_t			finalverts[MAXALIASVERTS +
+							((CACHE_SIZE - 1) / sizeof(finalvert_t)) + 1];
+	finalvert_t			*fvbase;
+	lm_iqm_t			*iqm;
+	int					i, mi, t, light;
+	static const byte	meshcolor[8] = { 0x6d, 0x52, 0x0b, 0xf3, 0x40, 0x20, 0xfe, 0x10 };
+	static byte			meshskin[16];
+
+	r_amodels_drawn++;
+
+	iqm = currententity->model->iqmdata;
+	if (!iqm)
+		return;
+	if (iqm->numverts > MAXALIASVERTS)
+		return;
+
+	fvbase = (finalvert_t *)
+		(((size_t)&finalverts[0] + CACHE_SIZE - 1) & ~((size_t)(CACHE_SIZE - 1)));
+
+	R_IQMSetUpTransform ();
+	R_AliasSetupLighting (plighting);	// sets r_ambientlight / r_shadelight / r_plightvec
+	light = r_ambientlight;				// R1: flat-lit
+	ziscale = (float)0x8000 * (float)0x10000;
+
+	acolormap = currententity->colormap;
+	if (!acolormap)
+		acolormap = vid.colormap;
+
+	for (i = 0; i < iqm->numverts; i++)
+	{
+		finalvert_t	*fv = &fvbase[i];
+		float		*p = iqm->verts[i].pos;
+		float		vx, vy, vz, zi;
+
+		vx = DotProduct (p, aliastransform[0]) + aliastransform[0][3];
+		vy = DotProduct (p, aliastransform[1]) + aliastransform[1][3];
+		vz = DotProduct (p, aliastransform[2]) + aliastransform[2][3];
+
+		fv->flags = 0;
+		if (vz < ALIAS_Z_CLIP_PLANE)
+		{
+			fv->flags = ALIAS_Z_CLIP;
+			continue;
+		}
+
+		zi = 1.0f / vz;
+		fv->v[5] = (int)(zi * ziscale);
+		fv->v[0] = (int)((vx * aliasxscale * zi) + aliasxcenter);
+		fv->v[1] = (int)((vy * aliasyscale * zi) + aliasycenter);
+		fv->v[2] = 0;		// solid-colour skin: always sample texel (0,0)
+		fv->v[3] = 0;
+		fv->v[4] = light;
+
+		if (fv->v[0] < r_refdef.vrect.x ||
+			fv->v[0] >= r_refdef.vrect.x + r_refdef.vrect.width ||
+			fv->v[1] < r_refdef.vrect.y ||
+			fv->v[1] >= r_refdef.vrect.y + r_refdef.vrect.height)
+			fv->flags |= ALIAS_XY_CLIP_MASK;
+	}
+
+	r_affinetridesc.drawtype     = 0;
+	r_affinetridesc.seamfixupX16 = 0;
+	r_affinetridesc.pfinalverts  = fvbase;
+	r_affinetridesc.skinwidth    = 4;
+	r_affinetridesc.skinheight   = 4;
+
+	for (mi = 0; mi < iqm->nummeshes; mi++)
+	{
+		lm_iqm_mesh_t	*me = &iqm->meshes[mi];
+		mtriangle_t		tri;
+
+		memset (meshskin, meshcolor[mi & 7], sizeof(meshskin));
+		r_affinetridesc.pskin = meshskin;
+		D_PolysetUpdateTables ();
+
+		tri.facesfront = 1;
+		r_affinetridesc.ptriangles   = &tri;
+		r_affinetridesc.numtriangles = 1;
+
+		for (t = 0; t < (int)me->num_triangles; t++)
+		{
+			unsigned	*idx = &iqm->tris[(me->first_triangle + t) * 3];
+			finalvert_t	*a = &fvbase[idx[0]];
+			finalvert_t	*b = &fvbase[idx[1]];
+			finalvert_t	*c = &fvbase[idx[2]];
+
+			if ((a->flags | b->flags | c->flags) & (ALIAS_XY_CLIP_MASK | ALIAS_Z_CLIP))
+				continue;	// R1: skip clipped triangles
+
+			tri.vertindex[0] = (int)idx[0];
+			tri.vertindex[1] = (int)idx[1];
+			tri.vertindex[2] = (int)idx[2];
+			D_PolysetDraw ();
+		}
+	}
 }
 
