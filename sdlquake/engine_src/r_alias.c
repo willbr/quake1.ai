@@ -867,6 +867,45 @@ void R_AliasDrawModel (alight_t *plighting)
 }
 
 
+#define MAX_IQM_JOINTS 128
+
+// quaternion (x,y,z,w) -> 3x4 rotation (column-vector convention: out = M*p)
+static void IQM_QuatMat (const float q[4], float m[3][4])
+{
+	float x = q[0], y = q[1], z = q[2], w = q[3];
+	float n = x*x + y*y + z*z + w*w;
+	float s = (n > 0.0f) ? 2.0f / n : 0.0f;
+	float xs = x*s, ys = y*s, zs = z*s;
+	float wx = w*xs, wy = w*ys, wz = w*zs;
+	float xx = x*xs, xy = x*ys, xz = x*zs;
+	float yy = y*ys, yz = y*zs, zz = z*zs;
+	m[0][0] = 1.0f-(yy+zz); m[0][1] = xy-wz;       m[0][2] = xz+wy;       m[0][3] = 0;
+	m[1][0] = xy+wz;        m[1][1] = 1.0f-(xx+zz);m[1][2] = yz-wx;       m[1][3] = 0;
+	m[2][0] = xz-wy;        m[2][1] = yz+wx;       m[2][2] = 1.0f-(xx+yy);m[2][3] = 0;
+}
+
+// local 3x4 from TRS[10] (0..2 translate, 3..6 quat xyzw, 7..9 scale)
+static void IQM_LocalMat (const float trs[10], float m[3][4])
+{
+	float r[3][4];
+	IQM_QuatMat (&trs[3], r);
+	m[0][0]=r[0][0]*trs[7]; m[0][1]=r[0][1]*trs[8]; m[0][2]=r[0][2]*trs[9]; m[0][3]=trs[0];
+	m[1][0]=r[1][0]*trs[7]; m[1][1]=r[1][1]*trs[8]; m[1][2]=r[1][2]*trs[9]; m[1][3]=trs[1];
+	m[2][0]=r[2][0]*trs[7]; m[2][1]=r[2][1]*trs[8]; m[2][2]=r[2][2]*trs[9]; m[2][3]=trs[2];
+}
+
+// inverse of a rotation(+unit-scale)+translation 3x4 (transpose rotation; exact
+// for R2's unit-scale bind. Non-uniform scale (breathing) is revisited in R3.)
+static void IQM_Invert34 (const float in[3][4], float out[3][4])
+{
+	out[0][0]=in[0][0]; out[0][1]=in[1][0]; out[0][2]=in[2][0];
+	out[1][0]=in[0][1]; out[1][1]=in[1][1]; out[1][2]=in[2][1];
+	out[2][0]=in[0][2]; out[2][1]=in[1][2]; out[2][2]=in[2][2];
+	out[0][3]=-(out[0][0]*in[0][3] + out[0][1]*in[1][3] + out[0][2]*in[2][3]);
+	out[1][3]=-(out[1][0]*in[0][3] + out[1][1]*in[1][3] + out[1][2]*in[2][3]);
+	out[2][3]=-(out[2][0]*in[0][3] + out[2][1]*in[1][3] + out[2][2]*in[2][3]);
+}
+
 /*
 ================
 R_IQMSetUpTransform
@@ -925,6 +964,12 @@ void R_IQMDrawModel (alight_t *plighting)
 	int					i, mi, t, light;
 	static const byte	meshcolor[8] = { 0x6d, 0x52, 0x0b, 0xf3, 0x40, 0x20, 0xfe, 0x10 };
 	static byte			meshskin[16];
+	static float		skin[MAX_IQM_JOINTS][3][4];
+	static float		bindinv[MAX_IQM_JOINTS][3][4];
+	static float		bindwld[MAX_IQM_JOINTS][3][4];
+	static float		curwld[MAX_IQM_JOINTS][3][4];
+	float				local[3][4], trs[10];
+	int					animated, jj, ff, pp, cc;
 
 	r_amodels_drawn++;
 
@@ -946,15 +991,76 @@ void R_IQMDrawModel (alight_t *plighting)
 	if (!acolormap)
 		acolormap = vid.colormap;
 
+	// Animation (R2): build a per-joint skin matrix for this frame. At bind pose
+	// skin == identity, so static models (frametrs == NULL) skip this entirely.
+	animated = (iqm->frametrs != 0 && iqm->numjoints <= MAX_IQM_JOINTS);
+	if (animated)
+	{
+		for (jj = 0; jj < iqm->numjoints; jj++)
+		{
+			trs[0] = iqm->joints[jj].translate[0];
+			trs[1] = iqm->joints[jj].translate[1];
+			trs[2] = iqm->joints[jj].translate[2];
+			trs[3] = iqm->joints[jj].rotate[0];
+			trs[4] = iqm->joints[jj].rotate[1];
+			trs[5] = iqm->joints[jj].rotate[2];
+			trs[6] = iqm->joints[jj].rotate[3];
+			trs[7] = iqm->joints[jj].scale[0];
+			trs[8] = iqm->joints[jj].scale[1];
+			trs[9] = iqm->joints[jj].scale[2];
+			IQM_LocalMat (trs, local);
+			pp = iqm->joints[jj].parent;
+			if (pp >= 0)
+				R_ConcatTransforms (bindwld[pp], local, bindwld[jj]);
+			else
+				memcpy (bindwld[jj], local, sizeof(local));
+			IQM_Invert34 (bindwld[jj], bindinv[jj]);
+		}
+
+		ff = (int)(cl.time * iqm->framerate);
+		ff %= iqm->numframes;
+		if (ff < 0)
+			ff += iqm->numframes;
+
+		for (jj = 0; jj < iqm->numjoints; jj++)
+		{
+			float *src = iqm->frametrs + ((size_t)ff * iqm->numjoints + jj) * 10;
+			for (cc = 0; cc < 10; cc++)
+				trs[cc] = src[cc];
+			IQM_LocalMat (trs, local);
+			pp = iqm->joints[jj].parent;
+			if (pp >= 0)
+				R_ConcatTransforms (curwld[pp], local, curwld[jj]);
+			else
+				memcpy (curwld[jj], local, sizeof(local));
+			R_ConcatTransforms (curwld[jj], bindinv[jj], skin[jj]);
+		}
+	}
+
 	for (i = 0; i < iqm->numverts; i++)
 	{
 		finalvert_t	*fv = &fvbase[i];
 		float		*p = iqm->verts[i].pos;
-		float		vx, vy, vz, zi;
+		float		posed[3], vx, vy, vz, zi;
+		int			bone;
 
-		vx = DotProduct (p, aliastransform[0]) + aliastransform[0][3];
-		vy = DotProduct (p, aliastransform[1]) + aliastransform[1][3];
-		vz = DotProduct (p, aliastransform[2]) + aliastransform[2][3];
+		if (animated)
+		{
+			bone = iqm->verts[i].bone;
+			if (bone >= iqm->numjoints)
+				bone = 0;
+			posed[0] = DotProduct (p, skin[bone][0]) + skin[bone][0][3];
+			posed[1] = DotProduct (p, skin[bone][1]) + skin[bone][1][3];
+			posed[2] = DotProduct (p, skin[bone][2]) + skin[bone][2][3];
+		}
+		else
+		{
+			posed[0] = p[0]; posed[1] = p[1]; posed[2] = p[2];
+		}
+
+		vx = DotProduct (posed, aliastransform[0]) + aliastransform[0][3];
+		vy = DotProduct (posed, aliastransform[1]) + aliastransform[1][3];
+		vz = DotProduct (posed, aliastransform[2]) + aliastransform[2][3];
 
 		fv->flags = 0;
 		if (vz < ALIAS_Z_CLIP_PLANE)
