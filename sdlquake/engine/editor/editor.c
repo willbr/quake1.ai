@@ -2876,13 +2876,22 @@ int Editor_ShouldDrawPlayer(void)
     return 0;
 }
 
-// 1 when the editor is open in Particle mode and the user has opted to hide the
-// game world. r_main.c consults this right before the particle pass and, when
-// set, paints the 3D view over with a clean backdrop (D_ClearViewToBackdrop) so
-// the effect previews against an empty canvas rather than the loaded map.
+// 1 when the editor is open in Particle mode. The orbit-camera preview has no
+// notion of aiming, so engine HUD bits that assume a first-person view (e.g.
+// the crosshair, which otherwise sits right on the orbit pivot / spawn point
+// and makes it look like the spawn point "rotates with the crosshair") are
+// suppressed while this holds.
+int Editor_ParticleModeActive(void)
+{
+    return s_open && Editor_ActiveMode() == &particle_mode;
+}
+
+// 1 when in Particle mode with the user's "hide world" toggle on. r_main.c
+// consults this right before the particle pass and, when set, paints the 3D
+// view over with a clean backdrop (D_ClearViewToBackdrop) so the effect
+// previews against an empty canvas rather than the loaded map.
 int Editor_ParticleHideWorld(void)
 {
-    return s_open
-        && Editor_ActiveMode() == &particle_mode
+    return Editor_ParticleModeActive()
         && editor_particle_hide_world.value != 0.0f;
 }

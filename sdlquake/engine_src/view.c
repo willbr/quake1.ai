@@ -1116,8 +1116,15 @@ void V_RenderView (void)
 	}
 
 #ifndef GLQUAKE
-	if (crosshair.value)
-		V_DrawCrosshair ();
+	{
+		// Particle editor: the orbit-camera preview isn't a first-person view,
+		// and the crosshair lands right on the orbit pivot (the effect's spawn
+		// point), making it look like the spawn point "rotates with the
+		// crosshair" when you circle the effect. Suppress it there.
+		extern int Editor_ParticleModeActive(void);
+		if (crosshair.value && !Editor_ParticleModeActive())
+			V_DrawCrosshair ();
+	}
 #endif
 		
 }
