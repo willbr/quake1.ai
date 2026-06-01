@@ -173,7 +173,7 @@ All Phase 8 sim systems live inside the hot-reloadable `game.dll` and share `sim
 - `sim_arena.c` — bump arena for per-tick allocations (paths, candidate lists); cleared each frame.
 - `sim_stimulus.c` — M1 stimulus bus (sound/sight/damage events).
 - `sim_ai.c` — M2/M2.5 FSM brains, path-following SEARCHING.
-- `sim_nav.c` — navmesh bake from BSP, A* pathfinder, in-game debug overlay (`sim_nav_debug` cvar). On `start.bsp` it bakes a **conditional-gate union mesh**: edges carry `requires_items`/`forbids_items` predicates gated on the four episode sigils (item bits 28–31, `IT_SIGIL1..4` in `game_defs.h`), so one cached mesh serves every `serverflags` state. The `func_bossgate` slab is kept solid for the primary flood (slab-top edges `forbids=ALL_SIGILS`) and a supplemental non-solid flood adds the shaft-descent edges (`requires=ALL_SIGILS`); `func_episodegate` entry passages are tagged `forbids=rune_bit`. Dev/test: `serverflags <n>` (engine console) sets the sigils; `nav_testpath x1 y1 z1 x2 y2 z2` prints the A* waypoint count under the live sigils. `nav_edges_near` (MCP) reports each edge's `requires`/`forbids`. `NAV_VERSION` is 22; `GAME_API_VERSION` 36 (33 added `nav_test_path`; 34 added `SV_Fire` for M8 fire; 35 added `button5`/`+pouroil` for M8/F2 hold-to-paint oil; 36 added `SV_Decal` for M8/F2 oil + scorch floor decals).
+- `sim_nav.c` — navmesh bake from BSP, A* pathfinder, in-game debug overlay (`sim_nav_debug` cvar). On `start.bsp` it bakes a **conditional-gate union mesh**: edges carry `requires_items`/`forbids_items` predicates gated on the four episode sigils (item bits 28–31, `IT_SIGIL1..4` in `game_defs.h`), so one cached mesh serves every `serverflags` state. The `func_bossgate` slab is kept solid for the primary flood (slab-top edges `forbids=ALL_SIGILS`) and a supplemental non-solid flood adds the shaft-descent edges (`requires=ALL_SIGILS`); `func_episodegate` entry passages are tagged `forbids=rune_bit`. Dev/test: `serverflags <n>` (engine console) sets the sigils; `nav_testpath x1 y1 z1 x2 y2 z2` prints the A* waypoint count under the live sigils. `nav_edges_near` (MCP) reports each edge's `requires`/`forbids`. `NAV_VERSION` is 22; `GAME_API_VERSION` 37 (33 added `nav_test_path`; 34 added `SV_Fire` for M8 fire; 35 added `button5`/`+pouroil` for M8/F2 hold-to-paint oil; 36 added `SV_Decal` for M8/F2 oil + scorch floor decals; 37 added `SpawnParticleEffect` for the data-driven particle editor (`r_emitter.c`)).
 - `sim_wind.c` — M4 voxel wind grid + smoke advection; `Wind_PathOcclusion` feeds AI LOS.
 - `sim_light.c` — M5 light-tier sampling via `engine_api->Sample_Lightmap`; Gust-extinguishable lights table.
 - `sim_retrofit.c` — M6 patrol-route auto-wiring for id1 maps.
@@ -183,7 +183,11 @@ All Phase 8 sim systems live inside the hot-reloadable `game.dll` and share `sim
 
 The in-game 3D editor is engine-side (not in `game.dll`) so it can touch `cl.worldmodel`, BSP loaders, and the framebuffer directly:
 
-- `editor.c` / `editor.h` — public entry points, mode toggle, frame tick.
+- `editor.c` / `editor.h` — public entry points, mode toggle, frame tick. **Hosts a multi-mode shell:** an `editor_mode_t` vtable (`editor_mode.h`) lets the editor switch between Map mode (the original `.map` editor, registered as `map_mode`) and Particle mode (`edit_particle.c`); the public `Editor_DrawUI`/`Editor_RenderScene`/`Editor_ProcessEvent`/`Editor_HideTransientFX`/`Editor_ShouldDrawPlayer` dispatch to the active mode (shared free-fly camera / open-close stays in the shell). Planned `.mdl`/texture editors plug in as new `s_modes[]` registrations.
+- `editor_mode.h` — the `editor_mode_t` vtable type (mode-specific slots: enter/exit/draw_ui/render_scene/process_event/hide_transient_fx/should_draw_player).
+- `edit_particle.c` — **Particle editor mode** (Phase: particle editor). ImGui panels (effect list, inspector, palette-swatch color-ramp editor, size envelope) over the data-driven emitter registry in `r_emitter.c`; preview spawns in front of the editor camera. Effects persist as `id1/particles/*.pcl` (loaded/saved by `r_emitter.c`).
+
+The emitter runtime is engine-side in `sdlquake/engine_src/r_emitter.c`: a name-keyed `emitter_def_t` registry + a live-emitter instance pool (`R_UpdateEmitters` each frame) that spawns `pt_emitter` particles into the existing `free_particles` pool. `R_DrawParticles` integrates them (gravity_scale/drag from the def) and `D_DrawEmitterParticle` (`d_part.c`) draws them via the dot/blob/smoke paths with a palette-ramp + size-envelope sampled at age. `.pcl` files list in `id1/particles/index.txt`; console `particle_spawn <name> [x y z]` / `particle_reload`; `r_emitter_active` cvar reports live instances (MCP-readable). Gameplay spawns by name via `eng->SpawnParticleEffect` (ABI 37).
 - `editor_ui.c`, `editor_classlist.c` — ImGui panels (inspector, entity browser).
 - `edit_scene.c` — in-memory editable scene; the live brush/entity graph the editor mutates.
 - `edit_history.c` — undo/redo stack.
@@ -243,6 +247,7 @@ wouldn't stand out in any single frame's flame graph).
 ## Reference data
 
 - `id1/` — Quake PAK files at repo root (required at runtime)
+- `id1/particles/` — data-driven particle-effect presets (`*.pcl`, Quake KV-block); `index.txt` lists which load at startup. Authored in the in-game Particle editor mode (`edit_particle.c`); runtime in `r_emitter.c`.
 - `ref/doom-data/` — Doom 1.9 shareware WAD (read by `zig build extract`)
 - `ref/wolf3d-data/` — Wolf3D shareware data files (read by `zig build extract`)
 - `ref/Quake-master/` — pristine upstream WinQuake (id-Software/Quake), kept as a diff baseline against `sdlquake/engine_src/`
