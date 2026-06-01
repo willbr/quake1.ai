@@ -219,7 +219,9 @@ static void panel_inspector(void)
         if (IG_Button(paused ? "Play"  : "Pause"))
             Editor_SetParticlePaused(!paused);
         IG_SameLine(0, -1);
-        if (IG_Button("Spawn"))
+        // "##preview" keeps the visible label "Spawn" but gives it an ID
+        // distinct from the "Spawn" collapsing-header section above.
+        if (IG_Button("Spawn##preview"))
             R_SpawnEffectIdx(s_sel, org, up);
         IG_SameLine(0, -1);
         if (s_loop_handle < 0) {
