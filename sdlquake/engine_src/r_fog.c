@@ -13,6 +13,7 @@ cvar_t r_fog_density = {"r_fog_density", "0",    false};
 cvar_t r_fog_red     = {"r_fog_red",     "0.5",  false};
 cvar_t r_fog_green   = {"r_fog_green",   "0.5",  false};
 cvar_t r_fog_blue    = {"r_fog_blue",    "0.55", false};
+cvar_t r_water_fog_density = {"r_water_fog_density", "0.015", false};
 
 int            r_fog_active = 0;
 int            r_fog_color_index = 0;
@@ -22,6 +23,12 @@ static unsigned char r_fog_colormap[64 * 256];
 
 static float cached_density = -1.0f;
 static float cached_r = -1.0f, cached_g = -1.0f, cached_b = -1.0f;
+
+/* Underwater murk: when the view leaf is liquid, fog switches to this effective
+   density and to the liquid's content-shift tint color (see R_Fog_Update). */
+static float     r_fog_density_eff = 0.0f;
+extern mleaf_t  *r_viewleaf;                              /* set in R_SetupFrame */
+extern cshift_t  cshift_water, cshift_slime, cshift_lava; /* view.c content tints */
 
 
 static int FindClosestPaletteIndex (int r, int g, int b)
@@ -74,18 +81,35 @@ static void BuildFogColormap (float fr, float fg, float fb)
 
 void R_Fog_Update (void)
 {
-	float d  = r_fog_density.value;
-	float fr = r_fog_red.value;
-	float fg = r_fog_green.value;
-	float fb = r_fog_blue.value;
+	float d, fr, fg, fb;
+
+	if (r_viewleaf && r_viewleaf->contents <= CONTENTS_WATER)
+	{
+		/* Underwater: own (denser) density, color tied to the liquid's tint. */
+		cshift_t *cs = (r_viewleaf->contents == CONTENTS_LAVA)  ? &cshift_lava  :
+		               (r_viewleaf->contents == CONTENTS_SLIME) ? &cshift_slime :
+		                                                          &cshift_water;
+		d  = r_water_fog_density.value;
+		fr = cs->destcolor[0] * (1.0f / 255.0f);
+		fg = cs->destcolor[1] * (1.0f / 255.0f);
+		fb = cs->destcolor[2] * (1.0f / 255.0f);
+	}
+	else
+	{
+		d  = r_fog_density.value;
+		fr = r_fog_red.value;
+		fg = r_fog_green.value;
+		fb = r_fog_blue.value;
+	}
 
 	if (fr != cached_r || fg != cached_g || fb != cached_b)
 	{
 		cached_r = fr; cached_g = fg; cached_b = fb;
 		BuildFogColormap (fr, fg, fb);
 	}
-	cached_density = d;
-	r_fog_active = (d > 0.00001f) ? 1 : 0;
+	cached_density    = d;
+	r_fog_density_eff = d;
+	r_fog_active      = (d > 0.00001f) ? 1 : 0;
 }
 
 
@@ -95,11 +119,13 @@ void R_Fog_Init (void)
 	Cvar_RegisterVariable (&r_fog_red);
 	Cvar_RegisterVariable (&r_fog_green);
 	Cvar_RegisterVariable (&r_fog_blue);
+	Cvar_RegisterVariable (&r_water_fog_density);
 	BuildFogColormap (r_fog_red.value, r_fog_green.value, r_fog_blue.value);
 	cached_r = r_fog_red.value;
 	cached_g = r_fog_green.value;
 	cached_b = r_fog_blue.value;
 	cached_density = r_fog_density.value;
+	r_fog_density_eff = r_fog_density.value;
 	r_fog_active = (cached_density > 0.00001f) ? 1 : 0;
 }
 
@@ -168,7 +194,7 @@ unsigned char *R_Fog_RowFromZi (float zi)
 	{
 		depth = 1.0f / zi;
 		if (depth < 0.0f) depth = 0.0f;
-		f = 1.0f - expf (-r_fog_density.value * depth);
+		f = 1.0f - expf (-r_fog_density_eff * depth);
 		idx = (int)(f * 63.0f + 0.5f);
 		if (idx < 0) idx = 0;
 		else if (idx > 63) idx = 63;
@@ -199,7 +225,7 @@ void R_Fog_GetRows (float zi, unsigned char **row_lo,
 
 	depth = 1.0f / zi;
 	if (depth < 0.0f) depth = 0.0f;
-	f = 1.0f - expf (-r_fog_density.value * depth);
+	f = 1.0f - expf (-r_fog_density_eff * depth);
 	if (f < 0.0f) f = 0.0f;
 	else if (f > 1.0f) f = 1.0f;
 

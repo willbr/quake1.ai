@@ -9,6 +9,7 @@ extern struct cvar_s r_fog_density;
 extern struct cvar_s r_fog_red;
 extern struct cvar_s r_fog_green;
 extern struct cvar_s r_fog_blue;
+extern struct cvar_s r_water_fog_density;
 
 extern int    r_fog_active;        // nonzero when density > 0
 extern int    r_fog_color_index;   // palette index closest to fog color (used by sky fill)
