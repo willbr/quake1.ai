@@ -1197,6 +1197,7 @@ SetVisibilityByPassages ();
 	{
 		extern int Editor_HideTransientFX(void);
 		extern int Editor_ParticleHideWorld(void);
+		extern void Editor_DrawParticleGrid(void);
 		extern void R_UpdateEmitters(void);
 		extern void D_ClearViewToBackdrop(void);
 		if (!Editor_HideTransientFX()) {
@@ -1204,6 +1205,9 @@ SetVisibilityByPassages ();
 			// to a clean backdrop so the effect previews against empty space.
 			if (Editor_ParticleHideWorld())
 				D_ClearViewToBackdrop ();
+			// Reference grid after the clear (so it survives) but before the
+			// particles (so the effect draws over it). No-op outside the editor.
+			Editor_DrawParticleGrid ();
 			R_UpdateEmitters ();   // spawn live data-driven emitters this frame
 			PERF_SCOPE("R_DrawParticles") R_DrawParticles ();
 		}

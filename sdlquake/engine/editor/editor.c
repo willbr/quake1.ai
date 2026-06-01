@@ -114,6 +114,14 @@ cvar_t      editor_show_links    = { "editor_show_links",  "1" };
 // the editor is open in Particle mode (Editor_ParticleHideWorld).
 cvar_t      editor_particle_hide_world = { "editor_particle_hide_world", "1" };
 
+// Particle-editor reference grid: a 16-unit (Quake build-unit) ground grid
+// centred on the orbit focus / spawn point, so you can judge an effect's size
+// against a known scale. Drawn by Editor_DrawParticleGrid from r_main.c right
+// after the optional hide-world clear (so it survives it) and before the
+// particle pass (so the effect draws on top). Coloured centre axes mark the
+// spawn point + orientation. Default on.
+cvar_t      editor_particle_grid = { "editor_particle_grid", "1" };
+
 // Face mode: 0 = clicks select brushes (default), 1 = clicks set the active
 // face on the singly-selected brush. Toggled via toolbar Faces button.
 // Active-face state lives in edit_scene; this cvar is just the UI flag.
@@ -2058,6 +2066,7 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_show_angles);
     Cvar_RegisterVariable(&editor_show_links);
     Cvar_RegisterVariable(&editor_particle_hide_world);
+    Cvar_RegisterVariable(&editor_particle_grid);
     Cvar_RegisterVariable(&editor_face_mode);
     Cvar_RegisterVariable(&editor_brush_tex);
     Cvar_RegisterVariable(&editor_brush_hollow_thickness);
@@ -2906,4 +2915,53 @@ int Editor_ParticleHideWorld(void)
 {
     return Editor_ParticleModeActive()
         && editor_particle_hide_world.value != 0.0f;
+}
+
+// Reference grid for the particle preview: a horizontal 16-unit grid centred on
+// the orbit focus (== the effect's spawn point), so the effect's size reads
+// against a known scale. Minor lines every 16u, brighter lines every 64u (every
+// 4th), coloured X/Y axes through the spawn point, and a short blue +Z tick for
+// vertical scale. Drawn from r_main.c after the optional hide-world clear (so it
+// isn't wiped) and before the particle pass (so the effect draws over it). Uses
+// the z-tested line path, so with the world shown it's correctly occluded by
+// geometry, and with the world hidden (z-buffer cleared) the whole grid shows.
+void Editor_DrawParticleGrid(void)
+{
+    enum { CELLS = 8 };               // cells each side of centre
+    const float STEP = 16.0f;         // world units per cell (Quake build unit)
+    const float span = CELLS * STEP;  // 128u half-extent -> 256u grid
+    vec3_t f, a, b;
+    int i;
+
+    if (!Editor_ParticleModeActive() || editor_particle_grid.value == 0.0f)
+        return;
+
+    Editor_GetOrbitFocus(f);
+
+    for (i = -CELLS; i <= CELLS; i++)
+    {
+        float off = i * STEP;
+        byte  col;
+        if (i == 0) continue;                   // centre lines drawn as axes below
+        col = (i % 4 == 0) ? 13 : 8;            // major (64u) lighter, minor mid-grey
+
+        a[0] = f[0]-span; a[1] = f[1]+off; a[2] = f[2];   // parallel to X
+        b[0] = f[0]+span; b[1] = f[1]+off; b[2] = f[2];
+        Editor_DrawLine3D(a, b, col);
+
+        a[0] = f[0]+off; a[1] = f[1]-span; a[2] = f[2];   // parallel to Y
+        b[0] = f[0]+off; b[1] = f[1]+span; b[2] = f[2];
+        Editor_DrawLine3D(a, b, col);
+    }
+
+    // Centre axes through the spawn point: X red, Y yellow-green, +Z blue tick.
+    a[0] = f[0]-span; a[1] = f[1]; a[2] = f[2];
+    b[0] = f[0]+span; b[1] = f[1]; b[2] = f[2];
+    Editor_DrawLine3D(a, b, EDIT_COLOR_AXIS_X);
+    a[0] = f[0]; a[1] = f[1]-span; a[2] = f[2];
+    b[0] = f[0]; b[1] = f[1]+span; b[2] = f[2];
+    Editor_DrawLine3D(a, b, EDIT_COLOR_AXIS_Y);
+    a[0] = f[0]; a[1] = f[1]; a[2] = f[2];
+    b[0] = f[0]; b[1] = f[1]; b[2] = f[2] + 4.0f*STEP;    // 64u vertical reference
+    Editor_DrawLine3D(a, b, EDIT_COLOR_AXIS_Z);
 }

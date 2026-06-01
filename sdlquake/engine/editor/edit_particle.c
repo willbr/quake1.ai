@@ -317,6 +317,15 @@ static void panel_inspector(void)
             if (IG_Checkbox("Hide world", &on))
                 Cvar_SetValue("editor_particle_hide_world", on ? 1.0f : 0.0f);
         }
+        // Reference grid (16u cells on the spawn plane) for judging effect size.
+        IG_SameLine(0, -1);
+        {
+            cvar_t *cv = Cvar_FindVar("editor_particle_grid");
+            int on = cv && cv->value != 0.0f;
+            if (IG_Checkbox("Grid", &on))
+                Cvar_SetValue("editor_particle_grid", on ? 1.0f : 0.0f);
+        }
+        IG_TextUnformatted("Grid: 16u cells (major every 64u)");
         IG_TextUnformatted("Camera: RMB-drag orbit  -  wheel / W,S zoom  -  A,D spin");
     }
 

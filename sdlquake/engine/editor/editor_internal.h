@@ -288,4 +288,9 @@ void Editor_SetOrbitFocus(vec3_t p);
 // pass when this is set, so effects preview against an empty canvas.
 int  Editor_ParticleHideWorld(void);
 
+// Draw the particle-preview reference grid (16u ground grid on the orbit focus).
+// No-op outside Particle mode or when `editor_particle_grid` is 0. Called from
+// r_main.c after the hide-world clear and before the particle pass.
+void Editor_DrawParticleGrid(void);
+
 #endif // EDITOR_INTERNAL_H
