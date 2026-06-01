@@ -2647,14 +2647,8 @@ static const editor_mode_t map_mode = {
     .should_draw_player = MapMode_ShouldDrawPlayer,
 };
 
-// TEMPORARY Particle-mode stub (Slice 1). Replaced by the real definition in
-// edit_particle.c (Slice 4 Task 4.6), at which point this stub is deleted and
-// particle_mode becomes an `extern` reference.
-static void particle_stub_draw_ui(void) { /* empty until Slice 4 */ }
-static const editor_mode_t particle_mode = {
-    .name    = "Particle",
-    .draw_ui = particle_stub_draw_ui,
-};
+// Particle mode is defined in edit_particle.c (Slice 4).
+extern const editor_mode_t particle_mode;
 
 static const editor_mode_t *s_modes[] = { &map_mode, &particle_mode };
 #define EDITOR_NUM_MODES ((int)(sizeof(s_modes)/sizeof(s_modes[0])))

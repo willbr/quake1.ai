@@ -148,6 +148,12 @@ int  IG_ColorEdit3(const char *label, float col[3])
 {
     return ImGui::ColorEdit3(label, col) ? 1 : 0;
 }
+int  IG_ColorSwatch(const char *id, float r, float g, float b, float size)
+{
+    ImVec4 col(r, g, b, 1.0f);
+    ImGuiColorEditFlags flags = ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop;
+    return ImGui::ColorButton(id, col, flags, ImVec2(size, size)) ? 1 : 0;
+}
 int  IG_CollapsingHeader(const char *label, int flags)
 {
     return ImGui::CollapsingHeader(label, (ImGuiTreeNodeFlags)flags) ? 1 : 0;
