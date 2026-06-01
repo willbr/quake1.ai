@@ -1,0 +1,29 @@
+// R_BlobExplosion -- Tarbaby/Spawn death + Shambler lightning. Vanilla spawns
+// 1024 dots, half blue (66..71) half magenta (150..155), isotropic +-256, ~1s.
+// The single ramp here fades blue -> magenta over life as a stand-in for the
+// two-colour spatial mix.
+particle_effect
+{
+	"name"         "blob_explosion"
+	"emission"     "burst"
+	"count"        "300"
+	"rate"         "0"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "16"
+	"cone_angle"   "0"
+	"dir_mode"     "along_shape"
+	"speed"        "40"
+	"speed_jitter" "60"
+	"spread"       "160"
+	"radial_bias"  "170"
+	"gravity"      "0.4"
+	"drag"         "0.8"
+	"life_min"     "0.8"
+	"life_max"     "1.2"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:66 0.5:70 1.0:152"
+}

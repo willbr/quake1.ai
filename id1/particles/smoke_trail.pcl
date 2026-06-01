@@ -1,0 +1,28 @@
+// R_RocketTrail type 1 -- grenade smoke trail. Like rocket_trail but seeded two
+// steps further down ramp3 so it reads grey (6,5,4,3) rather than fiery; slower
+// rise, longer life, fatter puffs.
+particle_effect
+{
+	"name"         "smoke_trail"
+	"emission"     "continuous"
+	"count"        "0"
+	"rate"         "50"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "3"
+	"cone_angle"   "0"
+	"dir_mode"     "up"
+	"speed"        "8"
+	"speed_jitter" "6"
+	"spread"       "25"
+	"radial_bias"  "0"
+	"gravity"      "-0.1"
+	"drag"         "0.5"
+	"life_min"     "1.2"
+	"life_max"     "2.0"
+	"style"        "smoke"
+	"size_start"   "1"
+	"size_peak"    "4"
+	"size_end"     "1"
+	"ramp"         "0.0:6 0.5:5 1.0:3"
+}

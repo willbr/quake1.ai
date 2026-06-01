@@ -1,0 +1,29 @@
+// R_WaterSplash kind 0 -- water-surface impact (bullets/bodies hitting water).
+// Vanilla throws pt_grav droplets in a 20-80deg dome off vertical at 180-300ups
+// under full gravity, cyan 244..246, settling back on the surface. The classic
+// "splash" effect.
+particle_effect
+{
+	"name"         "water_splash"
+	"emission"     "burst"
+	"count"        "70"
+	"rate"         "0"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "6"
+	"cone_angle"   "0"
+	"dir_mode"     "up"
+	"speed"        "240"
+	"speed_jitter" "70"
+	"spread"       "70"
+	"radial_bias"  "40"
+	"gravity"      "1.0"
+	"drag"         "0"
+	"life_min"     "0.9"
+	"life_max"     "1.5"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:244 1.0:246"
+}

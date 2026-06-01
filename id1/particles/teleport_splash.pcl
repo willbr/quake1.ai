@@ -1,0 +1,27 @@
+// R_TeleportSplash -- teleporter fizzle. Vanilla fills a box (+-16 xy, -24..32 z)
+// with slow-grav dots flying radially outward, white/grey 7..14, short ~0.3s.
+particle_effect
+{
+	"name"         "teleport_splash"
+	"emission"     "burst"
+	"count"        "350"
+	"rate"         "0"
+	"duration"     "0"
+	"shape"        "box"
+	"shape_size"   "24"
+	"cone_angle"   "0"
+	"dir_mode"     "along_shape"
+	"speed"        "40"
+	"speed_jitter" "40"
+	"spread"       "90"
+	"radial_bias"  "90"
+	"gravity"      "0.3"
+	"drag"         "0"
+	"life_min"     "0.2"
+	"life_max"     "0.4"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:7 1.0:14"
+}

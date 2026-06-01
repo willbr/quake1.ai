@@ -1,0 +1,28 @@
+// R_RocketTrail type 6 -- Vore (shalrath) homing-orb trail. Vanilla scatters
+// pt_static dots in a +-8 box, purple 152..155, short life. Previewed as a
+// slow purple haze.
+particle_effect
+{
+	"name"         "voor_trail"
+	"emission"     "continuous"
+	"count"        "0"
+	"rate"         "60"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "8"
+	"cone_angle"   "0"
+	"dir_mode"     "up"
+	"speed"        "6"
+	"speed_jitter" "6"
+	"spread"       "40"
+	"radial_bias"  "0"
+	"gravity"      "0"
+	"drag"         "0.6"
+	"life_min"     "0.2"
+	"life_max"     "0.4"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:152 1.0:155"
+}

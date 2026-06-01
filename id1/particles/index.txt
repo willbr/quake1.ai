@@ -1,4 +1,0 @@
-# one effect name per line; loaded as particles/<name>.pcl
-# auto-maintained by R_EmitterSave
-campfire
-spark_burst

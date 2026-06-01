@@ -1,0 +1,29 @@
+// R_LavaSplash -- the big EF_LAVASPLASH dome (Chthon rise, lava-pool ambience).
+// Vanilla fires a 32x32 grid of slow-grav dots up-and-outward (dir = xy_out plus
+// 256 up, normalized), orange 224..231, ~2s. Modelled as a wide upward fountain
+// with slight outward bias and low gravity.
+particle_effect
+{
+	"name"         "lava_splash"
+	"emission"     "burst"
+	"count"        "400"
+	"rate"         "0"
+	"duration"     "0"
+	"shape"        "box"
+	"shape_size"   "90"
+	"cone_angle"   "0"
+	"dir_mode"     "up"
+	"speed"        "95"
+	"speed_jitter" "55"
+	"spread"       "35"
+	"radial_bias"  "70"
+	"gravity"      "0.3"
+	"drag"         "0"
+	"life_min"     "1.5"
+	"life_max"     "2.3"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:224 0.5:227 1.0:231"
+}

@@ -1,0 +1,27 @@
+// R_WaterSplash kind 1 -- slime-surface impact. Same upward dome as water_splash
+// but green-grey 176..183 with a light-green foam highlight (180..183).
+particle_effect
+{
+	"name"         "slime_splash"
+	"emission"     "burst"
+	"count"        "55"
+	"rate"         "0"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "6"
+	"cone_angle"   "0"
+	"dir_mode"     "up"
+	"speed"        "220"
+	"speed_jitter" "65"
+	"spread"       "70"
+	"radial_bias"  "40"
+	"gravity"      "1.0"
+	"drag"         "0"
+	"life_min"     "0.9"
+	"life_max"     "1.4"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:176 0.5:180 1.0:183"
+}

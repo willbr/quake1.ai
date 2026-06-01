@@ -440,33 +440,27 @@ static void emitter_load_file(const char *relpath)
     }
 }
 
+// COM_EnumMatchingFiles callback: one particles/<stem>.pcl was found on some
+// searchpath. Reload it by stem through emitter_load_file, which goes via
+// COM_LoadTempFile — that re-resolves to the shadow-winning (loose-over-pak)
+// copy, so an editor-saved file always beats a same-named pak entry even if the
+// enumerator reported the pak one. Same-stem hits across searchpaths just
+// re-load the same slot (R_EmitterFind dedups by name): idempotent.
+static void emitter_index_cb(const char *stem, void *userdata)
+{
+    char rel[128];
+    (void)userdata;
+    snprintf(rel, sizeof(rel), "particles/%s.pcl", stem);
+    emitter_load_file(rel);
+}
+
 void R_EmitterLoadAll(void)
 {
-    // index.txt lists effect names (one per line); we load particles/<name>.pcl.
-    // COM_LoadTempFile reuses the temp hunk, so copy the index out before the
-    // per-file loads clobber it.
-    char *raw = (char *)COM_LoadTempFile("particles/index.txt");
-    char index[4096];
-    char *p;
-    int n;
-    if (!raw) { Con_DPrintf("R_EmitterLoadAll: no particles/index.txt\n"); return; }
-    strncpy(index, raw, sizeof(index) - 1); index[sizeof(index) - 1] = 0;
-
-    p = index;
-    while (*p) {
-        char line[EMIT_NAME_LEN + 16];
-        n = 0;
-        while (*p && *p != '\n' && *p != '\r' && n < (int)sizeof(line) - 1) line[n++] = *p++;
-        line[n] = 0;
-        while (*p == '\n' || *p == '\r') p++;
-        while (n > 0 && (line[n-1] == ' ' || line[n-1] == '\t')) line[--n] = 0;
-        if (n == 0 || line[0] == '#') continue;
-        {
-            char rel[EMIT_NAME_LEN + 32];
-            snprintf(rel, sizeof(rel), "particles/%s.pcl", line);
-            emitter_load_file(rel);
-        }
-    }
+    // Glob every particles/*.pcl across the searchpath (loose dirs + paks) —
+    // no hand-maintained index. New presets are picked up just by dropping the
+    // file in id1/particles/ (and `particle_reload` rescans live).
+    COM_EnumMatchingFiles("particles", ".pcl", emitter_index_cb, NULL);
+    Con_DPrintf("R_EmitterLoadAll: %d effect(s)\n", R_EmitterCount());
 }
 
 int R_EmitterSave(int idx)
@@ -517,17 +511,8 @@ int R_EmitterSave(int idx)
 
     snprintf(path, sizeof(path), "particles/%s.pcl", d->name);
     COM_WriteFile(path, body, n);   // writes under com_gamedir (id1/)
-
-    // Keep index.txt in sync so the effect reloads next launch. Rebuild from
-    // the live registry (simple + correct).
-    {
-        char acc[4096];
-        int j, m = 0;
-        m += snprintf(acc + m, sizeof(acc) - m, "# auto-maintained by R_EmitterSave\n");
-        for (j = 0; j < EMIT_MAX_DEFS && m < (int)sizeof(acc) - EMIT_NAME_LEN; j++)
-            if (s_defs[j].used) m += snprintf(acc + m, sizeof(acc) - m, "%s\n", s_defs[j].name);
-        COM_WriteFile("particles/index.txt", acc, m);
-    }
+    // No index to update — R_EmitterLoadAll globs particles/*.pcl, so the file
+    // is discovered on the next launch (or live via `particle_reload`).
     return 1;
 }
 

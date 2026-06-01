@@ -1,0 +1,28 @@
+// R_RocketTrail type 3 -- Scrag/Wizard green tracer. Vanilla emits pt_static
+// dots colour 52/60 in an alternating sideways spiral. The spiral can't be
+// expressed in the emitter model, so this is a green upward sparkle stand-in.
+particle_effect
+{
+	"name"         "wizard_trail"
+	"emission"     "continuous"
+	"count"        "0"
+	"rate"         "70"
+	"duration"     "0"
+	"shape"        "point"
+	"shape_size"   "0"
+	"cone_angle"   "0"
+	"dir_mode"     "up"
+	"speed"        "18"
+	"speed_jitter" "10"
+	"spread"       "35"
+	"radial_bias"  "0"
+	"gravity"      "0"
+	"drag"         "0.5"
+	"life_min"     "0.4"
+	"life_max"     "0.6"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:52 1.0:59"
+}

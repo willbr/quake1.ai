@@ -1,0 +1,28 @@
+// R_RocketTrail type 0 -- rocket fire trail. Vanilla drops a pt_fire every 3u
+// along the rocket's path, seeded at the orange end of ramp3 (109,107,...),
+// drifting up as it darkens to grey. Previewed here as a continuous point jet.
+particle_effect
+{
+	"name"         "rocket_trail"
+	"emission"     "continuous"
+	"count"        "0"
+	"rate"         "60"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "3"
+	"cone_angle"   "0"
+	"dir_mode"     "up"
+	"speed"        "12"
+	"speed_jitter" "8"
+	"spread"       "30"
+	"radial_bias"  "0"
+	"gravity"      "-0.2"
+	"drag"         "0.4"
+	"life_min"     "0.6"
+	"life_max"     "1.2"
+	"style"        "smoke"
+	"size_start"   "1"
+	"size_peak"    "3"
+	"size_end"     "0"
+	"ramp"         "0.0:109 0.4:107 1.0:6"
+}

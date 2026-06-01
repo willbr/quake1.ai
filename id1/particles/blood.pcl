@@ -1,0 +1,28 @@
+// R_BloodSpray -- flesh hit (gunshot/melee on monsters). Vanilla spawns pt_blood
+// dots with dir*15 plus +-150 jitter under full gravity, fading down the blood
+// ramp {248,79,77,75,73,71,67} from bright to dark red.
+particle_effect
+{
+	"name"         "blood"
+	"emission"     "burst"
+	"count"        "24"
+	"rate"         "0"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "8"
+	"cone_angle"   "0"
+	"dir_mode"     "along_shape"
+	"speed"        "100"
+	"speed_jitter" "70"
+	"spread"       "120"
+	"radial_bias"  "0"
+	"gravity"      "1.0"
+	"drag"         "0"
+	"life_min"     "0.4"
+	"life_max"     "0.9"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:248 0.4:75 0.7:71 1.0:67"
+}

@@ -1,0 +1,28 @@
+// R_RunParticleEffect color 0 -- wall bullet/spike impact chips (TE_GUNSHOT /
+// TE_SPIKE). Vanilla spawns ~20 pt_grav dots with dir*15 plus +-150 jitter,
+// short life, colour sampled off the wall texture (grey fallback).
+particle_effect
+{
+	"name"         "gunshot"
+	"emission"     "burst"
+	"count"        "24"
+	"rate"         "0"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "8"
+	"cone_angle"   "0"
+	"dir_mode"     "along_shape"
+	"speed"        "100"
+	"speed_jitter" "80"
+	"spread"       "140"
+	"radial_bias"  "0"
+	"gravity"      "1.0"
+	"drag"         "0"
+	"life_min"     "0.1"
+	"life_max"     "0.4"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:6 1.0:8"
+}

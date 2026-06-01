@@ -1,0 +1,29 @@
+// R_ParticleExplosion -- rocket / grenade / barrel detonation. Vanilla spawns
+// 1024 dots in a +-16 box with isotropic +-256 velocity, fading down the fire
+// ramp (ramp1) over ~0.5s. Modelled here as an outward (radial_bias) burst from
+// a box scatter with the fire ramp sampled over life.
+particle_effect
+{
+	"name"         "explosion"
+	"emission"     "burst"
+	"count"        "300"
+	"rate"         "0"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "16"
+	"cone_angle"   "0"
+	"dir_mode"     "along_shape"
+	"speed"        "40"
+	"speed_jitter" "60"
+	"spread"       "160"
+	"radial_bias"  "200"
+	"gravity"      "0.3"
+	"drag"         "0.8"
+	"life_min"     "0.4"
+	"life_max"     "0.7"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:111 0.35:107 0.7:103 1.0:97"
+}

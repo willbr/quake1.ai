@@ -1,0 +1,29 @@
+// R_EntityParticles -- the EF_BRIGHTFIELD orbiting halo (e.g. the boss/quad
+// shimmer). Vanilla orbits 162 vertex-normal dots of colour 0x6f on a 64u shell,
+// re-seeded every frame. Approximated as a dense, very-short-life orange shell
+// so the cloud constantly refreshes in place.
+particle_effect
+{
+	"name"         "brightfield"
+	"emission"     "continuous"
+	"count"        "0"
+	"rate"         "300"
+	"duration"     "0"
+	"shape"        "sphere"
+	"shape_size"   "40"
+	"cone_angle"   "0"
+	"dir_mode"     "along_shape"
+	"speed"        "0"
+	"speed_jitter" "0"
+	"spread"       "0"
+	"radial_bias"  "0"
+	"gravity"      "0"
+	"drag"         "0"
+	"life_min"     "0.08"
+	"life_max"     "0.12"
+	"style"        "dot"
+	"size_start"   "1"
+	"size_peak"    "2"
+	"size_end"     "0"
+	"ramp"         "0.0:111"
+}
