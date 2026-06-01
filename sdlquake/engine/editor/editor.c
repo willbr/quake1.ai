@@ -2225,6 +2225,16 @@ static void set_lookmode(int on)
     s_cam_mouse_dx = s_cam_mouse_dy = 0;
     if (w) SDL_SetWindowRelativeMouseMode(w, on ? true : false);
 
+    // Entering look mode: discard the relative-mouse delta SDL has been summing
+    // while we *weren't* polling it. The orbit camera only reads
+    // SDL_GetRelativeMouseState inside look mode, so all the cursor motion since
+    // the last orbit (roaming the panels, etc.) is still sitting in the
+    // accumulator; without this flush the first look-mode frame applies that
+    // whole stale delta at once and the view snaps on RMB-down. (Harmless for
+    // the free-fly camera, which reads motion from events, not this accumulator.)
+    if (on)
+        SDL_GetRelativeMouseState(NULL, NULL);
+
     // Leaving look mode: fire fake key-up events for everything currently
     // held. Otherwise the in_sdl.c gate (`if (ImguiLayer_IsOpen() &&
     // !Editor_AllowGameInput()) break;`) silently swallows the real key-up
