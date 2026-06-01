@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_dlight_colors.h"
 #include "r_local.h"
 
+extern cvar_t cl_spikeflash;
+
 int			num_temp_entities;
 entity_t	cl_temp_entities[MAX_TEMP_ENTITIES];
 beam_t		cl_beams[MAX_BEAMS];
@@ -144,6 +146,27 @@ static void CL_LastBeamEnd (vec3_t out_end)
 
 /*
 =================
+CL_SpikeFlash
+
+Brief muzzle-flash-style dynamic light at a spike's wall impact. Reuses the
+same dlight mechanism as the gun muzzle flash; gated by cl_spikeflash.
+=================
+*/
+static void CL_SpikeFlash (vec3_t pos, float radius)
+{
+	dlight_t	*dl;
+
+	if (!cl_spikeflash.value)
+		return;
+	dl = CL_AllocDlight (0);
+	VectorCopy (pos, dl->origin);
+	VectorCopy (DLIGHT_COLOR_MUZZLE, dl->color);
+	dl->radius = radius + (rand()&15);
+	dl->die = cl.time + 0.07;
+}
+
+/*
+=================
 CL_ParseTEnt
 =================
 */
@@ -168,6 +191,7 @@ void CL_ParseTEnt (void)
 		R_RunParticleEffect (pos, vec3_origin, 20, 30);
 		R_SpawnDecal (pos, DECAL_SPIKE);
 		S_StartSound (-1, 0, cl_sfx_wizhit, pos, 1, 1);
+		CL_SpikeFlash (pos, 55);
 		break;
 		
 	case TE_KNIGHTSPIKE:			// spike hitting wall
@@ -177,6 +201,7 @@ void CL_ParseTEnt (void)
 		R_RunParticleEffect (pos, vec3_origin, 226, 20);
 		R_SpawnDecal (pos, DECAL_SPIKE);
 		S_StartSound (-1, 0, cl_sfx_knighthit, pos, 1, 1);
+		CL_SpikeFlash (pos, 55);
 		break;
 		
 	case TE_SPIKE:			// spike hitting wall
@@ -344,13 +369,18 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
 		{
-			vec3_t normal;
+			vec3_t normal, flashpos;
 			int count;
 			normal[0] = MSG_ReadChar () * (1.0f / 127.0f);
 			normal[1] = MSG_ReadChar () * (1.0f / 127.0f);
 			normal[2] = MSG_ReadChar () * (1.0f / 127.0f);
 			count = MSG_ReadByte ();
 			R_SparkBurst (pos, normal, count);
+			// brief muzzle-flash-style impact light, pushed a little off the
+			// surface along its normal so it lights the wall cleanly (player
+			// nailgun + super-nailgun both arrive here as TE_SPARKBURST)
+			VectorMA (pos, 8, normal, flashpos);
+			CL_SpikeFlash (flashpos, 45);
 		}
 		break;
 

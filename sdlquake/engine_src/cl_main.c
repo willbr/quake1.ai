@@ -48,6 +48,9 @@ cvar_t	m_side = {"m_side","0.8", true};
 cvar_t	r_maplights_as_dlights = {"r_maplights_as_dlights", "0"};
 cvar_t	r_maplights_dlight_scale = {"r_maplights_dlight_scale", "0.5"};
 
+// Brief muzzle-flash-style dynamic light at spike wall impacts (see cl_tent.c).
+cvar_t	cl_spikeflash = {"cl_spikeflash", "1"};
+
 
 client_static_t	cls;
 client_state_t	cl;
@@ -948,6 +951,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&r_maplights_as_dlights);
 	Cvar_RegisterVariable (&r_maplights_dlight_scale);
+	Cvar_RegisterVariable (&cl_spikeflash);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
 	Cvar_RegisterVariable (&sensitivity);
