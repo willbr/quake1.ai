@@ -26,7 +26,16 @@ enum { IQM_UBYTE=1, IQM_FLOAT=7 };
 #define H_OFS_TRI   0x3C
 #define H_NUM_JOINT 0x44
 #define H_OFS_JOINT 0x48
+#define H_NUM_POSES 0x4C
+#define H_OFS_POSES 0x50
+#define H_NUM_ANIMS 0x54
+#define H_OFS_ANIMS 0x58
+#define H_NUM_FRAMES        0x5C
+#define H_NUM_FRAMECHANNELS 0x60
+#define H_OFS_FRAMES        0x64
 #define IQMJOINT_SZ 48   /* name+parent + 3+4+3 floats = 4+4+12+16+12 */
+#define IQMPOSE_SZ  88   /* parent+mask + 10 offset + 10 scale floats */
+#define IQMANIM_SZ  20   /* name+first_frame+num_frames+framerate+flags */
 
 /* 1 if [ofs, ofs+count*stride) fits within len */
 static int fits(size_t len, unsigned ofs, unsigned count, unsigned stride){
@@ -131,6 +140,62 @@ lm_result_t lm_load_iqm(const void *vbuf, size_t len,
         m->tris[i*3+0] = rdu(tt); m->tris[i*3+1] = rdu(tt+4); m->tris[i*3+2] = rdu(tt+8);
     }
 
+    /* ---- animation (optional): decode per-frame per-joint local TRS ---- */
+    {
+        unsigned num_poses  = rdu(b+H_NUM_POSES),  ofs_poses  = rdu(b+H_OFS_POSES);
+        unsigned num_anims  = rdu(b+H_NUM_ANIMS),  ofs_anims  = rdu(b+H_OFS_ANIMS);
+        unsigned nframes    = rdu(b+H_NUM_FRAMES), nfc        = rdu(b+H_NUM_FRAMECHANNELS);
+        unsigned ofs_frames = rdu(b+H_OFS_FRAMES);
+
+        if (nframes > 0 && num_poses == (unsigned)m->numjoints && num_poses > 0 &&
+            fits(len, ofs_poses, num_poses, IQMPOSE_SZ) &&
+            fits(len, ofs_frames, nframes * nfc, 2))
+        {
+            unsigned *pmask = QALLOC_ARR(&a, unsigned, num_poses);
+            float    *poff  = QALLOC_ARR(&a, float, num_poses*10);
+            float    *pscl  = QALLOC_ARR(&a, float, num_poses*10);
+            float    *ftrs  = QALLOC_ARR(&a, float, (size_t)nframes*num_poses*10);
+
+            if (pmask && poff && pscl && ftrs)
+            {
+                const unsigned char *fw = b + ofs_frames;
+                unsigned pi, fr, cc;
+                for (pi = 0; pi < num_poses; pi++)
+                {
+                    const unsigned char *po = b + ofs_poses + pi*IQMPOSE_SZ;
+                    pmask[pi] = rdu(po+4);
+                    for (cc = 0; cc < 10; cc++) poff[pi*10+cc] = rdf(po+8  + cc*4);
+                    for (cc = 0; cc < 10; cc++) pscl[pi*10+cc] = rdf(po+48 + cc*4);
+                }
+                for (fr = 0; fr < nframes; fr++)
+                    for (pi = 0; pi < num_poses; pi++)
+                    {
+                        float *dst = ftrs + ((size_t)fr*num_poses + pi)*10;
+                        for (cc = 0; cc < 10; cc++)
+                        {
+                            float v = poff[pi*10+cc];
+                            if (pmask[pi] & (1u << cc))
+                            {
+                                v += (float)(fw[0] | (fw[1] << 8)) * pscl[pi*10+cc];
+                                fw += 2;
+                            }
+                            dst[cc] = v;
+                        }
+                    }
+                m->frametrs  = ftrs;
+                m->numframes = (int)nframes;
+                m->framerate = (num_anims > 0 && fits(len, ofs_anims, num_anims, IQMANIM_SZ))
+                                ? rdf(b + ofs_anims + 12) : 10.0f;
+                if (m->framerate <= 0.0f) m->framerate = 10.0f;
+            }
+            else
+            {
+                QFREE(&a, ftrs);   /* OOM -> stay static */
+            }
+            QFREE(&a, pmask); QFREE(&a, poff); QFREE(&a, pscl);
+        }
+    }
+
     m->mins[0] = m->mins[1] = m->mins[2] =  1e30f;
     m->maxs[0] = m->maxs[1] = m->maxs[2] = -1e30f;
     for (i = 0; i < (int)num_vert; i++) for (j = 0; j < 3; j++){
@@ -149,5 +214,6 @@ void lm_iqm_free(lm_iqm_t *m){
     a = m->alloc;
     QFREE(&a, m->meshes); QFREE(&a, m->joints);
     QFREE(&a, m->verts);  QFREE(&a, m->tris);
+    QFREE(&a, m->frametrs);
     QFREE(&a, m);
 }

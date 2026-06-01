@@ -36,6 +36,13 @@ typedef struct lm_iqm_s {
     lm_iqm_vert_t  *verts;    int numverts;
     unsigned       *tris;     int numtris;   /* numtris*3 global vertex indices */
     float           mins[3], maxs[3];
+    /* animation (R2): decoded per-frame per-joint local TRS. numframes==0 and
+       frametrs==NULL means a static (bind-pose-only) model. Layout:
+       frametrs[(frame*numjoints + joint)*10 + c], c = 0..2 translate,
+       3..6 rotate quat (x,y,z,w), 7..9 scale. */
+    int             numframes;
+    float           framerate;
+    float          *frametrs;
     qalloc_t        alloc;
 } lm_iqm_t;
 
