@@ -2132,9 +2132,21 @@ void Editor_Toggle(void)
                 Con_Printf("editor: auto-save failed for %s\n",
                            edit_scene.filename);
         }
+
+        // Tear down the active mode's transient state on close — e.g. stop the
+        // particle preview's live emitters so nothing keeps running in the game
+        // once the editor is gone. Editor_SetMode does this on a mode switch;
+        // this covers a plain open/close. (map_mode has no exit, so it's a
+        // no-op there.)
+        if (Editor_ActiveMode()->exit) Editor_ActiveMode()->exit();
     }
 
     s_open = !s_open;
+
+    // Re-enter the active mode when (re)opening, mirroring the close-time exit
+    // so its transient state is rebuilt (particle mode re-arms its preview).
+    if (s_open && Editor_ActiveMode()->enter)
+        Editor_ActiveMode()->enter();
 
     // Editor open requires the dev overlay to be open (ImGui receives input,
     // mouse cursor freed). Mirror its state, but only flip if needed.

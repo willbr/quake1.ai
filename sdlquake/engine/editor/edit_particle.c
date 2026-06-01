@@ -14,12 +14,74 @@ extern byte *host_basepal;  // 768 bytes RGB; for palette swatches
 
 #define IG_TREE_DEFAULTOPEN (1<<5)
 
-static int  s_sel = -1;          // selected registry index, -1 = none
-static int  s_loop_handle = -1;  // active loop-preview live handle
-static char s_new_name[EMIT_NAME_LEN] = "new_effect";
+static int    s_sel          = -1;   // selected registry index, -1 = none
+static int    s_loop_handle  = -1;   // active continuous-preview live handle
+static int    s_preview_def  = -1;   // def idx currently being auto-previewed
+static int    s_auto_preview = 1;    // 1 = selecting an effect previews it live
+static double s_burst_next    = 0.0; // R_PartTime() of the next burst re-fire
+static char   s_new_name[EMIT_NAME_LEN] = "new_effect";
 
 static void panel_effect_list(void);
 static void panel_inspector(void);
+
+// ---- live preview ---------------------------------------------------------
+// Re-fire interval for a burst preview: long enough to watch it fade, short
+// enough to read as "live".
+static double preview_burst_period(const emitter_def_t *d)
+{
+    float p = d->life_max + 0.6f;
+    if (p < 0.8f) p = 0.8f;
+    if (p > 2.5f) p = 2.5f;
+    return (double)p;
+}
+
+// (Re)start the live preview for registry slot `idx`. Continuous effects park a
+// looping emitter; bursts fire once now and get scheduled for periodic re-fire
+// (a burst forced to "continuous" would emit nothing — its rate is 0). Clears
+// any previous preview first so switching effects doesn't pile emitters up.
+static void preview_restart(int idx)
+{
+    emitter_def_t *d;
+    vec3_t org, up = { 0, 0, 1 };
+
+    R_EmitterStopAll();
+    s_loop_handle = -1;
+    s_preview_def = idx;          // set unconditionally: don't re-enter every frame
+
+    d = R_EmitterGetDef(idx);
+    if (!d) return;
+
+    Editor_GetOrbitFocus(org);    // spawn at the orbit centre so the camera circles it
+    if (d->mode == EMIT_CONTINUOUS) {
+        s_loop_handle = R_SpawnEffectIdx(idx, org, up);
+    } else {
+        R_SpawnEffectIdx(idx, org, up);                       // one burst now
+        s_burst_next = R_PartTime() + preview_burst_period(d);
+    }
+}
+
+// Per-frame (top of the UI draw): keep the preview tracking the selection in
+// auto mode, and re-fire burst previews on their interval. Honors the clock
+// pause (R_PartTime freezes when paused, so re-fire naturally halts too).
+static void preview_tick(void)
+{
+    emitter_def_t *d;
+    if (!s_auto_preview) return;
+    if (s_sel < 0) {
+        if (s_preview_def >= 0) { R_EmitterStopAll(); s_loop_handle = -1; s_preview_def = -1; }
+        return;
+    }
+    if (s_sel != s_preview_def) { preview_restart(s_sel); return; }
+
+    d = R_EmitterGetDef(s_preview_def);
+    if (d && d->mode == EMIT_BURST && !Editor_GetParticlePaused()
+        && R_PartTime() >= s_burst_next) {
+        vec3_t org, up = { 0, 0, 1 };
+        Editor_GetOrbitFocus(org);
+        R_SpawnEffectIdx(s_preview_def, org, up);
+        s_burst_next = R_PartTime() + preview_burst_period(d);
+    }
+}
 
 // ---- mode entry points ---------------------------------------------------
 static void particle_enter(void)
@@ -32,12 +94,15 @@ static void particle_enter(void)
 }
 static void particle_exit(void)
 {
-    if (s_loop_handle >= 0) { R_EmitterStopHandle(s_loop_handle); s_loop_handle = -1; }
+    R_EmitterStopAll();
+    s_loop_handle = -1;
+    s_preview_def = -1;   // re-preview the selection when the mode is re-entered
 }
 static int particle_hide_fx(void) { return 0; } // SHOW particles in this mode
 
 static void particle_draw_ui(void)
 {
+    preview_tick();       // keep the live preview in sync with the selection
     panel_effect_list();
     panel_inspector();
 }
@@ -74,7 +139,12 @@ static void panel_effect_list(void)
         d = R_EmitterGetDef(i);
         if (!d) continue;
         IG_PushID_Int(i);
-        if (IG_Selectable(d->name, i == s_sel, 0)) s_sel = i;
+        if (IG_Selectable(d->name, i == s_sel, 0)) {
+            s_sel = i;
+            // Clicking an effect shows it immediately (re-fires even if it was
+            // already selected). preview_tick picks up programmatic changes too.
+            if (s_auto_preview) preview_restart(i);
+        }
         IG_PopID();
     }
 
@@ -219,23 +289,24 @@ static void panel_inspector(void)
         if (IG_Button(paused ? "Play"  : "Pause"))
             Editor_SetParticlePaused(!paused);
         IG_SameLine(0, -1);
-        // "##preview" keeps the visible label "Spawn" but gives it an ID
-        // distinct from the "Spawn" collapsing-header section above.
-        if (IG_Button("Spawn##preview"))
+        // Manual one-shot — fire the selected effect once. "##preview" keeps the
+        // visible label "Spawn" but gives it an ID distinct from the "Spawn"
+        // collapsing-header section above.
+        if (IG_Button("Spawn##preview")) {
             R_SpawnEffectIdx(s_sel, org, up);
-        IG_SameLine(0, -1);
-        if (s_loop_handle < 0) {
-            if (IG_Button("Loop preview")) {
-                int saved = d->mode;
-                d->mode = EMIT_CONTINUOUS;
-                s_loop_handle = R_SpawnEffectIdx(s_sel, org, up);
-                d->mode = saved;
-            }
-        } else {
-            if (IG_Button("Stop loop")) { R_EmitterStopHandle(s_loop_handle); s_loop_handle = -1; }
+            if (d->mode == EMIT_BURST) s_burst_next = R_PartTime() + preview_burst_period(d);
         }
-        IG_SameLine(0, -1);
-        if (IG_Button("Stop all")) { R_EmitterStopAll(); s_loop_handle = -1; }
+        if (!s_auto_preview) {
+            IG_SameLine(0, -1);
+            if (IG_Button("Stop all")) { R_EmitterStopAll(); s_loop_handle = -1; s_preview_def = -1; }
+        }
+
+        // Auto-preview: selecting (clicking) an effect shows it immediately —
+        // continuous effects loop, bursts re-fire on an interval. Toggling off
+        // halts the preview and hands control back to the Spawn button.
+        if (IG_Checkbox("Auto-preview", &s_auto_preview) && !s_auto_preview) {
+            R_EmitterStopAll(); s_loop_handle = -1; s_preview_def = -1;
+        }
 
         // Viewport backdrop: hide the loaded map behind the preview so the
         // effect is judged on its own. Bound to the editor_particle_hide_world
