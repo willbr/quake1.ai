@@ -2447,7 +2447,9 @@ static void editor_orbit_camera(void)
     {
         float dx = 0.0f, dy = 0.0f;
         SDL_GetRelativeMouseState(&dx, &dy);
-        s_orbit_yaw   += m_yaw.value   * dx * sensitivity.value;
+        // Yaw matches the free-fly look convention (mouse-right turns right),
+        // so orbit drag feels consistent with the rest of the editor.
+        s_orbit_yaw   -= m_yaw.value   * dx * sensitivity.value;
         s_orbit_pitch += m_pitch.value * dy * sensitivity.value;
         if (s_orbit_pitch >  89.0f) s_orbit_pitch =  89.0f;
         if (s_orbit_pitch < -89.0f) s_orbit_pitch = -89.0f;
