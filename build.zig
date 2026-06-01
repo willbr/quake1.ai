@@ -49,6 +49,7 @@ pub fn build(b: *std.Build) void {
         "mathlib.c",
         "menu.c",
         "model.c",
+        "iqm_dev.c",
         "net_dgrm.c", "net_loop.c", "net_main.c", "net_vcr.c",
         "nonintel.c",
         "pr_edict.c",
