@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d_local.h"
 #include "r_fog.h"
 #include "r_water.h"
+#include "r_caustics.h"
 #include <math.h>
 
 unsigned char	*r_turb_pbase, *r_turb_pdest;
@@ -488,7 +489,46 @@ void D_DrawSpans8 (espan_t *pspan)
 				}
 			}
 
-			if (r_fog_active)
+			if (r_caustics_active)
+			{
+				int sh  = r_caustic_shift;
+				int ox1 = r_caustic_ox1, oy1 = r_caustic_oy1;
+				int ox2 = r_caustic_ox2, oy2 = r_caustic_oy2;
+				if (r_fog_active)
+				{
+					unsigned char *fog_lo, *fog_hi;
+					int thresh4, x, yrow;
+					R_Fog_GetRows (zi, &fog_lo, &fog_hi, &thresh4);
+					x    = (int)(pdest - (unsigned char *)d_viewbuffer) - screenwidth * pspan->v;
+					yrow = (pspan->v & 1) << 1;
+					do
+					{
+						unsigned char texel = *(pbase + (s >> 16) + (t >> 16) * cachewidth);
+						int ca = r_caustic_tex[(((s>>sh)+ox1)&CAUSTIC_MASK) + (((t>>sh)+oy1)&CAUSTIC_MASK)*CAUSTIC_SIZE];
+						int cb = r_caustic_tex[(((s>>sh)+ox2)&CAUSTIC_MASK) + (((t>>sh)+oy2)&CAUSTIC_MASK)*CAUSTIC_SIZE];
+						int level = (ca > cb) ? ca : cb;
+						unsigned char *fog = (r_fog_bayer2x2[yrow | (x & 1)] < thresh4) ? fog_hi : fog_lo;
+						*pdest++ = fog[r_caustic_map[(level<<8) + texel]];
+						s += sstep;
+						t += tstep;
+						x++;
+					} while (--spancount > 0);
+				}
+				else
+				{
+					do
+					{
+						unsigned char texel = *(pbase + (s >> 16) + (t >> 16) * cachewidth);
+						int ca = r_caustic_tex[(((s>>sh)+ox1)&CAUSTIC_MASK) + (((t>>sh)+oy1)&CAUSTIC_MASK)*CAUSTIC_SIZE];
+						int cb = r_caustic_tex[(((s>>sh)+ox2)&CAUSTIC_MASK) + (((t>>sh)+oy2)&CAUSTIC_MASK)*CAUSTIC_SIZE];
+						int level = (ca > cb) ? ca : cb;
+						*pdest++ = r_caustic_map[(level<<8) + texel];
+						s += sstep;
+						t += tstep;
+					} while (--spancount > 0);
+				}
+			}
+			else if (r_fog_active)
 			{
 				unsigned char *fog_lo, *fog_hi;
 				int           thresh4;

@@ -50,25 +50,29 @@ texture, values `0..63`, baked at init from ridged sines (sum of a few sine
 gratings sharpened toward thin bright ridges). Tileable so `(s,t)` sampling wraps
 with a mask.
 
-### Per-pixel intensity — two scrolling layers, multiplied
+### Per-pixel intensity — two scrolling layers, combined with max
 
 In the solid-surface span inner loop (`D_DrawSpans8`), each pixel has
 perspective-correct `s,t` (fixed16, integer texel = `>>16`):
 
 ```
-a = r_caustic_tex[(((s>>SH1)+ox1)&MASK) + (((t>>SH1)+oy1)&MASK)*CSIZE];  // layer 1
-b = r_caustic_tex[(((s>>SH2)+ox2)&MASK) + (((t>>SH2)+oy2)&MASK)*CSIZE];  // layer 2
-level = (a*b) >> 6;                       // 0..63: multiply -> sparse bright cells
+ca = r_caustic_tex[(((s>>sh)+ox1)&MASK) + (((t>>sh)+oy1)&MASK)*CSIZE];  // layer 1
+cb = r_caustic_tex[(((s>>sh)+ox2)&MASK) + (((t>>sh)+oy2)&MASK)*CSIZE];  // layer 2
+level = (ca > cb) ? ca : cb;             // 0..63: max -> union of two networks
 *pdest = r_caustic_map[(level<<8) + texel];
 ```
 
-`SH1`/`SH2` are scale shifts (two different scales, from `r_caustics_scale`);
-`ox*/oy*` are per-frame scroll offsets from `cl.time * r_caustics_speed`
-(computed once per frame in `R_Caustics_Update`, the two layers scrolling in
-different directions). **Multiplying** the layers makes caustics appear only
-where both are bright — the constructive-interference look of real caustic
-networks — and the dance comes from the two offsets sliding past each other.
-This pattern formula is the part most likely to need visual tuning.
+`sh` is the scale shift (`16 + r_caustics_scale`); `ox*/oy*` are per-frame scroll
+offsets from `cl.time * r_caustics_speed` (computed once per frame in
+`R_Caustics_Update`, the two layers scrolling in different directions). The two
+layers are the *same* baked ridge texture sampled at two scrolling offsets, and
+**max** overlays the two moving ridge networks. (The design started with a
+*multiply* — constructive interference — but in playtest it was far too dim
+against the heavy brown underwater palette shift; `max` is brighter and more
+legible.) The ridge texture is baked from four tileable sines raised to the 4th
+power (mostly dark with sparse bright ridges). The dance comes from the two
+offsets sliding past each other. This pattern is the part most likely to need
+visual tuning.
 
 ### Caustic LUT
 
@@ -86,21 +90,20 @@ common (not-submerged) path stays **byte-identical**. The caustic path composes
 with fog (caustic then fog: `fog[r_caustic_map[(level<<8)+texel]]`), same as
 sheen. C path only (`#if !id386`; asm path not built).
 
-*Implementation note:* exact factoring — a separate `D_DrawSpans8_Caustic`
-function (duplicates the ~130-line perspective sub-span setup but leaves the hot
-path untouched) vs. per-sub-span gated inner loops inside `D_DrawSpans8`
-(duplicates only the small inner loop but edits the hot function) — is decided
-during planning. Bias toward whichever keeps the off-path identical with least
-duplication.
+*Implementation note:* implemented as **per-sub-span gated inner loops** inside
+`D_DrawSpans8` — the `if (r_caustics_active) {...} else if (r_fog_active) {...}
+else {...}` branch prepends the caustic case before the existing fog/normal
+cases, so only the small inner loop is duplicated and the not-submerged path
+stays byte-identical (no whole-function copy).
 
 ## Cvars (`r_caustics.c`, registered in `R_Caustics_Init`)
 
 | Cvar | Default | Meaning |
 |---|---|---|
 | `r_caustics` | `1` | Master toggle (`0` = off). |
-| `r_caustics_intensity` | `0.5` | Highlight strength 0..1 (bakes into the LUT). |
-| `r_caustics_scale` | tuned | Cell size on surfaces (texel→texture shift). |
-| `r_caustics_speed` | tuned | Scroll/animation rate. |
+| `r_caustics_intensity` | `0.7` | Highlight strength 0..1 (bakes into the LUT). |
+| `r_caustics_scale` | `2` | Cell size: `(s,t)>>(16+scale)`. Lower = denser/finer. |
+| `r_caustics_speed` | `12` | Scroll/animation rate. |
 
 Light blue-white highlight color fixed for v1 (easy to expose as cvars later).
 

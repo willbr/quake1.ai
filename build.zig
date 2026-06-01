@@ -59,6 +59,7 @@ pub fn build(b: *std.Build) void {
         "r_sky.c", "r_sprite.c", "r_surf.c", "r_surf_rgb.c", "r_vars.c",
         "r_fog.c",
         "r_water.c",
+        "r_caustics.c",
         "sbar.c",
         "screen.c",
         "snd_dma.c", "snd_mem.c", "snd_mix.c",
