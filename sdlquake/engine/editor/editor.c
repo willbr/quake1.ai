@@ -1996,6 +1996,8 @@ static int Editor_CompleteMapName(const char *partial, char **out, int max, int 
 // Lifecycle
 // -----------------------------------------------------------------------------
 
+static void Editor_Cmd_Mode_f(void);   // defined with the mode registry at EOF
+
 void Editor_Init(void)
 {
     if (s_inited) return;
@@ -2003,6 +2005,7 @@ void Editor_Init(void)
     Scene_Init();
 
     Cmd_AddCommand("editor",        Editor_Cmd_Toggle_f);
+    Cmd_AddCommand("editor_mode",   Editor_Cmd_Mode_f);
     Cmd_AddCommand("editor_load",   Editor_Cmd_Open_f);
     Cmd_AddCommand("editor_new",    Editor_Cmd_New_f);
     Cmd_AddCommand("editor_save",   Editor_Cmd_Save_f);
@@ -2662,6 +2665,20 @@ void Editor_SetMode(int idx)
     if (s_modes[s_active_mode]->exit) s_modes[s_active_mode]->exit();
     s_active_mode = idx;
     if (s_modes[s_active_mode]->enter) s_modes[s_active_mode]->enter();
+}
+
+// Console: editor_mode [n] -- switch the active editor mode (Map/Particle/...).
+// With no arg, lists the modes. Handy for headless/MCP testing.
+static void Editor_Cmd_Mode_f(void)
+{
+    int i;
+    if (Cmd_Argc() < 2) {
+        for (i = 0; i < EDITOR_NUM_MODES; i++)
+            Con_Printf("  %d = %s%s\n", i, s_modes[i]->name, i == s_active_mode ? "  (active)" : "");
+        return;
+    }
+    Editor_SetMode(atoi(Cmd_Argv(1)));
+    Con_Printf("editor_mode: %s\n", Editor_ActiveMode()->name);
 }
 
 // ---- public engine-boundary dispatchers ---------------------------------
