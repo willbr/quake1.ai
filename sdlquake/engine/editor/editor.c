@@ -18,6 +18,7 @@
 #include "edit_history.h"
 #include "editor.h"
 #include "editor_internal.h"
+#include "editor_mode.h"
 #include "hotreload.h"          // g_game_api
 #include "virtual_fs.h"         // Editor_VFS_*
 #include "qbsp_lib.h"           // qbsp_compile_to_memory
@@ -2152,13 +2153,13 @@ int Editor_AllowGameInput (void)
 {
     return s_open && s_lookmode && (int)editor_camera.value == 1;
 }
-int Editor_ShouldDrawPlayer(void)
+int MapMode_ShouldDrawPlayer(void)
 {
     // Only in free-fly: in FPS mode the camera is at the player's eyes so
     // their own model would block the view.
     return s_open && (int)editor_camera.value == 0;
 }
-int Editor_HideTransientFX(void)
+int MapMode_HideTransientFX(void)
 {
     return s_open && (int)editor_view_mode.value == 1;
 }
@@ -2488,7 +2489,7 @@ void Editor_PreRender(void)
 // SDL event hook
 // -----------------------------------------------------------------------------
 
-int Editor_ProcessEvent(void *evp)
+int MapMode_ProcessEvent(void *evp)
 {
     SDL_Event *ev = (SDL_Event *)evp;
     if (!s_open) return 0;
@@ -2625,5 +2626,98 @@ int Editor_ProcessEvent(void *evp)
         }
         return 0;
     }
+    return 0;
+}
+
+// =============================================================================
+// Editor mode registry + public dispatchers (multi-mode shell)
+//
+// Shared infrastructure (free-fly camera, open/close, look-mode) stays in the
+// shell above; only mode-specific behavior is dispatched through the vtable.
+// Map mode wraps the existing editor; Particle mode (Slice 4) plugs in here.
+// =============================================================================
+
+// Map mode = the existing editor's mode-specific entry points.
+static const editor_mode_t map_mode = {
+    .name               = "Map",
+    .draw_ui            = MapMode_DrawUI,
+    .render_scene       = MapMode_RenderScene,
+    .process_event      = MapMode_ProcessEvent,
+    .hide_transient_fx  = MapMode_HideTransientFX,
+    .should_draw_player = MapMode_ShouldDrawPlayer,
+};
+
+// TEMPORARY Particle-mode stub (Slice 1). Replaced by the real definition in
+// edit_particle.c (Slice 4 Task 4.6), at which point this stub is deleted and
+// particle_mode becomes an `extern` reference.
+static void particle_stub_draw_ui(void) { /* empty until Slice 4 */ }
+static const editor_mode_t particle_mode = {
+    .name    = "Particle",
+    .draw_ui = particle_stub_draw_ui,
+};
+
+static const editor_mode_t *s_modes[] = { &map_mode, &particle_mode };
+#define EDITOR_NUM_MODES ((int)(sizeof(s_modes)/sizeof(s_modes[0])))
+static int s_active_mode = 0;
+
+const editor_mode_t *Editor_ActiveMode(void) { return s_modes[s_active_mode]; }
+int  Editor_ActiveModeIdx(void) { return s_active_mode; }
+void Editor_SetMode(int idx)
+{
+    if (idx < 0 || idx >= EDITOR_NUM_MODES || idx == s_active_mode) return;
+    if (s_modes[s_active_mode]->exit) s_modes[s_active_mode]->exit();
+    s_active_mode = idx;
+    if (s_modes[s_active_mode]->enter) s_modes[s_active_mode]->enter();
+}
+
+// ---- public engine-boundary dispatchers ---------------------------------
+void Editor_DrawUI(void)
+{
+    const editor_mode_t *m;
+    if (!Editor_IsOpen()) return;       // panels only while the editor is open
+    m = Editor_ActiveMode();
+
+    // Mode switcher: a small window, present in every mode (while open).
+    IG_SetNextWindowPos(8.0f, 8.0f, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize(190.0f, 0.0f, IG_Cond_FirstUseEver);
+    if (IG_Begin("Editor Mode", NULL, IG_WF_None)) {
+        int i;
+        for (i = 0; i < EDITOR_NUM_MODES; i++) {
+            if (i) IG_SameLine(0, -1);
+            if (IG_RadioButton(s_modes[i]->name, i == s_active_mode))
+                Editor_SetMode(i);
+        }
+    }
+    IG_End();
+
+    if (m->draw_ui) m->draw_ui();
+}
+
+void Editor_RenderScene(void)
+{
+    // Always runs (even closed) so saved map edits stay visible; the map impl
+    // self-gates on open. Particle mode has no scene overlay (NULL -> no-op).
+    const editor_mode_t *m = Editor_ActiveMode();
+    if (m->render_scene) m->render_scene();
+}
+
+int Editor_ProcessEvent(void *evp)
+{
+    const editor_mode_t *m = Editor_ActiveMode();
+    if (m->process_event) return m->process_event(evp);
+    return 0;
+}
+
+int Editor_HideTransientFX(void)
+{
+    const editor_mode_t *m = Editor_ActiveMode();
+    if (m->hide_transient_fx) return m->hide_transient_fx();
+    return 1; // default: hide (matches old map-only behavior)
+}
+
+int Editor_ShouldDrawPlayer(void)
+{
+    const editor_mode_t *m = Editor_ActiveMode();
+    if (m->should_draw_player) return m->should_draw_player();
     return 0;
 }

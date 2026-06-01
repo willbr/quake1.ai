@@ -1290,7 +1290,7 @@ static void draw_target_links(void)
     }
 }
 
-void Editor_RenderScene(void)
+void MapMode_RenderScene(void)
 {
     int i, j;
     int style = (int)editor_render_style.value;

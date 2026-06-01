@@ -256,4 +256,20 @@ static inline int Editor_LiveEntInRange(const edict_t *e)
     return (int)(off / pr_edict_size) < sv.num_edicts;
 }
 
+// ---- Editor mode seam (multi-mode shell) --------------------------------
+// Map-mode implementations of the mode-specific entry points. Registered in
+// map_mode (editor.c); the public Editor_* names are dispatchers there.
+void MapMode_DrawUI(void);
+void MapMode_RenderScene(void);
+int  MapMode_ShouldDrawPlayer(void);
+int  MapMode_HideTransientFX(void);
+int  MapMode_ProcessEvent(void *ev);
+
+// Mode registry accessors (editor.c). The vtable type is editor_mode_t
+// (editor_mode.h); forward-declared here so this header needn't include it.
+struct editor_mode_s;
+const struct editor_mode_s *Editor_ActiveMode(void);
+int  Editor_ActiveModeIdx(void);
+void Editor_SetMode(int idx);
+
 #endif // EDITOR_INTERNAL_H

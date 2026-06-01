@@ -2609,7 +2609,7 @@ static void draw_inspector(void)
 // Public entry
 // -----------------------------------------------------------------------------
 
-void Editor_DrawUI(void)
+void MapMode_DrawUI(void)
 {
     if (!Editor_IsOpen()) return;
 
