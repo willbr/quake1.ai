@@ -126,6 +126,51 @@ static void edit_begin (void)
     edit_rebuild ();
 }
 
+// In-place delete of mesh `mi` from an lm_iqm_t: drop its vertex/triangle ranges,
+// reindex the remaining triangles, and fix later meshes' first_vertex/_triangle.
+// Counts shrink; the qalloc backing keeps its (now-larger) allocation. Joints and
+// animation are untouched (the part's joint just becomes unused).
+static void iqm_delete_mesh (lm_iqm_t *m, int mi)
+{
+    lm_iqm_mesh_t *me;
+    unsigned vf, vc, tf, tc, k;
+    int i;
+    if (!m || mi < 0 || mi >= m->nummeshes || m->nummeshes <= 1) return;
+    me = &m->meshes[mi];
+    vf = me->first_vertex;   vc = me->num_vertexes;
+    tf = me->first_triangle; tc = me->num_triangles;
+
+    for (k = vf; k + vc < (unsigned)m->numverts; k++) m->verts[k] = m->verts[k+vc];
+    m->numverts -= (int)vc;
+    for (k = tf*3; k + tc*3 < (unsigned)m->numtris*3; k++) m->tris[k] = m->tris[k+tc*3];
+    m->numtris -= (int)tc;
+    for (k = 0; k < (unsigned)m->numtris*3; k++)
+        if (m->tris[k] >= vf+vc) m->tris[k] -= vc;
+    for (i = mi; i+1 < m->nummeshes; i++) {
+        m->meshes[i] = m->meshes[i+1];
+        m->meshes[i].first_vertex   -= vc;
+        m->meshes[i].first_triangle -= tc;
+    }
+    m->nummeshes--;
+}
+
+static void edit_delete (int mi)
+{
+    int t;
+    if (!s_editmode || !s_orig || !s_edit) return;
+    if (mi < 0 || mi >= s_orig->nummeshes) return;
+    if (s_orig->nummeshes <= 1) { Con_Printf ("actor edit: can't delete the last part\n"); return; }
+    iqm_delete_mesh (s_orig, mi);
+    iqm_delete_mesh (s_edit, mi);
+    for (t = mi; t+1 < MAXEDITMESH; t++) {   // shift per-part transforms down
+        VectorCopy (s_voff[t+1],   s_voff[t]);
+        VectorCopy (s_vscale[t+1], s_vscale[t]);
+        VectorCopy (s_vrot[t+1],   s_vrot[t]);
+    }
+    if (s_selmesh >= s_orig->nummeshes) s_selmesh = s_orig->nummeshes - 1;
+    edit_rebuild ();
+}
+
 static void edit_save (void)
 {
     void *buf = NULL; size_t len = 0;
@@ -247,6 +292,8 @@ static void actor_draw_ui (void)
                 s_vscale[s_selmesh][0]=s_vscale[s_selmesh][1]=s_vscale[s_selmesh][2]=1.0f;
                 s_vrot[s_selmesh][0]=s_vrot[s_selmesh][1]=s_vrot[s_selmesh][2]=0.0f;
             }
+            IG_SameLine (0, -1);
+            if (IG_Button ("Delete part")) edit_delete (s_selmesh);
         }
         edit_rebuild ();   // apply numeric edits to the rendered copy each frame
 
@@ -301,6 +348,14 @@ static void Cmd_ActorEditRot_f (void)
     s_vrot[mi][0]=Q_atof(Cmd_Argv(2)); s_vrot[mi][1]=Q_atof(Cmd_Argv(3)); s_vrot[mi][2]=Q_atof(Cmd_Argv(4));
     edit_rebuild ();
 }
+static void Cmd_ActorEditDel_f (void)
+{
+    int mi;
+    if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_edit_del <mesh>\n"); return; }
+    if ((mi = actor_edit_part ()) < 0) return;
+    edit_delete (mi);
+    Con_Printf ("actor edit: deleted part; %d left\n", s_orig ? s_orig->nummeshes : 0);
+}
 static void Cmd_ActorEditSave_f (void)
 {
     if (Cmd_Argc () >= 2) { strncpy (s_savepath, Cmd_Argv (1), sizeof(s_savepath)-1); s_savepath[sizeof(s_savepath)-1]=0; }
@@ -313,6 +368,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_move",  Cmd_ActorEditMove_f);
     Cmd_AddCommand ("actor_edit_scale", Cmd_ActorEditScale_f);
     Cmd_AddCommand ("actor_edit_rot",   Cmd_ActorEditRot_f);
+    Cmd_AddCommand ("actor_edit_del",   Cmd_ActorEditDel_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
 }
 
