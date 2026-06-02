@@ -198,6 +198,10 @@ void Editor_ApplyClassnameDefaults(struct edit_entity_s *e, const char *cls);
 // inside R_RenderView_ between CL_RelinkEntities and R_EdgeDrawing.
 void Editor_PushPreviewEntities(void);
 
+// Actor mode (edit_actor.c): inject the previewed IQM actor into cl_visedicts at
+// the orbit focus. Called from the same window as Editor_PushPreviewEntities.
+void ActorMode_PushPreview(void);
+
 // render_wire.c — eagerly materialise transient edit_entity_t entries
 // for every alive runtime edict in sv.edicts (those not already bound
 // to a .map-authored entry). Reaps stale transients first. No-op

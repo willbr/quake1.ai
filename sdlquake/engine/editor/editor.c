@@ -2428,6 +2428,7 @@ void Editor_RefreshDlights(void)
 // GetRelativeMouseState / GetKeyboardState) here in the pre-render hook, so it
 // needs no per-mode SDL event plumbing.
 extern const editor_mode_t particle_mode;   // defined in edit_particle.c
+extern const editor_mode_t actor_mode;      // defined in edit_actor.c
 
 static vec3_t s_orbit_focus   = { 0, 0, 0 };
 static float  s_orbit_yaw     = 0.0f;
@@ -2575,6 +2576,7 @@ void Editor_PreRender(void)
     // host.c earlier in the frame) and before R_EdgeDrawing dispatches
     // brushmodel entries.
     Editor_PushPreviewEntities();
+    if (Editor_ActiveMode() == &actor_mode) ActorMode_PushPreview();
 
     // First frame after opening the editor: latch the current view into the
     // camera state so free-fly mode starts where the player was standing.
@@ -2585,8 +2587,8 @@ void Editor_PreRender(void)
         s_camera_inited = 1;
     }
 
-    // Particle mode uses an orbit camera (around the effect), not free-fly.
-    if (Editor_ActiveMode() == &particle_mode)
+    // Particle + Actor modes use an orbit camera (around the effect / actor).
+    if (Editor_ActiveMode() == &particle_mode || Editor_ActiveMode() == &actor_mode)
     {
         editor_orbit_camera();
         return;
@@ -2804,8 +2806,10 @@ static const editor_mode_t map_mode = {
 
 // Particle mode is defined in edit_particle.c (Slice 4).
 extern const editor_mode_t particle_mode;
+// Actor mode is defined in edit_actor.c (skeletal-actor editor, E1 skeleton).
+extern const editor_mode_t actor_mode;
 
-static const editor_mode_t *s_modes[] = { &map_mode, &particle_mode };
+static const editor_mode_t *s_modes[] = { &map_mode, &particle_mode, &actor_mode };
 #define EDITOR_NUM_MODES ((int)(sizeof(s_modes)/sizeof(s_modes[0])))
 static int s_active_mode = 0;
 
@@ -2816,7 +2820,8 @@ void Editor_SetMode(int idx)
     if (idx < 0 || idx >= EDITOR_NUM_MODES || idx == s_active_mode) return;
     if (s_modes[s_active_mode]->exit) s_modes[s_active_mode]->exit();
     s_active_mode = idx;
-    if (s_modes[s_active_mode] == &particle_mode) s_orbit_inited = 0; // re-center orbit on entry
+    if (s_modes[s_active_mode] == &particle_mode ||
+        s_modes[s_active_mode] == &actor_mode) s_orbit_inited = 0; // re-center orbit on entry
     if (s_modes[s_active_mode]->enter) s_modes[s_active_mode]->enter();
 }
 
