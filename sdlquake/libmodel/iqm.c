@@ -267,30 +267,63 @@ static void wrf(unsigned char *p, float f){ unsigned u; memcpy(&u,&f,4); wru(p,u
 
 #define ALIGN8(n) (((n)+7u)&~7u)
 
-/* Serialize geometry + skeleton to IQM v2 bytes. Animation (poses/anims/frames)
-   is intentionally NOT written yet — E1 authors static box actors; writing baked
-   clips lands with E2. On success *out_buf is a malloc()'d buffer of *out_len
-   bytes (caller free()s it); the resulting file re-parses via lm_load_iqm as a
-   static (bind-pose) model. */
+/* Serialize geometry + skeleton (+ animation, if present) to IQM v2 bytes. The
+   decoded per-frame TRS (frametrs) + clips are re-encoded into poses/anims/frames
+   (per-channel min/max quantization, the inverse of the loader), so an edited
+   actor keeps its clips through a save. On success *out_buf is a malloc()'d buffer
+   of *out_len bytes (caller free()s it). Round-trips via lm_load_iqm. */
 lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len){
     unsigned char *buf, *strs;
     unsigned strcap, slen, i;
     unsigned ofs_text, ofs_mesh, ofs_va, ofs_pos, ofs_uv, ofs_bi, ofs_bw, ofs_tri, ofs_joint, total;
-    unsigned *mesh_name_ofs, *mesh_mat_ofs, *joint_name_ofs;
+    unsigned ofs_poses=0, ofs_anims=0, ofs_frames=0, nfc=0;
+    unsigned *mesh_name_ofs, *mesh_mat_ofs, *joint_name_ofs, *clip_name_ofs=NULL;
+    unsigned *pose_mask=NULL; float *pose_off=NULL, *pose_scl=NULL;
+    int has_anim, nj;
 
     if (out_buf) *out_buf = NULL;
     if (out_len) *out_len = 0;
     if (!m || !out_buf || !out_len) return LM_ERR_BAD_COUNT;
     if (m->nummeshes <= 0 || m->numverts <= 0 || m->numtris <= 0) return LM_ERR_BAD_COUNT;
+    nj = m->numjoints;
+    has_anim = (m->numframes > 0 && m->frametrs && m->numclips > 0 && nj > 0);
+
+    /* per-pose channel quantization (offset=min, scale=range/65535, mask if varying) */
+    if (has_anim){
+        int j, c, fr;
+        pose_mask = (unsigned*)malloc(sizeof(unsigned)*(unsigned)nj);
+        pose_off  = (float*)malloc(sizeof(float)*(unsigned)nj*10);
+        pose_scl  = (float*)malloc(sizeof(float)*(unsigned)nj*10);
+        clip_name_ofs = (unsigned*)malloc(sizeof(unsigned)*(unsigned)m->numclips);
+        if (!pose_mask||!pose_off||!pose_scl||!clip_name_ofs){
+            free(pose_mask);free(pose_off);free(pose_scl);free(clip_name_ofs);
+            return LM_ERR_OOM;
+        }
+        for (j=0;j<nj;j++){
+            pose_mask[j]=0;
+            for (c=0;c<10;c++){
+                float mn = m->frametrs[((size_t)0*nj + j)*10 + c], mx = mn;
+                for (fr=1;fr<m->numframes;fr++){
+                    float v = m->frametrs[((size_t)fr*nj + j)*10 + c];
+                    if (v<mn) mn=v;
+                    if (v>mx) mx=v;
+                }
+                pose_off[j*10+c] = mn;
+                if (mx > mn){ pose_scl[j*10+c] = (mx-mn)/65535.0f; pose_mask[j] |= (1u<<c); nfc++; }
+                else          pose_scl[j*10+c] = 0.0f;
+            }
+        }
+    }
 
     /* string table (offset 0 == empty string) */
-    strcap = 1u + (unsigned)(m->nummeshes*2 + m->numjoints) * 72u;
+    strcap = 1u + (unsigned)(m->nummeshes*2 + nj + (has_anim?m->numclips:0)) * 72u;
     strs           = (unsigned char*)malloc(strcap);
     mesh_name_ofs  = (unsigned*)malloc(sizeof(unsigned)*(unsigned)(m->nummeshes));
     mesh_mat_ofs   = (unsigned*)malloc(sizeof(unsigned)*(unsigned)(m->nummeshes));
-    joint_name_ofs = (unsigned*)malloc(sizeof(unsigned)*(unsigned)(m->numjoints>0?m->numjoints:1));
+    joint_name_ofs = (unsigned*)malloc(sizeof(unsigned)*(unsigned)(nj>0?nj:1));
     if (!strs || !mesh_name_ofs || !mesh_mat_ofs || !joint_name_ofs){
         free(strs); free(mesh_name_ofs); free(mesh_mat_ofs); free(joint_name_ofs);
+        free(pose_mask);free(pose_off);free(pose_scl);free(clip_name_ofs);
         return LM_ERR_OOM;
     }
     strs[0]=0; slen=1;
@@ -298,7 +331,8 @@ lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len){
         (dst)=slen; memcpy(strs+slen, s_, L_); slen+=L_; strs[slen++]=0; }while(0)
     for (i=0;i<(unsigned)m->nummeshes;i++){ ADDSTR(mesh_name_ofs[i], m->meshes[i].name);
                                             ADDSTR(mesh_mat_ofs[i],  m->meshes[i].material); }
-    for (i=0;i<(unsigned)m->numjoints;i++){ ADDSTR(joint_name_ofs[i], m->joints[i].name); }
+    for (i=0;i<(unsigned)nj;i++){ ADDSTR(joint_name_ofs[i], m->joints[i].name); }
+    if (has_anim) for (i=0;i<(unsigned)m->numclips;i++){ ADDSTR(clip_name_ofs[i], m->clips[i].name); }
     #undef ADDSTR
 
     /* section offsets (mirrors the known-good generator layout) */
@@ -311,10 +345,17 @@ lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len){
     ofs_bw    = ofs_bi  + 4u*(unsigned)m->numverts;
     ofs_tri   = ALIGN8(ofs_bw + 4u*(unsigned)m->numverts);
     ofs_joint = ALIGN8(ofs_tri + 12u*(unsigned)m->numtris);
-    total     = ALIGN8(ofs_joint + 48u*(unsigned)m->numjoints);
+    total     = ALIGN8(ofs_joint + 48u*(unsigned)nj);
+    if (has_anim){
+        ofs_poses  = ALIGN8(ofs_joint + 48u*(unsigned)nj);
+        ofs_anims  = ALIGN8(ofs_poses + 88u*(unsigned)nj);
+        ofs_frames = ALIGN8(ofs_anims + 20u*(unsigned)m->numclips);
+        total      = ALIGN8(ofs_frames + (unsigned)m->numframes*nfc*2u);
+    }
 
     buf = (unsigned char*)calloc(1, total);
-    if (!buf){ free(strs); free(mesh_name_ofs); free(mesh_mat_ofs); free(joint_name_ofs); return LM_ERR_OOM; }
+    if (!buf){ free(strs); free(mesh_name_ofs); free(mesh_mat_ofs); free(joint_name_ofs);
+               free(pose_mask);free(pose_off);free(pose_scl);free(clip_name_ofs); return LM_ERR_OOM; }
 
     memcpy(buf, "INTERQUAKEMODEL\0", 16);
     wru(buf+0x10, 2);            /* version */
@@ -324,8 +365,12 @@ lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len){
     wru(buf+0x2C, 4u);                         /* num_vertexarrays */
     wru(buf+0x30, (unsigned)m->numverts);      wru(buf+0x34, ofs_va);
     wru(buf+0x38, (unsigned)m->numtris);       wru(buf+0x3C, ofs_tri);
-    wru(buf+0x44, (unsigned)m->numjoints);     wru(buf+0x48, ofs_joint);
-    /* poses/anims/frames/comment/extensions left zero (no animation written) */
+    wru(buf+0x44, (unsigned)nj);               wru(buf+0x48, ofs_joint);
+    if (has_anim){
+        wru(buf+0x4C, (unsigned)nj);            wru(buf+0x50, ofs_poses);
+        wru(buf+0x54, (unsigned)m->numclips);   wru(buf+0x58, ofs_anims);
+        wru(buf+0x5C, (unsigned)m->numframes);  wru(buf+0x60, nfc);  wru(buf+0x64, ofs_frames);
+    }
 
     memcpy(buf+ofs_text, strs, slen);
 
@@ -353,7 +398,7 @@ lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len){
         unsigned char *t = buf+ofs_tri+i*12;
         wru(t+0, m->tris[i*3+0]); wru(t+4, m->tris[i*3+1]); wru(t+8, m->tris[i*3+2]);
     }
-    for (i=0;i<(unsigned)m->numjoints;i++){
+    for (i=0;i<(unsigned)nj;i++){
         unsigned char *jo = buf+ofs_joint+i*48; int k;
         wru(jo+0, joint_name_ofs[i]);
         wru(jo+4, (unsigned)m->joints[i].parent);
@@ -362,7 +407,41 @@ lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len){
         for(k=0;k<3;k++) wrf(jo+36+k*4, m->joints[i].scale[k]);
     }
 
+    if (has_anim){
+        int j, c, fr;
+        unsigned char *fw;
+        for (j=0;j<nj;j++){                                   /* poses */
+            unsigned char *po = buf+ofs_poses+(unsigned)j*88;
+            wru(po+0, (unsigned)m->joints[j].parent);
+            wru(po+4, pose_mask[j]);
+            for(c=0;c<10;c++) wrf(po+8 +c*4, pose_off[j*10+c]);
+            for(c=0;c<10;c++) wrf(po+48+c*4, pose_scl[j*10+c]);
+        }
+        for (i=0;i<(unsigned)m->numclips;i++){                /* anims */
+            unsigned char *an = buf+ofs_anims+i*20;
+            wru(an+0,  clip_name_ofs[i]);
+            wru(an+4,  (unsigned)m->clips[i].first_frame);
+            wru(an+8,  (unsigned)m->clips[i].num_frames);
+            wrf(an+12, m->clips[i].framerate);
+            wru(an+16, m->clips[i].loop ? 1u : 0u);
+        }
+        fw = buf+ofs_frames;                                   /* frames (quantized) */
+        for (fr=0;fr<m->numframes;fr++)
+            for (j=0;j<nj;j++)
+                for (c=0;c<10;c++)
+                    if (pose_mask[j] & (1u<<c)){
+                        float s = pose_scl[j*10+c];
+                        float v = m->frametrs[((size_t)fr*nj + j)*10 + c];
+                        int   w = (s > 0.0f) ? (int)((v - pose_off[j*10+c]) / s + 0.5f) : 0;
+                        if (w<0) w=0;
+                        if (w>65535) w=65535;
+                        fw[0]=(unsigned char)(w&0xff); fw[1]=(unsigned char)((w>>8)&0xff);
+                        fw+=2;
+                    }
+    }
+
     free(strs); free(mesh_name_ofs); free(mesh_mat_ofs); free(joint_name_ofs);
+    free(pose_mask); free(pose_off); free(pose_scl); free(clip_name_ofs);
     *out_buf = buf; *out_len = (size_t)total;
     return LM_OK;
 }

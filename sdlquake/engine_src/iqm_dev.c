@@ -115,9 +115,9 @@ static void Actor_Clear_f (void)
 =================
 Actor_Roundtrip_f
   Load an IQM, serialize it back out with lm_write_iqm, re-parse the bytes, and
-  verify the geometry + skeleton survive the round trip. Tests the editor's IQM
-  writer (E1 pipeline backend) without any UI. Animation is not written yet, so
-  the re-parsed model is static (compared on geometry/joints only).
+  verify geometry + skeleton + animation survive the round trip. Tests the IQM
+  writer (editor save path) without any UI: geometry/joints exact (MATCH), and
+  animation re-encoded within quantization tolerance (maxerr small -> OK).
 =================
 */
 static void Actor_Roundtrip_f (void)
@@ -128,7 +128,9 @@ static void Actor_Roundtrip_f (void)
 	void		*buf;
 	size_t		len;
 	lm_result_t	r;
-	int			i, ok;
+	int			i, ok, anim_ok;
+	float		maxerr = 0.0f;
+	size_t		q, nq;
 
 	if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_roundtrip <file.iqm>\n"); return; }
 	Q_strcpy (name, Cmd_Argv (1));
@@ -152,11 +154,26 @@ static void Actor_Roundtrip_f (void)
 		    src->verts[i].pos[2] != rt->verts[i].pos[2] || src->verts[i].bone   != rt->verts[i].bone)
 			ok = 0;
 
-	Con_Printf ("actor_roundtrip %s: wrote %d bytes; src(m%d j%d v%d t%d) -> rt(m%d j%d v%d t%d) %s\n",
+	anim_ok = 1;
+	if (src->numframes > 0) {
+		if (rt->numframes != src->numframes || rt->numclips != src->numclips || !rt->frametrs)
+			anim_ok = 0;
+		else {
+			nq = (size_t)src->numframes * src->numjoints * 10;
+			for (q = 0; q < nq; q++) {
+				float e = src->frametrs[q] - rt->frametrs[q];
+				if (e < 0.0f) e = -e;
+				if (e > maxerr) maxerr = e;
+			}
+		}
+	}
+
+	Con_Printf ("actor_roundtrip %s: wrote %d bytes; geom(m%d j%d v%d t%d) %s; anim(%d fr, %d clips, maxerr %g) %s\n",
 		name, (int)len,
-		src->nummeshes, src->numjoints, src->numverts, src->numtris,
-		rt->nummeshes,  rt->numjoints,  rt->numverts,  rt->numtris,
-		ok ? "MATCH" : "MISMATCH");
+		rt->nummeshes, rt->numjoints, rt->numverts, rt->numtris,
+		ok ? "MATCH" : "MISMATCH",
+		rt->numframes, rt->numclips, maxerr,
+		(src->numframes == 0) ? "n/a" : ((anim_ok && maxerr < 0.02f) ? "OK" : "BAD"));
 
 	lm_iqm_free (rt);
 	free (buf);

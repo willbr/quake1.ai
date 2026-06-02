@@ -255,7 +255,7 @@ static void actor_draw_ui (void)
         IG_InputText ("##savepath", s_savepath, sizeof(s_savepath), 0);
         IG_SameLine (0, -1);
         if (IG_Button ("Save IQM")) edit_save ();
-        IG_TextUnformatted ("(saves geometry only; animation is dropped)");
+        IG_TextUnformatted ("(saves edited geometry + the original clips)");
     }
 
     IG_End ();
