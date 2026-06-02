@@ -11,12 +11,14 @@
 // ---------------------------------------------------------------------------
 // ImGuiWindowFlags subset
 // ---------------------------------------------------------------------------
-#define IG_WF_None            0
-#define IG_WF_NoTitleBar      (1<<0)
-#define IG_WF_NoResize        (1<<1)
-#define IG_WF_NoMove          (1<<2)
-#define IG_WF_NoCollapse      (1<<5)
-#define IG_WF_NoSavedSettings (1<<8)
+#define IG_WF_None                0
+#define IG_WF_NoTitleBar          (1<<0)
+#define IG_WF_NoResize            (1<<1)
+#define IG_WF_NoMove              (1<<2)
+#define IG_WF_NoScrollbar         (1<<3)
+#define IG_WF_NoScrollWithMouse   (1<<4)
+#define IG_WF_NoCollapse          (1<<5)
+#define IG_WF_NoSavedSettings     (1<<8)
 
 // ---------------------------------------------------------------------------
 // ImGuiCond

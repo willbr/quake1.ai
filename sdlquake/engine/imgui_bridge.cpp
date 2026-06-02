@@ -341,8 +341,7 @@ static void ig_build_default_layout(ImGuiID dockspace_id)
 {
     const ImGuiViewport *vp = ImGui::GetMainViewport();
     ImGui::DockBuilderRemoveNode(dockspace_id);
-    ImGui::DockBuilderAddNode(dockspace_id,
-        ImGuiDockNodeFlags_DockSpace | ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspace_id, vp->Size);
 
     ImGuiID centre = dockspace_id;
@@ -357,6 +356,7 @@ static void ig_build_default_layout(ImGuiID dockspace_id)
     ImGui::DockBuilderDockWindow("Actor",              left);
     ImGui::DockBuilderDockWindow("Inspector",          right);
     ImGui::DockBuilderDockWindow("Particle Inspector", right);
+    ImGui::DockBuilderDockWindow("Viewport",           centre);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }

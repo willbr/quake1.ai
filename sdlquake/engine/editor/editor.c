@@ -33,6 +33,14 @@
 
 extern SDL_Window *VID_GetWindow(void);
 
+// Viewport panel: the editor's 3D scene drawn as an ImGui Image. The image's
+// screen rect (set each frame by draw_viewport_window) is what window_to_vid
+// maps mouse coords into; s_viewport_hovered exempts it from WantCaptureMouse.
+extern void *VID_EditorSceneTexture(void);
+static float s_viewport_rect[4] = { 0, 0, 0, 0 };  // x, y, w, h (screen px)
+static int   s_viewport_valid   = 0;
+static int   s_viewport_hovered = 0;
+
 // Convert a window-coord SDL mouse event into vid-space coords.
 static void window_to_vid(float wx, float wy, float *vx, float *vy)
 {
@@ -2860,6 +2868,37 @@ int Editor_ParticlePreviewState(void)
     return s_particle_paused ? 2 : 1;
 }
 
+static void draw_viewport_window(void)
+{
+    if (!IG_Begin("Viewport", NULL, IG_WF_NoScrollbar | IG_WF_NoScrollWithMouse)) {
+        s_viewport_valid = 0;
+        IG_End();
+        return;
+    }
+    void *tex = VID_EditorSceneTexture();
+    float availw = 0, availh = 0;
+    IG_GetContentRegionAvail(&availw, &availh);
+    if (tex && availw > 1.0f && availh > 1.0f) {
+        float aspect = (float)vid.width / (float)vid.height;
+        float iw = availw, ih = availw / aspect;
+        if (ih > availh) { ih = availh; iw = availh * aspect; }
+        float bx = 0, by = 0;
+        IG_GetCursorScreenPos(&bx, &by);
+        float ox = (availw - iw) * 0.5f, oy = (availh - ih) * 0.5f;
+        IG_SetCursorScreenPos(bx + ox, by + oy);
+        IG_Image(tex, iw, ih);
+        s_viewport_rect[0] = bx + ox; s_viewport_rect[1] = by + oy;
+        s_viewport_rect[2] = iw;      s_viewport_rect[3] = ih;
+        s_viewport_valid   = 1;
+        s_viewport_hovered = (IG_IsItemHovered() || IG_IsWindowHovered());
+    } else {
+        IG_TextUnformatted("(no scene)");
+        s_viewport_valid   = 0;
+        s_viewport_hovered = 0;
+    }
+    IG_End();
+}
+
 // ---- public engine-boundary dispatchers ---------------------------------
 void Editor_DrawUI(void)
 {
@@ -2879,6 +2918,8 @@ void Editor_DrawUI(void)
         }
     }
     IG_End();
+
+    draw_viewport_window();
 
     if (m->draw_ui) m->draw_ui();
 }

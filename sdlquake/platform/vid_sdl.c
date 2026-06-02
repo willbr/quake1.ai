@@ -101,6 +101,9 @@ static SDL_GPUTransferBuffer   *gpu_palette_xfer  = NULL; // 256 * N * 4 bytes
 static int                      gpu_fb_tex_w      = 0;
 static int                      gpu_fb_tex_h      = 0;
 static int                      gpu_lut_dirty     = 1;
+static SDL_GPUTexture          *gpu_scene_tex     = NULL;
+static int                      gpu_scene_w       = 0;
+static int                      gpu_scene_h       = 0;
 static SDL_GPUTextureFormat     gpu_swapchain_format = SDL_GPU_TEXTUREFORMAT_INVALID;
 
 // VID_RequestGPUScreenshot sets the pending flag; the actual download happens
@@ -301,6 +304,30 @@ static void gpu_create_frame_textures(int w, int h) {
     gpu_fb_tex_h = h;
 }
 
+// Offscreen colour target the editor's Viewport panel samples. Same format as
+// the swapchain so the palette pipeline (built for gpu_swapchain_format) can
+// render into it; COLOR_TARGET so it's a render target, SAMPLER so ImGui can
+// Image() it.
+static void gpu_ensure_scene_tex(int w, int h) {
+    if (gpu_scene_tex && w == gpu_scene_w && h == gpu_scene_h) return;
+    if (gpu_scene_tex) SDL_ReleaseGPUTexture(gpu_device, gpu_scene_tex);
+    SDL_GPUTextureCreateInfo ti = {0};
+    ti.type                 = SDL_GPU_TEXTURETYPE_2D;
+    ti.format               = gpu_swapchain_format;
+    ti.usage                = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    ti.width                = (Uint32)w;
+    ti.height               = (Uint32)h;
+    ti.layer_count_or_depth = 1;
+    ti.num_levels           = 1;
+    ti.sample_count         = SDL_GPU_SAMPLECOUNT_1;
+    gpu_scene_tex = SDL_CreateGPUTexture(gpu_device, &ti);
+    gpu_scene_w = w;
+    gpu_scene_h = h;
+}
+
+// ImTextureID for the editor Viewport panel (NULL when not yet rendered).
+void *VID_EditorSceneTexture(void) { return (void *)gpu_scene_tex; }
+
 static int gpu_init(SDL_Window *win) {
     SDL_GPUShaderFormat fmts = SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL;
     gpu_device = SDL_CreateGPUDevice(fmts, false, NULL);
@@ -480,6 +507,7 @@ static void gpu_shutdown(void) {
 // Forward decls — implemented in imgui_layer.c via imgui_bridge.cpp.
 extern void ImguiLayer_PrepareGPU(SDL_GPUCommandBuffer *cmd);
 extern void ImguiLayer_RenderGPU (SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *pass);
+extern int Editor_IsOpen(void);
 
 static void gpu_render_frame(void) {
     // GPU texture is sized to the *super* buffer dims (the actual extent the
@@ -534,6 +562,31 @@ static void gpu_render_frame(void) {
     SDL_EndGPUCopyPass(copy);
     Perf_PopScope();
 
+    int editor_open = Editor_IsOpen();
+    if (editor_open) {
+        gpu_ensure_scene_tex(vid_render_w, vid_render_h);
+        SDL_GPUColorTargetInfo sct = {0};
+        sct.texture  = gpu_scene_tex;
+        sct.load_op  = SDL_GPU_LOADOP_CLEAR;
+        sct.store_op = SDL_GPU_STOREOP_STORE;
+        sct.clear_color.a = 1.0f;
+        SDL_GPURenderPass *spass = SDL_BeginGPURenderPass(cmd, &sct, 1, NULL);
+        SDL_BindGPUGraphicsPipeline(spass, gpu_pipeline);
+        SDL_GPUViewport svp = {0};
+        svp.w = (float)vid_render_w; svp.h = (float)vid_render_h; svp.max_depth = 1.0f;
+        SDL_SetGPUViewport(spass, &svp);
+        SDL_GPUTextureSamplerBinding sb[3];
+        sb[0].texture = gpu_fb_tex;         sb[0].sampler = gpu_sampler;
+        sb[1].texture = gpu_palette_id_tex; sb[1].sampler = gpu_sampler;
+        sb[2].texture = gpu_palette_tex;    sb[2].sampler = gpu_sampler;
+        SDL_BindGPUFragmentSamplers(spass, 0, sb, 3);
+        struct { float intensity, size, supersample, pad1; } sp =
+            { 0.0f, 1.0f, (float)vid_supersample_active, 0.0f };   // no scanlines in the editor
+        SDL_PushGPUFragmentUniformData(cmd, 0, &sp, sizeof(sp));
+        SDL_DrawGPUPrimitives(spass, 3, 1, 0, 0);
+        SDL_EndGPURenderPass(spass);
+    }
+
     ImguiLayer_PrepareGPU(cmd);
 
     Perf_PushScope("gpu_present");
@@ -570,82 +623,84 @@ static void gpu_render_frame(void) {
     color_target.clear_color.a = 1.0f;
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
 
-    SDL_BindGPUGraphicsPipeline(pass, gpu_pipeline);
+    if (!editor_open) {
+        SDL_BindGPUGraphicsPipeline(pass, gpu_pipeline);
 
-    // Integer-scale aspect-preserving letterbox. Matches the prior
-    // SDL_RenderLogicalPresentation INTEGER_SCALE behaviour.
-    int int_scale = (int)(swap_w / (Uint32)vid_render_w);
-    int sy        = (int)(swap_h / (Uint32)vid_render_h);
-    if (sy < int_scale) int_scale = sy;
-    if (int_scale < 1)  int_scale = 1;
-    int vp_w = vid_render_w * int_scale;
-    int vp_h = vid_render_h * int_scale;
-    SDL_GPUViewport vp = {0};
-    vp.x = (float)(((int)swap_w - vp_w) / 2);
-    vp.y = (float)(((int)swap_h - vp_h) / 2);
-    vp.w = (float)vp_w;
-    vp.h = (float)vp_h;
-    vp.max_depth = 1.0f;
-    SDL_SetGPUViewport(pass, &vp);
+        // Integer-scale aspect-preserving letterbox. Matches the prior
+        // SDL_RenderLogicalPresentation INTEGER_SCALE behaviour.
+        int int_scale = (int)(swap_w / (Uint32)vid_render_w);
+        int sy        = (int)(swap_h / (Uint32)vid_render_h);
+        if (sy < int_scale) int_scale = sy;
+        if (int_scale < 1)  int_scale = 1;
+        int vp_w = vid_render_w * int_scale;
+        int vp_h = vid_render_h * int_scale;
+        SDL_GPUViewport vp = {0};
+        vp.x = (float)(((int)swap_w - vp_w) / 2);
+        vp.y = (float)(((int)swap_h - vp_h) / 2);
+        vp.w = (float)vp_w;
+        vp.h = (float)vp_h;
+        vp.max_depth = 1.0f;
+        SDL_SetGPUViewport(pass, &vp);
 
-    SDL_GPUTextureSamplerBinding bindings[3];
-    bindings[0].texture = gpu_fb_tex;         bindings[0].sampler = gpu_sampler;
-    bindings[1].texture = gpu_palette_id_tex; bindings[1].sampler = gpu_sampler;
-    bindings[2].texture = gpu_palette_tex;    bindings[2].sampler = gpu_sampler;
-    SDL_BindGPUFragmentSamplers(pass, 0, bindings, 3);
+        SDL_GPUTextureSamplerBinding bindings[3];
+        bindings[0].texture = gpu_fb_tex;         bindings[0].sampler = gpu_sampler;
+        bindings[1].texture = gpu_palette_id_tex; bindings[1].sampler = gpu_sampler;
+        bindings[2].texture = gpu_palette_tex;    bindings[2].sampler = gpu_sampler;
+        SDL_BindGPUFragmentSamplers(pass, 0, bindings, 3);
 
-    // Fragment params: scanline overlay + supersample factor. Layout matches
-    // the std140 UBO in palette.frag.glsl (four floats = 16 bytes). The shader
-    // averages each ss×ss block of expanded texels down to one render texel, so
-    // it needs the live ss to know the block size (ss=1 → single fetch).
-    struct { float intensity, size, supersample, pad1; } scan_params;
-    float intensity = vid_scanline_intensity.value;
-    float size      = vid_scanline_size.value;
-    if (vid_scanlines.value == 0.0f) intensity = 0.0f;
-    if (intensity < 0.0f) intensity = 0.0f;
-    if (intensity > 1.0f) intensity = 1.0f;
-    if (size < 1.0f) size = 1.0f;
-    if (size > 8.0f) size = 8.0f;
-    scan_params.intensity   = intensity;
-    scan_params.size        = size;
-    scan_params.supersample = (float)vid_supersample_active;
-    scan_params.pad1        = 0.0f;
-    SDL_PushGPUFragmentUniformData(cmd, 0, &scan_params, sizeof(scan_params));
+        // Fragment params: scanline overlay + supersample factor. Layout matches
+        // the std140 UBO in palette.frag.glsl (four floats = 16 bytes). The shader
+        // averages each ss×ss block of expanded texels down to one render texel, so
+        // it needs the live ss to know the block size (ss=1 → single fetch).
+        struct { float intensity, size, supersample, pad1; } scan_params;
+        float intensity = vid_scanline_intensity.value;
+        float size      = vid_scanline_size.value;
+        if (vid_scanlines.value == 0.0f) intensity = 0.0f;
+        if (intensity < 0.0f) intensity = 0.0f;
+        if (intensity > 1.0f) intensity = 1.0f;
+        if (size < 1.0f) size = 1.0f;
+        if (size > 8.0f) size = 8.0f;
+        scan_params.intensity   = intensity;
+        scan_params.size        = size;
+        scan_params.supersample = (float)vid_supersample_active;
+        scan_params.pad1        = 0.0f;
+        SDL_PushGPUFragmentUniformData(cmd, 0, &scan_params, sizeof(scan_params));
 
-    SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-
-    // Crop-screenshot selection overlay: draws after the palette pass and
-    // before ImGui, so it overlays the framebuffer but the dev overlay still
-    // sits on top.
-    if (Crop_Active()) {
-        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-        Crop_GetRect(&x0, &y0, &x1, &y1);
-        // Rect is in super-pixel space; map super → viewport-local swapchain
-        // pixels. The palette pass already scaled (vid_super_w × vid_super_h)
-        // into (vp_w × vp_h), so use that ratio.
-        float sx = (float)vp_w / (float)vid_super_w;
-        float sy = (float)vp_h / (float)vid_super_h;
-        struct {
-            float rect[4];      // x0, y0, x1_excl, y1_excl
-            float viewport[4];  // origin_x, origin_y, w, h (swap-pixels)
-            float border_w;
-            float dim_alpha;
-            float pad0, pad1;
-        } rp;
-        rp.rect[0] = (float)x0       * sx;
-        rp.rect[1] = (float)y0       * sy;
-        rp.rect[2] = (float)(x1 + 1) * sx;
-        rp.rect[3] = (float)(y1 + 1) * sy;
-        rp.viewport[0] = vp.x;
-        rp.viewport[1] = vp.y;
-        rp.viewport[2] = vp.w;
-        rp.viewport[3] = vp.h;
-        rp.border_w  = (float)int_scale;  // one logical pixel
-        rp.dim_alpha = 0.5f;
-        rp.pad0 = rp.pad1 = 0.0f;
-        SDL_BindGPUGraphicsPipeline(pass, gpu_rect_pipeline);
-        SDL_PushGPUFragmentUniformData(cmd, 0, &rp, sizeof(rp));
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+
+        // Crop-screenshot selection overlay: draws after the palette pass and
+        // before ImGui, so it overlays the framebuffer but the dev overlay still
+        // sits on top.
+        if (Crop_Active()) {
+            int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            Crop_GetRect(&x0, &y0, &x1, &y1);
+            // Rect is in super-pixel space; map super → viewport-local swapchain
+            // pixels. The palette pass already scaled (vid_super_w × vid_super_h)
+            // into (vp_w × vp_h), so use that ratio.
+            float sx = (float)vp_w / (float)vid_super_w;
+            float sy = (float)vp_h / (float)vid_super_h;
+            struct {
+                float rect[4];      // x0, y0, x1_excl, y1_excl
+                float viewport[4];  // origin_x, origin_y, w, h (swap-pixels)
+                float border_w;
+                float dim_alpha;
+                float pad0, pad1;
+            } rp;
+            rp.rect[0] = (float)x0       * sx;
+            rp.rect[1] = (float)y0       * sy;
+            rp.rect[2] = (float)(x1 + 1) * sx;
+            rp.rect[3] = (float)(y1 + 1) * sy;
+            rp.viewport[0] = vp.x;
+            rp.viewport[1] = vp.y;
+            rp.viewport[2] = vp.w;
+            rp.viewport[3] = vp.h;
+            rp.border_w  = (float)int_scale;  // one logical pixel
+            rp.dim_alpha = 0.5f;
+            rp.pad0 = rp.pad1 = 0.0f;
+            SDL_BindGPUGraphicsPipeline(pass, gpu_rect_pipeline);
+            SDL_PushGPUFragmentUniformData(cmd, 0, &rp, sizeof(rp));
+            SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+        }
     }
 
     ImguiLayer_RenderGPU(cmd, pass);
