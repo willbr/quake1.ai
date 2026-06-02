@@ -212,6 +212,34 @@ static void edit_bind (int mi, int joint)
     }
 }
 
+static int joint_in_subtree (lm_iqm_t *m, int d, int root)
+{
+    int guard = 0;
+    while (d >= 0 && guard++ < 256) { if (d == root) return 1; d = m->joints[d].parent; }
+    return 0;
+}
+
+// Move a joint with **move-the-whole-assembly** semantics (vs re-pivot): the
+// joint, the part(s) bound to it, and its whole subtree shift by `delta`. We move
+// the subtree's *vertices* AND the joint's bind+anim translate together, so the
+// skin matrix (curwld . bindinv) stays clean (moving only the joint cancels out —
+// that was the no-op). To switch to re-pivot semantics later, move just the bind
+// translate and counter-rotate the children — a different op.
+static void edit_joint_move (int J, const vec3_t delta)
+{
+    int v, fr, c, nj;
+    if (!s_editmode || !s_orig || !s_edit) return;
+    if (J < 0 || J >= s_orig->numjoints) return;
+    nj = s_orig->numjoints;
+    for (v = 0; v < s_orig->numverts; v++)
+        if (joint_in_subtree (s_orig, s_orig->verts[v].bone, J))
+            for (c = 0; c < 3; c++) s_orig->verts[v].pos[c] += delta[c];
+    for (c = 0; c < 3; c++) { s_orig->joints[J].translate[c]+=delta[c]; s_edit->joints[J].translate[c]+=delta[c]; }
+    if (s_orig->frametrs) for (fr=0; fr<s_orig->numframes; fr++) for (c=0;c<3;c++) s_orig->frametrs[((size_t)fr*nj+J)*10+c]+=delta[c];
+    if (s_edit->frametrs) for (fr=0; fr<s_edit->numframes; fr++) for (c=0;c<3;c++) s_edit->frametrs[((size_t)fr*nj+J)*10+c]+=delta[c];
+    edit_rebuild ();   // propagate the s_orig vertex move into the rendered copy
+}
+
 static void edit_save (void)
 {
     void *buf = NULL; size_t len = 0;
@@ -348,6 +376,23 @@ static void actor_draw_ui (void)
         edit_rebuild ();   // apply numeric edits to the rendered copy each frame
 
         IG_Separator ();
+        if (IG_CollapsingHeader ("Joints (move = joint + its subtree)", 0)) {
+            static int   s_seljoint = 0;
+            static float s_jnudge[3] = { 0, 0, 0 };
+            int j;
+            if (s_seljoint >= s_orig->numjoints) s_seljoint = 0;
+            for (j = 0; j < s_orig->numjoints; j++) {
+                IG_PushID_Int (2000 + j);
+                if (IG_Selectable (s_orig->joints[j].name, j == s_seljoint, 0)) s_seljoint = j;
+                IG_PopID ();
+            }
+            if (IG_DragFloat3 ("move joint", s_jnudge, 0.5f)) {  // incremental nudge
+                edit_joint_move (s_seljoint, s_jnudge);
+                s_jnudge[0]=s_jnudge[1]=s_jnudge[2]=0.0f;
+            }
+        }
+
+        IG_Separator ();
         IG_SetNextItemWidth (175);
         IG_InputText ("##savepath", s_savepath, sizeof(s_savepath), 0);
         IG_SameLine (0, -1);
@@ -398,6 +443,17 @@ static void Cmd_ActorEditRot_f (void)
     s_vrot[mi][0]=Q_atof(Cmd_Argv(2)); s_vrot[mi][1]=Q_atof(Cmd_Argv(3)); s_vrot[mi][2]=Q_atof(Cmd_Argv(4));
     edit_rebuild ();
 }
+static void Cmd_ActorEditJMove_f (void)
+{
+    vec3_t d; int j;
+    if (Cmd_Argc () < 5) { Con_Printf ("usage: actor_edit_jmove <joint> <dx> <dy> <dz>\n"); return; }
+    if (!s_editmode || !s_orig) { Con_Printf ("not editing (actor_edit 1 first)\n"); return; }
+    j = Q_atoi (Cmd_Argv (1));
+    if (j < 0 || j >= s_orig->numjoints) { Con_Printf ("bad joint index\n"); return; }
+    d[0]=Q_atof(Cmd_Argv(2)); d[1]=Q_atof(Cmd_Argv(3)); d[2]=Q_atof(Cmd_Argv(4));
+    edit_joint_move (j, d);
+    Con_Printf ("actor edit: moved joint %d (%s) + its subtree\n", j, s_orig->joints[j].name);
+}
 static void Cmd_ActorEditBind_f (void)
 {
     int mi;
@@ -432,6 +488,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_scale", Cmd_ActorEditScale_f);
     Cmd_AddCommand ("actor_edit_rot",   Cmd_ActorEditRot_f);
     Cmd_AddCommand ("actor_edit_bind",  Cmd_ActorEditBind_f);
+    Cmd_AddCommand ("actor_edit_jmove", Cmd_ActorEditJMove_f);
     Cmd_AddCommand ("actor_edit_add",   Cmd_ActorEditAdd_f);
     Cmd_AddCommand ("actor_edit_del",   Cmd_ActorEditDel_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
