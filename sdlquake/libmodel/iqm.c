@@ -127,6 +127,17 @@ lm_result_t lm_load_iqm(const void *vbuf, size_t len,
         for (j = 0; j < 4; j++) m->joints[i].rotate[j]    = rdf(jo+20 + j*4);
         for (j = 0; j < 3; j++) m->joints[i].scale[j]     = rdf(jo+36 + j*4);
     }
+
+    /* ---- resolve role joints by name convention (R3) ---- */
+    m->head_joint = m->chest_joint = m->jaw_joint = -1;
+    m->num_eye = 0;
+    for (i = 0; i < (int)num_joint; i++){
+        const char *nm = m->joints[i].name;
+        if (m->head_joint  < 0 && strstr(nm, "head"))  m->head_joint  = i;
+        if (m->chest_joint < 0 && strstr(nm, "chest")) m->chest_joint = i;
+        if (m->jaw_joint   < 0 && strstr(nm, "jaw"))   m->jaw_joint   = i;
+        if (strstr(nm, "eye") && m->num_eye < 4)       m->eye_joint[m->num_eye++] = i;
+    }
     for (i = 0; i < (int)num_vert; i++){
         const unsigned char *pp = b + ofs_pos + i*12;
         m->verts[i].pos[0] = rdf(pp); m->verts[i].pos[1] = rdf(pp+4); m->verts[i].pos[2] = rdf(pp+8);

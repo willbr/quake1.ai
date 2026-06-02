@@ -43,6 +43,13 @@ typedef struct lm_iqm_s {
     int             numframes;
     float           framerate;
     float          *frametrs;
+    /* role joints (R3), resolved by name convention at load; -1 / 0 = absent.
+       head/chest/jaw match a substring; eyes match the "eye" prefix. */
+    int             head_joint;
+    int             chest_joint;
+    int             jaw_joint;     /* resolved for forward-compat; unused until lipsync */
+    int             eye_joint[4];
+    int             num_eye;
     qalloc_t        alloc;
 } lm_iqm_t;
 

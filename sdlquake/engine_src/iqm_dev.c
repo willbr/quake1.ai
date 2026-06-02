@@ -36,6 +36,8 @@ static void Actor_Dump_f (void)
 		iqm->maxs[0], iqm->maxs[1], iqm->maxs[2]);
 	Con_Printf ("  anim: %d frames @ %g fps%s\n",
 		iqm->numframes, iqm->framerate, iqm->frametrs ? "" : " (static)");
+	Con_Printf ("  roles: head %d  chest %d  jaw %d  eyes %d\n",
+		iqm->head_joint, iqm->chest_joint, iqm->jaw_joint, iqm->num_eye);
 	for (i = 0; i < iqm->numjoints; i++)
 		Con_Printf ("  joint %d '%s' parent %d  t(%g %g %g)\n", i,
 			iqm->joints[i].name, iqm->joints[i].parent,
