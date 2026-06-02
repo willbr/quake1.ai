@@ -173,12 +173,9 @@ static void draw_hud_section(void)
 
 void DebugPanel_Draw(int x, int y, int w, int h)
 {
-    // Initial rect comes from imgui_layer.c's responsive grid; FirstUseEver
-    // means the user can drag and resize freely (and ImGui remembers it
-    // across frames). The Smoke section pushed content past the default
-    // bottom-right slot, so users need to be able to grow the panel.
-    IG_SetNextWindowPos ((float)x, (float)y, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize((float)w, (float)h, IG_Cond_FirstUseEver);
+    // Docked into the F3 dev-overlay's bottom strip; position comes from the
+    // shared dock layout now, not the responsive grid.
+    (void)x; (void)y; (void)w; (void)h;
     if (!IG_Begin("Debug Render", NULL, IG_WF_None)) { IG_End(); return; }
 
     draw_ai_section();

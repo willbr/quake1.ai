@@ -484,8 +484,6 @@ static const char *ai_state_name(int s) {
 static void draw_ai(void)
 {
     if (!imgui_ai_panel_open) return;
-    IG_SetNextWindowPos ((float)s_ai.x, (float)s_ai.y, IG_Cond_Always);
-    IG_SetNextWindowSize((float)s_ai.w, (float)s_ai.h, IG_Cond_Always);
     if (!IG_Begin("AI", &imgui_ai_panel_open, IG_WF_None)) { IG_End(); return; }
 
     int n = ImguiSupport_AI_Count();
@@ -570,8 +568,6 @@ static void draw_cvars(void)
     char value_buf[128];
     char id_buf[144];
 
-    IG_SetNextWindowPos ((float)s_cvars.x, (float)s_cvars.y, IG_Cond_Always);
-    IG_SetNextWindowSize((float)s_cvars.w, (float)s_cvars.h, IG_Cond_Always);
     if (!IG_Begin("Cvars", NULL, IG_WF_None)) { IG_End(); return; }
 
     IG_SetNextItemWidth(200);
@@ -634,8 +630,6 @@ static void draw_console(void)
     static char input_buf[256];
     static int  reclaim_focus = 0;
 
-    IG_SetNextWindowPos ((float)s_console.x, (float)s_console.y, IG_Cond_Always);
-    IG_SetNextWindowSize((float)s_console.w, (float)s_console.h, IG_Cond_Always);
     if (!IG_Begin("Console", NULL, IG_WF_None)) { IG_End(); return; }
 
     /* Checkbox pinned above the scroll region. */
@@ -686,8 +680,6 @@ static void draw_entities(void)
     char buf[64];
     int n = ImguiSupport_GetNumEdicts();
 
-    IG_SetNextWindowPos ((float)s_entities.x, (float)s_entities.y, IG_Cond_Always);
-    IG_SetNextWindowSize((float)s_entities.w, (float)s_entities.h, IG_Cond_Always);
     if (!IG_Begin("Entities", NULL, IG_WF_None)) { IG_End(); return; }
 
     snprintf(buf, sizeof(buf), "%d edicts", n);
@@ -830,6 +822,7 @@ void ImguiLayer_PrepareGPU(SDL_GPUCommandBuffer *cmd)
         }
         else
         {
+            IG_HostDockSpace();   // dev panels dock into the shared layout
             compute_layout();
             draw_fps();
             draw_ai();

@@ -347,7 +347,8 @@ static void ig_build_default_layout(ImGuiID dockspace_id)
     ImGuiID centre = dockspace_id;
     ImGuiID top   = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Up,    0.16f, NULL, &centre);
     ImGuiID left  = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Left,  0.20f, NULL, &centre);
-    ImGuiID right = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.28f, NULL, &centre);
+    ImGuiID right  = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.28f, NULL, &centre);
+    ImGuiID bottom = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Down,  0.26f, NULL, &centre);
 
     ImGui::DockBuilderDockWindow("Editor",             top);
     ImGui::DockBuilderDockWindow("Editor Mode",        top);
@@ -357,6 +358,12 @@ static void ig_build_default_layout(ImGuiID dockspace_id)
     ImGui::DockBuilderDockWindow("Inspector",          right);
     ImGui::DockBuilderDockWindow("Particle Inspector", right);
     ImGui::DockBuilderDockWindow("Viewport",           centre);
+    // F3 dev-overlay panels share a bottom strip (the editor never submits them).
+    ImGui::DockBuilderDockWindow("Console",            bottom);
+    ImGui::DockBuilderDockWindow("Cvars",              bottom);
+    ImGui::DockBuilderDockWindow("Entities",           bottom);
+    ImGui::DockBuilderDockWindow("AI",                 bottom);
+    ImGui::DockBuilderDockWindow("Debug Render",       bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }
