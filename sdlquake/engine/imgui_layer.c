@@ -809,6 +809,7 @@ void ImguiLayer_PrepareGPU(SDL_GPUCommandBuffer *cmd)
     {
         extern int  Editor_IsOpen(void);
         extern void Editor_DrawUI(void);
+        extern void Editor_DrawViewport(void);
         if (perf_only)
         {
             compute_layout();
@@ -823,6 +824,7 @@ void ImguiLayer_PrepareGPU(SDL_GPUCommandBuffer *cmd)
         else
         {
             IG_HostDockSpace();   // dev panels dock into the shared layout
+            Editor_DrawViewport();   // the game as a Viewport panel (centre)
             compute_layout();
             draw_fps();
             draw_ai();

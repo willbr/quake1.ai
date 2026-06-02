@@ -508,6 +508,7 @@ static void gpu_shutdown(void) {
 extern void ImguiLayer_PrepareGPU(SDL_GPUCommandBuffer *cmd);
 extern void ImguiLayer_RenderGPU (SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *pass);
 extern int Editor_IsOpen(void);
+extern int ImguiLayer_IsOpen(void);
 
 static void gpu_render_frame(void) {
     // GPU texture is sized to the *super* buffer dims (the actual extent the
@@ -562,8 +563,10 @@ static void gpu_render_frame(void) {
     SDL_EndGPUCopyPass(copy);
     Perf_PopScope();
 
-    int editor_open = Editor_IsOpen();
-    if (editor_open) {
+    // Scene goes into the editor's Viewport panel whenever the docked overlay
+    // is up — the in-game editor OR the F3 dev overlay.
+    int scene_in_panel = Editor_IsOpen() || ImguiLayer_IsOpen();
+    if (scene_in_panel) {
         gpu_ensure_scene_tex(vid_render_w, vid_render_h);
         SDL_GPUColorTargetInfo sct = {0};
         sct.texture  = gpu_scene_tex;
@@ -623,7 +626,7 @@ static void gpu_render_frame(void) {
     color_target.clear_color.a = 1.0f;
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
 
-    if (!editor_open) {
+    if (!scene_in_panel) {
         SDL_BindGPUGraphicsPipeline(pass, gpu_pipeline);
 
         // Integer-scale aspect-preserving letterbox. Matches the prior

@@ -2878,7 +2878,9 @@ int Editor_ParticlePreviewState(void)
     return s_particle_paused ? 2 : 1;
 }
 
-static void draw_viewport_window(void)
+// The editor's 3D scene as a dockable Viewport panel (`VID_EditorSceneTexture`).
+// Public so the F3 dev overlay can show the game in the same panel.
+void Editor_DrawViewport(void)
 {
     if (!IG_Begin("Viewport", NULL, IG_WF_NoScrollbar | IG_WF_NoScrollWithMouse)) {
         s_viewport_valid = 0;
@@ -2929,7 +2931,7 @@ void Editor_DrawUI(void)
     }
     IG_End();
 
-    draw_viewport_window();
+    Editor_DrawViewport();
 
     if (m->draw_ui) m->draw_ui();
 }
