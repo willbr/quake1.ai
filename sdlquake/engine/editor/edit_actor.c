@@ -49,6 +49,9 @@ static int        s_animclip;                       // clip being authored
 static int        s_animframe;                      // current ABSOLUTE frame into frametrs
 static float      s_poseeul[3];                      // pose-edit buffer (euler rot)
 static float      s_posetr[3];                       // pose-edit buffer (translate)
+static float      s_clipeul[3], s_cliptr[3];         // pose clipboard (copy/paste keys)
+static int        s_clipvalid;
+static int        s_ease;                            // 0 = linear, 1 = ease-in/out (smoothstep)
 
 static void TX (const char *fmt, ...)             // formatted ImGui text helper
 {
@@ -331,6 +334,7 @@ static void e2_bake_joint (int j)
         if (A && B && B->frame > A->frame) {
             float u = (float)(f - A->frame) / (float)(B->frame - A->frame);
             float qa[4], qb[4];
+            if (s_ease) u = u*u*(3.0f - 2.0f*u);        // smoothstep ease-in/out
             e2_eul2quat (A->eul, qa); e2_eul2quat (B->eul, qb);
             e2_slerp (qa, qb, u, q);
             for (c=0;c<3;c++) tr[c]=A->tr[c]+(B->tr[c]-A->tr[c])*u;
@@ -370,6 +374,22 @@ static void e2_unkey (int j)
             for (; i+1 < n; i++) s_jkeys[j][i] = s_jkeys[j][i+1];
             s_jkeycnt[j] = n - 1; break;
         }
+}
+static void e2_copykey (int j)   // copy joint j's pose at the current frame
+{
+    int k;
+    if (!s_editmode || j < 0 || j >= MAXEDITMESH) return;
+    for (k = 0; k < s_jkeycnt[j]; k++)
+        if (s_jkeys[j][k].frame == s_animframe) {
+            VectorCopy (s_jkeys[j][k].eul, s_clipeul); VectorCopy (s_jkeys[j][k].tr, s_cliptr);
+            s_clipvalid = 1; return;
+        }
+    VectorCopy (s_poseeul, s_clipeul); VectorCopy (s_posetr, s_cliptr);  // else copy the edit buffer
+    s_clipvalid = 1;
+}
+static void e2_pastekey (int j)  // paste the clipboard pose as a key at the current frame
+{
+    if (s_clipvalid) e2_setkey (j, s_clipeul, s_cliptr);
 }
 
 static void edit_add_clip (int nframes, float fps)
@@ -582,6 +602,10 @@ static void actor_draw_ui (void)
             if (IG_Button ("Del key"))  e2_unkey (s_seljoint);
             IG_SameLine (0, -1);
             if (IG_Button ("Bake"))     { int jj; for (jj=0; jj<s_edit->numjoints && jj<MAXEDITMESH; jj++) e2_bake_joint (jj); }
+            if (IG_Button ("Copy"))  e2_copykey (s_seljoint);
+            IG_SameLine (0, -1);
+            if (IG_Button ("Paste")) e2_pastekey (s_seljoint);
+            if (IG_Checkbox ("ease in/out", &s_ease)) { int jj; for (jj=0; jj<s_edit->numjoints && jj<MAXEDITMESH; jj++) e2_bake_joint (jj); }
             IG_TextUnformatted ("(pick joint above; scrub frame; type rot/trans; Set key)");
         }
 
@@ -700,6 +724,16 @@ static void Cmd_ActorAnimBake_f (void)
     for (j = 0; j < s_edit->numjoints && j < MAXEDITMESH; j++) e2_bake_joint (j);
     Con_Printf ("actor anim: baked clip %d\n", s_animclip);
 }
+static void Cmd_ActorAnimCopy_f (void)
+{
+    if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_anim_copy <joint>\n"); return; }
+    e2_copykey (Q_atoi (Cmd_Argv (1)));
+}
+static void Cmd_ActorAnimPaste_f (void)
+{
+    if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_anim_paste <joint>\n"); return; }
+    e2_pastekey (Q_atoi (Cmd_Argv (1)));
+}
 static void Cmd_ActorEditJAdd_f (void)
 {
     vec3_t t = { 0, 0, 16 }; int parent;
@@ -763,6 +797,8 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_anim_key",   Cmd_ActorAnimKey_f);
     Cmd_AddCommand ("actor_anim_unkey", Cmd_ActorAnimUnkey_f);
     Cmd_AddCommand ("actor_anim_bake",  Cmd_ActorAnimBake_f);
+    Cmd_AddCommand ("actor_anim_copy",  Cmd_ActorAnimCopy_f);
+    Cmd_AddCommand ("actor_anim_paste", Cmd_ActorAnimPaste_f);
     Cmd_AddCommand ("actor_edit_add",   Cmd_ActorEditAdd_f);
     Cmd_AddCommand ("actor_edit_del",   Cmd_ActorEditDel_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
