@@ -867,6 +867,26 @@ void R_AliasDrawModel (alight_t *plighting)
 }
 
 
+// R3 procedural-face cvars (head look-at, eye gaze, breathing). Registered from R_Init.
+cvar_t	actor_lookat       = {"actor_lookat",       "1"};
+cvar_t	actor_gaze_yaw     = {"actor_gaze_yaw",     "50"};   // head yaw clamp (deg)
+cvar_t	actor_gaze_pitch   = {"actor_gaze_pitch",   "30"};   // head pitch clamp (deg)
+cvar_t	actor_eye_yaw      = {"actor_eye_yaw",      "25"};   // eye yaw clamp (deg)
+cvar_t	actor_eye_pitch    = {"actor_eye_pitch",    "20"};   // eye pitch clamp (deg)
+cvar_t	actor_breathe_rate = {"actor_breathe_rate", "0.25"}; // breaths/sec
+cvar_t	actor_breathe_amp  = {"actor_breathe_amp",  "0.04"}; // chest scale +/- fraction
+
+void R_IQMInitCvars (void)
+{
+	Cvar_RegisterVariable (&actor_lookat);
+	Cvar_RegisterVariable (&actor_gaze_yaw);
+	Cvar_RegisterVariable (&actor_gaze_pitch);
+	Cvar_RegisterVariable (&actor_eye_yaw);
+	Cvar_RegisterVariable (&actor_eye_pitch);
+	Cvar_RegisterVariable (&actor_breathe_rate);
+	Cvar_RegisterVariable (&actor_breathe_amp);
+}
+
 #define MAX_IQM_JOINTS 128
 
 // quaternion (x,y,z,w) -> 3x4 rotation (column-vector convention: out = M*p)
