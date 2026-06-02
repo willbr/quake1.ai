@@ -926,6 +926,68 @@ static void IQM_Invert34 (const float in[3][4], float out[3][4])
 	out[2][3]=-(out[2][0]*in[0][3] + out[2][1]*in[1][3] + out[2][2]*in[2][3]);
 }
 
+// Build a local 3x4 that aims the joint's +X axis at tgt_actor (actor space),
+// with yaw/pitch clamped (degrees). Keeps the joint's base translation (trs[0..2]);
+// replaces its rotation. parent = curwld[pp] (rotation assumed unit-scale, like
+// IQM_Invert34's caveat). pp < 0 means root.
+static void R_IQMLookAtLocal (const float *trs, int pp,
+		float curwld[][3][4], const vec3_t tgt_actor,
+		float maxyaw_deg, float maxpitch_deg, float local[3][4])
+{
+	vec3_t	org, dir, dirp;
+	float	yaw, pitch, hyp, c1, s1, c2, s2, maxyaw, maxpitch;
+
+	if (pp >= 0)
+	{
+		org[0] = DotProduct (trs, curwld[pp][0]) + curwld[pp][0][3];
+		org[1] = DotProduct (trs, curwld[pp][1]) + curwld[pp][1][3];
+		org[2] = DotProduct (trs, curwld[pp][2]) + curwld[pp][2][3];
+	}
+	else
+	{
+		org[0] = trs[0]; org[1] = trs[1]; org[2] = trs[2];
+	}
+
+	VectorSubtract (tgt_actor, org, dir);
+	if (pp >= 0)
+	{	// into parent space: dirp = Rot(curwld[pp])^T * dir
+		dirp[0] = dir[0]*curwld[pp][0][0] + dir[1]*curwld[pp][1][0] + dir[2]*curwld[pp][2][0];
+		dirp[1] = dir[0]*curwld[pp][0][1] + dir[1]*curwld[pp][1][1] + dir[2]*curwld[pp][2][1];
+		dirp[2] = dir[0]*curwld[pp][0][2] + dir[1]*curwld[pp][1][2] + dir[2]*curwld[pp][2][2];
+	}
+	else
+	{
+		VectorCopy (dir, dirp);
+	}
+
+	yaw   = atan2 (dirp[1], dirp[0]);
+	hyp   = sqrt (dirp[0]*dirp[0] + dirp[1]*dirp[1]);
+	pitch = atan2 (dirp[2], hyp);
+
+	maxyaw   = maxyaw_deg   * (M_PI / 180.0);
+	maxpitch = maxpitch_deg * (M_PI / 180.0);
+	if (yaw   >  maxyaw)   yaw   =  maxyaw;
+	if (yaw   < -maxyaw)   yaw   = -maxyaw;
+	if (pitch >  maxpitch) pitch =  maxpitch;
+	if (pitch < -maxpitch) pitch = -maxpitch;
+
+	c1 = cos (yaw);   s1 = sin (yaw);
+	c2 = cos (pitch); s2 = sin (pitch);
+	// M = Rz(yaw) * Ry(-pitch); maps +X -> (c1*c2, s1*c2, s2)
+	local[0][0] = c1*c2; local[0][1] = -s1; local[0][2] = -c1*s2; local[0][3] = trs[0];
+	local[1][0] = s1*c2; local[1][1] =  c1; local[1][2] = -s1*s2; local[1][3] = trs[1];
+	local[2][0] = s2;    local[2][1] =   0; local[2][2] =    c2;  local[2][3] = trs[2];
+}
+
+static int R_IQMJointIsEye (lm_iqm_t *iqm, int jj)
+{
+	int e;
+	for (e = 0; e < iqm->num_eye; e++)
+		if (iqm->eye_joint[e] == jj)
+			return 1;
+	return 0;
+}
+
 /*
 ================
 R_IQMSetUpTransform
@@ -990,6 +1052,8 @@ void R_IQMDrawModel (alight_t *plighting)
 	static float		curwld[MAX_IQM_JOINTS][3][4];
 	float				local[3][4], trs[10];
 	int					animated, jj, ff, pp, cc;
+	qboolean			lookat;
+	vec3_t				tgt_actor, delta;
 
 	r_amodels_drawn++;
 
@@ -1037,6 +1101,15 @@ void R_IQMDrawModel (alight_t *plighting)
 			IQM_Invert34 (bindwld[jj], bindinv[jj]);
 		}
 
+		// R3: player position (r_origin) expressed in actor space, for look-at.
+		// world->actor = Rot(entity)^T * (world - entity_origin); the entity
+		// rotation columns are (alias_forward, -alias_right, alias_up).
+		lookat = (actor_lookat.value != 0);
+		VectorSubtract (r_origin, currententity->origin, delta);
+		tgt_actor[0] =  DotProduct (delta, alias_forward);
+		tgt_actor[1] = -DotProduct (delta, alias_right);
+		tgt_actor[2] =  DotProduct (delta, alias_up);
+
 		ff = (int)(cl.time * iqm->framerate);
 		ff %= iqm->numframes;
 		if (ff < 0)
@@ -1047,8 +1120,14 @@ void R_IQMDrawModel (alight_t *plighting)
 			float *src = iqm->frametrs + ((size_t)ff * iqm->numjoints + jj) * 10;
 			for (cc = 0; cc < 10; cc++)
 				trs[cc] = src[cc];
-			IQM_LocalMat (trs, local);
 			pp = iqm->joints[jj].parent;
+
+			if (lookat && jj == iqm->head_joint)
+				R_IQMLookAtLocal (trs, pp, curwld, tgt_actor,
+					actor_gaze_yaw.value, actor_gaze_pitch.value, local);
+			else
+				IQM_LocalMat (trs, local);
+
 			if (pp >= 0)
 				R_ConcatTransforms (curwld[pp], local, curwld[jj]);
 			else
