@@ -171,6 +171,25 @@ static void edit_delete (int mi)
     edit_rebuild ();
 }
 
+static void edit_add_box (void)
+{
+    vec3_t c, h; int idx;
+    if (!s_editmode || !s_orig || !s_edit) return;
+    if (s_orig->nummeshes >= MAXEDITMESH) { Con_Printf ("actor edit: too many parts\n"); return; }
+    c[0] = (s_orig->mins[0]+s_orig->maxs[0])*0.5f;
+    c[1] = (s_orig->mins[1]+s_orig->maxs[1])*0.5f;
+    c[2] = (s_orig->mins[2]+s_orig->maxs[2])*0.5f;
+    h[0] = h[1] = h[2] = 8.0f;
+    idx = s_orig->nummeshes;
+    if (lm_iqm_add_box (s_orig, c, h, 0, "p_new") != LM_OK) return;
+    if (lm_iqm_add_box (s_edit, c, h, 0, "p_new") != LM_OK) return;
+    s_voff[idx][0]=s_voff[idx][1]=s_voff[idx][2]=0.0f;
+    s_vscale[idx][0]=s_vscale[idx][1]=s_vscale[idx][2]=1.0f;
+    s_vrot[idx][0]=s_vrot[idx][1]=s_vrot[idx][2]=0.0f;
+    s_selmesh = idx;
+    edit_rebuild ();
+}
+
 static void edit_save (void)
 {
     void *buf = NULL; size_t len = 0;
@@ -275,6 +294,7 @@ static void actor_draw_ui (void)
     {
         // ---- geometry editor (numeric fields) ----
         IG_Separator ();
+        if (IG_Button ("Add box")) edit_add_box ();
         IG_TextUnformatted ("Part (select to edit):");
         for (i = 0; i < s_orig->nummeshes && i < MAXEDITMESH; i++) {
             IG_PushID_Int (i);
@@ -348,6 +368,12 @@ static void Cmd_ActorEditRot_f (void)
     s_vrot[mi][0]=Q_atof(Cmd_Argv(2)); s_vrot[mi][1]=Q_atof(Cmd_Argv(3)); s_vrot[mi][2]=Q_atof(Cmd_Argv(4));
     edit_rebuild ();
 }
+static void Cmd_ActorEditAdd_f (void)
+{
+    if (!s_editmode) { Con_Printf ("not editing (actor_edit 1 first)\n"); return; }
+    edit_add_box ();
+    Con_Printf ("actor edit: added box; %d parts\n", s_orig ? s_orig->nummeshes : 0);
+}
 static void Cmd_ActorEditDel_f (void)
 {
     int mi;
@@ -368,6 +394,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_move",  Cmd_ActorEditMove_f);
     Cmd_AddCommand ("actor_edit_scale", Cmd_ActorEditScale_f);
     Cmd_AddCommand ("actor_edit_rot",   Cmd_ActorEditRot_f);
+    Cmd_AddCommand ("actor_edit_add",   Cmd_ActorEditAdd_f);
     Cmd_AddCommand ("actor_edit_del",   Cmd_ActorEditDel_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
 }

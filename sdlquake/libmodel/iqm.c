@@ -258,6 +258,45 @@ void lm_iqm_free(lm_iqm_t *m){
     QFREE(&a, m);
 }
 
+/* Append one axis-aligned box (8 verts, 12 tris, 1 mesh) bound to `joint` to an
+   lm_iqm_t, growing its arrays via the remembered allocator. Joints/animation are
+   untouched. Editor "add part" backend. */
+lm_result_t lm_iqm_add_box(lm_iqm_t *m, const float center[3], const float half[3],
+                           int joint, const char *material){
+    static const signed char C[8][3]={{-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},
+                                      {-1,-1,1},{1,-1,1},{1,1,1},{-1,1,1}};
+    static const unsigned char T[12][3]={{0,3,2},{0,2,1},{4,5,6},{4,6,7},{0,1,5},{0,5,4},
+                                        {2,3,7},{2,7,6},{1,2,6},{1,6,5},{0,4,7},{0,7,3}};
+    qalloc_t a; lm_iqm_vert_t *nv; unsigned *nt; lm_iqm_mesh_t *nm; int i; unsigned base, tbase;
+    if (!m) return LM_ERR_BAD_COUNT;
+    a = m->alloc;
+    base = (unsigned)m->numverts; tbase = (unsigned)m->numtris;
+    nv = QALLOC_ARR(&a, lm_iqm_vert_t, (size_t)m->numverts+8);
+    nt = QALLOC_ARR(&a, unsigned,      ((size_t)m->numtris+12)*3);
+    nm = QALLOC_ARR(&a, lm_iqm_mesh_t, (size_t)m->nummeshes+1);
+    if (!nv||!nt||!nm){ QFREE(&a,nv); QFREE(&a,nt); QFREE(&a,nm); return LM_ERR_OOM; }
+    memcpy(nv, m->verts, sizeof(lm_iqm_vert_t)*(size_t)m->numverts);
+    for (i=0;i<8;i++){
+        nv[base+i].pos[0]=center[0]+C[i][0]*half[0];
+        nv[base+i].pos[1]=center[1]+C[i][1]*half[1];
+        nv[base+i].pos[2]=center[2]+C[i][2]*half[2];
+        nv[base+i].st[0]=nv[base+i].st[1]=0.0f;
+        nv[base+i].bone=(unsigned char)joint;
+    }
+    memcpy(nt, m->tris, sizeof(unsigned)*(size_t)m->numtris*3);
+    for (i=0;i<12;i++){ nt[(tbase+i)*3+0]=base+T[i][0]; nt[(tbase+i)*3+1]=base+T[i][1]; nt[(tbase+i)*3+2]=base+T[i][2]; }
+    memcpy(nm, m->meshes, sizeof(lm_iqm_mesh_t)*(size_t)m->nummeshes);
+    memset(&nm[m->nummeshes], 0, sizeof(lm_iqm_mesh_t));
+    strncpy(nm[m->nummeshes].name, "addbox", 63);
+    strncpy(nm[m->nummeshes].material, material?material:"p_new", 63);
+    nm[m->nummeshes].first_vertex=base;  nm[m->nummeshes].num_vertexes=8;
+    nm[m->nummeshes].first_triangle=tbase; nm[m->nummeshes].num_triangles=12;
+    QFREE(&a, m->verts); QFREE(&a, m->tris); QFREE(&a, m->meshes);
+    m->verts=nv; m->tris=nt; m->meshes=nm;
+    m->numverts+=8; m->numtris+=12; m->nummeshes++;
+    return LM_OK;
+}
+
 /* ---- little-endian writers ---- */
 static void wru(unsigned char *p, unsigned v){
     p[0]=(unsigned char)(v&0xff);      p[1]=(unsigned char)((v>>8)&0xff);

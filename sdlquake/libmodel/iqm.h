@@ -78,4 +78,9 @@ void lm_iqm_free(lm_iqm_t *m);
    lm_load_iqm as a static (bind-pose) model. */
 lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len);
 
+/* Append one axis-aligned box (8 verts / 12 tris / 1 mesh) bound to `joint`,
+   growing the model's arrays via its allocator. Editor "add part" backend. */
+lm_result_t lm_iqm_add_box(lm_iqm_t *m, const float center[3], const float half[3],
+                           int joint, const char *material);
+
 #endif /* LIBMODEL_IQM_H */
