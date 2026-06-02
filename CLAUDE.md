@@ -309,8 +309,13 @@ R1–R5 (runtime) + E1–E3 (in-engine editor) + C1 (content), built one at a ti
   no clips. The bootstrap dummy now bakes **two** clips — `look` (head yaw,
   frames 0–15) and `nod` (head pitch, 16–31); `actor_dump` lists them. Verified
   in-game: `actor_clip 0` vs `1` (with `actor_lookat 0`) play visibly different
-  head motion (yaw vs pitch). `actor_clip` is global/client-side for now;
-  per-entity selection arrives with R5 (networked) or a per-entity field.
+  head motion (yaw vs pitch). **Per-entity, game-driven, networked clip selection
+  comes free:** `mod_iqm` repurposes the entity's **already-networked `frame`
+  field** as the clip index, so `game.dll` setting `self.frame = N` (or
+  `actor_spawn <f> [x y z] [clip]` for the dev actor) picks the clip per entity —
+  **no protocol/ABI change** (the R5 pose-sync payoff for animation, achieved via
+  the existing field). `actor_clip` (default −1) is a global test override; ≥0
+  forces a clip for all IQM actors.
 
 ## Perf instrumentation
 

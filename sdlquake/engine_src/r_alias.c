@@ -876,7 +876,7 @@ cvar_t	actor_eye_yaw      = {"actor_eye_yaw",      "25"};   // eye yaw clamp (de
 cvar_t	actor_eye_pitch    = {"actor_eye_pitch",    "20"};   // eye pitch clamp (deg)
 cvar_t	actor_breathe_rate = {"actor_breathe_rate", "0.25"}; // breaths/sec
 cvar_t	actor_breathe_amp  = {"actor_breathe_amp",  "0.04"}; // chest scale +/- fraction
-cvar_t	actor_clip         = {"actor_clip",         "0"};    // selected anim clip index (multi-clip)
+cvar_t	actor_clip         = {"actor_clip",         "-1"};   // global clip override; -1 = per-entity (frame)
 
 void R_IQMInitCvars (void)
 {
@@ -1118,8 +1118,9 @@ void R_IQMDrawModel (alight_t *plighting)
 		// loop within its frame range; otherwise loop the whole frame set (R2).
 		if (iqm->numclips > 0)
 		{
-			int				ci2 = (int)actor_clip.value;
+			int				ci2 = (int)actor_clip.value;   // global test override; -1 = per-entity
 			lm_iqm_clip_t	*clp;
+			if (ci2 < 0) ci2 = currententity->frame;       // per-entity clip via the networked frame field
 			if (ci2 < 0) ci2 = 0;
 			if (ci2 >= iqm->numclips) ci2 = iqm->numclips - 1;
 			clp = &iqm->clips[ci2];

@@ -67,7 +67,7 @@ static void Actor_Spawn_f (void)
 	model_t	*mod;
 	vec3_t	fwd, right, up, src;
 
-	if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_spawn <file.iqm> [x y z]\n"); return; }
+	if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_spawn <file.iqm> [x y z] [clip]\n"); return; }
 	if (cls.state != ca_connected || !cl.worldmodel)
 	{ Con_Printf ("actor_spawn: load a map first\n"); return; }
 
@@ -95,6 +95,9 @@ static void Actor_Spawn_f (void)
 		VectorMA (src, 96, fwd, dev_actor.origin);
 		dev_actor.angles[YAW] = cl.viewangles[YAW] + 180;	// face the player
 	}
+
+	if (Cmd_Argc () >= 6)
+		dev_actor.frame = Q_atoi (Cmd_Argv (5));	// clip index (mod_iqm: frame == clip)
 
 	dev_actor_active = true;
 	dev_actor_world  = cl.worldmodel;
