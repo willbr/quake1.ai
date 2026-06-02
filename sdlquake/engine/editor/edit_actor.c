@@ -282,8 +282,23 @@ static void e2_eul2quat (const float e[3], float q[4])  // e=pitch(Y),yaw(Z),rol
     e2_qmul (qy, qx, t);
     e2_qmul (qz, t, q);              // q = qz * qy * qx
 }
-// Bake joint j's keys into the selected clip's frametrs range (clamp outside the
-// key span, linear-interp euler+translate inside). Joints with no keys untouched.
+static void e2_slerp (const float a[4], const float b[4], float u, float o[4])
+{
+    float d = a[0]*b[0]+a[1]*b[1]+a[2]*b[2]+a[3]*b[3], bb[4], n; int c;
+    for (c=0;c<4;c++) bb[c]=b[c];
+    if (d < 0.0f) { d = -d; for (c=0;c<4;c++) bb[c] = -bb[c]; }   // shortest path
+    if (d > 0.9995f) {                                            // near-parallel: nlerp
+        for (c=0;c<4;c++) o[c] = a[c] + (bb[c]-a[c])*u;
+    } else {
+        float ang = (float)acos(d), s = (float)sin(ang);
+        float t0 = (float)sin((1.0f-u)*ang)/s, t1 = (float)sin(u*ang)/s;
+        for (c=0;c<4;c++) o[c] = a[c]*t0 + bb[c]*t1;
+    }
+    n = (float)sqrt(o[0]*o[0]+o[1]*o[1]+o[2]*o[2]+o[3]*o[3]);
+    if (n > 0.0f) for (c=0;c<4;c++) o[c]/=n;
+}
+// Bake joint j's keys into the selected clip's frametrs range: clamp outside the
+// key span; inside, **slerp** rotation + lerp translation. No-key joints untouched.
 static void e2_bake_joint (int j)
 {
     lm_iqm_clip_t *cl; int f0, f1, f, nj, k;
@@ -293,19 +308,22 @@ static void e2_bake_joint (int j)
     cl = &s_edit->clips[s_animclip];
     f0 = cl->first_frame; f1 = f0 + cl->num_frames; nj = s_edit->numjoints;
     for (f = f0; f < f1; f++) {
-        anim_key_t *A=NULL, *B=NULL; float eul[3], tr[3], q[4], *row; int c;
+        anim_key_t *A=NULL, *B=NULL; float tr[3], q[4], *row; int c;
         for (k = 0; k < s_jkeycnt[j]; k++) {
             if (s_jkeys[j][k].frame <= f) A = &s_jkeys[j][k];
             if (s_jkeys[j][k].frame >= f && !B) B = &s_jkeys[j][k];
         }
         if (A && B && B->frame > A->frame) {
             float u = (float)(f - A->frame) / (float)(B->frame - A->frame);
-            for (c=0;c<3;c++){ eul[c]=A->eul[c]+(B->eul[c]-A->eul[c])*u; tr[c]=A->tr[c]+(B->tr[c]-A->tr[c])*u; }
+            float qa[4], qb[4];
+            e2_eul2quat (A->eul, qa); e2_eul2quat (B->eul, qb);
+            e2_slerp (qa, qb, u, q);
+            for (c=0;c<3;c++) tr[c]=A->tr[c]+(B->tr[c]-A->tr[c])*u;
         } else {
             anim_key_t *K = A ? A : B;
-            for (c=0;c<3;c++){ eul[c]=K->eul[c]; tr[c]=K->tr[c]; }
+            e2_eul2quat (K->eul, q);
+            for (c=0;c<3;c++) tr[c]=K->tr[c];
         }
-        e2_eul2quat (eul, q);
         row = s_edit->frametrs + ((size_t)f*nj + j)*10;
         row[0]=tr[0]; row[1]=tr[1]; row[2]=tr[2];
         row[3]=q[0];  row[4]=q[1];  row[5]=q[2]; row[6]=q[3];
