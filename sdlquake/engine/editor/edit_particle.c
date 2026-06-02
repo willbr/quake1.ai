@@ -122,8 +122,6 @@ static void panel_effect_list(void)
     int i;
     emitter_def_t *d;
 
-    IG_SetNextWindowPos(8.0f, 120.0f, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize(220.0f, 360.0f, IG_Cond_FirstUseEver);
     if (!IG_Begin("Particle Effects", NULL, IG_WF_None)) { IG_End(); return; }
 
     IG_SetNextItemWidth(120);
@@ -201,8 +199,6 @@ static void panel_inspector(void)
     static const char * const dirs[]   = { "along_shape", "inherit", "up" };
     static const char * const styles[] = { "dot", "blob", "smoke" };
 
-    IG_SetNextWindowPos(236.0f, 120.0f, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize(330.0f, 560.0f, IG_Cond_FirstUseEver);
     if (!IG_Begin("Particle Inspector", NULL, IG_WF_None)) { IG_End(); return; }
     if (!d) { IG_TextUnformatted("(no effect selected)"); IG_End(); return; }
 

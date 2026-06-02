@@ -734,7 +734,17 @@ void ImguiLayer_Init(SDL_Window *w, SDL_GPUDevice *gpu, SDL_GPUTextureFormat swa
     s_gpu    = gpu;
 
     IG_CreateContext();
-    IG_SetIniFilename(NULL);
+    IG_EnableDocking();
+    // Enable layout persistence (was disabled). ImGui writes "imgui.ini" to the
+    // process CWD. If it's absent (first run / fresh build), bake the default
+    // dock layout the first time the editor opens.
+    {
+        static const char *ini = "imgui.ini";
+        FILE *f = fopen(ini, "rb");
+        if (f) fclose(f);
+        else   IG_RequestDefaultLayout();
+        IG_SetIniFilename(ini);
+    }
     IG_StyleColorsDark();
 
     IG_ImplSDL3_InitForOther(w);
@@ -815,6 +825,7 @@ void ImguiLayer_PrepareGPU(SDL_GPUCommandBuffer *cmd)
         }
         else if (Editor_IsOpen())
         {
+            IG_HostDockSpace();   // passthrough host node; windows dock into it
             Editor_DrawUI();
         }
         else

@@ -450,8 +450,6 @@ static void actor_draw_ui (void)
     lm_iqm_t *iqm;
     int       i, edit;
 
-    IG_SetNextWindowPos (8.0f, 120.0f, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize (286.0f, 520.0f, IG_Cond_FirstUseEver);
     if (!IG_Begin ("Actor", NULL, IG_WF_None)) { IG_End (); return; }
 
     IG_SetNextItemWidth (175);
