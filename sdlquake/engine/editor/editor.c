@@ -44,17 +44,19 @@ static int   s_viewport_hovered = 0;
 // Convert a window-coord SDL mouse event into vid-space coords.
 static void window_to_vid(float wx, float wy, float *vx, float *vy)
 {
+    // When the editor's Viewport panel is showing, the scene lives inside that
+    // image rect — map relative to it. (s_viewport_rect / s_viewport_valid are
+    // set each frame by draw_viewport_window.)
+    if (s_viewport_valid && s_viewport_rect[2] > 1.0f && s_viewport_rect[3] > 1.0f) {
+        *vx = (wx - s_viewport_rect[0]) / s_viewport_rect[2] * (float)vid.width;
+        *vy = (wy - s_viewport_rect[1]) / s_viewport_rect[3] * (float)vid.height;
+        return;
+    }
+
     SDL_Window *w = VID_GetWindow();
     int ww = 320, wh = 200;
     if (w) SDL_GetWindowSize(w, &ww, &wh);
     if (ww <= 0 || wh <= 0) { *vx = wx; *vy = wy; return; }
-
-    // SDL3 logical presentation is LETTERBOX (vid_sdl.c) — fractional scale
-    // = min(ww/vw, wh/vh), no integer rounding, no minimum clamp. The render
-    // is centred in the window with bars on whichever axis doesn't fill.
-    // INTEGER_SCALE math here gave the wrong vid coords whenever the window
-    // didn't match the render at a whole multiple, and the picker landed on
-    // a different handle than the one the user clicked.
     float scale_x = (float)ww / (float)vid.width;
     float scale_y = (float)wh / (float)vid.height;
     float scale   = scale_x < scale_y ? scale_x : scale_y;
@@ -66,6 +68,14 @@ static void window_to_vid(float wx, float wy, float *vx, float *vy)
 
 // Exposed wrapper so other editor modes (edit_actor gizmo) can convert too.
 void Editor_WindowToVid(float wx, float wy, float *vx, float *vy) { window_to_vid(wx, wy, vx, vy); }
+int  Editor_MouseOverViewport(void) { return s_viewport_hovered; }
+
+// True when ImGui owns the mouse for a real panel — i.e. captured but NOT over
+// the Viewport image (where clicks should pick/orbit the scene).
+static int editor_view_captured(void)
+{
+    return IG_WantCaptureMouse() && !s_viewport_hovered;
+}
 
 static int  s_open = 0;
 static int  s_inited = 0;
@@ -2493,7 +2503,7 @@ static void editor_orbit_camera(void)
     // RMB drag captures the mouse (relative mode) and orbits.
     mb  = SDL_GetMouseState(NULL, NULL);
     rmb = (mb & SDL_BUTTON_RMASK) != 0;
-    if (rmb && !s_orbit_prev_rmb && IG_WantCaptureMouse()) rmb = 0; // press began over a panel
+    if (rmb && !s_orbit_prev_rmb && editor_view_captured()) rmb = 0; // press began over a panel
     if (rmb && !s_lookmode)  set_lookmode(1);
     if (!rmb && s_lookmode)  set_lookmode(0);
     s_orbit_prev_rmb = (mb & SDL_BUTTON_RMASK) != 0;
@@ -2672,14 +2682,14 @@ int MapMode_ProcessEvent(void *evp)
         {
             // RMB enters look mode. Don't grab if the cursor is over an
             // ImGui panel — let the panel take the click instead.
-            if (IG_WantCaptureMouse()) return 0;
+            if (editor_view_captured()) return 0;
             set_lookmode(1);
             return 1;
         }
         if (ev->button.button != SDL_BUTTON_LEFT) return 0;
         // ImGui owns the click if the cursor is over an ImGui window (panel,
         // button). Don't run picking/gizmo in that case.
-        if (IG_WantCaptureMouse()) return 0;
+        if (editor_view_captured()) return 0;
         // Don't pick or drag while looking around.
         if (s_lookmode) return 0;
         float vx, vy;
@@ -2938,7 +2948,7 @@ int Editor_ProcessEvent(void *evp)
     SDL_Event *ev = (SDL_Event *)evp;
     // Particle orbit zoom: accumulate wheel here (the orbit camera polls it),
     // unless the cursor is over an ImGui panel (let the panel scroll instead).
-    if (ev->type == SDL_EVENT_MOUSE_WHEEL && m == &particle_mode && !IG_WantCaptureMouse())
+    if (ev->type == SDL_EVENT_MOUSE_WHEEL && m == &particle_mode && !editor_view_captured())
         s_cam_wheel += ev->wheel.y;
     if (m->process_event) return m->process_event(evp);
     return 0;
