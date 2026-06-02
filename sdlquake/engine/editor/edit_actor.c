@@ -47,6 +47,8 @@ static anim_key_t s_jkeys[MAXEDITMESH][E2_MAXKEYS];
 static int        s_jkeycnt[MAXEDITMESH];
 static int        s_animclip;                       // clip being authored
 static int        s_animframe;                      // current ABSOLUTE frame into frametrs
+static float      s_poseeul[3];                      // pose-edit buffer (euler rot)
+static float      s_posetr[3];                       // pose-edit buffer (translate)
 
 static void TX (const char *fmt, ...)             // formatted ImGui text helper
 {
@@ -490,6 +492,44 @@ static void actor_draw_ui (void)
                 edit_joint_move (s_seljoint, s_jnudge);
                 s_jnudge[0]=s_jnudge[1]=s_jnudge[2]=0.0f;
             }
+        }
+
+        IG_Separator ();
+        if (s_edit->numclips > 0 && IG_CollapsingHeader ("Animation (keyframes)", 0)) {
+            lm_iqm_clip_t *cl; int rel, kk, iskey = 0; float rf;
+            if (s_animclip >= s_edit->numclips) s_animclip = 0;
+            IG_TextUnformatted ("clip:");
+            for (i = 0; i < s_edit->numclips; i++) {
+                IG_PushID_Int (3000 + i);
+                if (IG_Selectable (s_edit->clips[i].name, i == s_animclip, 0)) {
+                    s_animclip = i; s_animframe = s_edit->clips[i].first_frame;
+                    Cvar_SetValue ("actor_clip", (float)i);
+                }
+                IG_PopID ();
+            }
+            cl = &s_edit->clips[s_animclip];
+            rel = s_animframe - cl->first_frame;
+            rf = (float)rel;
+            if (IG_DragFloat ("frame", &rf, 0.25f, 0.0f, (float)(cl->num_frames-1))) {
+                rel = (int)(rf + 0.5f);
+                if (rel < 0) rel = 0; if (rel >= cl->num_frames) rel = cl->num_frames-1;
+                s_animframe = cl->first_frame + rel;
+            }
+            if (s_seljoint >= 0 && s_seljoint < MAXEDITMESH)
+                for (kk = 0; kk < s_jkeycnt[s_seljoint]; kk++)
+                    if (s_jkeys[s_seljoint][kk].frame == s_animframe) { iskey = 1; break; }
+            TX ("frame %d/%d  joint %d (%s)  %s%d keys", rel, cl->num_frames, s_seljoint,
+                (s_seljoint>=0 && s_seljoint<s_edit->numjoints) ? s_edit->joints[s_seljoint].name : "?",
+                iskey ? "[ON KEY] " : "",
+                (s_seljoint>=0 && s_seljoint<MAXEDITMESH) ? s_jkeycnt[s_seljoint] : 0);
+            IG_DragFloat3 ("rot (key)",   s_poseeul, 1.0f);
+            IG_DragFloat3 ("trans (key)", s_posetr,  0.5f);
+            if (IG_Button ("Set key"))  e2_setkey (s_seljoint, s_poseeul, s_posetr);
+            IG_SameLine (0, -1);
+            if (IG_Button ("Del key"))  e2_unkey (s_seljoint);
+            IG_SameLine (0, -1);
+            if (IG_Button ("Bake"))     { int jj; for (jj=0; jj<s_edit->numjoints && jj<MAXEDITMESH; jj++) e2_bake_joint (jj); }
+            IG_TextUnformatted ("(pick joint above; scrub frame; type rot/trans; Set key)");
         }
 
         IG_Separator ();
