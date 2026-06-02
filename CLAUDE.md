@@ -301,6 +301,16 @@ R1–R5 (runtime) + E1–E3 (in-engine editor) + C1 (content), built one at a ti
   authoring tools (create/size/parent box parts, rig joints, animation timeline +
   save via the IQM writer) are the next slices — **UX-heavy, to be designed with
   the user.**
+- **Multi-clip done** (animation infrastructure for E2 / R5 / behaviours). The
+  loader parses every `iqmanim` into `lm_iqm_t.clips[]` (`lm_iqm_clip_t`:
+  name/first_frame/num_frames/framerate/loop, ranges clamped into the decoded
+  frame set); `R_IQMDrawModel` plays the `actor_clip` cvar–selected clip (loops
+  within its frame range) and falls back to the whole frame set when a model has
+  no clips. The bootstrap dummy now bakes **two** clips — `look` (head yaw,
+  frames 0–15) and `nod` (head pitch, 16–31); `actor_dump` lists them. Verified
+  in-game: `actor_clip 0` vs `1` (with `actor_lookat 0`) play visibly different
+  head motion (yaw vs pitch). `actor_clip` is global/client-side for now;
+  per-entity selection arrives with R5 (networked) or a per-entity field.
 
 ## Perf instrumentation
 

@@ -38,6 +38,10 @@ static void Actor_Dump_f (void)
 		iqm->numframes, iqm->framerate, iqm->frametrs ? "" : " (static)");
 	Con_Printf ("  roles: head %d  chest %d  jaw %d  eyes %d  pony %d\n",
 		iqm->head_joint, iqm->chest_joint, iqm->jaw_joint, iqm->num_eye, iqm->num_pony);
+	for (i = 0; i < iqm->numclips; i++)
+		Con_Printf ("  clip %d '%s' [%d+%d] @ %g fps%s\n", i, iqm->clips[i].name,
+			iqm->clips[i].first_frame, iqm->clips[i].num_frames,
+			iqm->clips[i].framerate, iqm->clips[i].loop ? " loop" : "");
 	for (i = 0; i < iqm->numjoints; i++)
 		Con_Printf ("  joint %d '%s' parent %d  t(%g %g %g)\n", i,
 			iqm->joints[i].name, iqm->joints[i].parent,

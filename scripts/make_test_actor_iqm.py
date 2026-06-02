@@ -64,20 +64,28 @@ for (ji, half, off, mat) in PARTS:
 
 numverts = len(positions); numtris = len(triangles)
 
-# ---- animation: "look" clip, head yaws about +Z ----
-NFRAMES = 16
+# ---- animation: two clips over a shared 32-frame stream ----
+#   clip "look": frames  0..15  -- head yaws  about +Z
+#   clip "nod":  frames 16..31  -- head pitches about +Y
 FPS     = 10.0
 AMP     = 30.0   # degrees
-# per-frame head quaternion (x,y,z,w) about +Z
+CLIPLEN = 16
+NFRAMES = CLIPLEN * 2
+# per-frame head quaternion (x,y,z,w)
 head_q = []
-for f in range(NFRAMES):
-    a = math.radians(AMP * math.sin(2.0 * math.pi * f / NFRAMES))
+for f in range(CLIPLEN):   # "look": yaw about +Z
+    a = math.radians(AMP * math.sin(2.0 * math.pi * f / CLIPLEN))
     head_q.append((0.0, 0.0, math.sin(a / 2.0), math.cos(a / 2.0)))
-qz_vals = [q[2] for q in head_q]; qw_vals = [q[3] for q in head_q]
-qz_min, qz_max = min(qz_vals), max(qz_vals)
-qw_min, qw_max = min(qw_vals), max(qw_vals)
-qz_scale = (qz_max - qz_min) / 65535.0 if qz_max > qz_min else 0.0
-qw_scale = (qw_max - qw_min) / 65535.0 if qw_max > qw_min else 0.0
+for f in range(CLIPLEN):   # "nod": pitch about +Y
+    a = math.radians(AMP * math.sin(2.0 * math.pi * f / CLIPLEN))
+    head_q.append((0.0, math.sin(a / 2.0), 0.0, math.cos(a / 2.0)))
+
+# animated head quat channels: Qy(4), Qz(5), Qw(6). per-channel min/range over all frames.
+QIDX = {4: 1, 5: 2, 6: 3}   # channel index -> head_q tuple index
+qvals = {c: [q[QIDX[c]] for q in head_q] for c in QIDX}
+qmin  = {c: min(qvals[c]) for c in QIDX}
+qmax  = {c: max(qvals[c]) for c in QIDX}
+qscl  = {c: ((qmax[c]-qmin[c]) / 65535.0 if qmax[c] > qmin[c] else 0.0) for c in QIDX}
 
 # poses: one per joint (parallel). mask bits: 0,1,2=Txyz 3,4,5,6=Qxyzw 7,8,9=Sxyz
 poses = []   # (parent, mask, offset[10], scale[10])
@@ -86,13 +94,13 @@ for j, (name, parent, t) in enumerate(JOINTS):
     scale  = [0.0] * 10
     mask   = 0
     if j == HEAD:
-        mask = (1 << 5) | (1 << 6)         # animate Qz, Qw only
-        offset[5] = qz_min; scale[5] = qz_scale
-        offset[6] = qw_min; scale[6] = qw_scale
+        mask = (1 << 4) | (1 << 5) | (1 << 6)   # animate Qy, Qz, Qw
+        for c in (4, 5, 6):
+            offset[c] = qmin[c]; scale[c] = qscl[c]
     poses.append((parent, mask, offset, scale))
 
 CHANNEL_ORDER = list(range(10))
-num_framechannels = sum(bin(p[1]).count("1") for p in poses)   # = 2 (head Qz,Qw)
+num_framechannels = sum(bin(p[1]).count("1") for p in poses)   # = 3 (head Qy,Qz,Qw)
 
 def enc(val, off, scl):
     if scl == 0.0:
@@ -106,10 +114,8 @@ for f in range(NFRAMES):
         for c in CHANNEL_ORDER:
             if not (mask & (1 << c)):
                 continue
-            if j == HEAD and c == 5:
-                frame_words.append(enc(head_q[f][2], offset[5], scale[5]))
-            elif j == HEAD and c == 6:
-                frame_words.append(enc(head_q[f][3], offset[6], scale[6]))
+            if j == HEAD and c in QIDX:
+                frame_words.append(enc(head_q[f][QIDX[c]], offset[c], scale[c]))
             else:
                 frame_words.append(0)
 assert len(frame_words) == NFRAMES * num_framechannels
@@ -122,7 +128,8 @@ def add_str(s):
 joint_name_ofs = [add_str(n) for (n, _, _) in JOINTS]
 mesh_name_ofs  = [add_str("mesh%d" % i) for i in range(len(PARTS))]
 mesh_mat_ofs   = [add_str(m) for (_, _, _, m) in PARTS]
-anim_name_ofs  = add_str("look")
+look_name_ofs  = add_str("look")
+nod_name_ofs   = add_str("nod")
 
 def align(n, a=8):
     return (n + (a - 1)) & ~(a - 1)
@@ -141,7 +148,7 @@ off = align(off)
 ofs_tris = off; off += numtris * 12; off = align(off)
 ofs_joints = off; off += 48 * len(JOINTS); off = align(off)   # iqmjoint = 48 bytes
 ofs_poses = off; off += 88 * len(poses); off = align(off)      # iqmpose = 88 bytes
-ofs_anims = off; off += 20 * 1; off = align(off)               # iqmanim = 20 bytes
+ofs_anims = off; off += 20 * 2; off = align(off)               # 2 iqmanim entries (20 bytes each)
 ofs_frames = off; off += NFRAMES * num_framechannels * 2; off = align(off)
 filesize = off
 
@@ -153,7 +160,7 @@ hdr += struct.pack("<III", NUM_VA, numverts, ofs_vas)
 hdr += struct.pack("<III", numtris, ofs_tris, 0)
 hdr += struct.pack("<II", len(JOINTS), ofs_joints)
 hdr += struct.pack("<II", len(poses), ofs_poses)               # poses
-hdr += struct.pack("<II", 1, ofs_anims)                        # anims
+hdr += struct.pack("<II", 2, ofs_anims)                        # anims (2 clips)
 hdr += struct.pack("<IIII", NFRAMES, num_framechannels, ofs_frames, 0)  # frames..ofs_bounds=0
 hdr += struct.pack("<II", 0, 0)   # comment
 hdr += struct.pack("<II", 0, 0)   # extensions
@@ -194,8 +201,8 @@ p = ofs_poses
 for (parent, mask, offset, scale) in poses:
     out[p:p+88] = struct.pack("<iI20f", parent, mask, *offset, *scale); p += 88
 p = ofs_anims
-out[p:p+20] = struct.pack("<IIIfI", anim_name_ofs, 0, NFRAMES, FPS, 1)  # flags: IQM_LOOP
-p += 20
+out[p:p+20] = struct.pack("<IIIfI", look_name_ofs, 0,       CLIPLEN, FPS, 1); p += 20  # "look" (loop)
+out[p:p+20] = struct.pack("<IIIfI", nod_name_ofs,  CLIPLEN, CLIPLEN, FPS, 1); p += 20  # "nod"  (loop)
 p = ofs_frames
 for w in frame_words: out[p:p+2] = struct.pack("<H", w); p += 2
 

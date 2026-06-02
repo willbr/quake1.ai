@@ -876,6 +876,7 @@ cvar_t	actor_eye_yaw      = {"actor_eye_yaw",      "25"};   // eye yaw clamp (de
 cvar_t	actor_eye_pitch    = {"actor_eye_pitch",    "20"};   // eye pitch clamp (deg)
 cvar_t	actor_breathe_rate = {"actor_breathe_rate", "0.25"}; // breaths/sec
 cvar_t	actor_breathe_amp  = {"actor_breathe_amp",  "0.04"}; // chest scale +/- fraction
+cvar_t	actor_clip         = {"actor_clip",         "0"};    // selected anim clip index (multi-clip)
 
 void R_IQMInitCvars (void)
 {
@@ -886,6 +887,7 @@ void R_IQMInitCvars (void)
 	Cvar_RegisterVariable (&actor_eye_pitch);
 	Cvar_RegisterVariable (&actor_breathe_rate);
 	Cvar_RegisterVariable (&actor_breathe_amp);
+	Cvar_RegisterVariable (&actor_clip);
 	IQM_DynamicsInitCvars ();
 }
 
@@ -1112,10 +1114,31 @@ void R_IQMDrawModel (alight_t *plighting)
 		tgt_actor[1] = -DotProduct (delta, alias_right);
 		tgt_actor[2] =  DotProduct (delta, alias_up);
 
-		ff = (int)(cl.time * iqm->framerate);
-		ff %= iqm->numframes;
-		if (ff < 0)
-			ff += iqm->numframes;
+		// Pick the playing frame. Multi-clip: actor_clip selects a clip and we
+		// loop within its frame range; otherwise loop the whole frame set (R2).
+		if (iqm->numclips > 0)
+		{
+			int				ci2 = (int)actor_clip.value;
+			lm_iqm_clip_t	*clp;
+			if (ci2 < 0) ci2 = 0;
+			if (ci2 >= iqm->numclips) ci2 = iqm->numclips - 1;
+			clp = &iqm->clips[ci2];
+			if (clp->num_frames > 0)
+			{
+				ff = (int)(cl.time * clp->framerate) % clp->num_frames;
+				if (ff < 0) ff += clp->num_frames;
+				ff += clp->first_frame;
+			}
+			else
+				ff = 0;
+		}
+		else
+		{
+			ff = (int)(cl.time * iqm->framerate);
+			ff %= iqm->numframes;
+			if (ff < 0)
+				ff += iqm->numframes;
+		}
 
 		for (jj = 0; jj < iqm->numjoints; jj++)
 		{

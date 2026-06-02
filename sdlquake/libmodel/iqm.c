@@ -201,6 +201,32 @@ lm_result_t lm_load_iqm(const void *vbuf, size_t len,
                 m->framerate = (num_anims > 0 && fits(len, ofs_anims, num_anims, IQMANIM_SZ))
                                 ? rdf(b + ofs_anims + 12) : 10.0f;
                 if (m->framerate <= 0.0f) m->framerate = 10.0f;
+
+                /* parse every anim clip (frame range into the shared frame set) */
+                if (num_anims > 0 && fits(len, ofs_anims, num_anims, IQMANIM_SZ))
+                {
+                    lm_iqm_clip_t *cl = QALLOC_ARR(&a, lm_iqm_clip_t, num_anims);
+                    if (cl)
+                    {
+                        unsigned ai;
+                        for (ai = 0; ai < num_anims; ai++)
+                        {
+                            const unsigned char *an = b + ofs_anims + ai*IQMANIM_SZ;
+                            unsigned ff = rdu(an+4), nf = rdu(an+8), flags = rdu(an+16);
+                            float    fr2 = rdf(an+12);
+                            strncpy(cl[ai].name, strat(b, ofs_text, num_text, rdu(an)), 63);
+                            cl[ai].name[63] = 0;
+                            if (ff > nframes)      ff = nframes;           /* clamp into decoded set */
+                            if (ff + nf > nframes) nf = nframes - ff;
+                            cl[ai].first_frame = (int)ff;
+                            cl[ai].num_frames  = (int)nf;
+                            cl[ai].framerate   = (fr2 > 0.0f) ? fr2 : 10.0f;
+                            cl[ai].loop        = (flags & 1u) ? 1 : 0;
+                        }
+                        m->clips = cl;
+                        m->numclips = (int)num_anims;
+                    }
+                }
             }
             else
             {
@@ -228,7 +254,7 @@ void lm_iqm_free(lm_iqm_t *m){
     a = m->alloc;
     QFREE(&a, m->meshes); QFREE(&a, m->joints);
     QFREE(&a, m->verts);  QFREE(&a, m->tris);
-    QFREE(&a, m->frametrs);
+    QFREE(&a, m->frametrs); QFREE(&a, m->clips);
     QFREE(&a, m);
 }
 

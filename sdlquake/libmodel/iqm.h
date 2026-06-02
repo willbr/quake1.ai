@@ -30,11 +30,19 @@ typedef struct {
     unsigned first_triangle, num_triangles;
 } lm_iqm_mesh_t;
 
+typedef struct {
+    char  name[64];
+    int   first_frame, num_frames;
+    float framerate;
+    int   loop;                  /* IQM_LOOP flag */
+} lm_iqm_clip_t;
+
 typedef struct lm_iqm_s {
     lm_iqm_mesh_t  *meshes;   int nummeshes;
     lm_iqm_joint_t *joints;   int numjoints;
     lm_iqm_vert_t  *verts;    int numverts;
     unsigned       *tris;     int numtris;   /* numtris*3 global vertex indices */
+    lm_iqm_clip_t  *clips;    int numclips;  /* animation clips (frame ranges); 0 = none */
     float           mins[3], maxs[3];
     /* animation (R2): decoded per-frame per-joint local TRS. numframes==0 and
        frametrs==NULL means a static (bind-pose-only) model. Layout:
