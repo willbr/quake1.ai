@@ -201,6 +201,8 @@ void Editor_PushPreviewEntities(void);
 // Actor mode (edit_actor.c): inject the previewed IQM actor into cl_visedicts at
 // the orbit focus. Called from the same window as Editor_PushPreviewEntities.
 void ActorMode_PushPreview(void);
+// Register the actor_edit* console commands (scriptable geometry-edit backend).
+void ActorMode_RegisterCmds(void);
 
 // render_wire.c — eagerly materialise transient edit_entity_t entries
 // for every alive runtime edict in sv.edicts (those not already bound

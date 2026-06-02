@@ -2024,6 +2024,8 @@ void Editor_Init(void)
 
     Cmd_AddCommand("editor",        Editor_Cmd_Toggle_f);
     Cmd_AddCommand("editor_mode",   Editor_Cmd_Mode_f);
+    ActorMode_RegisterCmds();
+
     Cmd_AddCommand("editor_orbit",  Editor_Cmd_Orbit_f);
     Cmd_AddCommand("editor_load",   Editor_Cmd_Open_f);
     Cmd_AddCommand("editor_new",    Editor_Cmd_New_f);

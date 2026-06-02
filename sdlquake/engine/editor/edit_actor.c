@@ -1,9 +1,11 @@
-// edit_actor.c -- Actor editor mode (E1 skeleton). Loads an IQM actor and
-// previews it with the shared orbit camera; the R3 head look-at tracks the orbit
-// camera live, so circling the actor shows it watching you. Read-only inspector
-// (joints / meshes / roles). The interactive authoring tools (create/size/parent
-// box parts, rig joints, animation timeline) build on this foundation. Engine-
-// side, like the rest of the editor; mirrors edit_particle.c's mode pattern.
+// edit_actor.c -- Actor editor mode. Two sub-modes over the orbit-camera preview:
+//   * Preview: load an IQM, watch it animate; the R3 head look-at tracks the
+//     orbit camera; per-clip selector + look-at toggle.
+//   * Edit geometry: make the loaded actor's parts editable and move/resize each
+//     mesh with numeric fields, then re-save as an .iqm (via lm_write_iqm). The
+//     editable copy is geometry-only (animation is dropped by the writer; clip
+//     authoring is a later slice). Per the user: numeric fields first, edit the
+//     loaded actor. Engine-side; mirrors edit_particle.c's mode pattern.
 
 #include "quakedef.h"
 #include "iqm.h"
@@ -12,32 +14,122 @@
 #include "editor_internal.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 
 #define IG_TREE_DEFAULTOPEN (1<<5)
+#define MAXEDITMESH 64
 
-static entity_t  s_ent;                          // the previewed actor entity
+// ---- preview state --------------------------------------------------------
+static entity_t  s_ent;                          // previewed (loaded) actor entity
 static model_t  *s_mod;                           // loaded IQM model (NULL = none)
 static char      s_path[MAX_QPATH] = "actors/dummy.iqm";
 
+// ---- edit-geometry state --------------------------------------------------
+static int       s_editmode;                      // 1 = editing geometry
+static lm_iqm_t *s_orig;                           // pristine geometry copy (source of truth)
+static lm_iqm_t *s_edit;                           // rendered copy (rebuilt from s_orig + xforms)
+static model_t   s_emodel;                         // wraps s_edit for the renderer
+static entity_t  s_eent;                           // edit-preview entity
+static int       s_selmesh;                        // selected part
+static float     s_voff[MAXEDITMESH][3];           // per-mesh move (offset)
+static float     s_vscale[MAXEDITMESH][3];         // per-mesh size (scale about centroid)
+static char      s_savepath[MAX_QPATH] = "actors/dummy_edit.iqm";
+
 static void TX (const char *fmt, ...)             // formatted ImGui text helper
 {
-    char buf[256];
-    va_list ap;
-    va_start (ap, fmt);
-    vsnprintf (buf, sizeof(buf), fmt, ap);
-    va_end (ap);
+    char buf[256]; va_list ap;
+    va_start (ap, fmt); vsnprintf (buf, sizeof(buf), fmt, ap); va_end (ap);
     IG_TextUnformatted (buf);
 }
 
+// ---- edit-geometry backend ------------------------------------------------
+static void edit_free (void)
+{
+    if (s_orig) { lm_iqm_free (s_orig); s_orig = NULL; }
+    if (s_edit) { lm_iqm_free (s_edit); s_edit = NULL; }
+    s_editmode = 0;
+}
+
+// Rebuild s_edit's vertices from s_orig + per-mesh move/size (scale about the
+// part's centroid). Cheap (a few hundred verts); run every edit frame.
+static void edit_rebuild (void)
+{
+    int mi;
+    if (!s_orig || !s_edit) return;
+    for (mi = 0; mi < s_orig->nummeshes && mi < MAXEDITMESH; mi++)
+    {
+        lm_iqm_mesh_t *me = &s_orig->meshes[mi];
+        unsigned a = me->first_vertex, n = me->num_vertexes, k;
+        float c[3] = { 0, 0, 0 };
+        for (k = 0; k < n; k++)
+            { c[0]+=s_orig->verts[a+k].pos[0]; c[1]+=s_orig->verts[a+k].pos[1]; c[2]+=s_orig->verts[a+k].pos[2]; }
+        if (n) { c[0]/=n; c[1]/=n; c[2]/=n; }
+        for (k = 0; k < n; k++)
+        {
+            int j;
+            for (j = 0; j < 3; j++)
+                s_edit->verts[a+k].pos[j] =
+                    c[j] + s_vscale[mi][j] * (s_orig->verts[a+k].pos[j] - c[j]) + s_voff[mi][j];
+        }
+    }
+    // refresh model bounds for culling/scale sanity
+    {
+        int i, j;
+        for (j = 0; j < 3; j++) { s_edit->mins[j] = 1e30f; s_edit->maxs[j] = -1e30f; }
+        for (i = 0; i < s_edit->numverts; i++) for (j = 0; j < 3; j++)
+            { float v = s_edit->verts[i].pos[j];
+              if (v < s_edit->mins[j]) s_edit->mins[j] = v;
+              if (v > s_edit->maxs[j]) s_edit->maxs[j] = v; }
+        VectorCopy (s_edit->mins, s_emodel.mins);
+        VectorCopy (s_edit->maxs, s_emodel.maxs);
+    }
+}
+
+// Enter edit mode: deep-copy the loaded geometry (round-trip through the IQM
+// writer/loader gives two independent malloc-backed copies) and reset xforms.
+static void edit_begin (void)
+{
+    void *buf = NULL; size_t len = 0; int mi;
+    edit_free ();
+    if (!s_mod || !s_mod->iqmdata) return;
+    if (lm_write_iqm (s_mod->iqmdata, &buf, &len) != LM_OK) return;
+    if (lm_load_iqm (buf, len, 0, &s_orig) != LM_OK) { free (buf); s_orig = NULL; return; }
+    if (lm_load_iqm (buf, len, 0, &s_edit) != LM_OK) { free (buf); lm_iqm_free (s_orig); s_orig = NULL; return; }
+    free (buf);
+
+    for (mi = 0; mi < MAXEDITMESH; mi++)
+        { s_voff[mi][0]=s_voff[mi][1]=s_voff[mi][2]=0.0f;
+          s_vscale[mi][0]=s_vscale[mi][1]=s_vscale[mi][2]=1.0f; }
+    s_selmesh = 0;
+
+    memset (&s_emodel, 0, sizeof(s_emodel));
+    strncpy (s_emodel.name, "*actor_edit", sizeof(s_emodel.name)-1);
+    s_emodel.type    = mod_iqm;
+    s_emodel.iqmdata = s_edit;
+    memset (&s_eent, 0, sizeof(s_eent));
+    s_eent.model    = &s_emodel;
+    s_eent.colormap = vid.colormap;
+    s_editmode = 1;
+    edit_rebuild ();
+}
+
+static void edit_save (void)
+{
+    void *buf = NULL; size_t len = 0;
+    if (!s_edit) return;
+    if (lm_write_iqm (s_edit, &buf, &len) != LM_OK) { Con_Printf ("actor save: write failed\n"); return; }
+    COM_WriteFile (s_savepath, buf, (int)len);
+    free (buf);
+    Con_Printf ("actor save: wrote %s (%d bytes)\n", s_savepath, (int)len);
+}
+
+// ---- load (preview) -------------------------------------------------------
 static void actor_load (const char *path)
 {
     model_t *m = Mod_ForName ((char *)path, false);
-    if (!m || m->type != mod_iqm) {
-        Con_Printf ("actor editor: %s is not an IQM\n", path);
-        s_mod = NULL;
-        return;
-    }
+    edit_free ();
+    if (!m || m->type != mod_iqm) { Con_Printf ("actor editor: %s is not an IQM\n", path); s_mod = NULL; return; }
     s_mod = m;
     memset (&s_ent, 0, sizeof(s_ent));
     s_ent.model    = m;
@@ -45,85 +137,165 @@ static void actor_load (const char *path)
     s_ent.frame    = 0;
 }
 
-static void actor_enter (void)
-{
-    if (!s_mod)
-        actor_load (s_path);
-}
+static void actor_enter (void) { if (!s_mod) actor_load (s_path); }
+static void actor_exit  (void) { edit_free (); }
 
-// Inject the previewed actor into cl_visedicts at the orbit focus each editor
-// frame. Called from editor.c after CL_RelinkEntities reset the list and before
-// the entity render pass (the same window Editor_PushPreviewEntities uses).
+// Inject the previewed actor (edit copy when editing, else the loaded model)
+// into cl_visedicts at the orbit focus each editor frame.
 void ActorMode_PushPreview (void)
 {
-    if (!s_mod)
-        return;
-    if (cl_numvisedicts >= MAX_VISEDICTS)
-        return;
-    Editor_GetOrbitFocus (s_ent.origin);
-    cl_visedicts[cl_numvisedicts++] = &s_ent;
+    entity_t *e;
+    if (s_editmode && s_edit) e = &s_eent;
+    else if (s_mod)           e = &s_ent;
+    else                      return;
+    if (cl_numvisedicts >= MAX_VISEDICTS) return;
+    Editor_GetOrbitFocus (e->origin);
+    cl_visedicts[cl_numvisedicts++] = e;
 }
 
+// ---- UI -------------------------------------------------------------------
 static void actor_draw_ui (void)
 {
     lm_iqm_t *iqm;
-    int       i;
+    int       i, edit;
 
     IG_SetNextWindowPos (8.0f, 120.0f, IG_Cond_FirstUseEver);
-    IG_SetNextWindowSize (270.0f, 470.0f, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize (286.0f, 520.0f, IG_Cond_FirstUseEver);
     if (!IG_Begin ("Actor", NULL, IG_WF_None)) { IG_End (); return; }
 
     IG_SetNextItemWidth (175);
     IG_InputText ("##path", s_path, sizeof(s_path), 0);
     IG_SameLine (0, -1);
-    if (IG_Button ("Load"))
-        actor_load (s_path);
+    if (IG_Button ("Load")) actor_load (s_path);
 
     IG_Separator ();
     if (!s_mod || !s_mod->iqmdata) { IG_TextUnformatted ("(no actor loaded)"); IG_End (); return; }
     iqm = s_mod->iqmdata;
 
     TX ("%s", s_mod->name);
-    TX ("meshes %d   joints %d", iqm->nummeshes, iqm->numjoints);
-    TX ("verts %d   tris %d", iqm->numverts, iqm->numtris);
-    if (iqm->numframes > 0) TX ("anim: %d frames @ %g fps", iqm->numframes, iqm->framerate);
-    else                    IG_TextUnformatted ("anim: (static)");
+    TX ("meshes %d   joints %d   verts %d   tris %d", iqm->nummeshes, iqm->numjoints, iqm->numverts, iqm->numtris);
     TX ("roles: head %d  chest %d  jaw %d  eyes %d  pony %d",
         iqm->head_joint, iqm->chest_joint, iqm->jaw_joint, iqm->num_eye, iqm->num_pony);
 
-    IG_Separator ();
-    if (IG_CollapsingHeader ("Joints", IG_TREE_DEFAULTOPEN))
-        for (i = 0; i < iqm->numjoints; i++)
-            TX ("%2d %-14s parent %d", i, iqm->joints[i].name, iqm->joints[i].parent);
-    if (IG_CollapsingHeader ("Meshes", 0))
-        for (i = 0; i < iqm->nummeshes; i++)
-            TX ("%2d %-10s [%s]", i, iqm->meshes[i].name, iqm->meshes[i].material);
+    // ---- Edit geometry toggle ----
+    edit = s_editmode;
+    if (IG_Checkbox ("Edit geometry (move/resize parts)", &edit))
+    {
+        if (edit) edit_begin ();
+        else      edit_free ();
+    }
 
-    IG_Separator ();
-    IG_TextUnformatted ("Preview");
-    if (iqm->numclips > 0) {
-        IG_TextUnformatted ("clip (sets the previewed entity's frame):");
-        for (i = 0; i < iqm->numclips; i++) {
+    if (!s_editmode)
+    {
+        // ---- preview / inspector ----
+        IG_Separator ();
+        if (IG_CollapsingHeader ("Joints", IG_TREE_DEFAULTOPEN))
+            for (i = 0; i < iqm->numjoints; i++)
+                TX ("%2d %-14s parent %d", i, iqm->joints[i].name, iqm->joints[i].parent);
+        if (IG_CollapsingHeader ("Meshes", 0))
+            for (i = 0; i < iqm->nummeshes; i++)
+                TX ("%2d %-10s [%s]", i, iqm->meshes[i].name, iqm->meshes[i].material);
+
+        IG_Separator ();
+        IG_TextUnformatted ("Preview");
+        if (iqm->numclips > 0) {
+            IG_TextUnformatted ("clip (sets previewed entity's frame):");
+            for (i = 0; i < iqm->numclips; i++) {
+                IG_PushID_Int (i);
+                if (IG_Selectable (iqm->clips[i].name, i == s_ent.frame, 0)) s_ent.frame = i;
+                IG_PopID ();
+            }
+        }
+        {
+            cvar_t *cv = Cvar_FindVar ("actor_lookat");
+            int on = cv && cv->value != 0.0f;
+            if (IG_Checkbox ("Look at camera (head)", &on))
+                Cvar_SetValue ("actor_lookat", on ? 1.0f : 0.0f);
+        }
+        IG_TextUnformatted ("Camera: RMB-drag orbit; the head tracks it.");
+    }
+    else if (s_orig)
+    {
+        // ---- geometry editor (numeric fields) ----
+        IG_Separator ();
+        IG_TextUnformatted ("Part (select to edit):");
+        for (i = 0; i < s_orig->nummeshes && i < MAXEDITMESH; i++) {
             IG_PushID_Int (i);
-            if (IG_Selectable (iqm->clips[i].name, i == s_ent.frame, 0))
-                s_ent.frame = i;
+            if (IG_Selectable (s_orig->meshes[i].name, i == s_selmesh, 0)) s_selmesh = i;
             IG_PopID ();
         }
+        if (s_selmesh >= 0 && s_selmesh < s_orig->nummeshes) {
+            IG_Separator ();
+            TX ("editing part %d (%s)", s_selmesh, s_orig->meshes[s_selmesh].name);
+            IG_DragFloat3 ("move",  s_voff[s_selmesh],   0.5f);
+            IG_DragFloat3 ("size",  s_vscale[s_selmesh], 0.02f);
+            if (IG_Button ("Reset part")) {
+                s_voff[s_selmesh][0]=s_voff[s_selmesh][1]=s_voff[s_selmesh][2]=0.0f;
+                s_vscale[s_selmesh][0]=s_vscale[s_selmesh][1]=s_vscale[s_selmesh][2]=1.0f;
+            }
+        }
+        edit_rebuild ();   // apply numeric edits to the rendered copy each frame
+
+        IG_Separator ();
+        IG_SetNextItemWidth (175);
+        IG_InputText ("##savepath", s_savepath, sizeof(s_savepath), 0);
+        IG_SameLine (0, -1);
+        if (IG_Button ("Save IQM")) edit_save ();
+        IG_TextUnformatted ("(saves geometry only; animation is dropped)");
     }
-    {   // toggle the procedural head look-at so baked clips are visible
-        cvar_t *cv = Cvar_FindVar ("actor_lookat");
-        int on = cv && cv->value != 0.0f;
-        if (IG_Checkbox ("Look at camera (head)", &on))
-            Cvar_SetValue ("actor_lookat", on ? 1.0f : 0.0f);
-    }
-    IG_TextUnformatted ("Camera: RMB-drag orbit; the head tracks it.");
-    IG_TextUnformatted ("Editing tools (box create / rig / timeline): TBD.");
+
     IG_End ();
 }
 
-// Exported vtable -- referenced by editor.c's s_modes[] (extern).
+// ---- console interface (scriptable / headless-testable edit backend) ------
+static void Cmd_ActorEdit_f (void)
+{
+    if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_edit <0|1>\n"); return; }
+    if (!s_mod) actor_load (s_path);
+    if (Q_atoi (Cmd_Argv (1))) edit_begin (); else edit_free ();
+    Con_Printf ("actor edit mode %s\n", s_editmode ? "on" : "off");
+}
+static int actor_edit_part (void)
+{
+    int mi;
+    if (!s_editmode || !s_orig) { Con_Printf ("not editing (actor_edit 1 first)\n"); return -1; }
+    mi = Q_atoi (Cmd_Argv (1));
+    if (mi < 0 || mi >= s_orig->nummeshes || mi >= MAXEDITMESH) { Con_Printf ("bad mesh index\n"); return -1; }
+    return mi;
+}
+static void Cmd_ActorEditMove_f (void)
+{
+    int mi;
+    if (Cmd_Argc () < 5) { Con_Printf ("usage: actor_edit_move <mesh> <dx> <dy> <dz>\n"); return; }
+    if ((mi = actor_edit_part ()) < 0) return;
+    s_voff[mi][0]=Q_atof(Cmd_Argv(2)); s_voff[mi][1]=Q_atof(Cmd_Argv(3)); s_voff[mi][2]=Q_atof(Cmd_Argv(4));
+    edit_rebuild ();
+}
+static void Cmd_ActorEditScale_f (void)
+{
+    int mi;
+    if (Cmd_Argc () < 5) { Con_Printf ("usage: actor_edit_scale <mesh> <sx> <sy> <sz>\n"); return; }
+    if ((mi = actor_edit_part ()) < 0) return;
+    s_vscale[mi][0]=Q_atof(Cmd_Argv(2)); s_vscale[mi][1]=Q_atof(Cmd_Argv(3)); s_vscale[mi][2]=Q_atof(Cmd_Argv(4));
+    edit_rebuild ();
+}
+static void Cmd_ActorEditSave_f (void)
+{
+    if (Cmd_Argc () >= 2) { strncpy (s_savepath, Cmd_Argv (1), sizeof(s_savepath)-1); s_savepath[sizeof(s_savepath)-1]=0; }
+    if (s_editmode) edit_save (); else Con_Printf ("not editing\n");
+}
+
+void ActorMode_RegisterCmds (void)
+{
+    Cmd_AddCommand ("actor_edit",       Cmd_ActorEdit_f);
+    Cmd_AddCommand ("actor_edit_move",  Cmd_ActorEditMove_f);
+    Cmd_AddCommand ("actor_edit_scale", Cmd_ActorEditScale_f);
+    Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
+}
+
 const editor_mode_t actor_mode = {
     .name    = "Actor",
     .enter   = actor_enter,
+    .exit    = actor_exit,
     .draw_ui = actor_draw_ui,
 };
