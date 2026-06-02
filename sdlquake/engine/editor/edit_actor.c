@@ -190,6 +190,28 @@ static void edit_add_box (void)
     edit_rebuild ();
 }
 
+// Bind a part to a joint: set every vertex's blend index so the part follows
+// that joint under animation (the "parent"/rig op). bone lives in the vert, so
+// it persists through edit_rebuild (which only rewrites positions) and the save.
+static int edit_part_joint (int mi)
+{
+    if (!s_orig || mi < 0 || mi >= s_orig->nummeshes) return 0;
+    return s_orig->verts[s_orig->meshes[mi].first_vertex].bone;
+}
+static void edit_bind (int mi, int joint)
+{
+    lm_iqm_mesh_t *me; unsigned k;
+    if (!s_editmode || !s_orig || !s_edit) return;
+    if (mi < 0 || mi >= s_orig->nummeshes) return;
+    if (joint < 0) joint = 0;
+    if (joint >= s_orig->numjoints) joint = s_orig->numjoints - 1;
+    me = &s_orig->meshes[mi];
+    for (k = 0; k < me->num_vertexes; k++) {
+        s_orig->verts[me->first_vertex+k].bone = (unsigned char)joint;
+        s_edit->verts[me->first_vertex+k].bone = (unsigned char)joint;
+    }
+}
+
 static void edit_save (void)
 {
     void *buf = NULL; size_t len = 0;
@@ -307,6 +329,14 @@ static void actor_draw_ui (void)
             IG_DragFloat3 ("move",   s_voff[s_selmesh],   0.5f);
             IG_DragFloat3 ("size",   s_vscale[s_selmesh], 0.02f);
             IG_DragFloat3 ("rotate", s_vrot[s_selmesh],   1.0f);
+            {   // bind the part to a joint (it follows that joint under animation)
+                int   cur = edit_part_joint (s_selmesh);
+                float jf  = (float)cur;
+                if (IG_DragFloat ("bind joint", &jf, 0.25f, 0.0f, (float)(s_orig->numjoints-1)))
+                    edit_bind (s_selmesh, (int)(jf + 0.5f));
+                TX ("  bound to joint %d (%s)", cur,
+                    (cur>=0 && cur<s_orig->numjoints) ? s_orig->joints[cur].name : "?");
+            }
             if (IG_Button ("Reset part")) {
                 s_voff[s_selmesh][0]=s_voff[s_selmesh][1]=s_voff[s_selmesh][2]=0.0f;
                 s_vscale[s_selmesh][0]=s_vscale[s_selmesh][1]=s_vscale[s_selmesh][2]=1.0f;
@@ -368,6 +398,13 @@ static void Cmd_ActorEditRot_f (void)
     s_vrot[mi][0]=Q_atof(Cmd_Argv(2)); s_vrot[mi][1]=Q_atof(Cmd_Argv(3)); s_vrot[mi][2]=Q_atof(Cmd_Argv(4));
     edit_rebuild ();
 }
+static void Cmd_ActorEditBind_f (void)
+{
+    int mi;
+    if (Cmd_Argc () < 3) { Con_Printf ("usage: actor_edit_bind <mesh> <joint>\n"); return; }
+    if ((mi = actor_edit_part ()) < 0) return;
+    edit_bind (mi, Q_atoi (Cmd_Argv (2)));
+}
 static void Cmd_ActorEditAdd_f (void)
 {
     if (!s_editmode) { Con_Printf ("not editing (actor_edit 1 first)\n"); return; }
@@ -394,6 +431,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_move",  Cmd_ActorEditMove_f);
     Cmd_AddCommand ("actor_edit_scale", Cmd_ActorEditScale_f);
     Cmd_AddCommand ("actor_edit_rot",   Cmd_ActorEditRot_f);
+    Cmd_AddCommand ("actor_edit_bind",  Cmd_ActorEditBind_f);
     Cmd_AddCommand ("actor_edit_add",   Cmd_ActorEditAdd_f);
     Cmd_AddCommand ("actor_edit_del",   Cmd_ActorEditDel_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
