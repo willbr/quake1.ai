@@ -249,6 +249,24 @@ R1–R5 (runtime) + E1–E3 (in-engine editor) + C1 (content), built one at a ti
   actor the look-at/gaze read subtly (featureless cube, eye cubes centred on
   their joints); verified from a fixed camera by varying only the gaze/breathe
   cvars. Plan: `docs/superpowers/plans/2026-06-02-skeletal-actors-r3-procedural-face.md`.
+- **R4 done** (self-animating ponytail / secondary dynamics). `iqm_dynamics.c`
+  — a client-side **Verlet point-chain**, engine-side, cosmetic, never networked.
+  Ponytail joints are resolved as an ordered chain by the `pony` name convention
+  (`lm_iqm_t.pony_joint[]`/`num_pony`). Run from `R_IQMDrawModel` after the R3
+  pose composes: the chain root joint is pinned to its **rigid posed** position
+  (so it follows the head look-at) and stays rigid; the free joints integrate
+  gravity + inertia in **world space** (camera-motion-immune), satisfy distance
+  constraints + a light straighten-toward-rigid term, and their simulated
+  transforms are converted back to actor space and written into the free joints'
+  `skin[]` (each segment's +Z bind axis aimed along the simulated chain). Per-actor
+  sim state lives in a 16-slot pool keyed by `entity_t*`. Cvars `actor_dynamics`
+  (on/off), `actor_pony_gravity`/`actor_pony_damping`/`actor_pony_stiffness`/
+  `actor_pony_iters`. Verified in-game: the tail **sags under gravity** with
+  dynamics on vs rigid with it off. **Wind tie-in deferred** (would need an ABI
+  hook to read the game.dll `sim_wind` grid). The bootstrap dummy uses a
+  back-sticking tail so it's visible past the chunky body; the solver handles any
+  chain config. No ABI/protocol bump. Plan:
+  `docs/superpowers/plans/2026-06-02-skeletal-actors-r4-ponytail-dynamics.md`.
 
 ## Perf instrumentation
 
