@@ -100,7 +100,23 @@ static void actor_draw_ui (void)
             TX ("%2d %-10s [%s]", i, iqm->meshes[i].name, iqm->meshes[i].material);
 
     IG_Separator ();
-    IG_TextUnformatted ("Preview: orbit camera (RMB-drag); head tracks it live.");
+    IG_TextUnformatted ("Preview");
+    if (iqm->numclips > 0) {
+        IG_TextUnformatted ("clip (sets the previewed entity's frame):");
+        for (i = 0; i < iqm->numclips; i++) {
+            IG_PushID_Int (i);
+            if (IG_Selectable (iqm->clips[i].name, i == s_ent.frame, 0))
+                s_ent.frame = i;
+            IG_PopID ();
+        }
+    }
+    {   // toggle the procedural head look-at so baked clips are visible
+        cvar_t *cv = Cvar_FindVar ("actor_lookat");
+        int on = cv && cv->value != 0.0f;
+        if (IG_Checkbox ("Look at camera (head)", &on))
+            Cvar_SetValue ("actor_lookat", on ? 1.0f : 0.0f);
+    }
+    IG_TextUnformatted ("Camera: RMB-drag orbit; the head tracks it.");
     IG_TextUnformatted ("Editing tools (box create / rig / timeline): TBD.");
     IG_End ();
 }
