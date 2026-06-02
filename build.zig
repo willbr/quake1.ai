@@ -50,6 +50,7 @@ pub fn build(b: *std.Build) void {
         "menu.c",
         "model.c",
         "iqm_dev.c",
+        "iqm_dynamics.c",
         "net_dgrm.c", "net_loop.c", "net_main.c", "net_vcr.c",
         "nonintel.c",
         "pr_edict.c",
