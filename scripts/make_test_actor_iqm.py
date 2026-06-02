@@ -12,10 +12,11 @@ JOINTS = [
     ("head",   1, (0, 0, 28)),
     ("eye.L",  2, (8, 4, 4)),
     ("eye.R",  2, (8, -4, 4)),
-    ("ponytail_01", 2, (-10, 0, 2)),   # idx 5: attach behind/above the head
-    ("ponytail_02", 5, (0, 0, -9)),    # idx 6
-    ("ponytail_03", 6, (0, 0, -9)),    # idx 7
-    ("ponytail_04", 7, (0, 0, -9)),    # idx 8
+    ("ponytail_01", 2, (-12, 0, 6)),   # idx 5: attach at the back of the head
+    ("ponytail_02", 5, (-13, 0, 0)),   # idx 6: tail sticks straight back (sags under gravity)
+    ("ponytail_03", 6, (-13, 0, 0)),   # idx 7
+    ("ponytail_04", 7, (-13, 0, 0)),   # idx 8
+    ("ponytail_05", 8, (-13, 0, 0)),   # idx 9
 ]
 HEAD = 2
 
@@ -33,10 +34,11 @@ PARTS = [
     (2, (10, 10, 10), (0, 0, 0),  "p_head"),
     (3, (2, 2, 2),    (0, 0, 0),  "p_eye"),
     (4, (2, 2, 2),    (0, 0, 0),  "p_eye"),
-    (5, (3, 3, 5),    (0, 0, 0),  "p_pony"),
-    (6, (3, 3, 5),    (0, 0, 0),  "p_pony"),
-    (7, (3, 3, 5),    (0, 0, 0),  "p_pony"),
-    (8, (3, 3, 5),    (0, 0, 0),  "p_pony"),
+    (5, (4, 4, 8),    (0, 0, 0),  "p_pony"),
+    (6, (4, 4, 8),    (0, 0, 0),  "p_pony"),
+    (7, (4, 4, 8),    (0, 0, 0),  "p_pony"),
+    (8, (4, 4, 8),    (0, 0, 0),  "p_pony"),
+    (9, (4, 4, 8),    (0, 0, 0),  "p_pony"),
 ]
 
 CORNERS = [(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
