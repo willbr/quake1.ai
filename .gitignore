@@ -36,3 +36,5 @@ screenshots/
 
 # Perf captures (from the `profile <n>` console command)
 profiles/
+
+imgui.ini

@@ -258,6 +258,7 @@ static void draw_toolbar(void)
     }
     if (ui_btn_same("Light..."))                s_show_light_opts = !s_show_light_opts;
     if (ui_btn_same("Close (F2)"))              ui_exec("editor\n");
+    if (ui_btn_same("Reset layout"))            IG_RequestDefaultLayout();
 
     // -- Selection / undo ------------------------------------------------
     if (IG_Button("Undo"))                      ui_exec("editor_undo\n");
