@@ -83,4 +83,8 @@ lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len);
 lm_result_t lm_iqm_add_box(lm_iqm_t *m, const float center[3], const float half[3],
                            int joint, const char *material);
 
+/* Append a joint (identity rotation, unit scale) under `parent`, growing joints[]
+   and (if animated) frametrs. Editor "add joint" backend. */
+lm_result_t lm_iqm_add_joint(lm_iqm_t *m, const char *name, int parent, const float t[3]);
+
 #endif /* LIBMODEL_IQM_H */

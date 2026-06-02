@@ -36,6 +36,8 @@ static float     s_voff[MAXEDITMESH][3];           // per-mesh move (offset)
 static float     s_vscale[MAXEDITMESH][3];         // per-mesh size (scale about centroid)
 static float     s_vrot[MAXEDITMESH][3];           // per-mesh rotate (euler pitch/yaw/roll, about centroid)
 static char      s_savepath[MAX_QPATH] = "actors/dummy_edit.iqm";
+static int       s_seljoint;                       // selected joint (skeleton editing)
+static float     s_jnudge[3];                       // incremental joint-move nudge
 
 static void TX (const char *fmt, ...)             // formatted ImGui text helper
 {
@@ -240,6 +242,14 @@ static void edit_joint_move (int J, const vec3_t delta)
     edit_rebuild ();   // propagate the s_orig vertex move into the rendered copy
 }
 
+static void edit_add_joint (int parent, const vec3_t t)
+{
+    if (!s_editmode || !s_orig || !s_edit) return;
+    if (parent < -1 || parent >= s_orig->numjoints) parent = 0;
+    if (lm_iqm_add_joint (s_orig, "joint", parent, t) != LM_OK) return;
+    if (lm_iqm_add_joint (s_edit, "joint", parent, t) != LM_OK) return;
+}
+
 static void edit_save (void)
 {
     void *buf = NULL; size_t len = 0;
@@ -377,10 +387,13 @@ static void actor_draw_ui (void)
 
         IG_Separator ();
         if (IG_CollapsingHeader ("Joints (move = joint + its subtree)", 0)) {
-            static int   s_seljoint = 0;
-            static float s_jnudge[3] = { 0, 0, 0 };
             int j;
             if (s_seljoint >= s_orig->numjoints) s_seljoint = 0;
+            if (IG_Button ("Add joint")) {       // child of the selected joint, 16u up
+                vec3_t off = { 0, 0, 16 };
+                edit_add_joint (s_seljoint, off);
+                s_seljoint = s_orig->numjoints - 1;
+            }
             for (j = 0; j < s_orig->numjoints; j++) {
                 IG_PushID_Int (2000 + j);
                 if (IG_Selectable (s_orig->joints[j].name, j == s_seljoint, 0)) s_seljoint = j;
@@ -454,6 +467,15 @@ static void Cmd_ActorEditJMove_f (void)
     edit_joint_move (j, d);
     Con_Printf ("actor edit: moved joint %d (%s) + its subtree\n", j, s_orig->joints[j].name);
 }
+static void Cmd_ActorEditJAdd_f (void)
+{
+    vec3_t t = { 0, 0, 16 }; int parent;
+    if (!s_editmode || !s_orig) { Con_Printf ("not editing (actor_edit 1 first)\n"); return; }
+    parent = (Cmd_Argc () >= 2) ? Q_atoi (Cmd_Argv (1)) : 0;
+    if (Cmd_Argc () >= 5) { t[0]=Q_atof(Cmd_Argv(2)); t[1]=Q_atof(Cmd_Argv(3)); t[2]=Q_atof(Cmd_Argv(4)); }
+    edit_add_joint (parent, t);
+    Con_Printf ("actor edit: added joint under %d; %d joints\n", parent, s_orig->numjoints);
+}
 static void Cmd_ActorEditBind_f (void)
 {
     int mi;
@@ -489,6 +511,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_rot",   Cmd_ActorEditRot_f);
     Cmd_AddCommand ("actor_edit_bind",  Cmd_ActorEditBind_f);
     Cmd_AddCommand ("actor_edit_jmove", Cmd_ActorEditJMove_f);
+    Cmd_AddCommand ("actor_edit_jadd",  Cmd_ActorEditJAdd_f);
     Cmd_AddCommand ("actor_edit_add",   Cmd_ActorEditAdd_f);
     Cmd_AddCommand ("actor_edit_del",   Cmd_ActorEditDel_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);

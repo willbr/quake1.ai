@@ -297,6 +297,42 @@ lm_result_t lm_iqm_add_box(lm_iqm_t *m, const float center[3], const float half[
     return LM_OK;
 }
 
+/* Append a joint (name/parent/translate, identity rotation, unit scale), growing
+   joints[] and — if the model is animated — re-laying-out frametrs to carry one
+   more (static) joint slot per frame. num_poses stays == numjoints. Editor
+   "add joint" backend. */
+lm_result_t lm_iqm_add_joint(lm_iqm_t *m, const char *name, int parent, const float t[3]){
+    qalloc_t a; lm_iqm_joint_t *nj; lm_iqm_joint_t *jn;
+    if (!m) return LM_ERR_BAD_COUNT;
+    a = m->alloc;
+    nj = QALLOC_ARR(&a, lm_iqm_joint_t, (size_t)m->numjoints+1);
+    if (!nj) return LM_ERR_OOM;
+    memcpy(nj, m->joints, sizeof(lm_iqm_joint_t)*(size_t)m->numjoints);
+    jn = &nj[m->numjoints];
+    memset(jn, 0, sizeof(*jn));
+    strncpy(jn->name, name?name:"joint", 63);
+    jn->parent = parent;
+    jn->translate[0]=t[0]; jn->translate[1]=t[1]; jn->translate[2]=t[2];
+    jn->rotate[3]=1.0f;                                 /* identity quat (0,0,0,1) */
+    jn->scale[0]=jn->scale[1]=jn->scale[2]=1.0f;
+    if (m->frametrs && m->numframes > 0){
+        int onj = m->numjoints, fr;
+        float *nf = QALLOC_ARR(&a, float, (size_t)m->numframes*(onj+1)*10);
+        if (!nf){ QFREE(&a,nj); return LM_ERR_OOM; }
+        for (fr=0; fr<m->numframes; fr++){
+            float *row = nf + ((size_t)fr*(onj+1) + onj)*10;
+            memcpy(nf + (size_t)fr*(onj+1)*10, m->frametrs + (size_t)fr*onj*10, sizeof(float)*onj*10);
+            row[0]=t[0]; row[1]=t[1]; row[2]=t[2];         /* T */
+            row[3]=0; row[4]=0; row[5]=0; row[6]=1.0f;     /* Q identity */
+            row[7]=1.0f; row[8]=1.0f; row[9]=1.0f;         /* S */
+        }
+        QFREE(&a, m->frametrs); m->frametrs = nf;
+    }
+    QFREE(&a, m->joints); m->joints = nj;
+    m->numjoints++;
+    return LM_OK;
+}
+
 /* ---- little-endian writers ---- */
 static void wru(unsigned char *p, unsigned v){
     p[0]=(unsigned char)(v&0xff);      p[1]=(unsigned char)((v>>8)&0xff);
