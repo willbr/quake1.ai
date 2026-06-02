@@ -256,6 +256,21 @@ static void edit_joint_move (int J, const vec3_t delta)
     edit_rebuild ();   // propagate the s_orig vertex move into the rendered copy
 }
 
+// Re-pivot a joint: move its rotation centre WITHOUT moving the mesh. Shift the
+// joint's bind+anim translate (not the verts) — the skin matrix stays identity at
+// rest (mesh unchanged), but the joint origin moves, so future rotations of this
+// joint pivot around the new point. The complement to edit_joint_move.
+static void edit_joint_pivot (int J, const vec3_t d)
+{
+    int fr, c, nj;
+    if (!s_editmode || !s_orig || !s_edit) return;
+    if (J < 0 || J >= s_orig->numjoints) return;
+    nj = s_orig->numjoints;
+    for (c = 0; c < 3; c++) { s_orig->joints[J].translate[c]+=d[c]; s_edit->joints[J].translate[c]+=d[c]; }
+    if (s_orig->frametrs) for (fr=0; fr<s_orig->numframes; fr++) for (c=0;c<3;c++) s_orig->frametrs[((size_t)fr*nj+J)*10+c]+=d[c];
+    if (s_edit->frametrs) for (fr=0; fr<s_edit->numframes; fr++) for (c=0;c<3;c++) s_edit->frametrs[((size_t)fr*nj+J)*10+c]+=d[c];
+}
+
 static void edit_add_joint (int parent, const vec3_t t)
 {
     if (!s_editmode || !s_orig || !s_edit) return;
@@ -522,6 +537,13 @@ static void actor_draw_ui (void)
                 edit_joint_move (s_seljoint, s_jnudge);
                 s_jnudge[0]=s_jnudge[1]=s_jnudge[2]=0.0f;
             }
+            {   // re-pivot: move the rotation centre, mesh stays put
+                static float pivn[3] = { 0, 0, 0 };
+                if (IG_DragFloat3 ("re-pivot", pivn, 0.5f)) {
+                    edit_joint_pivot (s_seljoint, pivn);
+                    pivn[0]=pivn[1]=pivn[2]=0.0f;
+                }
+            }
         }
 
         IG_Separator ();
@@ -687,6 +709,17 @@ static void Cmd_ActorEditJAdd_f (void)
     edit_add_joint (parent, t);
     Con_Printf ("actor edit: added joint under %d; %d joints\n", parent, s_orig->numjoints);
 }
+static void Cmd_ActorEditJPivot_f (void)
+{
+    vec3_t d; int j;
+    if (Cmd_Argc () < 5) { Con_Printf ("usage: actor_edit_jpivot <joint> <dx> <dy> <dz>\n"); return; }
+    if (!s_editmode || !s_orig) { Con_Printf ("not editing (actor_edit 1 first)\n"); return; }
+    j = Q_atoi (Cmd_Argv (1));
+    if (j < 0 || j >= s_orig->numjoints) { Con_Printf ("bad joint index\n"); return; }
+    d[0]=Q_atof(Cmd_Argv(2)); d[1]=Q_atof(Cmd_Argv(3)); d[2]=Q_atof(Cmd_Argv(4));
+    edit_joint_pivot (j, d);
+    Con_Printf ("actor edit: re-pivoted joint %d (%s) (mesh unchanged)\n", j, s_orig->joints[j].name);
+}
 static void Cmd_ActorEditBind_f (void)
 {
     int mi;
@@ -722,6 +755,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_rot",   Cmd_ActorEditRot_f);
     Cmd_AddCommand ("actor_edit_bind",  Cmd_ActorEditBind_f);
     Cmd_AddCommand ("actor_edit_jmove", Cmd_ActorEditJMove_f);
+    Cmd_AddCommand ("actor_edit_jpivot",Cmd_ActorEditJPivot_f);
     Cmd_AddCommand ("actor_edit_jadd",  Cmd_ActorEditJAdd_f);
     Cmd_AddCommand ("actor_anim_clip",  Cmd_ActorAnimClip_f);
     Cmd_AddCommand ("actor_anim_addclip", Cmd_ActorAnimAddClip_f);
