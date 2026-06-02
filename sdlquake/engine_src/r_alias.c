@@ -1125,6 +1125,9 @@ void R_IQMDrawModel (alight_t *plighting)
 			if (lookat && jj == iqm->head_joint)
 				R_IQMLookAtLocal (trs, pp, curwld, tgt_actor,
 					actor_gaze_yaw.value, actor_gaze_pitch.value, local);
+			else if (lookat && R_IQMJointIsEye (iqm, jj))
+				R_IQMLookAtLocal (trs, pp, curwld, tgt_actor,
+					actor_eye_yaw.value, actor_eye_pitch.value, local);
 			else
 				IQM_LocalMat (trs, local);
 
