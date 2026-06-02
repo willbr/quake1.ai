@@ -34,6 +34,7 @@ static entity_t  s_eent;                           // edit-preview entity
 static int       s_selmesh;                        // selected part
 static float     s_voff[MAXEDITMESH][3];           // per-mesh move (offset)
 static float     s_vscale[MAXEDITMESH][3];         // per-mesh size (scale about centroid)
+static float     s_vrot[MAXEDITMESH][3];           // per-mesh rotate (euler pitch/yaw/roll, about centroid)
 static char      s_savepath[MAX_QPATH] = "actors/dummy_edit.iqm";
 
 static void TX (const char *fmt, ...)             // formatted ImGui text helper
@@ -65,12 +66,22 @@ static void edit_rebuild (void)
         for (k = 0; k < n; k++)
             { c[0]+=s_orig->verts[a+k].pos[0]; c[1]+=s_orig->verts[a+k].pos[1]; c[2]+=s_orig->verts[a+k].pos[2]; }
         if (n) { c[0]/=n; c[1]/=n; c[2]/=n; }
-        for (k = 0; k < n; k++)
         {
-            int j;
-            for (j = 0; j < 3; j++)
-                s_edit->verts[a+k].pos[j] =
-                    c[j] + s_vscale[mi][j] * (s_orig->verts[a+k].pos[j] - c[j]) + s_voff[mi][j];
+            // rotation basis (engine convention: columns fwd / -right / up)
+            vec3_t fwd, right, up;
+            int    rot = (s_vrot[mi][0]||s_vrot[mi][1]||s_vrot[mi][2]);
+            if (rot) AngleVectors (s_vrot[mi], fwd, right, up);
+            for (k = 0; k < n; k++)
+            {
+                vec3_t d; int j;
+                for (j = 0; j < 3; j++) d[j] = s_vscale[mi][j] * (s_orig->verts[a+k].pos[j] - c[j]);
+                if (rot)
+                    for (j = 0; j < 3; j++)
+                        s_edit->verts[a+k].pos[j] = c[j] + d[0]*fwd[j] - d[1]*right[j] + d[2]*up[j] + s_voff[mi][j];
+                else
+                    for (j = 0; j < 3; j++)
+                        s_edit->verts[a+k].pos[j] = c[j] + d[j] + s_voff[mi][j];
+            }
         }
     }
     // refresh model bounds for culling/scale sanity
@@ -100,7 +111,8 @@ static void edit_begin (void)
 
     for (mi = 0; mi < MAXEDITMESH; mi++)
         { s_voff[mi][0]=s_voff[mi][1]=s_voff[mi][2]=0.0f;
-          s_vscale[mi][0]=s_vscale[mi][1]=s_vscale[mi][2]=1.0f; }
+          s_vscale[mi][0]=s_vscale[mi][1]=s_vscale[mi][2]=1.0f;
+          s_vrot[mi][0]=s_vrot[mi][1]=s_vrot[mi][2]=0.0f; }
     s_selmesh = 0;
 
     memset (&s_emodel, 0, sizeof(s_emodel));
@@ -227,11 +239,13 @@ static void actor_draw_ui (void)
         if (s_selmesh >= 0 && s_selmesh < s_orig->nummeshes) {
             IG_Separator ();
             TX ("editing part %d (%s)", s_selmesh, s_orig->meshes[s_selmesh].name);
-            IG_DragFloat3 ("move",  s_voff[s_selmesh],   0.5f);
-            IG_DragFloat3 ("size",  s_vscale[s_selmesh], 0.02f);
+            IG_DragFloat3 ("move",   s_voff[s_selmesh],   0.5f);
+            IG_DragFloat3 ("size",   s_vscale[s_selmesh], 0.02f);
+            IG_DragFloat3 ("rotate", s_vrot[s_selmesh],   1.0f);
             if (IG_Button ("Reset part")) {
                 s_voff[s_selmesh][0]=s_voff[s_selmesh][1]=s_voff[s_selmesh][2]=0.0f;
                 s_vscale[s_selmesh][0]=s_vscale[s_selmesh][1]=s_vscale[s_selmesh][2]=1.0f;
+                s_vrot[s_selmesh][0]=s_vrot[s_selmesh][1]=s_vrot[s_selmesh][2]=0.0f;
             }
         }
         edit_rebuild ();   // apply numeric edits to the rendered copy each frame
@@ -279,6 +293,14 @@ static void Cmd_ActorEditScale_f (void)
     s_vscale[mi][0]=Q_atof(Cmd_Argv(2)); s_vscale[mi][1]=Q_atof(Cmd_Argv(3)); s_vscale[mi][2]=Q_atof(Cmd_Argv(4));
     edit_rebuild ();
 }
+static void Cmd_ActorEditRot_f (void)
+{
+    int mi;
+    if (Cmd_Argc () < 5) { Con_Printf ("usage: actor_edit_rot <mesh> <pitch> <yaw> <roll>\n"); return; }
+    if ((mi = actor_edit_part ()) < 0) return;
+    s_vrot[mi][0]=Q_atof(Cmd_Argv(2)); s_vrot[mi][1]=Q_atof(Cmd_Argv(3)); s_vrot[mi][2]=Q_atof(Cmd_Argv(4));
+    edit_rebuild ();
+}
 static void Cmd_ActorEditSave_f (void)
 {
     if (Cmd_Argc () >= 2) { strncpy (s_savepath, Cmd_Argv (1), sizeof(s_savepath)-1); s_savepath[sizeof(s_savepath)-1]=0; }
@@ -290,6 +312,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit",       Cmd_ActorEdit_f);
     Cmd_AddCommand ("actor_edit_move",  Cmd_ActorEditMove_f);
     Cmd_AddCommand ("actor_edit_scale", Cmd_ActorEditScale_f);
+    Cmd_AddCommand ("actor_edit_rot",   Cmd_ActorEditRot_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
 }
 
