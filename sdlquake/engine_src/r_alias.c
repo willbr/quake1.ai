@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 						// right now, but that should move)
 #include "r_drawflat.h"
 #include "iqm.h"
+#include "iqm_dynamics.h"
 
 #define LIGHT_MIN	5		// lowest light value we'll allow, to avoid the
 							//  need for inner-loop light clamping
@@ -885,6 +886,7 @@ void R_IQMInitCvars (void)
 	Cvar_RegisterVariable (&actor_eye_pitch);
 	Cvar_RegisterVariable (&actor_breathe_rate);
 	Cvar_RegisterVariable (&actor_breathe_amp);
+	IQM_DynamicsInitCvars ();
 }
 
 #define MAX_IQM_JOINTS 128
@@ -1161,6 +1163,26 @@ void R_IQMDrawModel (alight_t *plighting)
 				skin[ci][rr][2] *= s;
 				skin[ci][rr][3] = s * skin[ci][rr][3] + (1.0f - s) * org[rr];
 			}
+		}
+
+		// R4: ponytail dynamics. Build the actor->world rotation (entity columns
+		// alias_forward / -alias_right / alias_up) + origin, solve the chain, and
+		// write the simulated (free) ponytail joints' skin matrices.
+		if (iqm->num_pony >= 2)
+		{
+			float	a2w_rot[3][3];
+			vec3_t	a2w_org;
+			int		rr2;
+
+			for (rr2 = 0; rr2 < 3; rr2++)
+			{
+				a2w_rot[rr2][0] =  alias_forward[rr2];
+				a2w_rot[rr2][1] = -alias_right[rr2];
+				a2w_rot[rr2][2] =  alias_up[rr2];
+			}
+			VectorCopy (currententity->origin, a2w_org);
+			IQM_SolveDynamics (currententity, iqm, curwld, bindinv, skin,
+				a2w_rot, a2w_org, cl.time);
 		}
 	}
 
