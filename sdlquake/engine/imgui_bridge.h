@@ -95,6 +95,7 @@ int   IG_WantCaptureKeyboard(void); // 1 if a text widget is focused
 // closing doesn't leave the corresponding key "stuck" inside ImGui's view.
 void IG_ClearInputs(void);
 int   IG_IsMouseDoubleClicked(int button); // 1 if button was just double-clicked
+int   IG_IsMouseClicked(int button);       // 1 if button was just clicked
 void  IG_GetDisplaySize(float *w, float *h);
 
 // Frame lifecycle

@@ -38,6 +38,13 @@ void Editor_PreRender(void);
 int  Editor_AllowGameInput(void);
 int  Editor_LookmodeActive(void);
 
+// F3 dev-overlay "play in the viewport": click the game Viewport panel to give
+// the running game mouse/keyboard input (Esc releases). Drives the same input
+// gates as the editor's FPS-look mode.
+int  Editor_ViewportPlaying(void);
+void Editor_ViewportPlayStart(void);
+void Editor_ViewportPlayStop(void);
+
 // Cycle editor_camera between 0 (free-fly) and 1 (FPS). Bound to Tab in
 // in_sdl.c.
 void Editor_CycleCameraMode(void);

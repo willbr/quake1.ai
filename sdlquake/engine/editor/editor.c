@@ -32,6 +32,7 @@
 #include <math.h>
 
 extern SDL_Window *VID_GetWindow(void);
+extern int ImguiLayer_IsOpen(void);
 
 // Viewport panel: the editor's 3D scene drawn as an ImGui Image. The image's
 // screen rect (set each frame by draw_viewport_window) is what window_to_vid
@@ -215,6 +216,7 @@ static void editor_light_opts_from_cvars(light_options_t *out)
 }
 
 static int     s_lookmode      = 0;
+static int     s_vp_play       = 0;   // F3 overlay: play the game in the Viewport panel
 static int     s_camera_inited = 0;
 static vec3_t  s_cam_origin;
 static vec3_t  s_cam_angles;
@@ -2131,6 +2133,7 @@ void Editor_Shutdown(void)
 void Editor_Toggle(void)
 {
     if (!s_inited) return;
+    Editor_ViewportPlayStop();   // drop any F3 viewport-play before switching modes
 
     // Opening the editor: refresh edit_scene against the live server.
     // Server-populated scenes get rebuilt against new sv.edicts when the
@@ -2207,9 +2210,10 @@ int Editor_IsPaused(void)
     if ((int)editor_camera.value == 0) return 1;   // free-fly: always paused
     return !s_lookmode;                            // fps: paused when not looking
 }
-int Editor_LookmodeActive (void) { return s_open && s_lookmode; }
+int Editor_LookmodeActive (void) { return (s_open && s_lookmode) || (s_vp_play && !s_open); }
 int Editor_AllowGameInput (void)
 {
+    if (s_vp_play && !s_open) return 1;   // F3 viewport play (editor closed)
     return s_open && s_lookmode && (int)editor_camera.value == 1;
 }
 int MapMode_ShouldDrawPlayer(void)
@@ -2266,6 +2270,33 @@ static void set_lookmode(int on)
     // mode the player walks "by itself".
     if (was_on && !on)
         release_held_keys();
+}
+
+// F3 dev-overlay: play the running game inside the Viewport panel. PlayStart
+// grabs the mouse for relative look (flushing the stale UI delta); the input
+// gates above then route mouse/keyboard to the game and un-pause the sim.
+// Esc / closing F3 / opening the editor calls PlayStop.
+int  Editor_ViewportPlaying(void) { return s_vp_play; }
+void Editor_ViewportPlayStart(void)
+{
+    if (s_vp_play) return;
+    if (!ImguiLayer_IsOpen() || s_open) return;   // F3 overlay only, editor closed
+    s_vp_play = 1;
+    {
+        SDL_Window *w = VID_GetWindow();
+        if (w) SDL_SetWindowRelativeMouseMode(w, true);
+    }
+    SDL_GetRelativeMouseState(NULL, NULL);   // discard delta accumulated over the UI
+}
+void Editor_ViewportPlayStop(void)
+{
+    if (!s_vp_play) return;
+    s_vp_play = 0;
+    {
+        SDL_Window *w = VID_GetWindow();
+        if (w) SDL_SetWindowRelativeMouseMode(w, false);
+    }
+    release_held_keys();
 }
 
 void Editor_CycleCameraMode(void)
@@ -2903,6 +2934,13 @@ void Editor_DrawViewport(void)
         s_viewport_rect[2] = iw;      s_viewport_rect[3] = ih;
         s_viewport_valid   = 1;
         s_viewport_hovered = (IG_IsItemHovered() || IG_IsWindowHovered());
+        // F3 dev overlay: click the game view to play it; Esc releases.
+        if (!Editor_IsOpen() && !Editor_ViewportPlaying()) {
+            if (IG_IsItemHovered() && IG_IsMouseClicked(0))
+                Editor_ViewportPlayStart();
+            IG_SetCursorScreenPos(bx + ox + 6.0f, by + oy + 4.0f);
+            IG_TextUnformatted("Click to play  (Esc releases)");
+        }
     } else {
         IG_TextUnformatted("(no scene)");
         s_viewport_valid   = 0;

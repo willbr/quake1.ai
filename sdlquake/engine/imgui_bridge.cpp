@@ -39,6 +39,7 @@ void IG_ClearInputs(void)
     io.ClearInputMouse();
 }
 int   IG_IsMouseDoubleClicked(int button){ return ImGui::IsMouseDoubleClicked((ImGuiMouseButton)button) ? 1 : 0; }
+int   IG_IsMouseClicked(int button)      { return ImGui::IsMouseClicked((ImGuiMouseButton)button) ? 1 : 0; }
 void  IG_GetDisplaySize(float *w, float *h)
 {
     ImVec2 sz = ImGui::GetIO().DisplaySize;

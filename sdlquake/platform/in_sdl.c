@@ -163,7 +163,10 @@ void IN_ProcessEvents(void)
             if (ev.key.scancode == SDL_SCANCODE_F3)
             {
                 if (ev.key.type == SDL_EVENT_KEY_DOWN)
+                {
+                    Editor_ViewportPlayStop();   // release viewport-play before toggling
                     ImguiLayer_Toggle();
+                }
                 break;
             }
             if (ev.key.scancode == SDL_SCANCODE_F2)
@@ -182,15 +185,18 @@ void IN_ProcessEvents(void)
                     Editor_Toggle();
                 break;
             }
-            // Esc closes the dev overlay if it's open (and no ImGui widget
-            // has keyboard focus — let ImGui dismiss the widget first).
+            // Esc in the F3 overlay: if playing the game in the Viewport panel,
+            // release play; otherwise close the overlay (unless an ImGui widget
+            // has keyboard focus — let ImGui dismiss it first).
             if (ev.key.scancode == SDL_SCANCODE_ESCAPE
                 && ImguiLayer_IsOpen()
-                && !Editor_IsOpen()
-                && !IG_WantCaptureKeyboard())
+                && !Editor_IsOpen())
             {
                 if (ev.key.type == SDL_EVENT_KEY_DOWN)
-                    ImguiLayer_Toggle();
+                {
+                    if (Editor_ViewportPlaying())       Editor_ViewportPlayStop();
+                    else if (!IG_WantCaptureKeyboard()) ImguiLayer_Toggle();
+                }
                 break;
             }
             // Editor delete: Delete or Backspace removes the current
