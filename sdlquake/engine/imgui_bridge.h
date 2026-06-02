@@ -74,6 +74,15 @@ void  IG_DestroyContext(void);
 void  IG_StyleColorsDark(void);
 void  IG_SetIniFilename(const char *path);   // pass NULL to disable .ini
 
+// Docking (docking-branch ImGui). IG_EnableDocking sets the config flag once
+// at init. IG_HostDockSpace submits the full-viewport passthrough host dock
+// node — call it once per frame BEFORE the windows that dock into it.
+// IG_RequestDefaultLayout (re)bakes the default layout on the next
+// IG_HostDockSpace call (first run + the editor's "Reset layout" button).
+void  IG_EnableDocking(void);
+void  IG_HostDockSpace(void);
+void  IG_RequestDefaultLayout(void);
+
 // Per-frame info
 float IG_GetFramerate(void);
 int   IG_WantCaptureMouse(void);    // 1 if ImGui currently owns the mouse

@@ -5,6 +5,7 @@
 #include "backends/imgui_impl_sdl3.h"
 #include "backends/imgui_impl_sdlgpu3.h"
 #include "imgui_bridge.h"
+#include "imgui_internal.h"   // DockBuilder* lives here
 
 extern "C" {
 
@@ -307,5 +308,53 @@ void IG_ImplSDLGPU3_PrepareDrawData(SDL_GPUCommandBuffer *cmd)
     { ImGui_ImplSDLGPU3_PrepareDrawData(ImGui::GetDrawData(), cmd); }
 void IG_ImplSDLGPU3_RenderDrawData(SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *pass)
     { ImGui_ImplSDLGPU3_RenderDrawData(ImGui::GetDrawData(), cmd, pass); }
+
+// --- Docking ---------------------------------------------------------------
+static bool s_rebuild_layout = false;
+
+void IG_EnableDocking(void)
+{
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+}
+
+void IG_RequestDefaultLayout(void) { s_rebuild_layout = true; }
+
+// Carve top / left / right strips off the host node; the remaining `centre`
+// node is left empty — with PassthruCentralNode it renders transparent and
+// the 3D scene shows through it. Windows are docked by title; the per-mode
+// panels share the left/right strips (only one mode draws at a time).
+static void ig_build_default_layout(ImGuiID dockspace_id)
+{
+    const ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id,
+        ImGuiDockNodeFlags_DockSpace | ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockBuilderSetNodeSize(dockspace_id, vp->Size);
+
+    ImGuiID centre = dockspace_id;
+    ImGuiID top   = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Up,    0.16f, NULL, &centre);
+    ImGuiID left  = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Left,  0.20f, NULL, &centre);
+    ImGuiID right = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.28f, NULL, &centre);
+
+    ImGui::DockBuilderDockWindow("Editor",             top);
+    ImGui::DockBuilderDockWindow("Editor Mode",        top);
+    ImGui::DockBuilderDockWindow("Brushes",            left);
+    ImGui::DockBuilderDockWindow("Particle Effects",   left);
+    ImGui::DockBuilderDockWindow("Actor",              left);
+    ImGui::DockBuilderDockWindow("Inspector",          right);
+    ImGui::DockBuilderDockWindow("Particle Inspector", right);
+
+    ImGui::DockBuilderFinish(dockspace_id);
+}
+
+void IG_HostDockSpace(void)
+{
+    ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(
+        0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+    if (s_rebuild_layout) {
+        s_rebuild_layout = false;
+        ig_build_default_layout(dockspace_id);
+    }
+}
 
 } // extern "C"
