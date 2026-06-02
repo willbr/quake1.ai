@@ -4,6 +4,7 @@
 #include "game_types.h"
 #include "game_defs.h"
 #include "sim/sim.h"
+#include "actor_test.h"
 #include <string.h>
 
 extern engine_api_t   *eng;
@@ -199,6 +200,8 @@ void spawn_worldspawn(edict_t *self)
     eng->PrecacheModel("progs/backpack.mdl");
     eng->PrecacheModel("progs/zom_gib.mdl");
     eng->PrecacheModel("progs/v_light.mdl");
+
+    Actor_TestPrecache();   // skeletal-actor IQM dummy (impulse 217 spawns it)
 
     // light style animation tables ('a' = dark, 'z' = bright)
     eng->SV_LightStyle( 0, "m");

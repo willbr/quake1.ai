@@ -267,6 +267,16 @@ R1–R5 (runtime) + E1–E3 (in-engine editor) + C1 (content), built one at a ti
   back-sticking tail so it's visible past the chunky body; the solver handles any
   chain config. No ABI/protocol bump. Plan:
   `docs/superpowers/plans/2026-06-02-skeletal-actors-r4-ponytail-dynamics.md`.
+- **C1-lite done** (in-game server integration). `sdlquake/game/actor_test.c` —
+  proves the whole stack works on a **real server-spawned networked entity**, not
+  just the engine dev-spawn. `Actor_TestPrecache()` (called from `worldspawn`)
+  precaches `actors/dummy.iqm` into the level's precache list; `impulse 217`
+  (`Actor_TestDebugSpawn`) `ED_Alloc`s a `SOLID_NOT`/`MOVETYPE_NONE` entity 96u
+  ahead, `SV_SetModel`s it to the IQM, and `SV_SetOrigin` links it. The client
+  renders it as `mod_iqm` and R3/R4 (look-at/breathing/ponytail) run for it
+  automatically — **all client-side, so no protocol/ABI change** (`R5` would only
+  be needed for game.dll to *drive* clip/talk/expression state). Verified
+  in-game: the entity spawns and renders with live expression.
 
 ## Perf instrumentation
 

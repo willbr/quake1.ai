@@ -6,6 +6,7 @@
 #include "weapons_phase6.h"
 #include "weapons_fire.h"
 #include "flammables.h"
+#include "actor_test.h"
 #include "sim/sim.h"
 #include <string.h>
 #include <math.h>
@@ -1697,6 +1698,7 @@ static void ImpulseCommands(void) {
         vec3_t up = { 0, 0, 1 };
         eng->SpawnParticleEffect("campfire", self->v.origin, up);
     }
+    if (imp == 217) Actor_TestDebugSpawn(self);   // skeletal actor: spawn IQM test actor ahead
     if (imp == 255) QuadCheat();
     self->v.impulse = 0;
 }
