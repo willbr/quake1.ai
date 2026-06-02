@@ -174,6 +174,10 @@ float IG_GetFrameHeightWithSpacing(void);
 // Width of the current window's content region (excluding scrollbar). Used
 // to auto-wrap thumbnail grids when the user resizes the window.
 float IG_GetContentRegionAvailX(void);
+void  IG_GetContentRegionAvail(float *w, float *h);
+void  IG_GetCursorScreenPos(float *x, float *y);
+void  IG_SetCursorScreenPos(float x, float y);
+int   IG_IsWindowHovered(void);   // 1 if the current window is hovered
 
 // Tables
 int   IG_BeginTable(const char *id, int cols, int flags,

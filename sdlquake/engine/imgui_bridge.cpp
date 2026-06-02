@@ -198,6 +198,20 @@ void IG_SetKeyboardFocusHere(int offset) { ImGui::SetKeyboardFocusHere(offset); 
 // Layout queries
 float IG_GetFrameHeightWithSpacing(void) { return ImGui::GetFrameHeightWithSpacing(); }
 float IG_GetContentRegionAvailX(void)    { return ImGui::GetContentRegionAvail().x; }
+void IG_GetContentRegionAvail(float *w, float *h)
+{
+    ImVec2 a = ImGui::GetContentRegionAvail();
+    if (w) *w = a.x;
+    if (h) *h = a.y;
+}
+void IG_GetCursorScreenPos(float *x, float *y)
+{
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    if (x) *x = p.x;
+    if (y) *y = p.y;
+}
+void IG_SetCursorScreenPos(float x, float y) { ImGui::SetCursorScreenPos(ImVec2(x, y)); }
+int  IG_IsWindowHovered(void) { return ImGui::IsWindowHovered() ? 1 : 0; }
 
 // Tables
 int IG_BeginTable(const char *id, int cols, int flags, float ow, float oh)
