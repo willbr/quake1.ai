@@ -131,12 +131,14 @@ lm_result_t lm_load_iqm(const void *vbuf, size_t len,
     /* ---- resolve role joints by name convention (R3) ---- */
     m->head_joint = m->chest_joint = m->jaw_joint = -1;
     m->num_eye = 0;
+    m->num_pony = 0;
     for (i = 0; i < (int)num_joint; i++){
         const char *nm = m->joints[i].name;
         if (m->head_joint  < 0 && strstr(nm, "head"))  m->head_joint  = i;
         if (m->chest_joint < 0 && strstr(nm, "chest")) m->chest_joint = i;
         if (m->jaw_joint   < 0 && strstr(nm, "jaw"))   m->jaw_joint   = i;
-        if (strstr(nm, "eye") && m->num_eye < 4)       m->eye_joint[m->num_eye++] = i;
+        if (strstr(nm, "eye")  && m->num_eye  < 4)     m->eye_joint[m->num_eye++]   = i;
+        if (strstr(nm, "pony") && m->num_pony < 8)     m->pony_joint[m->num_pony++] = i;
     }
     for (i = 0; i < (int)num_vert; i++){
         const unsigned char *pp = b + ofs_pos + i*12;

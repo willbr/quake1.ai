@@ -50,6 +50,8 @@ typedef struct lm_iqm_s {
     int             jaw_joint;     /* resolved for forward-compat; unused until lipsync */
     int             eye_joint[4];
     int             num_eye;
+    int             pony_joint[8];  /* ordered chain root..tip (R4 dynamics) */
+    int             num_pony;
     qalloc_t        alloc;
 } lm_iqm_t;
 
