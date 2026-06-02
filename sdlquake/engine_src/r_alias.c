@@ -1137,6 +1137,31 @@ void R_IQMDrawModel (alight_t *plighting)
 				memcpy (curwld[jj], local, sizeof(local));
 			R_ConcatTransforms (curwld[jj], bindinv[jj], skin[jj]);
 		}
+
+		// R3 breathing: scale ONLY the chest mesh about its posed origin, by
+		// post-multiplying its skin matrix. Non-propagating (children use their
+		// own skin matrices), matching the design's "uniform, non-propagating
+		// mesh scale" decision. v' = org + s*(v - org) on the posed vertex.
+		if (iqm->chest_joint >= 0 && iqm->chest_joint < iqm->numjoints &&
+			actor_breathe_amp.value != 0.0f)
+		{
+			int		ci = iqm->chest_joint;
+			float	s  = 1.0f + actor_breathe_amp.value *
+						sin (cl.time * actor_breathe_rate.value * 2.0f * M_PI);
+			float	org[3];
+			int		rr;
+
+			org[0] = curwld[ci][0][3];
+			org[1] = curwld[ci][1][3];
+			org[2] = curwld[ci][2][3];
+			for (rr = 0; rr < 3; rr++)
+			{
+				skin[ci][rr][0] *= s;
+				skin[ci][rr][1] *= s;
+				skin[ci][rr][2] *= s;
+				skin[ci][rr][3] = s * skin[ci][rr][3] + (1.0f - s) * org[rr];
+			}
+		}
 	}
 
 	for (i = 0; i < iqm->numverts; i++)
