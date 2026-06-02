@@ -104,11 +104,63 @@ static void Actor_Clear_f (void)
 	Con_Printf ("actor cleared\n");
 }
 
+/*
+=================
+Actor_Roundtrip_f
+  Load an IQM, serialize it back out with lm_write_iqm, re-parse the bytes, and
+  verify the geometry + skeleton survive the round trip. Tests the editor's IQM
+  writer (E1 pipeline backend) without any UI. Animation is not written yet, so
+  the re-parsed model is static (compared on geometry/joints only).
+=================
+*/
+static void Actor_Roundtrip_f (void)
+{
+	char		name[MAX_QPATH];
+	model_t		*mod;
+	lm_iqm_t	*src, *rt;
+	void		*buf;
+	size_t		len;
+	lm_result_t	r;
+	int			i, ok;
+
+	if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_roundtrip <file.iqm>\n"); return; }
+	Q_strcpy (name, Cmd_Argv (1));
+	mod = Mod_ForName (name, false);
+	if (!mod || mod->type != mod_iqm) { Con_Printf ("actor_roundtrip: %s is not an IQM\n", name); return; }
+	src = mod->iqmdata;
+
+	r = lm_write_iqm (src, &buf, &len);
+	if (r != LM_OK) { Con_Printf ("actor_roundtrip: write failed (%d)\n", (int)r); return; }
+
+	r = lm_load_iqm (buf, len, 0, &rt);
+	if (r != LM_OK) { Con_Printf ("actor_roundtrip: re-parse failed (%d), wrote %d bytes\n", (int)r, (int)len); free (buf); return; }
+
+	ok = (src->nummeshes == rt->nummeshes && src->numjoints == rt->numjoints &&
+	      src->numverts  == rt->numverts  && src->numtris   == rt->numtris);
+	for (i = 0; ok && i < src->numjoints; i++)
+		if (src->joints[i].parent != rt->joints[i].parent || Q_strcmp (src->joints[i].name, rt->joints[i].name))
+			ok = 0;
+	for (i = 0; ok && i < src->numverts; i++)
+		if (src->verts[i].pos[0] != rt->verts[i].pos[0] || src->verts[i].pos[1] != rt->verts[i].pos[1] ||
+		    src->verts[i].pos[2] != rt->verts[i].pos[2] || src->verts[i].bone   != rt->verts[i].bone)
+			ok = 0;
+
+	Con_Printf ("actor_roundtrip %s: wrote %d bytes; src(m%d j%d v%d t%d) -> rt(m%d j%d v%d t%d) %s\n",
+		name, (int)len,
+		src->nummeshes, src->numjoints, src->numverts, src->numtris,
+		rt->nummeshes,  rt->numjoints,  rt->numverts,  rt->numtris,
+		ok ? "MATCH" : "MISMATCH");
+
+	lm_iqm_free (rt);
+	free (buf);
+}
+
 void IQMDev_Init (void)
 {
-	Cmd_AddCommand ("actor_dump",  Actor_Dump_f);
-	Cmd_AddCommand ("actor_spawn", Actor_Spawn_f);
-	Cmd_AddCommand ("actor_clear", Actor_Clear_f);
+	Cmd_AddCommand ("actor_dump",      Actor_Dump_f);
+	Cmd_AddCommand ("actor_spawn",     Actor_Spawn_f);
+	Cmd_AddCommand ("actor_clear",     Actor_Clear_f);
+	Cmd_AddCommand ("actor_roundtrip", Actor_Roundtrip_f);
 }
 
 void IQMDev_AddToScene (void)

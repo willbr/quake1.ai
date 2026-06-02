@@ -277,6 +277,16 @@ R1–R5 (runtime) + E1–E3 (in-engine editor) + C1 (content), built one at a ti
   automatically — **all client-side, so no protocol/ABI change** (`R5` would only
   be needed for game.dll to *drive* clip/talk/expression state). Verified
   in-game: the entity spawns and renders with live expression.
+- **IQM writer done** (E1 pipeline backend — the editor's save path). `lm_write_iqm`
+  (`libmodel/iqm.c`) serializes an `lm_iqm_t`'s geometry + skeleton back to IQM v2
+  bytes (string table, 4 vertex arrays POSITION/TEXCOORD/BLENDINDEXES/BLENDWEIGHTS,
+  triangles, joints), mirroring the known-good generator layout; output re-parses
+  as a **static** model (animation-write deferred to E2 — E1 authors static box
+  actors). Verified by the `actor_roundtrip <file.iqm>` console command (load →
+  write → re-parse → compare): `dummy.iqm` round-trips geometry + joints exact
+  (`MATCH`). The remaining editor work (the interactive **Actor editor mode**:
+  box create/size/parent, gizmos, animation timeline) is UX-heavy and the natural
+  next sub-project (E1 proper), templated on `edit_particle.c`.
 
 ## Perf instrumentation
 

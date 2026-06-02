@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #include "iqm.h"
 
 /* ---- little-endian readers over a fixed buffer ---- */
@@ -229,4 +230,113 @@ void lm_iqm_free(lm_iqm_t *m){
     QFREE(&a, m->verts);  QFREE(&a, m->tris);
     QFREE(&a, m->frametrs);
     QFREE(&a, m);
+}
+
+/* ---- little-endian writers ---- */
+static void wru(unsigned char *p, unsigned v){
+    p[0]=(unsigned char)(v&0xff);      p[1]=(unsigned char)((v>>8)&0xff);
+    p[2]=(unsigned char)((v>>16)&0xff);p[3]=(unsigned char)((v>>24)&0xff);
+}
+static void wrf(unsigned char *p, float f){ unsigned u; memcpy(&u,&f,4); wru(p,u); }
+
+#define ALIGN8(n) (((n)+7u)&~7u)
+
+/* Serialize geometry + skeleton to IQM v2 bytes. Animation (poses/anims/frames)
+   is intentionally NOT written yet — E1 authors static box actors; writing baked
+   clips lands with E2. On success *out_buf is a malloc()'d buffer of *out_len
+   bytes (caller free()s it); the resulting file re-parses via lm_load_iqm as a
+   static (bind-pose) model. */
+lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len){
+    unsigned char *buf, *strs;
+    unsigned strcap, slen, i;
+    unsigned ofs_text, ofs_mesh, ofs_va, ofs_pos, ofs_uv, ofs_bi, ofs_bw, ofs_tri, ofs_joint, total;
+    unsigned *mesh_name_ofs, *mesh_mat_ofs, *joint_name_ofs;
+
+    if (out_buf) *out_buf = NULL;
+    if (out_len) *out_len = 0;
+    if (!m || !out_buf || !out_len) return LM_ERR_BAD_COUNT;
+    if (m->nummeshes <= 0 || m->numverts <= 0 || m->numtris <= 0) return LM_ERR_BAD_COUNT;
+
+    /* string table (offset 0 == empty string) */
+    strcap = 1u + (unsigned)(m->nummeshes*2 + m->numjoints) * 72u;
+    strs           = (unsigned char*)malloc(strcap);
+    mesh_name_ofs  = (unsigned*)malloc(sizeof(unsigned)*(unsigned)(m->nummeshes));
+    mesh_mat_ofs   = (unsigned*)malloc(sizeof(unsigned)*(unsigned)(m->nummeshes));
+    joint_name_ofs = (unsigned*)malloc(sizeof(unsigned)*(unsigned)(m->numjoints>0?m->numjoints:1));
+    if (!strs || !mesh_name_ofs || !mesh_mat_ofs || !joint_name_ofs){
+        free(strs); free(mesh_name_ofs); free(mesh_mat_ofs); free(joint_name_ofs);
+        return LM_ERR_OOM;
+    }
+    strs[0]=0; slen=1;
+    #define ADDSTR(dst, nm) do{ const char *s_=(nm)?(nm):""; unsigned L_=(unsigned)strlen(s_); \
+        (dst)=slen; memcpy(strs+slen, s_, L_); slen+=L_; strs[slen++]=0; }while(0)
+    for (i=0;i<(unsigned)m->nummeshes;i++){ ADDSTR(mesh_name_ofs[i], m->meshes[i].name);
+                                            ADDSTR(mesh_mat_ofs[i],  m->meshes[i].material); }
+    for (i=0;i<(unsigned)m->numjoints;i++){ ADDSTR(joint_name_ofs[i], m->joints[i].name); }
+    #undef ADDSTR
+
+    /* section offsets (mirrors the known-good generator layout) */
+    ofs_text  = 124u;
+    ofs_mesh  = ALIGN8(ofs_text + slen);
+    ofs_va    = ALIGN8(ofs_mesh + 24u*(unsigned)m->nummeshes);
+    ofs_pos   = ofs_va + 20u*4u;
+    ofs_uv    = ofs_pos + 12u*(unsigned)m->numverts;
+    ofs_bi    = ofs_uv  + 8u*(unsigned)m->numverts;
+    ofs_bw    = ofs_bi  + 4u*(unsigned)m->numverts;
+    ofs_tri   = ALIGN8(ofs_bw + 4u*(unsigned)m->numverts);
+    ofs_joint = ALIGN8(ofs_tri + 12u*(unsigned)m->numtris);
+    total     = ALIGN8(ofs_joint + 48u*(unsigned)m->numjoints);
+
+    buf = (unsigned char*)calloc(1, total);
+    if (!buf){ free(strs); free(mesh_name_ofs); free(mesh_mat_ofs); free(joint_name_ofs); return LM_ERR_OOM; }
+
+    memcpy(buf, "INTERQUAKEMODEL\0", 16);
+    wru(buf+0x10, 2);            /* version */
+    wru(buf+0x14, total);        /* filesize */
+    wru(buf+0x1C, slen);                       wru(buf+0x20, ofs_text);
+    wru(buf+0x24, (unsigned)m->nummeshes);     wru(buf+0x28, ofs_mesh);
+    wru(buf+0x2C, 4u);                         /* num_vertexarrays */
+    wru(buf+0x30, (unsigned)m->numverts);      wru(buf+0x34, ofs_va);
+    wru(buf+0x38, (unsigned)m->numtris);       wru(buf+0x3C, ofs_tri);
+    wru(buf+0x44, (unsigned)m->numjoints);     wru(buf+0x48, ofs_joint);
+    /* poses/anims/frames/comment/extensions left zero (no animation written) */
+
+    memcpy(buf+ofs_text, strs, slen);
+
+    for (i=0;i<(unsigned)m->nummeshes;i++){
+        unsigned char *me = buf+ofs_mesh+i*24;
+        wru(me+0,  mesh_name_ofs[i]);          wru(me+4,  mesh_mat_ofs[i]);
+        wru(me+8,  m->meshes[i].first_vertex); wru(me+12, m->meshes[i].num_vertexes);
+        wru(me+16, m->meshes[i].first_triangle);wru(me+20,m->meshes[i].num_triangles);
+    }
+    {
+        unsigned char *va = buf+ofs_va;
+        wru(va+0,IQM_POSITION);     wru(va+4,0); wru(va+8,IQM_FLOAT); wru(va+12,3); wru(va+16,ofs_pos); va+=20;
+        wru(va+0,IQM_TEXCOORD);     wru(va+4,0); wru(va+8,IQM_FLOAT); wru(va+12,2); wru(va+16,ofs_uv);  va+=20;
+        wru(va+0,IQM_BLENDINDEXES); wru(va+4,0); wru(va+8,IQM_UBYTE); wru(va+12,4); wru(va+16,ofs_bi);  va+=20;
+        wru(va+0,IQM_BLENDWEIGHTS); wru(va+4,0); wru(va+8,IQM_UBYTE); wru(va+12,4); wru(va+16,ofs_bw);
+    }
+    for (i=0;i<(unsigned)m->numverts;i++){
+        unsigned char *p;
+        p = buf+ofs_pos+i*12; wrf(p,m->verts[i].pos[0]); wrf(p+4,m->verts[i].pos[1]); wrf(p+8,m->verts[i].pos[2]);
+        p = buf+ofs_uv +i*8;  wrf(p,m->verts[i].st[0]);  wrf(p+4,m->verts[i].st[1]);
+        p = buf+ofs_bi +i*4;  p[0]=m->verts[i].bone; p[1]=0; p[2]=0; p[3]=0;
+        p = buf+ofs_bw +i*4;  p[0]=255; p[1]=0; p[2]=0; p[3]=0;
+    }
+    for (i=0;i<(unsigned)m->numtris;i++){
+        unsigned char *t = buf+ofs_tri+i*12;
+        wru(t+0, m->tris[i*3+0]); wru(t+4, m->tris[i*3+1]); wru(t+8, m->tris[i*3+2]);
+    }
+    for (i=0;i<(unsigned)m->numjoints;i++){
+        unsigned char *jo = buf+ofs_joint+i*48; int k;
+        wru(jo+0, joint_name_ofs[i]);
+        wru(jo+4, (unsigned)m->joints[i].parent);
+        for(k=0;k<3;k++) wrf(jo+8 +k*4, m->joints[i].translate[k]);
+        for(k=0;k<4;k++) wrf(jo+20+k*4, m->joints[i].rotate[k]);
+        for(k=0;k<3;k++) wrf(jo+36+k*4, m->joints[i].scale[k]);
+    }
+
+    free(strs); free(mesh_name_ofs); free(mesh_mat_ofs); free(joint_name_ofs);
+    *out_buf = buf; *out_len = (size_t)total;
+    return LM_OK;
 }

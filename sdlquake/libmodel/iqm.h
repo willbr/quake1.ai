@@ -64,4 +64,10 @@ lm_result_t lm_load_iqm(const void *buf, size_t len,
 /* Free via the remembered allocator (no-op for arena backings). Safe on NULL. */
 void lm_iqm_free(lm_iqm_t *m);
 
+/* Serialize geometry + skeleton (no animation yet) to IQM v2 bytes. On success
+   returns LM_OK and sets *out_buf to a malloc()'d buffer of *out_len bytes that
+   the caller must free() with the C library free(). The output re-parses via
+   lm_load_iqm as a static (bind-pose) model. */
+lm_result_t lm_write_iqm(const lm_iqm_t *m, void **out_buf, size_t *out_len);
+
 #endif /* LIBMODEL_IQM_H */
