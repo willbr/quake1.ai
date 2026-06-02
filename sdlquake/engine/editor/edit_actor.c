@@ -39,6 +39,15 @@ static char      s_savepath[MAX_QPATH] = "actors/dummy_edit.iqm";
 static int       s_seljoint;                       // selected joint (skeleton editing)
 static float     s_jnudge[3];                       // incremental joint-move nudge
 
+// E2 animation timeline: sparse per-joint keys (euler rot + translate) over a
+// clip; bake interpolates them into frametrs (the per-frame render/save target).
+#define E2_MAXKEYS 32
+typedef struct { int frame; float eul[3]; float tr[3]; } anim_key_t;
+static anim_key_t s_jkeys[MAXEDITMESH][E2_MAXKEYS];
+static int        s_jkeycnt[MAXEDITMESH];
+static int        s_animclip;                       // clip being authored
+static int        s_animframe;                      // current ABSOLUTE frame into frametrs
+
 static void TX (const char *fmt, ...)             // formatted ImGui text helper
 {
     char buf[256]; va_list ap;
@@ -116,6 +125,9 @@ static void edit_begin (void)
           s_vscale[mi][0]=s_vscale[mi][1]=s_vscale[mi][2]=1.0f;
           s_vrot[mi][0]=s_vrot[mi][1]=s_vrot[mi][2]=0.0f; }
     s_selmesh = 0;
+    memset (s_jkeycnt, 0, sizeof(s_jkeycnt));   // E2: no keys until authored
+    s_animclip = 0;
+    s_animframe = (s_edit && s_edit->numclips > 0) ? s_edit->clips[0].first_frame : 0;
 
     memset (&s_emodel, 0, sizeof(s_emodel));
     strncpy (s_emodel.name, "*actor_edit", sizeof(s_emodel.name)-1);
@@ -248,6 +260,81 @@ static void edit_add_joint (int parent, const vec3_t t)
     if (parent < -1 || parent >= s_orig->numjoints) parent = 0;
     if (lm_iqm_add_joint (s_orig, "joint", parent, t) != LM_OK) return;
     if (lm_iqm_add_joint (s_edit, "joint", parent, t) != LM_OK) return;
+}
+
+// ---- E2 animation: keys -> frametrs (slerp-free MVP: euler+translate lerp) ----
+static void e2_qmul (const float a[4], const float b[4], float o[4])
+{
+    o[0]=a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1];
+    o[1]=a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0];
+    o[2]=a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3];
+    o[3]=a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2];
+}
+static void e2_eul2quat (const float e[3], float q[4])  // e=pitch(Y),yaw(Z),roll(X)
+{
+    float k = (float)(M_PI/180.0)*0.5f;
+    float hx=e[2]*k, hy=e[0]*k, hz=e[1]*k, t[4];
+    float qx[4]={(float)sin(hx),0,0,(float)cos(hx)};
+    float qy[4]={0,(float)sin(hy),0,(float)cos(hy)};
+    float qz[4]={0,0,(float)sin(hz),(float)cos(hz)};
+    e2_qmul (qy, qx, t);
+    e2_qmul (qz, t, q);              // q = qz * qy * qx
+}
+// Bake joint j's keys into the selected clip's frametrs range (clamp outside the
+// key span, linear-interp euler+translate inside). Joints with no keys untouched.
+static void e2_bake_joint (int j)
+{
+    lm_iqm_clip_t *cl; int f0, f1, f, nj, k;
+    if (!s_edit || !s_edit->frametrs) return;
+    if (s_animclip < 0 || s_animclip >= s_edit->numclips) return;
+    if (j < 0 || j >= s_edit->numjoints || j >= MAXEDITMESH || s_jkeycnt[j] < 1) return;
+    cl = &s_edit->clips[s_animclip];
+    f0 = cl->first_frame; f1 = f0 + cl->num_frames; nj = s_edit->numjoints;
+    for (f = f0; f < f1; f++) {
+        anim_key_t *A=NULL, *B=NULL; float eul[3], tr[3], q[4], *row; int c;
+        for (k = 0; k < s_jkeycnt[j]; k++) {
+            if (s_jkeys[j][k].frame <= f) A = &s_jkeys[j][k];
+            if (s_jkeys[j][k].frame >= f && !B) B = &s_jkeys[j][k];
+        }
+        if (A && B && B->frame > A->frame) {
+            float u = (float)(f - A->frame) / (float)(B->frame - A->frame);
+            for (c=0;c<3;c++){ eul[c]=A->eul[c]+(B->eul[c]-A->eul[c])*u; tr[c]=A->tr[c]+(B->tr[c]-A->tr[c])*u; }
+        } else {
+            anim_key_t *K = A ? A : B;
+            for (c=0;c<3;c++){ eul[c]=K->eul[c]; tr[c]=K->tr[c]; }
+        }
+        e2_eul2quat (eul, q);
+        row = s_edit->frametrs + ((size_t)f*nj + j)*10;
+        row[0]=tr[0]; row[1]=tr[1]; row[2]=tr[2];
+        row[3]=q[0];  row[4]=q[1];  row[5]=q[2]; row[6]=q[3];
+        row[7]=1.0f;  row[8]=1.0f;  row[9]=1.0f;
+    }
+}
+static void e2_setkey (int j, const float eul[3], const float tr[3])
+{
+    int i, n;
+    if (!s_editmode || !s_edit || j < 0 || j >= s_edit->numjoints || j >= MAXEDITMESH) return;
+    n = s_jkeycnt[j];
+    for (i = 0; i < n; i++) if (s_jkeys[j][i].frame == s_animframe) break;
+    if (i == n) {                       // insert a new key, keeping frames sorted
+        if (n >= E2_MAXKEYS) { Con_Printf ("actor anim: key limit\n"); return; }
+        i = n; while (i > 0 && s_jkeys[j][i-1].frame > s_animframe) { s_jkeys[j][i]=s_jkeys[j][i-1]; i--; }
+        s_jkeys[j][i].frame = s_animframe; s_jkeycnt[j] = n + 1;
+    }
+    VectorCopy (eul, s_jkeys[j][i].eul);
+    VectorCopy (tr,  s_jkeys[j][i].tr);
+    e2_bake_joint (j);
+}
+static void e2_unkey (int j)
+{
+    int i, n;
+    if (j < 0 || j >= MAXEDITMESH) return;
+    n = s_jkeycnt[j];
+    for (i = 0; i < n; i++)
+        if (s_jkeys[j][i].frame == s_animframe) {
+            for (; i+1 < n; i++) s_jkeys[j][i] = s_jkeys[j][i+1];
+            s_jkeycnt[j] = n - 1; break;
+        }
 }
 
 static void edit_save (void)
@@ -467,6 +554,50 @@ static void Cmd_ActorEditJMove_f (void)
     edit_joint_move (j, d);
     Con_Printf ("actor edit: moved joint %d (%s) + its subtree\n", j, s_orig->joints[j].name);
 }
+static void Cmd_ActorAnimClip_f (void)
+{
+    if (!s_editmode || !s_edit) { Con_Printf ("not editing (actor_edit 1 first)\n"); return; }
+    if (Cmd_Argc () < 2) { Con_Printf ("anim: clip %d/%d, frame %d\n", s_animclip, s_edit->numclips, s_animframe); return; }
+    s_animclip = Q_atoi (Cmd_Argv (1));
+    if (s_animclip < 0) s_animclip = 0;
+    if (s_animclip >= s_edit->numclips) s_animclip = s_edit->numclips - 1;
+    s_animframe = s_edit->clips[s_animclip].first_frame;
+    Cvar_SetValue ("actor_clip", (float)s_animclip);   // preview the edited clip
+}
+static void Cmd_ActorAnimFrame_f (void)
+{
+    lm_iqm_clip_t *cl; int rel;
+    if (!s_editmode || !s_edit || s_animclip >= s_edit->numclips) { Con_Printf ("not editing\n"); return; }
+    cl = &s_edit->clips[s_animclip];
+    if (Cmd_Argc () < 2) { Con_Printf ("anim: frame %d (clip-local %d)\n", s_animframe, s_animframe - cl->first_frame); return; }
+    rel = Q_atoi (Cmd_Argv (1));
+    if (rel < 0) rel = 0;
+    if (rel >= cl->num_frames) rel = cl->num_frames - 1;
+    s_animframe = cl->first_frame + rel;
+}
+static void Cmd_ActorAnimKey_f (void)
+{
+    int j; float eul[3], tr[3];
+    if (Cmd_Argc () < 8) { Con_Printf ("usage: actor_anim_key <joint> <pitch> <yaw> <roll> <tx> <ty> <tz>\n"); return; }
+    if (!s_editmode || !s_edit) { Con_Printf ("not editing\n"); return; }
+    j = Q_atoi (Cmd_Argv (1));
+    eul[0]=Q_atof(Cmd_Argv(2)); eul[1]=Q_atof(Cmd_Argv(3)); eul[2]=Q_atof(Cmd_Argv(4));
+    tr[0]=Q_atof(Cmd_Argv(5));  tr[1]=Q_atof(Cmd_Argv(6));  tr[2]=Q_atof(Cmd_Argv(7));
+    e2_setkey (j, eul, tr);
+    Con_Printf ("actor anim: key joint %d @ frame %d\n", j, s_animframe);
+}
+static void Cmd_ActorAnimUnkey_f (void)
+{
+    if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_anim_unkey <joint>\n"); return; }
+    e2_unkey (Q_atoi (Cmd_Argv (1)));
+}
+static void Cmd_ActorAnimBake_f (void)
+{
+    int j;
+    if (!s_editmode || !s_edit) { Con_Printf ("not editing\n"); return; }
+    for (j = 0; j < s_edit->numjoints && j < MAXEDITMESH; j++) e2_bake_joint (j);
+    Con_Printf ("actor anim: baked clip %d\n", s_animclip);
+}
 static void Cmd_ActorEditJAdd_f (void)
 {
     vec3_t t = { 0, 0, 16 }; int parent;
@@ -512,6 +643,11 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_bind",  Cmd_ActorEditBind_f);
     Cmd_AddCommand ("actor_edit_jmove", Cmd_ActorEditJMove_f);
     Cmd_AddCommand ("actor_edit_jadd",  Cmd_ActorEditJAdd_f);
+    Cmd_AddCommand ("actor_anim_clip",  Cmd_ActorAnimClip_f);
+    Cmd_AddCommand ("actor_anim_frame", Cmd_ActorAnimFrame_f);
+    Cmd_AddCommand ("actor_anim_key",   Cmd_ActorAnimKey_f);
+    Cmd_AddCommand ("actor_anim_unkey", Cmd_ActorAnimUnkey_f);
+    Cmd_AddCommand ("actor_anim_bake",  Cmd_ActorAnimBake_f);
     Cmd_AddCommand ("actor_edit_add",   Cmd_ActorEditAdd_f);
     Cmd_AddCommand ("actor_edit_del",   Cmd_ActorEditDel_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
