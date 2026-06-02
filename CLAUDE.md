@@ -86,6 +86,23 @@ as `ImTextureID`. Window→logical mouse coords go through
 `VID_WindowToLogical`, which reproduces the integer-scale letterbox
 math used at present time.
 
+The editor UI uses **ImGui docking** (vendored docking branch under
+`sdlquake/vendor/imgui-1.92.8-docking/`, `ConfigFlags |=
+DockingEnable`): `IG_HostDockSpace` (`imgui_bridge.cpp`) submits a
+host `DockSpaceOverViewport`; a `DockBuilder` default layout (toolbar
+top, Brushes left, Inspector right) bakes on first run and via the
+toolbar's "Reset layout" button, persisting through `imgui.ini`. The
+3D scene is its **own dockable `Viewport` panel**: when the editor is
+open `gpu_render_frame` runs the palette pass into an offscreen
+`gpu_scene_tex` (`VID_EditorSceneTexture`) and the swapchain pass
+becomes clear+ImGui-only, while the `Viewport` window `IG_Image`s the
+texture; editor mouse-picking maps through that panel's image rect in
+`window_to_vid` (exempted from `WantCaptureMouse` via
+`Editor_MouseOverViewport`). Normal gameplay keeps the single-pass
+direct-to-swapchain path. Design: `docs/superpowers/specs/
+2026-06-02-imgui-docking-layout-design.md` +
+`2026-06-02-editor-viewport-panel-design.md`.
+
 The CRT scanline overlay (`vid_scanlines` / `vid_scanline_intensity` /
 `vid_scanline_size`) is implemented inside `palette.frag.glsl`: a
 fragment UBO at set=3 binding=0 carries `(intensity, size)`, and the
@@ -181,7 +198,7 @@ All Phase 8 sim systems live inside the hot-reloadable `game.dll` and share `sim
 
 ### Editor module map (`sdlquake/engine/editor/`, Phase 7)
 
-The in-game 3D editor is engine-side (not in `game.dll`) so it can touch `cl.worldmodel`, BSP loaders, and the framebuffer directly:
+The in-game 3D editor is engine-side (not in `game.dll`) so it can touch `cl.worldmodel`, BSP loaders, and the framebuffer directly. The editor UI is **ImGui-docked** (docking-branch ImGui; default layout baked + persisted, "Reset layout" button) with the 3D scene rendered into its own dockable `Viewport` panel (`VID_EditorSceneTexture` → `IG_Image`; picking remapped to the panel rect) — see the render-pipeline section above:
 
 - `editor.c` / `editor.h` — public entry points, mode toggle, frame tick. **Hosts a multi-mode shell:** an `editor_mode_t` vtable (`editor_mode.h`) lets the editor switch between Map mode (the original `.map` editor, registered as `map_mode`) and Particle mode (`edit_particle.c`); the public `Editor_DrawUI`/`Editor_RenderScene`/`Editor_ProcessEvent`/`Editor_HideTransientFX`/`Editor_ShouldDrawPlayer` dispatch to the active mode (shared free-fly camera / open-close stays in the shell). Planned `.mdl`/texture editors plug in as new `s_modes[]` registrations.
 - `editor_mode.h` — the `editor_mode_t` vtable type (mode-specific slots: enter/exit/draw_ui/render_scene/process_event/hide_transient_fx/should_draw_player).
