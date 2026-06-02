@@ -357,6 +357,18 @@ static void e2_unkey (int j)
         }
 }
 
+static void edit_add_clip (int nframes, float fps)
+{
+    if (!s_editmode || !s_orig || !s_edit) return;
+    if (nframes < 2) nframes = 16;
+    if (fps <= 0.0f) fps = 10.0f;
+    if (lm_iqm_add_clip (s_orig, "newclip", nframes, fps, 1) != LM_OK) return;
+    if (lm_iqm_add_clip (s_edit, "newclip", nframes, fps, 1) != LM_OK) return;
+    s_animclip  = s_edit->numclips - 1;
+    s_animframe = s_edit->clips[s_animclip].first_frame;
+    Cvar_SetValue ("actor_clip", (float)s_animclip);
+}
+
 static void edit_save (void)
 {
     void *buf = NULL; size_t len = 0;
@@ -517,6 +529,7 @@ static void actor_draw_ui (void)
             lm_iqm_clip_t *cl; int rel, kk, iskey = 0; float rf;
             if (s_animclip >= s_edit->numclips) s_animclip = 0;
             IG_TextUnformatted ("clip:");
+            if (IG_Button ("New clip (16f)")) edit_add_clip (16, 10.0f);
             for (i = 0; i < s_edit->numclips; i++) {
                 IG_PushID_Int (3000 + i);
                 if (IG_Selectable (s_edit->clips[i].name, i == s_animclip, 0)) {
@@ -622,6 +635,15 @@ static void Cmd_ActorAnimClip_f (void)
     s_animframe = s_edit->clips[s_animclip].first_frame;
     Cvar_SetValue ("actor_clip", (float)s_animclip);   // preview the edited clip
 }
+static void Cmd_ActorAnimAddClip_f (void)
+{
+    int nframes; float fps;
+    if (!s_editmode || !s_edit) { Con_Printf ("not editing (actor_edit 1 first)\n"); return; }
+    nframes = (Cmd_Argc () >= 2) ? Q_atoi (Cmd_Argv (1)) : 16;
+    fps     = (Cmd_Argc () >= 3) ? Q_atof (Cmd_Argv (2)) : 10.0f;
+    edit_add_clip (nframes, fps);
+    Con_Printf ("actor anim: added clip %d (%d frames @ %g fps)\n", s_animclip, nframes, fps);
+}
 static void Cmd_ActorAnimFrame_f (void)
 {
     lm_iqm_clip_t *cl; int rel;
@@ -702,6 +724,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_jmove", Cmd_ActorEditJMove_f);
     Cmd_AddCommand ("actor_edit_jadd",  Cmd_ActorEditJAdd_f);
     Cmd_AddCommand ("actor_anim_clip",  Cmd_ActorAnimClip_f);
+    Cmd_AddCommand ("actor_anim_addclip", Cmd_ActorAnimAddClip_f);
     Cmd_AddCommand ("actor_anim_frame", Cmd_ActorAnimFrame_f);
     Cmd_AddCommand ("actor_anim_key",   Cmd_ActorAnimKey_f);
     Cmd_AddCommand ("actor_anim_unkey", Cmd_ActorAnimUnkey_f);

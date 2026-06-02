@@ -87,4 +87,8 @@ lm_result_t lm_iqm_add_box(lm_iqm_t *m, const float center[3], const float half[
    and (if animated) frametrs. Editor "add joint" backend. */
 lm_result_t lm_iqm_add_joint(lm_iqm_t *m, const char *name, int parent, const float t[3]);
 
+/* Append a clip of `nframes` bind-pose frames (grows frametrs + clips). Editor
+   "new clip" backend. */
+lm_result_t lm_iqm_add_clip(lm_iqm_t *m, const char *name, int nframes, float fps, int loop);
+
 #endif /* LIBMODEL_IQM_H */

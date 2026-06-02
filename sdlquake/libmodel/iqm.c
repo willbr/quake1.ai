@@ -333,6 +333,41 @@ lm_result_t lm_iqm_add_joint(lm_iqm_t *m, const char *name, int parent, const fl
     return LM_OK;
 }
 
+/* Append a new clip of `nframes` bind-pose frames (grows frametrs + clips). The
+   new frames default to each joint's bind TRS (static rest), ready to key. If the
+   model had no animation, this creates it. Editor "new clip" backend. */
+lm_result_t lm_iqm_add_clip(lm_iqm_t *m, const char *name, int nframes, float fps, int loop){
+    qalloc_t a; float *nf; lm_iqm_clip_t *nc; int nj, fr, j; size_t newcount, old;
+    if (!m || nframes < 1 || m->numjoints < 1) return LM_ERR_BAD_COUNT;
+    a = m->alloc; nj = m->numjoints;
+    newcount = (size_t)(m->numframes + nframes) * nj * 10;
+    nf = QALLOC_ARR(&a, float, newcount);
+    if (!nf) return LM_ERR_OOM;
+    old = (size_t)m->numframes * nj * 10;
+    if (m->frametrs && old) memcpy(nf, m->frametrs, sizeof(float)*old);
+    for (fr = m->numframes; fr < m->numframes + nframes; fr++)
+        for (j = 0; j < nj; j++){
+            float *row = nf + ((size_t)fr*nj + j)*10;
+            row[0]=m->joints[j].translate[0]; row[1]=m->joints[j].translate[1]; row[2]=m->joints[j].translate[2];
+            row[3]=m->joints[j].rotate[0]; row[4]=m->joints[j].rotate[1]; row[5]=m->joints[j].rotate[2]; row[6]=m->joints[j].rotate[3];
+            row[7]=m->joints[j].scale[0]; row[8]=m->joints[j].scale[1]; row[9]=m->joints[j].scale[2];
+        }
+    nc = QALLOC_ARR(&a, lm_iqm_clip_t, (size_t)m->numclips+1);
+    if (!nc) { QFREE(&a, nf); return LM_ERR_OOM; }
+    if (m->clips && m->numclips) memcpy(nc, m->clips, sizeof(lm_iqm_clip_t)*(size_t)m->numclips);
+    memset(&nc[m->numclips], 0, sizeof(lm_iqm_clip_t));
+    strncpy(nc[m->numclips].name, name?name:"clip", 63);
+    nc[m->numclips].first_frame = m->numframes;
+    nc[m->numclips].num_frames  = nframes;
+    nc[m->numclips].framerate   = fps > 0.0f ? fps : 10.0f;
+    nc[m->numclips].loop        = loop ? 1 : 0;
+    if (m->frametrs) QFREE(&a, m->frametrs);
+    if (m->clips)    QFREE(&a, m->clips);
+    m->frametrs = nf; m->clips = nc;
+    m->numframes += nframes; m->numclips++;
+    return LM_OK;
+}
+
 /* ---- little-endian writers ---- */
 static void wru(unsigned char *p, unsigned v){
     p[0]=(unsigned char)(v&0xff);      p[1]=(unsigned char)((v>>8)&0xff);
