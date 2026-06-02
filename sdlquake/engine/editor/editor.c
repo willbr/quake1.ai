@@ -56,6 +56,9 @@ static void window_to_vid(float wx, float wy, float *vx, float *vy)
     *vy = (wy - oy) / scale;
 }
 
+// Exposed wrapper so other editor modes (edit_actor gizmo) can convert too.
+void Editor_WindowToVid(float wx, float wy, float *vx, float *vy) { window_to_vid(wx, wy, vx, vy); }
+
 static int  s_open = 0;
 static int  s_inited = 0;
 

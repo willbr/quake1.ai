@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <math.h>
 
 #define IG_TREE_DEFAULTOPEN (1<<5)
 #define MAXEDITMESH 64
@@ -660,6 +661,15 @@ static void Cmd_ActorEditRot_f (void)
     s_vrot[mi][0]=Q_atof(Cmd_Argv(2)); s_vrot[mi][1]=Q_atof(Cmd_Argv(3)); s_vrot[mi][2]=Q_atof(Cmd_Argv(4));
     edit_rebuild ();
 }
+static void Cmd_ActorEditSel_f (void)   // select the part the gizmo/fields act on
+{
+    if (Cmd_Argc () < 2) { Con_Printf ("usage: actor_edit_sel <mesh>\n"); return; }
+    if (!s_editmode || !s_orig) { Con_Printf ("not editing\n"); return; }
+    s_selmesh = Q_atoi (Cmd_Argv (1));
+    if (s_selmesh < 0) s_selmesh = 0;
+    if (s_selmesh >= s_orig->nummeshes) s_selmesh = s_orig->nummeshes - 1;
+    Con_Printf ("actor edit: selected part %d\n", s_selmesh);
+}
 static void Cmd_ActorEditJMove_f (void)
 {
     vec3_t d; int j;
@@ -788,6 +798,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_scale", Cmd_ActorEditScale_f);
     Cmd_AddCommand ("actor_edit_rot",   Cmd_ActorEditRot_f);
     Cmd_AddCommand ("actor_edit_bind",  Cmd_ActorEditBind_f);
+    Cmd_AddCommand ("actor_edit_sel",   Cmd_ActorEditSel_f);
     Cmd_AddCommand ("actor_edit_jmove", Cmd_ActorEditJMove_f);
     Cmd_AddCommand ("actor_edit_jpivot",Cmd_ActorEditJPivot_f);
     Cmd_AddCommand ("actor_edit_jadd",  Cmd_ActorEditJAdd_f);

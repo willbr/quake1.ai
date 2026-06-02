@@ -59,6 +59,8 @@ enum {
 
 // render_wire.c
 int  Editor_ProjectWorld (const vec3_t world, float *out_sx, float *out_sy);
+void Editor_ScreenToRay (float sx, float sy, vec3_t out_origin, vec3_t out_dir);
+void Editor_WindowToVid (float wx, float wy, float *vx, float *vy);
 void Editor_ScreenToRay  (float sx, float sy, vec3_t out_origin, vec3_t out_dir);
 void Editor_DrawLine3D   (const vec3_t a, const vec3_t b, byte color);
 // Same projection + clip, but bypasses the z-buffer so the line draws over
