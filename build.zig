@@ -113,7 +113,7 @@ pub fn build(b: *std.Build) void {
         "sdlquake/engine/editor/light_bake_thread.c",
     };
 
-    const imgui_dir = "sdlquake/vendor/imgui-1.92.8";
+    const imgui_dir = "sdlquake/vendor/imgui-1.92.8-docking";
     const imgui_cpp_flags: []const []const u8 = &.{
         "-std=c++17",
         "-fno-strict-aliasing",
