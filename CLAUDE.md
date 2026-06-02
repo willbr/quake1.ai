@@ -228,6 +228,27 @@ R1–R5 (runtime) + E1–E3 (in-engine editor) + C1 (content), built one at a ti
   `IQM_Invert34` + `R_ConcatTransforms`), rigid-skins each vertex (1 bone), and
   loops the clip off `cl.time`. Bootstrap asset bakes a "look" clip (head yaw
   ±30°). Static (bind-only) models keep the identity-skin fast path.
+- **R3 done** (procedural face: look-at + eye-gaze + breathing). Role joints
+  (`head_joint`/`chest_joint`/`jaw_joint`/`eye_joint[]`) are resolved by **name
+  convention** in `lm_load_iqm` (`strstr` on "head"/"chest"/"jaw"/"eye"; cached
+  on `lm_iqm_t`). In `R_IQMDrawModel`'s compose loop, the head and eye joints'
+  local rotation is **overridden** by `R_IQMLookAtLocal` to aim each joint's +X
+  axis at the player (`r_origin`, transformed into actor space via the entity
+  rotation `alias_forward/right/up`), clamped to a yaw/pitch cone — head and
+  eyes track you; eyes (children of the head) carry the residual past the head
+  clamp. **Breathing** post-multiplies the chest joint's skin matrix by a
+  scale-about-posed-origin (`v' = org + s·(v−org)`), so it's **non-propagating**
+  (children keep their own skin matrices) per the design's uniform-mesh-scale
+  decision. Cvars (registered in `R_Init` via `R_IQMInitCvars`):
+  `actor_lookat` (master on/off), `actor_gaze_yaw`/`actor_gaze_pitch` (head
+  clamp 50/30°), `actor_eye_yaw`/`actor_eye_pitch` (eye clamp 25/20°),
+  `actor_breathe_rate`/`actor_breathe_amp` (0.25 Hz / 0.04). All engine-side, no
+  ABI bump. **Lipsync deferred**: the design's mouth skin-swap needs textured
+  heads (R1/R2 use solid-colour synth skins); `jaw` is resolved for
+  forward-compat but unused until a texturing milestone. On the cube bootstrap
+  actor the look-at/gaze read subtly (featureless cube, eye cubes centred on
+  their joints); verified from a fixed camera by varying only the gaze/breathe
+  cvars. Plan: `docs/superpowers/plans/2026-06-02-skeletal-actors-r3-procedural-face.md`.
 
 ## Perf instrumentation
 
