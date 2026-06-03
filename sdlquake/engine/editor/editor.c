@@ -144,6 +144,16 @@ cvar_t      editor_particle_hide_world = { "editor_particle_hide_world", "1" };
 // spawn point + orientation. Default on.
 cvar_t      editor_particle_grid = { "editor_particle_grid", "1" };
 
+// Actor-editor viewport: same idea as the particle editor's two toggles, for
+// Actor mode. `hide_world` paints the 3D view over with r_clearcolor (so the
+// actor previews against a clean backdrop, not the loaded map -- the actor is
+// isolated as the sole visedict in ActorMode_PushPreview, and r_main.c wipes
+// the world BSP before the actor draws). `grid` draws the 16u reference grid on
+// the actor's feet plane. Both default on -- the point of the actor editor is
+// to judge the model alone (Editor_ActorHideWorld / Editor_DrawActorGrid).
+cvar_t      editor_actor_hide_world = { "editor_actor_hide_world", "1" };
+cvar_t      editor_actor_grid       = { "editor_actor_grid", "1" };
+
 // Face mode: 0 = clicks select brushes (default), 1 = clicks set the active
 // face on the singly-selected brush. Toggled via toolbar Faces button.
 // Active-face state lives in edit_scene; this cvar is just the UI flag.
@@ -2092,6 +2102,8 @@ void Editor_Init(void)
     Cvar_RegisterVariable(&editor_show_links);
     Cvar_RegisterVariable(&editor_particle_hide_world);
     Cvar_RegisterVariable(&editor_particle_grid);
+    Cvar_RegisterVariable(&editor_actor_hide_world);
+    Cvar_RegisterVariable(&editor_actor_grid);
     Cvar_RegisterVariable(&editor_face_mode);
     Cvar_RegisterVariable(&editor_brush_tex);
     Cvar_RegisterVariable(&editor_brush_hollow_thickness);
@@ -3028,24 +3040,22 @@ int Editor_ParticleHideWorld(void)
         && editor_particle_hide_world.value != 0.0f;
 }
 
-// Reference grid for the particle preview: a horizontal 16-unit grid centred on
-// the orbit focus (== the effect's spawn point), so the effect's size reads
-// against a known scale. Minor lines every 16u, brighter lines every 64u (every
-// 4th), coloured X/Y axes through the spawn point, and a short blue +Z tick for
-// vertical scale. Drawn from r_main.c after the optional hide-world clear (so it
-// isn't wiped) and before the particle pass (so the effect draws over it). Uses
-// the z-tested line path, so with the world shown it's correctly occluded by
+// Orbit-preview reference grid, shared by the Particle and Actor editors: a
+// horizontal 16-unit grid centred on the orbit focus (the effect's spawn point
+// / the actor's feet), so the previewed thing's size reads against a known
+// scale. Minor lines every 16u, brighter lines every 64u (every 4th), coloured
+// X/Y axes through the centre, and a short blue +Z tick for vertical scale.
+// Drawn from r_main.c after the optional hide-world clear (so it isn't wiped)
+// and before the previewed thing draws (so that draws over it). Uses the
+// z-tested line path, so with the world shown it's correctly occluded by
 // geometry, and with the world hidden (z-buffer cleared) the whole grid shows.
-void Editor_DrawParticleGrid(void)
+static void draw_orbit_grid(void)
 {
     enum { CELLS = 8 };               // cells each side of centre
     const float STEP = 16.0f;         // world units per cell (Quake build unit)
     const float span = CELLS * STEP;  // 128u half-extent -> 256u grid
     vec3_t f, a, b;
     int i;
-
-    if (!Editor_ParticleModeActive() || editor_particle_grid.value == 0.0f)
-        return;
 
     Editor_GetOrbitFocus(f);
 
@@ -3065,7 +3075,7 @@ void Editor_DrawParticleGrid(void)
         Editor_DrawLine3D(a, b, col);
     }
 
-    // Centre axes through the spawn point: X red, Y yellow-green, +Z blue tick.
+    // Centre axes through the focus: X red, Y yellow-green, +Z blue tick.
     a[0] = f[0]-span; a[1] = f[1]; a[2] = f[2];
     b[0] = f[0]+span; b[1] = f[1]; b[2] = f[2];
     Editor_DrawLine3D(a, b, EDIT_COLOR_AXIS_X);
@@ -3075,4 +3085,40 @@ void Editor_DrawParticleGrid(void)
     a[0] = f[0]; a[1] = f[1]; a[2] = f[2];
     b[0] = f[0]; b[1] = f[1]; b[2] = f[2] + 4.0f*STEP;    // 64u vertical reference
     Editor_DrawLine3D(a, b, EDIT_COLOR_AXIS_Z);
+}
+
+// No-op outside Particle mode or when `editor_particle_grid` is 0.
+void Editor_DrawParticleGrid(void)
+{
+    if (!Editor_ParticleModeActive() || editor_particle_grid.value == 0.0f)
+        return;
+    draw_orbit_grid();
+}
+
+// ---- Actor mode (orbit preview, same treatment as Particle mode) ----------
+
+// 1 when the editor is open in Actor mode. Like Editor_ParticleModeActive, used
+// to suppress first-person HUD bits (crosshair, viewmodel gun) that make no
+// sense in the orbit-camera preview.
+int Editor_ActorModeActive(void)
+{
+    return s_open && Editor_ActiveMode() == &actor_mode;
+}
+
+// 1 when in Actor mode with the "hide world" toggle on. r_main.c consults this
+// after drawing the world BSP and before the entity pass and, when set, paints
+// the 3D view over with a clean backdrop (D_ClearViewToBackdrop) so the actor
+// (the sole visedict; see ActorMode_PushPreview) previews against empty space.
+int Editor_ActorHideWorld(void)
+{
+    return Editor_ActorModeActive()
+        && editor_actor_hide_world.value != 0.0f;
+}
+
+// No-op outside Actor mode or when `editor_actor_grid` is 0.
+void Editor_DrawActorGrid(void)
+{
+    if (!Editor_ActorModeActive() || editor_actor_grid.value == 0.0f)
+        return;
+    draw_orbit_grid();
 }

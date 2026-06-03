@@ -1122,7 +1122,8 @@ void V_RenderView (void)
 		// point), making it look like the spawn point "rotates with the
 		// crosshair" when you circle the effect. Suppress it there.
 		extern int Editor_ParticleModeActive(void);
-		if (crosshair.value && !Editor_ParticleModeActive())
+		extern int Editor_ActorModeActive(void);
+		if (crosshair.value && !Editor_ParticleModeActive() && !Editor_ActorModeActive())
 			V_DrawCrosshair ();
 	}
 #endif

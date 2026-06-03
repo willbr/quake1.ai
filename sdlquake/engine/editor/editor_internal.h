@@ -301,4 +301,17 @@ int  Editor_ParticleHideWorld(void);
 // r_main.c after the hide-world clear and before the particle pass.
 void Editor_DrawParticleGrid(void);
 
+// Actor mode (edit_actor.c) gets the same orbit-preview treatment as Particle
+// mode: the actor previews against a clean grid+backdrop, not the loaded map.
+// 1 when the editor is open in Actor mode (suppresses the crosshair + viewmodel
+// gun, which make no sense in the orbit preview).
+int  Editor_ActorModeActive(void);
+// 1 when in Actor mode with `editor_actor_hide_world` on. r_main.c then wipes
+// the world BSP to a backdrop after drawing it and before the entity pass, so
+// the actor (isolated as the sole visedict) shows against empty space.
+int  Editor_ActorHideWorld(void);
+// Draw the actor-preview reference grid (16u ground grid on the orbit focus).
+// No-op outside Actor mode or when `editor_actor_grid` is 0.
+void Editor_DrawActorGrid(void);
+
 #endif // EDITOR_INTERNAL_H

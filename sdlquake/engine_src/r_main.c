@@ -757,10 +757,16 @@ void R_DrawViewModel (void)
 	float		add;
 	dlight_t	*dl;
 	extern int  Editor_ShouldDrawPlayer(void);
+	extern int  Editor_ActorModeActive(void);
 
 	// Phase 7 editor: free-fly camera renders the player body, so a
 	// floating viewmodel at the camera origin would look wrong.
 	if (Editor_ShouldDrawPlayer()) return;
+	// Actor editor (orbit preview): no first-person gun over the clean
+	// grid+actor view. Unlike Particle mode there's no late framebuffer clear
+	// to wipe it (we clear before entities so the actor survives), so suppress
+	// it explicitly -- same rule as the crosshair (view.c).
+	if (Editor_ActorModeActive()) return;
 
 	if (!r_drawviewmodel.value || r_fov_greater_than_90)
 		return;
@@ -847,7 +853,9 @@ Mirrors R_DrawViewModel's preconditions; bails early for the 3D alias case
 void R_DrawViewModel_2DPass (void)
 {
 	extern int Editor_ShouldDrawPlayer(void);
+	extern int Editor_ActorModeActive(void);
 	if (Editor_ShouldDrawPlayer()) return;
+	if (Editor_ActorModeActive()) return;   // no 2D sprite gun in the actor preview
 	if (!r_drawviewmodel.value || r_fov_greater_than_90)
 		return;
 	if (cl.items & IT_INVISIBILITY)
@@ -1206,6 +1214,21 @@ SetVisibilityByPassages ();
 	{
 		extern void DebugLines_Draw(void);
 		DebugLines_Draw();
+	}
+
+	// Actor editor: preview the actor like the particle editor previews an
+	// effect -- against a clean grid+backdrop, not the loaded map. The actor is
+	// the sole visedict (ActorMode_PushPreview dropped the rest), so wipe the
+	// world BSP HERE -- after R_EdgeDrawing drew it, before R_DrawEntitiesOnList
+	// draws the actor over the cleared canvas + grid. (Particles can clear after
+	// entities; an actor can't, since it IS an entity.)
+	{
+		extern int  Editor_ActorHideWorld(void);
+		extern void D_ClearViewToBackdrop(void);
+		extern void Editor_DrawActorGrid(void);
+		if (Editor_ActorHideWorld())
+			D_ClearViewToBackdrop ();
+		Editor_DrawActorGrid ();   // no-op outside Actor mode / grid cvar off
 	}
 
 	PERF_SCOPE("R_DrawEntitiesOnList") R_DrawEntitiesOnList ();

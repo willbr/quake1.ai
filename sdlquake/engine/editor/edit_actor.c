@@ -436,10 +436,17 @@ static void actor_exit  (void) { edit_free (); }
 void ActorMode_PushPreview (void)
 {
     entity_t *e;
+    // Preview the actor the way the particle editor previews an effect: against
+    // a clean grid+backdrop, NOT the loaded map. The actor renders through the
+    // normal entity pipeline, so the only way to show it alone is to drop every
+    // other visedict that CL_RelinkEntities + Editor_PushPreviewEntities queued
+    // this frame (map monsters, items, point-entity previews). r_main.c then
+    // wipes the world BSP to a backdrop before the actor draws -- see
+    // Editor_ActorHideWorld. Only ever called while Actor mode is active.
+    cl_numvisedicts = 0;
     if (s_editmode && s_edit) e = &s_eent;
     else if (s_mod)           e = &s_ent;
-    else                      return;
-    if (cl_numvisedicts >= MAX_VISEDICTS) return;
+    else                      return;   // no actor loaded -> empty grid backdrop
     Editor_GetOrbitFocus (e->origin);
     cl_visedicts[cl_numvisedicts++] = e;
 }
@@ -473,6 +480,24 @@ static void actor_draw_ui (void)
         if (edit) edit_begin ();
         else      edit_free ();
     }
+
+    // ---- Viewport (like the particle editor): preview the actor against a
+    // clean backdrop + reference grid instead of the loaded map. ----
+    IG_Separator ();
+    {
+        cvar_t *cv = Cvar_FindVar ("editor_actor_hide_world");
+        int on = cv && cv->value != 0.0f;
+        if (IG_Checkbox ("Hide world", &on))
+            Cvar_SetValue ("editor_actor_hide_world", on ? 1.0f : 0.0f);
+    }
+    IG_SameLine (0, -1);
+    {
+        cvar_t *cv = Cvar_FindVar ("editor_actor_grid");
+        int on = cv && cv->value != 0.0f;
+        if (IG_Checkbox ("Grid", &on))
+            Cvar_SetValue ("editor_actor_grid", on ? 1.0f : 0.0f);
+    }
+    IG_TextUnformatted ("Grid: 16u cells (major every 64u)");
 
     if (!s_editmode)
     {
