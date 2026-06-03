@@ -94,6 +94,13 @@ void Perf_RegisterCommands(void);
 // runs unpaused).
 int Perf_ShowOverlay(void);
 
+// `perf_live` cvar: when set, the F3 dev overlay keeps the profiler ticking
+// (and the host runs the game sim — see the SV_Physics gate in host.c) rather
+// than freezing on the last frame. Default on. The Profile panel's Play/Pause
+// button calls Perf_SetLive, which also flips the pause state immediately.
+int  Perf_Live(void);
+void Perf_SetLive(int live);
+
 // Aggregate -----------------------------------------------------------
 // Per-scope totals over the current source (replay-wide if a capture is
 // loaded, otherwise the live frame ring). Sorted by total_ms descending

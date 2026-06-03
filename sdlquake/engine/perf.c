@@ -121,6 +121,13 @@ static Uint64       s_perf_freq;
 //   1  Perf panel (graphs + flame chart)
 cvar_t scr_showperf = {"showperf", "0", true};
 
+// Cvar — when the F3 dev overlay is open, keep the profiler (and the game
+// sim) running live instead of freezing on the last frame. Toggled by the
+// Profile panel's Play/Pause button. Default on ("play"): opening F3 shows
+// live, updating graphs; set 0 to restore the classic freeze-on-open so the
+// flame graph / sparkline stay still for hovering.
+cvar_t perf_live = {"perf_live", "1", true};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1036,8 +1043,21 @@ void Perf_RegisterCommands(void) {
     Cmd_AddCommand("profile",      Perf_Profile_f);
     Cmd_AddCommand("perf_replay",  Perf_Replay_f);
     Cvar_RegisterVariable(&scr_showperf);
+    Cvar_RegisterVariable(&perf_live);
 }
 
 int Perf_ShowOverlay(void) {
     return scr_showperf.value != 0 ? 1 : 0;
+}
+
+int Perf_Live(void) {
+    return perf_live.value != 0 ? 1 : 0;
+}
+
+void Perf_SetLive(int live) {
+    Cvar_SetValue("perf_live", live ? 1.0f : 0.0f);
+    // Reflect immediately: when the overlay is open the pause state is what
+    // gates Perf_BeginFrame, so flip it now rather than waiting for the next
+    // ImguiLayer_Toggle.
+    Perf_SetPaused(!live);
 }

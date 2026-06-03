@@ -206,6 +206,21 @@ static void draw_profile(void)
     if (!IG_Begin("Profile", NULL, IG_WF_NoCollapse))
     { IG_End(); return; }
 
+    // ---- Play / Pause (live profiling) ----------------------------------
+    // Default live ("play") so the graphs update in real time; pause to
+    // freeze the flame graph + sparkline + aggregate for hovering/scrubbing.
+    // Hidden while replaying a loaded capture — the toggle is meaningless
+    // there (you're viewing recorded frames, not the live ring).
+    if (!Perf_IsReplaying()) {
+        int live = Perf_Live();
+        if (IG_Button(live ? "Pause" : "Play"))
+            Perf_SetLive(!live);
+        IG_SameLine(0, -1);
+        IG_TextUnformatted(live ? "live - graphs ticking"
+                                : "frozen - graphs held for inspection");
+        IG_Spacing();
+    }
+
     // ---- Source selector + capture status -------------------------------
     enum { MAX_CAPTURES = 32 };
     const char *items[MAX_CAPTURES];
@@ -766,10 +781,12 @@ void ImguiLayer_Toggle(void)
     s_open = !s_open;
     SDL_SetWindowRelativeMouseMode(s_window, !s_open);
 
-    // Freeze the perf overlay when the dev panel opens so the user can
-    // hover the flame graph / sparklines without the data scrolling out
-    // from under them.
-    Perf_SetPaused(s_open);
+    // Freeze the perf overlay when the dev panel opens *only if* the user
+    // hasn't opted into live profiling (perf_live, default on). When live,
+    // the graphs keep ticking and the host runs the sim while F3 is up, so
+    // the Profile panel shows real gameplay load; the Play/Pause button on
+    // that panel flips perf_live. Closing always returns to unpaused.
+    Perf_SetPaused(s_open && !Perf_Live());
 
     // Closing: drop any key/mouse state ImGui is tracking. We gate event
     // forwarding on s_open, so a KEY_DOWN that arrived while the layer was

@@ -33,6 +33,7 @@ extern void Editor_Init        (void);
 extern void Editor_Shutdown    (void);
 extern int  Editor_IsPaused    (void);
 extern int  Editor_AllowGameInput(void);
+extern int  Editor_IsOpen      (void);   // F2 editor (kept frozen even when perf_live)
 
 // Rect-screenshot session also freezes the sim — cl.paused alone doesn't
 // gate SV_Physics. Defined in platform/crop_screenshot.c.
@@ -587,8 +588,10 @@ void _Host_ServerFrame (void)
 // always pause in single player if in console, menus, dev overlay, or editor
 // (Editor_AllowGameInput is the FPS-mode look-mode bypass — when set, the
 // player is actively driving the camera and physics should run even with
-// the editor UI up.)
-	if (!sv.paused && !Editor_IsPaused() && !Crop_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))) )
+// the editor UI up. Perf_Live (perf_live cvar, default on) is the profiler
+// bypass — keep the sim running while the F3 dev overlay is up so the live
+// flame graph shows real gameplay load; suppressed in the F2 editor.)
+	if (!sv.paused && !Editor_IsPaused() && !Crop_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput() || (Perf_Live() && !Editor_IsOpen())))) )
 		SV_Physics ();
 }
 
@@ -642,8 +645,10 @@ void Host_ServerFrame (void)
 // always pause in single player if in console, menus, dev overlay, or editor
 // (Editor_AllowGameInput is the FPS-mode look-mode bypass — when set, the
 // player is actively driving the camera and physics should run even with
-// the editor UI up.)
-	if (!sv.paused && !Editor_IsPaused() && !Crop_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput()))) )
+// the editor UI up. Perf_Live (perf_live cvar, default on) is the profiler
+// bypass — keep the sim running while the F3 dev overlay is up so the live
+// flame graph shows real gameplay load; suppressed in the F2 editor.)
+	if (!sv.paused && !Editor_IsPaused() && !Crop_IsPaused() && (svs.maxclients > 1 || (key_dest == key_game && (!ImguiLayer_IsOpen() || Editor_AllowGameInput() || (Perf_Live() && !Editor_IsOpen())))) )
 		SV_Physics ();
 
 // send all messages to the clients
