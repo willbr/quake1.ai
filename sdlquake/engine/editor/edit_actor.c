@@ -12,6 +12,7 @@
 #include "imgui_bridge.h"
 #include "editor_mode.h"
 #include "editor_internal.h"
+#include <SDL3/SDL.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +37,8 @@ static int       s_selmesh;                        // selected part
 static float     s_voff[MAXEDITMESH][3];           // per-mesh move (offset)
 static float     s_vscale[MAXEDITMESH][3];         // per-mesh size (scale about centroid)
 static float     s_vrot[MAXEDITMESH][3];           // per-mesh rotate (euler pitch/yaw/roll, about centroid)
+static int       s_drag_axis = -1;                 // gizmo: axis being dragged (0/1/2), else -1
+static int       s_drag_mesh = -1;                 // gizmo: part being dragged
 static char      s_savepath[MAX_QPATH] = "actors/dummy_edit.iqm";
 static int       s_seljoint;                       // selected joint (skeleton editing)
 static float     s_jnudge[3];                       // incremental joint-move nudge
@@ -67,6 +70,7 @@ static void edit_free (void)
     if (s_orig) { lm_iqm_free (s_orig); s_orig = NULL; }
     if (s_edit) { lm_iqm_free (s_edit); s_edit = NULL; }
     s_editmode = 0;
+    s_drag_axis = -1; s_drag_mesh = -1;   // cancel any in-progress gizmo drag
 }
 
 // Rebuild s_edit's vertices from s_orig + per-mesh move/size (scale about the
@@ -458,8 +462,6 @@ void ActorMode_PushPreview (void)
 // docs/superpowers/specs/2026-06-03-actor-viewport-translate-gizmo-design.md.
 // ===========================================================================
 
-static int s_drag_axis = -1;   // 0/1/2 while dragging that axis, else -1
-
 // World-space centroid of edited part `mi`: mean of its s_edit verts + the
 // orbit focus (preview entity sits at the focus with zero angles, so
 // world = model + focus).
@@ -561,6 +563,121 @@ static int actor_pick_at_vid (float vx, float vy)
     Editor_GetOrbitFocus (focus);
     VectorSubtract (ro, focus, ro_model);
     return actor_ray_pick_meshes (ro_model, rd);
+}
+
+// Drag state (s_drag_axis / s_drag_mesh declared with the edit-state block above).
+static vec3_t s_drag_cen0;          // axis-line anchor, fixed at grab time
+static float  s_drag_s0;            // axis param at grab
+static float  s_drag_voff0;         // s_voff[mesh][axis] at grab
+
+// Closest approach between the world axis line (cen + s*ax, ax unit) and the
+// ray (ro + t*rd). Outputs axis param s and the gap distance; ok=0 if the ray
+// is ~parallel to the axis.
+static void actor_axis_closest (const vec3_t cen, const vec3_t ax,
+                                const vec3_t ro, const vec3_t rd,
+                                float *out_s, float *out_dist, int *ok)
+{
+    vec3_t r, ap, rp, diff;
+    float  b, cc, d, e, denom, s, t;
+    VectorSubtract (cen, ro, r);
+    b  = DotProduct (ax, rd);
+    cc = DotProduct (rd, rd);
+    d  = DotProduct (ax, r);
+    e  = DotProduct (rd, r);
+    denom = cc - b * b;                 // a = ax·ax = 1
+    if (denom < 1e-6f) { *ok = 0; *out_s = 0.0f; *out_dist = 1e9f; return; }
+    s = (b * e - cc * d) / denom;
+    t = (e - b * d) / denom;
+    VectorMA (cen, s, ax, ap);
+    VectorMA (ro,  t, rd, rp);
+    VectorSubtract (ap, rp, diff);
+    *out_s    = s;
+    *out_dist = Length (diff);
+    *ok       = 1;
+}
+
+// Which axis handle (0/1/2) the ray grabs, or -1. Handles run [0,len] from cen.
+static int actor_axis_hit (const vec3_t cen, float len,
+                           const vec3_t ro, const vec3_t rd, float *out_s)
+{
+    static const vec3_t AXIS[3] = { {1,0,0}, {0,1,0}, {0,0,1} };
+    int   i, best = -1, ok;
+    float bestd = 1e9f, thresh = len * 0.22f;   // grab radius, camera-scaled
+    for (i = 0; i < 3; i++) {
+        float s, dist;
+        actor_axis_closest (cen, AXIS[i], ro, rd, &s, &dist, &ok);
+        if (!ok || s < 0.0f || s > len) continue;
+        if (dist < thresh && dist < bestd) { bestd = dist; best = i; if (out_s) *out_s = s; }
+    }
+    return best;
+}
+
+// actor_mode .process_event slot. LMB over the viewport: grab an axis handle
+// and drag (writes s_voff, applied by edit_rebuild), else pick a part. RMB
+// orbit is polled elsewhere and untouched.
+static int actor_process_event (void *evp)
+{
+    extern int Editor_IsOpen (void);
+    extern int Editor_MouseOverViewport (void);
+    extern int Editor_LookmodeActive (void);
+    static const vec3_t AXIS[3] = { {1,0,0}, {0,1,0}, {0,0,1} };
+    SDL_Event *ev = (SDL_Event *)evp;
+    vec3_t ro, rd, cen, focus, ro_model;
+    float  vx, vy, len, s;
+    int    axis;
+
+    if (!Editor_IsOpen () || !s_editmode || !s_edit) return 0;
+
+    switch (ev->type) {
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        if (ev->button.button != SDL_BUTTON_LEFT) return 0;
+        if (!Editor_MouseOverViewport () || Editor_LookmodeActive ()) return 0;
+        Editor_WindowToVid (ev->button.x, ev->button.y, &vx, &vy);
+        Editor_ScreenToRay (vx, vy, ro, rd);
+        // Axis-handle grab first (only when a part is selected).
+        if (s_selmesh >= 0 && s_selmesh < s_edit->nummeshes) {
+            actor_part_centroid_world (s_selmesh, cen);
+            len  = actor_handle_len (cen);
+            axis = actor_axis_hit (cen, len, ro, rd, &s);
+            if (axis >= 0) {
+                s_drag_axis  = axis;
+                s_drag_mesh  = s_selmesh;
+                VectorCopy (cen, s_drag_cen0);
+                s_drag_s0    = s;
+                s_drag_voff0 = s_voff[s_selmesh][axis];
+                return 1;
+            }
+        }
+        // Otherwise pick a part (model-space ray = world ray minus focus).
+        Editor_GetOrbitFocus (focus);
+        VectorSubtract (ro, focus, ro_model);
+        {
+            int hit = actor_ray_pick_meshes (ro_model, rd);
+            if (hit >= 0) s_selmesh = hit;
+        }
+        return 1;
+
+    case SDL_EVENT_MOUSE_MOTION:
+        if (s_drag_axis < 0) return 0;
+        Editor_WindowToVid (ev->motion.x, ev->motion.y, &vx, &vy);
+        Editor_ScreenToRay (vx, vy, ro, rd);
+        {
+            int   ok;
+            float s_now, dist;
+            actor_axis_closest (s_drag_cen0, AXIS[s_drag_axis], ro, rd, &s_now, &dist, &ok);
+            if (ok && s_drag_mesh >= 0 && s_drag_mesh < MAXEDITMESH)
+                s_voff[s_drag_mesh][s_drag_axis] = s_drag_voff0 + (s_now - s_drag_s0);
+        }
+        return 1;
+
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (ev->button.button == SDL_BUTTON_LEFT && s_drag_axis >= 0) {
+            s_drag_axis = -1;
+            return 1;
+        }
+        return 0;
+    }
+    return 0;
 }
 
 // ---- UI -------------------------------------------------------------------
@@ -964,9 +1081,10 @@ void ActorMode_RegisterCmds (void)
 }
 
 const editor_mode_t actor_mode = {
-    .name         = "Actor",
-    .enter        = actor_enter,
-    .exit         = actor_exit,
-    .draw_ui      = actor_draw_ui,
-    .render_scene = actor_render_scene,
+    .name          = "Actor",
+    .enter         = actor_enter,
+    .exit          = actor_exit,
+    .draw_ui       = actor_draw_ui,
+    .render_scene  = actor_render_scene,
+    .process_event = actor_process_event,
 };
