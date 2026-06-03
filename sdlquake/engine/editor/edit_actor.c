@@ -432,8 +432,33 @@ static void actor_load (const char *path)
     s_ent.frame    = 0;
 }
 
-static void actor_enter (void) { if (!s_mod) actor_load (s_path); }
-static void actor_exit  (void) { edit_free (); }
+// actor_lookat value before the editor overrode it (-1 = nothing saved).
+static int s_lookat_saved = -1;
+
+static void actor_enter (void)
+{
+    if (!s_mod) actor_load (s_path);
+    // The editor preview defaults to NOT tracking the orbit camera -- a head
+    // that swivels to follow the camera reads as distracting while you're
+    // editing geometry. Save the prior value and restore it in actor_exit so
+    // this editor-only default doesn't leak into dev/test (gameplay) actors.
+    {
+        cvar_t *cv = Cvar_FindVar ("actor_lookat");
+        if (cv) {
+            if (s_lookat_saved < 0) s_lookat_saved = (cv->value != 0.0f) ? 1 : 0;
+            Cvar_SetValue ("actor_lookat", 0.0f);
+        }
+    }
+}
+
+static void actor_exit (void)
+{
+    edit_free ();
+    if (s_lookat_saved >= 0) {
+        Cvar_SetValue ("actor_lookat", (float)s_lookat_saved);
+        s_lookat_saved = -1;
+    }
+}
 
 // Inject the previewed actor (edit copy when editing, else the loaded model)
 // into cl_visedicts at the orbit focus each editor frame.
