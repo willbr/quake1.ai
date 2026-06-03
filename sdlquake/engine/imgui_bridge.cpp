@@ -365,6 +365,7 @@ static void ig_build_default_layout(ImGuiID dockspace_id)
     ImGui::DockBuilderDockWindow("Entities",           bottom);
     ImGui::DockBuilderDockWindow("AI",                 bottom);
     ImGui::DockBuilderDockWindow("Debug Render",       bottom);
+    ImGui::DockBuilderDockWindow("Profile",            bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }

@@ -203,7 +203,7 @@ static void draw_profile(void)
     // they're tiled and resize would just produce overlap.
     IG_SetNextWindowPos ((float)s_profile.x, (float)s_profile.y, IG_Cond_FirstUseEver);
     IG_SetNextWindowSize((float)s_profile.w, (float)s_profile.h, IG_Cond_FirstUseEver);
-    if (!IG_Begin("Profile", NULL, IG_WF_NoCollapse | IG_WF_NoSavedSettings))
+    if (!IG_Begin("Profile", NULL, IG_WF_NoCollapse))
     { IG_End(); return; }
 
     // ---- Source selector + capture status -------------------------------
