@@ -451,6 +451,70 @@ void ActorMode_PushPreview (void)
     cl_visedicts[cl_numvisedicts++] = e;
 }
 
+// ===========================================================================
+// Viewport translate gizmo (MVP). Draws 3 axis handles at the selected part's
+// centroid and (Task 3) drags them into s_voff. Active only while the editor is
+// open in Actor mode with geometry-edit on and a part selected. See
+// docs/superpowers/specs/2026-06-03-actor-viewport-translate-gizmo-design.md.
+// ===========================================================================
+
+static int s_drag_axis = -1;   // 0/1/2 while dragging that axis, else -1
+
+// World-space centroid of edited part `mi`: mean of its s_edit verts + the
+// orbit focus (preview entity sits at the focus with zero angles, so
+// world = model + focus).
+static void actor_part_centroid_world (int mi, vec3_t out)
+{
+    lm_iqm_mesh_t *m = &s_edit->meshes[mi];
+    vec3_t focus;
+    double sx = 0, sy = 0, sz = 0;
+    unsigned k;
+    for (k = 0; k < m->num_vertexes; k++) {
+        float *p = s_edit->verts[m->first_vertex + k].pos;
+        sx += p[0]; sy += p[1]; sz += p[2];
+    }
+    if (m->num_vertexes) { sx /= m->num_vertexes; sy /= m->num_vertexes; sz /= m->num_vertexes; }
+    Editor_GetOrbitFocus (focus);
+    out[0] = (float)sx + focus[0];
+    out[1] = (float)sy + focus[1];
+    out[2] = (float)sz + focus[2];
+}
+
+// Camera-relative handle length so it stays readable at any orbit zoom.
+static float actor_handle_len (const vec3_t cen_w)
+{
+    extern vec3_t r_origin;
+    vec3_t d;
+    float len;
+    VectorSubtract (cen_w, r_origin, d);
+    len = Length (d) * 0.18f;
+    if (len <  8.0f) len =  8.0f;
+    if (len > 64.0f) len = 64.0f;
+    return len;
+}
+
+// actor_mode .render_scene slot: 3 axis arrows at the selected part's centroid.
+// Self-gates (runs even when the editor is closed, like the map impl).
+static void actor_render_scene (void)
+{
+    extern int Editor_IsOpen (void);
+    vec3_t cen, end;
+    float  len;
+
+    if (!Editor_IsOpen () || !s_editmode || !s_edit) return;
+    if (s_selmesh < 0 || s_selmesh >= s_edit->nummeshes) return;
+
+    actor_part_centroid_world (s_selmesh, cen);
+    len = actor_handle_len (cen);
+
+    VectorCopy (cen, end); end[0] += len;
+    Editor_DrawLine3DOver (cen, end, s_drag_axis == 0 ? EDIT_COLOR_AXIS_HOT : EDIT_COLOR_AXIS_X);
+    VectorCopy (cen, end); end[1] += len;
+    Editor_DrawLine3DOver (cen, end, s_drag_axis == 1 ? EDIT_COLOR_AXIS_HOT : EDIT_COLOR_AXIS_Y);
+    VectorCopy (cen, end); end[2] += len;
+    Editor_DrawLine3DOver (cen, end, s_drag_axis == 2 ? EDIT_COLOR_AXIS_HOT : EDIT_COLOR_AXIS_Z);
+}
+
 // ---- UI -------------------------------------------------------------------
 static void actor_draw_ui (void)
 {
@@ -839,8 +903,9 @@ void ActorMode_RegisterCmds (void)
 }
 
 const editor_mode_t actor_mode = {
-    .name    = "Actor",
-    .enter   = actor_enter,
-    .exit    = actor_exit,
-    .draw_ui = actor_draw_ui,
+    .name         = "Actor",
+    .enter        = actor_enter,
+    .exit         = actor_exit,
+    .draw_ui      = actor_draw_ui,
+    .render_scene = actor_render_scene,
 };
