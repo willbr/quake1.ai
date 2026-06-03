@@ -92,14 +92,21 @@ DockingEnable`): `IG_HostDockSpace` (`imgui_bridge.cpp`) submits a
 host `DockSpaceOverViewport`; a `DockBuilder` default layout (toolbar
 top, Brushes left, Inspector right) bakes on first run and via the
 toolbar's "Reset layout" button, persisting through `imgui.ini`. The
-3D scene is its **own dockable `Viewport` panel**: when the editor is
-open `gpu_render_frame` runs the palette pass into an offscreen
-`gpu_scene_tex` (`VID_EditorSceneTexture`) and the swapchain pass
-becomes clear+ImGui-only, while the `Viewport` window `IG_Image`s the
-texture; editor mouse-picking maps through that panel's image rect in
+3D scene is its **own dockable `Viewport` panel**: when the editor or
+the F3 dev overlay is open (`scene_in_panel`) `gpu_render_frame` runs
+the palette pass into an offscreen `gpu_scene_tex`
+(`VID_EditorSceneTexture`) and the swapchain pass becomes
+clear+ImGui-only, while the `Viewport` window `IG_Image`s the texture;
+editor mouse-picking maps through that panel's image rect in
 `window_to_vid` (exempted from `WantCaptureMouse` via
 `Editor_MouseOverViewport`). Normal gameplay keeps the single-pass
-direct-to-swapchain path. Design: `docs/superpowers/specs/
+direct-to-swapchain path. The **F3 dev overlay** shares the same
+dockspace — Console/Cvars/Entities/AI/Debug/Profile dock into a bottom
+strip (FPS stays a floating HUD) and the running game shows in the
+Viewport panel; **clicking it plays the game** (`s_vp_play` /
+`Editor_ViewportPlay*` grab the mouse and route input through the
+`Editor_AllowGameInput` / `Editor_LookmodeActive` gates; Esc releases).
+Design: `docs/superpowers/specs/
 2026-06-02-imgui-docking-layout-design.md` +
 `2026-06-02-editor-viewport-panel-design.md`.
 
