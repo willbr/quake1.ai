@@ -515,6 +515,54 @@ static void actor_render_scene (void)
     Editor_DrawLine3DOver (cen, end, s_drag_axis == 2 ? EDIT_COLOR_AXIS_HOT : EDIT_COLOR_AXIS_Z);
 }
 
+// Möller–Trumbore ray (MODEL space) vs every triangle of s_edit. Returns the
+// nearest-hit mesh index, or -1. tris hold global vertex indices into verts.
+static int actor_ray_pick_meshes (const vec3_t ro, const vec3_t rd)
+{
+    int      mi, best = -1;
+    float    bestt = 1e30f;
+    if (!s_edit) return -1;
+    for (mi = 0; mi < s_edit->nummeshes; mi++) {
+        lm_iqm_mesh_t *m = &s_edit->meshes[mi];
+        unsigned tri;
+        for (tri = 0; tri < m->num_triangles; tri++) {
+            unsigned *idx = &s_edit->tris[(m->first_triangle + tri) * 3];
+            float *v0 = s_edit->verts[idx[0]].pos;
+            float *v1 = s_edit->verts[idx[1]].pos;
+            float *v2 = s_edit->verts[idx[2]].pos;
+            vec3_t e1, e2, p, q, tv;
+            float  det, inv, u, vv, t;
+            VectorSubtract (v1, v0, e1);
+            VectorSubtract (v2, v0, e2);
+            CrossProduct (rd, e2, p);
+            det = DotProduct (e1, p);
+            if (det > -1e-6f && det < 1e-6f) continue;     // ray parallel to tri
+            inv = 1.0f / det;
+            VectorSubtract (ro, v0, tv);
+            u = DotProduct (tv, p) * inv;
+            if (u < 0.0f || u > 1.0f) continue;
+            CrossProduct (tv, e1, q);
+            vv = DotProduct (rd, q) * inv;
+            if (vv < 0.0f || u + vv > 1.0f) continue;
+            t = DotProduct (e2, q) * inv;
+            if (t > 1e-4f && t < bestt) { bestt = t; best = mi; }
+        }
+    }
+    return best;
+}
+
+// Pick a part at viewport (vid/super-pixel) coords. World ray from
+// Editor_ScreenToRay, shifted to model space by subtracting the orbit focus.
+static int actor_pick_at_vid (float vx, float vy)
+{
+    vec3_t ro, rd, focus, ro_model;
+    if (!s_edit) return -1;
+    Editor_ScreenToRay (vx, vy, ro, rd);
+    Editor_GetOrbitFocus (focus);
+    VectorSubtract (ro, focus, ro_model);
+    return actor_ray_pick_meshes (ro_model, rd);
+}
+
 // ---- UI -------------------------------------------------------------------
 static void actor_draw_ui (void)
 {
@@ -878,6 +926,18 @@ static void Cmd_ActorEditSave_f (void)
     if (s_editmode) edit_save (); else Con_Printf ("not editing\n");
 }
 
+static void Cmd_ActorEditPick_f (void)
+{
+    float vx, vy;
+    int   hit;
+    if (!s_editmode || !s_edit) { Con_Printf ("not editing (actor_edit 1 first)\n"); return; }
+    if (Cmd_Argc () >= 3) { vx = Q_atof (Cmd_Argv (1)); vy = Q_atof (Cmd_Argv (2)); }
+    else                  { vx = vid.width * 0.5f; vy = vid.height * 0.5f; }   // default: view centre
+    hit = actor_pick_at_vid (vx, vy);
+    if (hit >= 0) Con_Printf ("actor pick (%.0f %.0f): part %d (%s)\n", vx, vy, hit, s_edit->meshes[hit].name);
+    else          Con_Printf ("actor pick (%.0f %.0f): miss\n", vx, vy);
+}
+
 void ActorMode_RegisterCmds (void)
 {
     Cmd_AddCommand ("actor_edit",       Cmd_ActorEdit_f);
@@ -900,6 +960,7 @@ void ActorMode_RegisterCmds (void)
     Cmd_AddCommand ("actor_edit_add",   Cmd_ActorEditAdd_f);
     Cmd_AddCommand ("actor_edit_del",   Cmd_ActorEditDel_f);
     Cmd_AddCommand ("actor_edit_save",  Cmd_ActorEditSave_f);
+    Cmd_AddCommand ("actor_edit_pick",  Cmd_ActorEditPick_f);
 }
 
 const editor_mode_t actor_mode = {
