@@ -383,6 +383,12 @@ overlay graph and an offline capture format.
 - Console: `profile <n>` captures `n` frames to `profiles/perf_<ts>.json`
   (Chrome trace, drop into chrome://tracing or speedscope.app) plus
   `perf_<ts>_summary.json` (per-scope avg/p50/p95/max/calls).
+- **Record button** (Profile panel): UI twin for `profile <n>` — Record/Stop
+  + a frame-count combo. Starting forces the profiler live (`Perf_SetLive(1)`)
+  and exits replay first, so it captures even from a paused state (a paused
+  profiler records nothing — the bare console command stalls there). On
+  completion the trace auto-loads into replay for immediate inspection.
+  `Perf_StopCapture()` finalizes early.
 - `scripts/perf_diff.py old_summary.json new_summary.json` diffs two
   captures for regression tracking.
 
