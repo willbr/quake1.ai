@@ -72,6 +72,8 @@ const perf_scope_view_t *Perf_LastFrameNode(int i);
 // nonzero if already capturing or n_frames invalid.
 int  Perf_StartCapture(int n_frames);
 int  Perf_StartCaptureSeconds(float seconds);
+// Finalize an in-progress capture early (the Profile panel's Stop button).
+void Perf_StopCapture(void);
 int  Perf_IsCapturing(void);
 // Frames remaining (frame-bound capture) or seconds-remaining rounded up
 // (time-bound capture).

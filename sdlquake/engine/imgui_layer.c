@@ -228,6 +228,43 @@ static void draw_profile(void)
         IG_Spacing();
     }
 
+    // ---- Record (capture frames -> Chrome-trace JSON, like `profile <n>`) -
+    // Always available. Starting forces the profiler live (so frames actually
+    // flow — a paused/idle profiler records nothing) and exits any replay; on
+    // completion the new trace auto-loads into replay below for immediate
+    // inspection. Stop ends a capture early.
+    {
+        static const char *rec_labels[] = { "60", "120", "240", "480", "600" };
+        static const int   rec_frames [] = {  60,  120,  240,  480,  600  };
+        static int rec_idx = 1;   // default 120 frames
+
+        if (Perf_IsCapturing()) {
+            if (IG_Button("Stop")) Perf_StopCapture();
+        } else {
+            if (IG_Button("Record")) {
+                if (Perf_IsReplaying()) Perf_UnloadCapture();
+                Perf_SetLive(1);                 // profiler ticks + sim runs
+                Perf_StartCapture(rec_frames[rec_idx]);
+            }
+            IG_SameLine(0, -1);
+            IG_SetNextItemWidth(80);
+            IG_Combo("frames", &rec_idx, rec_labels,
+                     (int)(sizeof(rec_labels)/sizeof(rec_labels[0])));
+        }
+        IG_Spacing();
+    }
+
+    // Auto-load a freshly-finished capture into replay for inspection (covers
+    // both the Record button and console `profile`). Fires once per new path.
+    {
+        static char rec_seen[512];
+        const char *p = Perf_LastCapturePath();
+        if (p && !Perf_IsCapturing() && strcmp(p, rec_seen) != 0) {
+            snprintf(rec_seen, sizeof(rec_seen), "%s", p);
+            Perf_LoadCapture(p);
+        }
+    }
+
     // ---- Source selector + capture status -------------------------------
     enum { MAX_CAPTURES = 32 };
     const char *items[MAX_CAPTURES];
@@ -274,7 +311,7 @@ static void draw_profile(void)
         const char *p = Perf_LastCapturePath();
         if (p) snprintf(buf, sizeof(buf), "last capture: %s", p);
         else   snprintf(buf, sizeof(buf),
-                        "type 'profile 120' in the console to capture");
+                        "click Record to capture (or 'profile 120' in the console)");
     }
     IG_TextUnformatted(buf);
 

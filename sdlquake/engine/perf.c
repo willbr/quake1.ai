@@ -973,6 +973,18 @@ int Perf_StartCaptureSeconds(float seconds) {
     return 0;
 }
 
+// Finalize the in-progress capture early (the Profile panel's Stop button).
+// Flushes whatever frames were collected, mirroring the normal completion path
+// in Perf_EndFrame. No-op if not capturing; capture_flush writes nothing if no
+// frames landed yet.
+void Perf_StopCapture(void) {
+    if (!s_capture_active) return;
+    s_capture_active = 0;
+    s_capture_done   = 1;
+    capture_flush();
+    capture_reset();
+}
+
 int  Perf_IsCapturing(void)       { return s_capture_active; }
 const char *Perf_CaptureUnit(void) {
     if (!s_capture_active)        return "";
