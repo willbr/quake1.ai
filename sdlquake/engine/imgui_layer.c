@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "imgui_bridge.h"
@@ -735,6 +736,8 @@ static void draw_entities(void)
 // Public interface (declared in imgui_layer.h)
 // ---------------------------------------------------------------------------
 
+static void ImguiLayer_DevOverlay_f(void);   // `devoverlay` console twin, defined below
+
 void ImguiLayer_Init(SDL_Window *w, SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchain_fmt)
 {
     s_window = w;
@@ -756,6 +759,14 @@ void ImguiLayer_Init(SDL_Window *w, SDL_GPUDevice *gpu, SDL_GPUTextureFormat swa
 
     IG_ImplSDL3_InitForOther(w);
     IG_ImplSDLGPU3_Init(gpu, swapchain_fmt);
+
+    // Console twin for the F3 toggle. Guarded so a vid_restart (which re-runs
+    // ImguiLayer_Init) doesn't re-register and warn.
+    {
+        extern void Cmd_AddCommand(const char *name, void (*fn)(void));
+        static int registered = 0;
+        if (!registered) { Cmd_AddCommand("devoverlay", ImguiLayer_DevOverlay_f); registered = 1; }
+    }
 
     s_inited = 1;
 }
@@ -797,6 +808,35 @@ void ImguiLayer_Toggle(void)
     // InputText) auto-fire and immediately deactivate any freshly-clicked
     // text widget. Specifically hit when closing the editor with Esc.
     if (!s_open) IG_ClearInputs();
+}
+
+// Console twin for the F3 dev-overlay toggle, so the overlay can be opened
+// from the console / MCP / a cfg without the keyboard (the F3 key in in_sdl.c
+// is the only other path). Handy for headless or scripted profiling sessions.
+//   devoverlay         toggle
+//   devoverlay 0 | 1   force closed / open (idempotent — friendly for scripts)
+static void ImguiLayer_DevOverlay_f(void)
+{
+    extern int   Cmd_Argc(void);
+    extern char *Cmd_Argv(int arg);
+    extern void  Con_Printf(const char *fmt, ...);
+    extern int   Editor_IsOpen(void);
+    extern void  Editor_ViewportPlayStop(void);
+
+    if (!s_inited) { Con_Printf("devoverlay: ImGui layer not initialised\n"); return; }
+
+    // The F2 editor owns the overlay while it's up; route the user there so we
+    // don't desync the editor's open-state from the layer's.
+    if (Editor_IsOpen()) {
+        Con_Printf("devoverlay: F2 editor is open - toggle it with 'editor'\n");
+        return;
+    }
+
+    int want = (Cmd_Argc() >= 2) ? (atoi(Cmd_Argv(1)) != 0) : !s_open;
+    if (want == s_open) return;   // already in the requested state
+
+    Editor_ViewportPlayStop();    // mirror the F3 key path
+    ImguiLayer_Toggle();
 }
 
 int ImguiLayer_IsOpen(void)    { return s_open; }
