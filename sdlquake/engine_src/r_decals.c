@@ -4,10 +4,12 @@ See docs/superpowers/specs/2026-05-13-decals-design.md.
 */
 #include "quakedef.h"
 #include "r_local.h"
+#include "perf.h"
 
 static void R_DecalsTest_f (void);       /* forward decl — defined later in this file */
 static void R_DecalsTestGrid_f (void);   /* forward decl — defined later in this file */
 static void R_DecalsTestPool_f (void);   /* forward decl — defined later in this file */
+static void R_DecalsBench_f (void);      /* forward decl — defined later in this file */
 /* Forward decl: defined later. The drip tick in R_DecalsFrame paints
    via this, so it appears before its definition. */
 static void Stain_AddCell (msurface_t *target, vec3_t cell_world,
@@ -56,6 +58,7 @@ void R_DecalsInit (void)
 	Cmd_AddCommand ("r_decals_test", R_DecalsTest_f);
 	Cmd_AddCommand ("r_decals_test_grid", R_DecalsTestGrid_f);
 	Cmd_AddCommand ("r_decals_test_pool", R_DecalsTestPool_f);
+	Cmd_AddCommand ("r_decals_bench", R_DecalsBench_f);
 }
 
 /* Dev: spawn a blood pool at the player's view origin (isolates the pool
@@ -655,12 +658,66 @@ static void Stain_AddCell (msurface_t *target, vec3_t cell_world,
 	st->last_touched_frame = r_framecount;
 }
 
+// Collect world surfaces lying on BSP node planes within `radius` of point `p`
+// into out[] (capped at `max`), returning the count. Each world surface belongs
+// to exactly one node, so the result has no duplicates — no dedup needed.
+//
+// This replaces the old O(numsurfaces) linear scans the decal painter used to
+// do once per find AND once per kernel cell: a 28x28 blood splat (or 52x52
+// scorch) on e1m1's 5516 surfaces was ~4.3M (or ~16M) surface tests = ~16ms
+// (~55ms) per decal, run synchronously on the server physics / client-parse hot
+// path. With this, the candidate set shrinks to the handful of surfaces on
+// nearby node planes. The straddle descent (visit both sides when the slab is
+// within radius of the plane) gathers coplanar faces split across BSP
+// boundaries up to `radius` away, preserving the cross-face bleed.
+static int R_GatherDecalSurfaces (vec3_t p, float radius, msurface_t **out, int max)
+{
+	model_t *world = cl.worldmodel;
+	mnode_t *stack[256];
+	mnode_t *node;
+	int      sp = 0, n = 0;
+
+	if (!world) return 0;
+	node = world->nodes;
+	while (1)
+	{
+		mplane_t *pl;
+		float     d;
+
+		if (node->contents < 0) {            // leaf — carries no surfaces
+			if (sp == 0) break;
+			node = stack[--sp];
+			continue;
+		}
+
+		pl = node->plane;
+		d  = (pl->type < 3) ? (p[pl->type] - pl->dist)
+		                    : (DotProduct (p, pl->normal) - pl->dist);
+
+		if (node->numsurfaces && d > -radius && d < radius) {
+			msurface_t *s = world->surfaces + node->firstsurface;
+			int i;
+			for (i = 0; i < (int)node->numsurfaces && n < max; i++, s++)
+				out[n++] = s;
+		}
+
+		if (d > radius)              node = node->children[0];
+		else if (d < -radius)        node = node->children[1];
+		else {                       // slab straddles the plane — visit both
+			if (sp < 256) stack[sp++] = node->children[1];
+			node = node->children[0];
+		}
+	}
+	return n;
+}
+
 // Paint a kernel whose centre is at world-space point `center` and whose UV
 // basis comes from `primary`. Each cell is converted to world coordinates by
-// stepping along the primary surface's texture axes, then R_PointOnSurface_World
-// dispatches the paint to whichever coplanar world surface actually contains
-// that point. Cells over no surface (an open void past a face edge) drop.
-// This is what lets a scorch bleed across coplanar face boundaries.
+// stepping along the primary surface's texture axes, then matched against the
+// BSP-local candidate surfaces gathered once up front (whichever coplanar world
+// surface actually contains that point gets the paint). Cells over no surface
+// (an open void past a face edge) drop. This is what lets a scorch bleed across
+// coplanar face boundaries.
 static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
                                      int dr, int dg, int db,
                                      const int *kernel, int ksize, int knorm)
@@ -687,8 +744,15 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 	}
 
 	{
-		model_t  *world = cl.worldmodel;
 		mplane_t *primary_plane = primary->plane;
+		// Gather candidate surfaces once: everything on a node plane within the
+		// kernel's in-plane reach of the centre (so coplanar faces split across
+		// BSP boundaries are still reached). The per-cell loop below iterates
+		// this handful instead of every world surface.
+		msurface_t *cand[512];
+		int         ncand;
+		float       reach = (ksize / 2) * (VectorLength (step_u) + VectorLength (step_v)) + 8.0f;
+		ncand = R_GatherDecalSurfaces (center, reach, cand, 512);
 
 		half = ksize / 2;
 		for (ky = 0; ky < ksize; ky++) {
@@ -706,12 +770,12 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 				cell_world[1] = center[1] + sx * step_u[1] + sy * step_v[1];
 				cell_world[2] = center[2] + sx * step_u[2] + sy * step_v[2];
 
-				// Paint EVERY coplanar world face whose UV bounds contain
+				// Paint EVERY coplanar candidate face whose UV bounds contain
 				// this cell. Returning a single "best" match leaves edge
 				// luxels on one side of a BSP boundary unpainted whenever
 				// iteration order picks the wrong tie-breaker.
-				for (si = 0; si < world->numsurfaces; si++) {
-					msurface_t *s = &world->surfaces[si];
+				for (si = 0; si < ncand; si++) {
+					msurface_t *s = cand[si];
 					mplane_t   *pl = s->plane;
 					mtexinfo_t *stex;
 					float       d, ad, u, v;
@@ -760,21 +824,24 @@ static void Stain_PaintKernel_World (vec3_t center, msurface_t *primary,
 // Uses the surface plane and a caller-supplied tolerance. Returns NULL if no match.
 msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dist)
 {
-	model_t    *world;
+	msurface_t *cand[256];
 	msurface_t *best, *s;
 	mplane_t   *pl;
 	mtexinfo_t *tex;
 	float       best_d, d, ad, nd, u, v;
-	int         i;
+	int         ncand, i;
 
-	world = cl.worldmodel;
-	if (!world) return NULL;
+	if (!cl.worldmodel) return NULL;
 
 	best   = NULL;
 	best_d = max_plane_dist;
 
-	for (i = 0; i < world->numsurfaces; i++) {
-		s  = &world->surfaces[i];
+	// Only surfaces whose node plane lies within the tolerance of p can match;
+	// gather those instead of scanning every world surface.
+	ncand = R_GatherDecalSurfaces (p, max_plane_dist + 1.0f, cand, 256);
+
+	for (i = 0; i < ncand; i++) {
+		s  = cand[i];
 		pl = s->plane;
 		d  = DotProduct(p, pl->normal) - pl->dist;
 		if (s->flags & SURF_PLANEBACK) d = -d;
@@ -797,6 +864,37 @@ msurface_t *R_PointOnSurface_World (vec3_t p, vec3_t normal, float max_plane_dis
 		best_d = ad;
 	}
 	return best;
+}
+
+// Dev/perf command: spawn N blood-splat decals at the aim point and report
+// per-decal cost + the world surface count. Used to measure the decal painter
+// (before/after the BSP-local surface gather). Usage: r_decals_bench [n]
+static void R_DecalsBench_f (void)
+{
+	vec3_t   forward, right, up, end;
+	trace_t  tr;
+	double   t0, dt;
+	int      n = 50, i;
+	extern server_t sv;
+
+	if (Cmd_Argc () >= 2) n = atoi (Cmd_Argv (1));
+	if (n < 1) n = 1;
+	if (!sv.active) { Con_Printf ("r_decals_bench: no server\n"); return; }
+
+	AngleVectors (r_refdef.viewangles, forward, right, up);
+	(void)right; (void)up;
+	VectorMA (r_refdef.vieworg, 4096.0f, forward, end);
+	tr = SV_Move (r_refdef.vieworg, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
+	if (tr.fraction >= 1.0f) { Con_Printf ("r_decals_bench: nothing in front\n"); return; }
+
+	t0 = Sys_FloatTime ();
+	for (i = 0; i < n; i++)
+		R_SpawnDecal (tr.endpos, DECAL_BLOOD_SPLAT);
+	dt = Sys_FloatTime () - t0;
+
+	Con_Printf ("r_decals_bench: %d x DECAL_BLOOD_SPLAT in %.2f ms (%.3f ms/decal); %d world surfaces\n",
+		n, dt * 1000.0, dt * 1000.0 / (double)n,
+		cl.worldmodel ? cl.worldmodel->numsurfaces : -1);
 }
 
 // Dev command: paint a solid black 5x5 decal at the spot the player is looking at.
@@ -910,7 +1008,7 @@ static void R_DecalsTestGrid_f (void)
 		tr.endpos[0], tr.endpos[1], tr.endpos[2]);
 }
 
-void R_SpawnDecal (vec3_t pos, decal_type_t type)
+static void R_SpawnDecal_impl (vec3_t pos, decal_type_t type)
 {
 	msurface_t *surf;
 	const decal_kernel_t *dk;
@@ -980,6 +1078,14 @@ void R_SpawnDecal (vec3_t pos, decal_type_t type)
 		Con_Printf ("  painted kernel %d (dr=%d dg=%d db=%d)\n",
 			dk->ksize, dk->dr, dk->dg, dk->db);
 	}
+}
+
+// Public wrapper — PERF_SCOPE so decal painting shows up in captures by name
+// instead of hiding inside Phys_Toss (server gib bounces) and CL_ReadFromServer
+// (client temp-entity parsing), the two places that call it on the hot path.
+void R_SpawnDecal (vec3_t pos, decal_type_t type)
+{
+	PERF_SCOPE("R_SpawnDecal") R_SpawnDecal_impl (pos, type);
 }
 
 /* Paint a small blood dot at `pos` on the surface near `normal`.
