@@ -31,8 +31,11 @@ int imgui_ai_panel_open = 1;
 // Responsive layout
 //
 // Recomputed each frame from the current display size so the F3 overlay
-// tracks window resizes. Panels apply their rect with IG_Cond_Always, which
-// means a user drag snaps back next frame — fine for a dev overlay.
+// tracks window resizes. Most panels apply their rect with IG_Cond_Always, so
+// a user drag snaps back next frame — fine for a dev overlay. Exceptions: the
+// FPS HUD and Profile use IG_Cond_FirstUseEver, so the computed rect is only
+// the initial placement and the user can freely drag/resize them (persisted
+// via imgui.ini).
 //
 //        col1 (FPS+AI)     col2 (Cvars)        col3 (Entities/DebugRender)
 //        +----------+      +------------+      +-----------+
@@ -130,9 +133,12 @@ static void draw_fps(void)
 {
     char buf[128];
 
-    IG_SetNextWindowPos ((float)s_fps.x, (float)s_fps.y, IG_Cond_Always);
-    IG_SetNextWindowSize((float)s_fps.w, (float)s_fps.h, IG_Cond_Always);
-    if (!IG_Begin("FPS", NULL, IG_WF_NoCollapse | IG_WF_NoSavedSettings))
+    // FirstUseEver (not Always) so the user can drag/resize the FPS HUD; the
+    // computed s_fps rect is just the initial placement. NoSavedSettings
+    // dropped so a move persists across sessions via imgui.ini.
+    IG_SetNextWindowPos ((float)s_fps.x, (float)s_fps.y, IG_Cond_FirstUseEver);
+    IG_SetNextWindowSize((float)s_fps.w, (float)s_fps.h, IG_Cond_FirstUseEver);
+    if (!IG_Begin("FPS", NULL, IG_WF_NoCollapse))
     { IG_End(); return; }
 
     float fps       = Perf_SmoothedFps();
