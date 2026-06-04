@@ -1,7 +1,7 @@
 # Threaded Span Fill (`D_DrawSurfaces`) — Design
 
 **Date:** 2026-06-04
-**Status:** Design approved ("lets try it"). Next: implementation plan (writing-plans).
+**Status:** Phase 0 ✅ done (commit `7bb1864`). Next: Phase 1 (serial cache pre-build).
 **Scope:** Parallelize the software renderer's **span fill** (`D_DrawSurfaces` /
 `D_DrawSpans8` / `D_DrawZSpans` / `Turbulent8`) across CPU threads, decomposed by
 horizontal scanline bands. The **edge sweep** (`R_ScanEdges` AET maintenance +
