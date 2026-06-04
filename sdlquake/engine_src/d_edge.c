@@ -308,6 +308,98 @@ static surfcache_t *D_ResolveSurfaceCache (surf_t *s)
 
 /*
 ==============
+D_SetupSurfaceFill
+
+Phase 2: full per-surface setup for a SOLID or TURB surface. Runs the bmodel
+transform around D_CalcGradients for insubmodel surfaces (exactly as the old
+draw loop did) and records the gradient OUTPUTS + cacheblock into s->fill, so
+the draw pass can load them and call the span drawer with no transform and no
+D_CalcGradients. The recorded outputs already encode the surface's transform,
+so the result is identical regardless of the current global transform state.
+==============
+*/
+static void D_SetupSurfaceFill (surf_t *s)
+{
+	msurface_t	*pface = s->data;
+	vec3_t		local_modelorg, saved_tmo;
+	qboolean	sub = s->insubmodel;
+
+	if (sub)
+	{
+		// Save the world transform state on entry; restored below. currententity
+		// = s->entity so D_CacheSurface's R_TextureAnimation picks the right
+		// alternate-anim texture, and the bmodel rotation feeds D_CalcGradients.
+		VectorCopy (transformed_modelorg, saved_tmo);
+		currententity = s->entity;
+		VectorSubtract (r_origin, currententity->origin, local_modelorg);
+		TransformVector (local_modelorg, transformed_modelorg);
+		R_RotateBmodel ();
+	}
+	else
+		currententity = &cl_entities[0];
+
+	if (s->flags & SURF_DRAWTURB)
+	{
+		// Turb has no surfcache: s->rcache/rmip/rbucket are intentionally left
+		// unset (the turb draw branch and the solid-only thrash guard never read
+		// them). Only s->fill is consumed for turb.
+		miplevel = 0;
+		cacheblock = (pixel_t *)
+				((byte *)pface->texinfo->texture +
+				pface->texinfo->texture->offsets[0]);
+		cachewidth = 64;
+
+		// r_drawflat 2: override cacheblock with category source. Turbulent8
+		// still warps, but a uniform source warps to a uniform output, so
+		// water/lava/slime read as solid blocks.
+		if (r_drawflat.value == 2)
+		{
+			int cat = R_DrawFlat_SurfCategory (pface);
+			cacheblock = (pixel_t *)r_drawflat_src[cat];
+			cachewidth = 64;
+		}
+	}
+	else
+	{
+		surfcache_t *c = D_ResolveSurfaceCache (s);	// sets s->rmip/rbucket
+		s->rcache  = c;
+		miplevel   = s->rmip;
+		cacheblock = (pixel_t *)c->data;
+		cachewidth = c->width;
+	}
+
+	D_CalcGradients (pface);
+
+	s->fill.cacheblock  = cacheblock;
+	s->fill.cachewidth  = cachewidth;
+	s->fill.miplevel    = miplevel;
+	s->fill.sdivzstepu  = d_sdivzstepu;
+	s->fill.tdivzstepu  = d_tdivzstepu;
+	s->fill.sdivzstepv  = d_sdivzstepv;
+	s->fill.tdivzstepv  = d_tdivzstepv;
+	s->fill.sdivzorigin = d_sdivzorigin;
+	s->fill.tdivzorigin = d_tdivzorigin;
+	s->fill.sadjust     = sadjust;
+	s->fill.tadjust     = tadjust;
+	s->fill.bbextents   = bbextents;
+	s->fill.bbextentt   = bbextentt;
+
+	if (sub)
+	{
+		// restore the world drawing state
+		currententity = &cl_entities[0];
+		VectorCopy (saved_tmo, transformed_modelorg);
+		VectorCopy (base_vpn, vpn);
+		VectorCopy (base_vup, vup);
+		VectorCopy (base_vright, vright);
+		VectorCopy (base_modelorg, modelorg);
+		R_TransformFrustum ();
+	}
+}
+
+
+/*
+==============
 D_DrawSurfaces
 ==============
 */
@@ -315,13 +407,12 @@ void D_DrawSurfaces (void)
 {
 	surf_t			*s;
 	msurface_t		*pface;
-	surfcache_t		*pcurrentcache;
-	vec3_t			world_transformed_modelorg;
-	vec3_t			local_modelorg;
 
 	currententity = &cl_entities[0];
+	// Establish the world value of transformed_modelorg; D_SetupSurfaceFill
+	// reads it (and save/restores it) for world surfaces, and replaces it with
+	// the bmodel-rotated value for insubmodel surfaces.
 	TransformVector (modelorg, transformed_modelorg);
-	VectorCopy (transformed_modelorg, world_transformed_modelorg);
 
 // TODO: could preset a lot of this at mode set time
 	// r_drawflat 1: original id "hash s->data" debug mode. Mode 2 (lit
@@ -344,26 +435,24 @@ void D_DrawSurfaces (void)
 	}
 	else
 	{
-		// Phase 1: resolve+build all solid-surface caches up front so the draw
-		// pass only READS them (prerequisite for threading the fill). dlit
+		// Phase 2: full per-surface setup up front (cacheblock + bmodel
+		// transform + D_CalcGradients) for SOLID and TURB surfaces, recording
+		// the gradient outputs + cacheblock on s->fill so the draw pass only
+		// LOADS them and calls the span drawer (no transform, no
+		// D_CalcGradients) — prerequisite for threading the fill. dlit
 		// re-lighting and the allocator thus run once, here, serially.
 		for (s = &surfaces[1] ; s<surface_p ; s++)
 		{
 			if (!s->spans)
 				continue;
-			if (s->flags & (SURF_DRAWSKY | SURF_DRAWBACKGROUND | SURF_DRAWTURB))
+			if (s->flags & (SURF_DRAWSKY | SURF_DRAWBACKGROUND))
 			{
-				s->rcache = NULL;			// these branches don't use a surfcache
+				s->rcache = NULL;			// sky/background: no fill state
 				continue;
 			}
-			// D_CacheSurface -> R_TextureAnimation reads currententity->frame to
-			// pick alternate_anims (e.g. a pressed func_button's +a texture). The
-			// draw pass sets currententity = s->entity for insubmodel surfaces;
-			// match that here so the resolve builds the same (alternate) texture.
-			currententity = s->insubmodel ? s->entity : &cl_entities[0];
-			s->rcache = D_ResolveSurfaceCache (s);	// sets s->rmip
+			D_SetupSurfaceFill (s);			// solid + turb: full setup, records s->fill
 		}
-		currententity = &cl_entities[0];	// restore for the draw pass's world surfaces
+		currententity = &cl_entities[0];	// restore for the draw loop
 
 		for (s = &surfaces[1] ; s<surface_p ; s++)
 		{
@@ -412,114 +501,45 @@ void D_DrawSurfaces (void)
 			}
 			else if (s->flags & SURF_DRAWTURB)
 			{
-				pface = s->data;
-				miplevel = 0;
-				cacheblock = (pixel_t *)
-						((byte *)pface->texinfo->texture +
-						pface->texinfo->texture->offsets[0]);
-				cachewidth = 64;
-
-				if (s->insubmodel)
-				{
-				// FIXME: we don't want to do all this for every polygon!
-				// TODO: store once at start of frame
-					currententity = s->entity;	//FIXME: make this passed in to
-												// R_RotateBmodel ()
-					VectorSubtract (r_origin, currententity->origin,
-							local_modelorg);
-					TransformVector (local_modelorg, transformed_modelorg);
-
-					R_RotateBmodel ();	// FIXME: don't mess with the frustum,
-										// make entity passed in
-				}
-
-				// r_drawflat 2: override cacheblock with category source.
-				// Turbulent8 still warps, but a uniform source warps to a
-				// uniform output, so water/lava/slime read as solid blocks.
-				if (r_drawflat.value == 2)
-				{
-					int cat = R_DrawFlat_SurfCategory (pface);
-					cacheblock = (pixel_t *)r_drawflat_src[cat];
-					cachewidth = 64;
-				}
-
-				D_CalcGradients (pface);
+				// Phase 2: load the recorded fill state (the resolve pass already
+				// ran the bmodel transform + D_CalcGradients) and draw.
+				cacheblock = (pixel_t *)s->fill.cacheblock;
+				cachewidth = s->fill.cachewidth;
+				miplevel   = s->fill.miplevel;
+				d_sdivzstepu = s->fill.sdivzstepu;  d_tdivzstepu = s->fill.tdivzstepu;
+				d_sdivzstepv = s->fill.sdivzstepv;  d_tdivzstepv = s->fill.tdivzstepv;
+				d_sdivzorigin = s->fill.sdivzorigin; d_tdivzorigin = s->fill.tdivzorigin;
+				sadjust = s->fill.sadjust;  tadjust = s->fill.tadjust;
+				bbextents = s->fill.bbextents;  bbextentt = s->fill.bbextentt;
 				Turbulent8 (s->spans);
 				D_DrawZSpans (s->spans);
-
-				if (s->insubmodel)
-				{
-				//
-				// restore the old drawing state
-				// FIXME: we don't want to do this every time!
-				// TODO: speed up
-				//
-					currententity = &cl_entities[0];
-					VectorCopy (world_transformed_modelorg,
-								transformed_modelorg);
-					VectorCopy (base_vpn, vpn);
-					VectorCopy (base_vup, vup);
-					VectorCopy (base_vright, vright);
-					VectorCopy (base_modelorg, modelorg);
-					R_TransformFrustum ();
-				}
 			}
 			else
 			{
-				if (s->insubmodel)
-				{
-				// FIXME: we don't want to do all this for every polygon!
-				// TODO: store once at start of frame
-					currententity = s->entity;	//FIXME: make this passed in to
-												// R_RotateBmodel ()
-					VectorSubtract (r_origin, currententity->origin, local_modelorg);
-					TransformVector (local_modelorg, transformed_modelorg);
-
-					R_RotateBmodel ();	// FIXME: don't mess with the frustum,
-										// make entity passed in
-				}
-
 				pface = s->data;
-				// Use the cache the resolve pass built. Guard against the rare
-				// case where cache thrash evicted it after we recorded it: the
-				// surface's cachespot slot lives in the (stable) msurface_t and is
-				// NULL'd on eviction, so it names our cache iff it is still live.
-				// Read the SLOT, never the recorded cache's own fields (those can
-				// be recycled into another cache's texel data). Normal play never
-				// re-resolves -> the draw stays allocator-free (the property
-				// Phase 3 threading needs). currententity is already s->entity
-				// here for insubmodel surfaces, so a re-resolve picks the right
-				// alternate-anim texture.
-				pcurrentcache = (surfcache_t *)s->rcache;
-				if (pface->cachespots[s->rmip][s->rbucket] != pcurrentcache)
-					pcurrentcache = D_ResolveSurfaceCache (s);
-				miplevel = s->rmip;
+				// Phase 1 thrash guard: if the recorded cache was evicted, re-run
+				// the full per-surface setup (re-resolves AND re-records s->fill,
+				// incl. the bmodel transform internally). The surface's cachespot
+				// slot lives in the (stable) msurface_t and is NULL'd on eviction,
+				// so it names our cache iff it is still live. Read the SLOT, never
+				// the recorded cache's own fields (those can be recycled into
+				// another cache's texel data). Normal play never re-resolves -> the
+				// draw stays allocator-free (the property Phase 3 threading needs).
+				if (pface->cachespots[s->rmip][s->rbucket] != (surfcache_t *)s->rcache)
+					D_SetupSurfaceFill (s);
 
-				cacheblock = (pixel_t *)pcurrentcache->data;
-				cachewidth = pcurrentcache->width;
-
-				D_CalcGradients (pface);
-
+				// Phase 2: load the recorded fill state and draw (no transform, no
+				// D_CalcGradients — the resolve pass already produced these).
+				cacheblock = (pixel_t *)s->fill.cacheblock;
+				cachewidth = s->fill.cachewidth;
+				miplevel   = s->fill.miplevel;
+				d_sdivzstepu = s->fill.sdivzstepu;  d_tdivzstepu = s->fill.tdivzstepu;
+				d_sdivzstepv = s->fill.sdivzstepv;  d_tdivzstepv = s->fill.tdivzstepv;
+				d_sdivzorigin = s->fill.sdivzorigin; d_tdivzorigin = s->fill.tdivzorigin;
+				sadjust = s->fill.sadjust;  tadjust = s->fill.tadjust;
+				bbextents = s->fill.bbextents;  bbextentt = s->fill.bbextentt;
 				(*d_drawspans) (s->spans);
-
 				D_DrawZSpans (s->spans);
-
-				if (s->insubmodel)
-				{
-				//
-				// restore the old drawing state
-				// FIXME: we don't want to do this every time!
-				// TODO: speed up
-				//
-					currententity = &cl_entities[0];
-					VectorCopy (world_transformed_modelorg,
-								transformed_modelorg);
-					VectorCopy (base_vpn, vpn);
-					VectorCopy (base_vup, vup);
-					VectorCopy (base_vright, vright);
-					VectorCopy (base_modelorg, modelorg);
-					R_TransformFrustum ();
-				}
 			}
 		}
 	}

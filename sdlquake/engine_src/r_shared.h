@@ -75,6 +75,21 @@ typedef struct espan_s
 	struct espan_s	*pnext;
 } espan_t;
 
+// Phase 2: recorded per-surface fill state. The resolve pass runs the full
+// per-surface setup (cacheblock + bmodel transform + D_CalcGradients) once and
+// records the gradient OUTPUTS (not inputs) here; the draw pass loads them and
+// calls the span drawer with no transform and no D_CalcGradients. Basic types
+// only (void*/int) to avoid include ordering issues — pixel_t* -> void*,
+// fixed16_t -> int.
+typedef struct surf_fill_s
+{
+	void	*cacheblock;
+	int		cachewidth;
+	int		miplevel;
+	float	sdivzstepu, tdivzstepu, sdivzstepv, tdivzstepv, sdivzorigin, tdivzorigin;
+	int		sadjust, tadjust, bbextents, bbextentt;
+} surf_fill_t;
+
 // FIXME: compress, make a union if that will help
 // insubmodel is only 1, flags is fewer than 32, spanstate could be a byte
 typedef struct surf_s
@@ -101,6 +116,9 @@ typedef struct surf_s
 									//  D_CalcGradients
 	int			rbucket;			// Phase 1: resolved dither bucket; with rmip,
 									//  indexes msurface_t.cachespots to revalidate
+
+	surf_fill_t	fill;				// Phase 2: recorded fill state (gradients +
+									//  cacheblock) so the draw needs no transform
 
 	int			pad[2];				// stale comment: struct is already >64 bytes
 } surf_t;
