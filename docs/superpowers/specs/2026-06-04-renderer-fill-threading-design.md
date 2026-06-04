@@ -1,7 +1,15 @@
 # Threaded Span Fill (`D_DrawSurfaces`) — Design
 
 **Date:** 2026-06-04
-**Status:** Phase 0 ✅ (`7bb1864`), Phase 1 ✅ (`076546b`), Phase 2 ✅ (`98f82ca`). Next: Phase 3 (fork the fill).
+**Status:** ✅ COMPLETE. Phase 0 (`7bb1864`), Phase 1 (`076546b`), Phase 2 (`98f82ca`),
+Phase 3a `__thread` (`328f8a2`), Phase 3b fork (`77fcf3b`).
+**Result (10-core Mac, e1m1):** `D_DrawSurfaces` fill 3.14 ms → **0.75 ms (4.19×)**, `R_ScanEdges`
+3.41 → 1.02 ms, frame 5.65 → 3.21 ms. Verified BYTE-IDENTICAL serial (`r_threads 0`) vs threaded,
+6/6 repeated threaded captures deterministic (no race), two adversarial reviews clean.
+**Follow-ups (optional):** debug-cvar assert for the disjoint-span invariant (self-police future
+sweep changes); scanline-band decomposition if surface-queue load balance ever disappoints;
+then the SIMD phase (gather-free loops first — `D_DrawZSpans`, lightmap combine — 128-bit C
+intrinsics / simde, both ISAs; defer the `D_DrawSpans8` texel gather).
 Phase 1: draw reads a recorded cache (`surf_t.rcache/rmip/rbucket`) validated against the stable
 `cachespots` slot; allocator + dlit re-light run only in the serial resolve pass.
 Phase 2 (reframed from `__thread`-only, user-approved): all per-surface setup (cacheblock +
