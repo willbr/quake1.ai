@@ -34,6 +34,17 @@ extern cvar_t r_sweepprofile;
 		else { call; } \
 	} while (0)
 
+// Phase 0 (renderer fill threading): the span buffer holds a whole frame's
+// spans so D_DrawSurfaces runs once at end-of-frame instead of flushing
+// ~6x/frame mid-sweep. Sized generously; the overflow flush below is kept
+// as a safety valve for pathological frames.
+#define R_FRAME_MAXSPANS  131072
+
+// Span buffer for a whole frame's worth of spans. Moved off the R_ScanEdges
+// stack (was a 72 KB local at MAXSPANS=3000) and enlarged to ~3 MB so the
+// mid-sweep overflow flush effectively never fires in normal play.
+static byte r_frame_spanbuf[R_FRAME_MAXSPANS*sizeof(espan_t)+CACHE_SIZE];
+
 #if 0
 // FIXME
 the complex cases add new polys on most lines, so dont optimize for keeping them the same
@@ -675,7 +686,6 @@ Each surface has a linked list of its visible spans
 void R_ScanEdges (void)
 {
 	int		iv, bottom;
-	byte	basespans[MAXSPANS*sizeof(espan_t)+CACHE_SIZE];
 	espan_t	*basespan_p;
 	surf_t	*s;
 	int		sweep_prof;
@@ -685,8 +695,8 @@ void R_ScanEdges (void)
 	sp_insert = sp_gen = sp_remove = sp_step = 0.0;
 
 	basespan_p = (espan_t *)
-			(((size_t)(basespans) + CACHE_SIZE - 1) & ~((size_t)(CACHE_SIZE - 1)));
-	max_span_p = &basespan_p[MAXSPANS - r_refdef.vrect.width];
+			(((size_t)(r_frame_spanbuf) + CACHE_SIZE - 1) & ~((size_t)(CACHE_SIZE - 1)));
+	max_span_p = &basespan_p[R_FRAME_MAXSPANS - r_refdef.vrect.width];
 
 	span_p = basespan_p;
 
@@ -741,6 +751,18 @@ void R_ScanEdges (void)
 	// the next scan
 		if (span_p >= max_span_p)
 		{
+		// Phase 0 invariant: with the full-frame span buffer this should never
+		// fire in normal play, so the fill is one end-of-frame pass. If it does,
+		// this frame falls back to multi-pass (still correct) -- warn once so a
+		// pathological map doesn't silently break the single-pass assumption.
+			static qboolean overflow_warned;
+			if (!overflow_warned)
+			{
+				Con_DPrintf ("R_ScanEdges: span buffer overflow (>%d spans/frame) "
+						"-- fill not single-pass this frame\n", R_FRAME_MAXSPANS);
+				overflow_warned = true;
+			}
+
 			VID_UnlockBuffer ();
 			S_ExtraUpdate ();	// don't let sound get messed up if going slow
 			VID_LockBuffer ();
