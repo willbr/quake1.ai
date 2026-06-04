@@ -1156,27 +1156,78 @@ R_ShowDepth
 Debug view: overwrite the framebuffer inside the 3D viewport with a grayscale
 visualization of d_pzbuffer -- the per-pixel reciprocal-depth buffer that the
 world span pass (D_DrawZSpans) plus the entity/viewmodel rasterizers populate.
-Near = bright, far / sky = black. Basepal indices 0..15 are the grayscale ramp.
+Near = bright, far / sky = black. Basepal indices 0..15 are the grayscale ramp,
+ordered-dithered (4x4 Bayer) so those 16 levels read as a smooth gradient.
 
-r_showdepth's value doubles as the far-distance normalizer in world units, so a
-plain `r_showdepth 1` just works (values < 16 fall back to a 2000u default) and
-`r_showdepth 4000` tunes the range. No-op (early out) unless it's on.
+`r_showdepth 1` auto-ranges -- it scans the visible near..far each frame and
+stretches the gradient to fill the full black->white ramp (EMA-smoothed so
+turning the view doesn't flicker), so you always get max contrast with no
+tuning. `r_showdepth 2000` pins a fixed 2000-unit far plane (near = 0) instead.
+No-op (early out) unless it's on.
 ================
 */
 extern short        *d_pzbuffer;	// d_local.h (not in r_main's include chain)
 extern unsigned int  d_zwidth;
 
+// 4x4 ordered-dither matrix (values 0..15). Used to dither between the 16
+// basepal grays so the depth gradient reads smooth instead of 16 hard bands.
+static const int s_depth_bayer[4][4] = {
+	{  0,  8,  2, 10 },
+	{ 12,  4, 14,  6 },
+	{  3, 11,  1,  9 },
+	{ 15,  7, 13,  5 }
+};
+
 static void R_ShowDepth (void)
 {
-	int		u, v;
-	float	fardist;
+	static float	sm_near = 0.0f, sm_far = 0.0f;	// EMA-smoothed range (auto mode)
+	int		u, v, automode;
+	float	neardist, fardist, invrange;
 
 	if (r_showdepth.value <= 0)
 		return;
 
-	fardist = r_showdepth.value;
-	if (fardist < 16.0f)
-		fardist = 2000.0f;	// a plain on/off toggle -> sensible default range
+	// `r_showdepth 1` (any value < 16) = AUTO: stretch the gradient to the
+	// actual visible near..far so it always uses full black->white contrast.
+	// `r_showdepth 2000` = MANUAL: fixed 2000-unit far plane, near = 0.
+	automode = (r_showdepth.value < 16.0f);
+
+	if (automode)
+	{
+		short	smin = 32767, smax = 1;		// s = (1/z)*32768; bigger s = nearer
+		float	znear, zfar;
+
+		for (v = r_refdef.vrect.y ; v < r_refdef.vrectbottom ; v++)
+		{
+			short *zp = d_pzbuffer + v * d_zwidth;
+			for (u = r_refdef.vrect.x ; u < r_refdef.vrectright ; u++)
+			{
+				short s = zp[u];
+				if (s <= 0)
+					continue;				// sky / unwritten -> ignore for range
+				if (s < smin) smin = s;
+				if (s > smax) smax = s;
+			}
+		}
+
+		znear = 32768.0f / (float)smax;		// nearest visible distance
+		zfar  = 32768.0f / (float)smin;		// farthest visible distance
+
+		if (sm_near == 0.0f) { sm_near = znear; sm_far = zfar; }	// first frame
+		sm_near += (znear - sm_near) * 0.15f;	// ease toward the new range so
+		sm_far  += (zfar  - sm_far ) * 0.15f;	// turning the view doesn't flicker
+		neardist = sm_near;
+		fardist  = sm_far;
+	}
+	else
+	{
+		neardist = 0.0f;
+		fardist  = r_showdepth.value;
+	}
+
+	if (fardist < neardist + 1.0f)
+		fardist = neardist + 1.0f;			// avoid div-by-zero on a flat wall
+	invrange = 1.0f / (fardist - neardist);
 
 	for (v = r_refdef.vrect.y ; v < r_refdef.vrectbottom ; v++)
 	{
@@ -1194,18 +1245,25 @@ static void R_ShowDepth (void)
 			}
 			else
 			{
-			// d_pzbuffer holds (1/z)*32768, so z ~= 32768/s. Shade by linear
-			// distance, not raw 1/z (which crushes everything past arm's
-			// length into the brightest bin).
+			// d_pzbuffer holds (1/z)*32768, so z ~= 32768/s. Normalize linear
+			// distance across the (auto or manual) near..far span, then dither.
 				float	z = 32768.0f / (float)s;
-				float	t = z / fardist;		// 0 near .. 1 far
-				int		level;
-				if (t > 1.0f)
-					t = 1.0f;
-				level = (int)((1.0f - t) * 15.0f + 0.5f);	// near -> 15, far -> 0
-				if (level < 0)  level = 0;
-				if (level > 15) level = 15;
-				idx = level;
+				float	t = (z - neardist) * invrange;	// 0 near .. 1 far
+				float	fb, thresh;
+				int		base;
+				if (t < 0.0f) t = 0.0f;
+				if (t > 1.0f) t = 1.0f;
+			// Exact brightness in [0,15], then ordered-dither to the next gray
+			// when the fractional part beats this pixel's Bayer threshold --
+			// turns the 16 hard bands into a smooth-reading gradient.
+				fb     = (1.0f - t) * 15.0f;		// near -> 15, far -> 0
+				base   = (int)fb;
+				thresh = (s_depth_bayer[v & 3][u & 3] + 0.5f) * (1.0f / 16.0f);
+				if ((fb - (float)base) > thresh)
+					base++;
+				if (base < 0)  base = 0;
+				if (base > 15) base = 15;
+				idx = base;
 			}
 			dst[u] = (byte)idx;
 		}
