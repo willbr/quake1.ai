@@ -144,6 +144,7 @@ cvar_t	r_dspeeds = {"r_dspeeds","0"};
 cvar_t	r_drawflat = {"r_drawflat", "0"};
 cvar_t	r_lightmap = {"r_lightmap", "0"};
 cvar_t	r_showdepth = {"r_showdepth", "0"};	// debug: visualize d_pzbuffer as grayscale depth
+cvar_t	r_sweepprofile = {"r_sweepprofile", "0"};	// debug: break R_ScanEdges sweep into insert/gen/remove/step ms (Con_Printf every 60 frames)
 cvar_t	r_lightmap_dither = {"r_lightmap_dither", "1", true};	// archived
 cvar_t	r_particle_wind_scale   = {"r_particle_wind_scale",   "1"};
 cvar_t	r_particle_wind_disable = {"r_particle_wind_disable", "0"};
@@ -262,6 +263,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_lightmap);
 	Cvar_RegisterVariable (&r_showdepth);
+	Cvar_RegisterVariable (&r_sweepprofile);
 	Cvar_RegisterVariable (&r_lightmap_dither);
 	Cvar_RegisterVariable (&r_particle_wind_scale);
 	Cvar_RegisterVariable (&r_particle_wind_disable);

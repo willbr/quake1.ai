@@ -21,6 +21,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_local.h"
+#include "perf.h"		// sweep-vs-fill split: time D_DrawSurfaces as a child of R_ScanEdges
+
+// r_sweepprofile drill-down: break the R_ScanEdges sweep into its four
+// sub-ops. Per-scanline PERF_SCOPE would blow PERF_MAX_NODES_FRAME (2048),
+// so accumulate manually and Con_Printf the per-frame breakdown. Zero cost
+// when off (the cvar is read once per frame into sweep_prof).
+extern cvar_t r_sweepprofile;
+#define SWEEP_TIME(prof, acc, call) \
+	do { \
+		if (prof) { double _t0 = Sys_FloatTime(); call; (acc) += Sys_FloatTime() - _t0; } \
+		else { call; } \
+	} while (0)
 
 #if 0
 // FIXME
@@ -666,6 +678,11 @@ void R_ScanEdges (void)
 	byte	basespans[MAXSPANS*sizeof(espan_t)+CACHE_SIZE];
 	espan_t	*basespan_p;
 	surf_t	*s;
+	int		sweep_prof;
+	double	sp_insert, sp_gen, sp_remove, sp_step;
+
+	sweep_prof = (r_sweepprofile.value != 0.0f);
+	sp_insert = sp_gen = sp_remove = sp_step = 0.0;
 
 	basespan_p = (espan_t *)
 			(((size_t)(basespans) + CACHE_SIZE - 1) & ~((size_t)(CACHE_SIZE - 1)));
@@ -715,10 +732,10 @@ void R_ScanEdges (void)
 
 		if (newedges[iv])
 		{
-			R_InsertNewEdges (newedges[iv], edge_head.next);
+			SWEEP_TIME(sweep_prof, sp_insert, R_InsertNewEdges (newedges[iv], edge_head.next));
 		}
 
-		(*pdrawfunc) ();
+		SWEEP_TIME(sweep_prof, sp_gen, (*pdrawfunc) ());
 
 	// flush the span list if we can't be sure we have enough spans left for
 	// the next scan
@@ -734,7 +751,7 @@ void R_ScanEdges (void)
 			}
 			else
 			{
-				D_DrawSurfaces ();
+				PERF_SCOPE("D_DrawSurfaces") D_DrawSurfaces ();
 			}
 
 		// clear the surface span pointers
@@ -745,10 +762,10 @@ void R_ScanEdges (void)
 		}
 
 		if (removeedges[iv])
-			R_RemoveEdges (removeedges[iv]);
+			SWEEP_TIME(sweep_prof, sp_remove, R_RemoveEdges (removeedges[iv]));
 
 		if (edge_head.next != &edge_tail)
-			R_StepActiveU (edge_head.next);
+			SWEEP_TIME(sweep_prof, sp_step, R_StepActiveU (edge_head.next));
 	}
 
 // do the last scan (no need to step or sort or remove on the last scan)
@@ -768,7 +785,22 @@ void R_ScanEdges (void)
 	if (r_drawculledpolys)
 		R_DrawCulledPolys ();
 	else
-		D_DrawSurfaces ();
+		PERF_SCOPE("D_DrawSurfaces") D_DrawSurfaces ();
+
+	if (sweep_prof)
+	{
+		static double a_ins = 0, a_gen = 0, a_rem = 0, a_step = 0;
+		static int    nframes = 0;
+		a_ins += sp_insert; a_gen += sp_gen; a_rem += sp_remove; a_step += sp_step;
+		if (++nframes >= 60)
+		{
+			double k = 1000.0 / nframes;	// summed seconds -> ms/frame
+			Con_Printf ("sweep ms/frame: insert %.3f  gen %.3f  remove %.3f  step %.3f  (sum %.3f)\n",
+					a_ins*k, a_gen*k, a_rem*k, a_step*k,
+					(a_ins+a_gen+a_rem+a_step)*k);
+			a_ins = a_gen = a_rem = a_step = 0; nframes = 0;
+		}
+	}
 }
 
 
