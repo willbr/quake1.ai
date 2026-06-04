@@ -1182,6 +1182,45 @@ static const int s_depth_bayer[4][4] = {
 	{ 15,  7, 13,  5 }
 };
 
+// Depth-darkening ramp for the coloured (r_drawflat) path. We can't use
+// vid.colormap for this: its row 0 is *overbright* (blows colours toward
+// white) and it deliberately refuses to darken fullbright indices 224..255
+// (e.g. r_fullbright maps the floor to 254/white, which colormap leaves
+// untouched -> "depth doesn't work on the white floor"). So build our own:
+// for shade 0..63, the nearest palette index to basepal[c] scaled toward
+// black. Shade 0 = the colour unchanged, shade 63 = black, for EVERY index.
+static byte	s_depthramp[64][256];
+static int	s_depthramp_built = 0;
+
+static void R_BuildDepthRamp (void)
+{
+	int		shade, c, i;
+
+	for (shade = 0 ; shade < 64 ; shade++)
+	{
+		float	scale = (float)(63 - shade) * (1.0f / 63.0f);	// 1 near .. 0 far
+
+		for (c = 0 ; c < 256 ; c++)
+		{
+			int	tr = (int)(host_basepal[c*3+0] * scale);
+			int	tg = (int)(host_basepal[c*3+1] * scale);
+			int	tb = (int)(host_basepal[c*3+2] * scale);
+			int	best = 0, bestd = 0x7fffffff;
+
+			for (i = 0 ; i < 256 ; i++)
+			{
+				int dr = (int)host_basepal[i*3+0] - tr;
+				int dg = (int)host_basepal[i*3+1] - tg;
+				int db = (int)host_basepal[i*3+2] - tb;
+				int d  = dr*dr + dg*dg + db*db;
+				if (d < bestd) { bestd = d; best = i; }
+			}
+			s_depthramp[shade][c] = (byte)best;
+		}
+	}
+	s_depthramp_built = 1;
+}
+
 static void R_ShowDepth (void)
 {
 	static float	sm_near = 0.0f, sm_far = 0.0f;	// EMA-smoothed range (auto mode)
@@ -1199,6 +1238,8 @@ static void R_ShowDepth (void)
 	// With r_drawflat on, keep its per-surface colours and just darken them by
 	// distance (coloured depth) instead of replacing the view with grayscale.
 	colored = (r_drawflat.value != 0.0f);
+	if (colored && !s_depthramp_built)
+		R_BuildDepthRamp ();
 
 	if (automode)
 	{
@@ -1268,15 +1309,15 @@ static void R_ShowDepth (void)
 			if (colored)
 			{
 			// Keep r_drawflat's per-surface colour, darken it by distance via
-			// the palette's own shade ramp (colormap row 0 = bright .. 63 =
-			// dark), dithered between rows.
+			// our palette-derived ramp (shade 0 = colour as-is .. 63 = black,
+			// works for fullbright colours too), dithered between rows.
 				float	fsh   = t * 63.0f;			// near -> 0, far -> 63
 				int		shade = (int)fsh;
 				if ((fsh - (float)shade) > thresh)
 					shade++;
 				if (shade < 0)  shade = 0;
 				if (shade > 63) shade = 63;
-				dst[u] = vid.colormap[(shade << 8) + dst[u]];
+				dst[u] = s_depthramp[shade][dst[u]];
 			}
 			else
 			{
