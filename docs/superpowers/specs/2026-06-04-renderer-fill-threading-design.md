@@ -1,7 +1,10 @@
 # Threaded Span Fill (`D_DrawSurfaces`) — Design
 
 **Date:** 2026-06-04
-**Status:** Phase 0 ✅ done (commit `7bb1864`). Next: Phase 1 (serial cache pre-build).
+**Status:** Phase 0 ✅ (`7bb1864`), Phase 1 ✅ (`076546b`). Next: Phase 2 (`__thread` the per-surface globals).
+Phase 1 note: the draw now reads a per-surface recorded cache (`surf_t.rcache/rmip/rbucket`)
+validated against the stable `cachespots` slot; allocator + dlit re-light run only in the
+serial resolve pass. Bmodel transform still wraps `D_CalcGradients` in the draw (Phase 2/3 concern).
 **Scope:** Parallelize the software renderer's **span fill** (`D_DrawSurfaces` /
 `D_DrawSpans8` / `D_DrawZSpans` / `Turbulent8`) across CPU threads, decomposed by
 horizontal scanline bands. The **edge sweep** (`R_ScanEdges` AET maintenance +
