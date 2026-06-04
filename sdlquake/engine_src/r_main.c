@@ -1164,6 +1164,10 @@ stretches the gradient to fill the full black->white ramp (EMA-smoothed so
 turning the view doesn't flicker), so you always get max contrast with no
 tuning. `r_showdepth 2000` pins a fixed 2000-unit far plane (near = 0) instead.
 No-op (early out) unless it's on.
+
+With r_drawflat also on, it keeps r_drawflat's per-surface category colours
+and darkens them by distance through vid.colormap (coloured depth) instead of
+the grayscale ramp -- so `r_drawflat 2; r_showdepth 1` gives colour + depth.
 ================
 */
 extern short        *d_pzbuffer;	// d_local.h (not in r_main's include chain)
@@ -1181,7 +1185,7 @@ static const int s_depth_bayer[4][4] = {
 static void R_ShowDepth (void)
 {
 	static float	sm_near = 0.0f, sm_far = 0.0f;	// EMA-smoothed range (auto mode)
-	int		u, v, automode;
+	int		u, v, automode, colored;
 	float	neardist, fardist, invrange;
 
 	if (r_showdepth.value <= 0)
@@ -1191,6 +1195,10 @@ static void R_ShowDepth (void)
 	// actual visible near..far so it always uses full black->white contrast.
 	// `r_showdepth 2000` = MANUAL: fixed 2000-unit far plane, near = 0.
 	automode = (r_showdepth.value < 16.0f);
+
+	// With r_drawflat on, keep its per-surface colours and just darken them by
+	// distance (coloured depth) instead of replacing the view with grayscale.
+	colored = (r_drawflat.value != 0.0f);
 
 	if (automode)
 	{
@@ -1237,35 +1245,50 @@ static void R_ShowDepth (void)
 		for (u = r_refdef.vrect.x ; u < r_refdef.vrectright ; u++)
 		{
 			short	s = zp[u];
-			int		idx;
+			float	t, thresh;
 
+		// d_pzbuffer holds (1/z)*32768, so z ~= 32768/s. Normalize to [0 near
+		// .. 1 far] over the (auto or manual) range; sky / unwritten == far.
 			if (s <= 0)
 			{
-				idx = 0;		// sky / unwritten == infinitely far == black
+				t = 1.0f;
 			}
 			else
 			{
-			// d_pzbuffer holds (1/z)*32768, so z ~= 32768/s. Normalize linear
-			// distance across the (auto or manual) near..far span, then dither.
-				float	z = 32768.0f / (float)s;
-				float	t = (z - neardist) * invrange;	// 0 near .. 1 far
-				float	fb, thresh;
-				int		base;
+				float z = 32768.0f / (float)s;
+				t = (z - neardist) * invrange;
 				if (t < 0.0f) t = 0.0f;
 				if (t > 1.0f) t = 1.0f;
-			// Exact brightness in [0,15], then ordered-dither to the next gray
-			// when the fractional part beats this pixel's Bayer threshold --
-			// turns the 16 hard bands into a smooth-reading gradient.
-				fb     = (1.0f - t) * 15.0f;		// near -> 15, far -> 0
-				base   = (int)fb;
-				thresh = (s_depth_bayer[v & 3][u & 3] + 0.5f) * (1.0f / 16.0f);
+			}
+
+		// This pixel's ordered-dither threshold (Bayer 4x4 -> [0,1)); used to
+		// dither between adjacent levels so the gradient reads smooth.
+			thresh = (s_depth_bayer[v & 3][u & 3] + 0.5f) * (1.0f / 16.0f);
+
+			if (colored)
+			{
+			// Keep r_drawflat's per-surface colour, darken it by distance via
+			// the palette's own shade ramp (colormap row 0 = bright .. 63 =
+			// dark), dithered between rows.
+				float	fsh   = t * 63.0f;			// near -> 0, far -> 63
+				int		shade = (int)fsh;
+				if ((fsh - (float)shade) > thresh)
+					shade++;
+				if (shade < 0)  shade = 0;
+				if (shade > 63) shade = 63;
+				dst[u] = vid.colormap[(shade << 8) + dst[u]];
+			}
+			else
+			{
+			// Grayscale: the 16 basepal grays (0..15), dithered.
+				float	fb   = (1.0f - t) * 15.0f;	// near -> 15, far -> 0
+				int		base = (int)fb;
 				if ((fb - (float)base) > thresh)
 					base++;
 				if (base < 0)  base = 0;
 				if (base > 15) base = 15;
-				idx = base;
+				dst[u] = (byte)base;
 			}
-			dst[u] = (byte)idx;
 		}
 	}
 }
