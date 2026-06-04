@@ -95,7 +95,14 @@ typedef struct surf_s
 	qboolean	insubmodel;
 	float		d_ziorigin, d_zistepu, d_zistepv;
 
-	int			pad[2];				// to 64 bytes
+	void		*rcache;			// Phase 1: resolved surfcache_t* (cast in
+									//  d_edge.c); NULL = not pre-resolved
+	int			rmip;				// Phase 1: resolved miplevel for
+									//  D_CalcGradients
+	int			rbucket;			// Phase 1: resolved dither bucket; with rmip,
+									//  indexes msurface_t.cachespots to revalidate
+
+	int			pad[2];				// stale comment: struct is already >64 bytes
 } surf_t;
 
 extern	surf_t	*surfaces, *surface_p, *surf_max;

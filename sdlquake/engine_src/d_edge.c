@@ -169,6 +169,145 @@ void D_CalcGradients (msurface_t *pface)
 
 /*
 ==============
+D_ResolveSurfaceCache
+
+Phase 1: resolve a solid surface's mip level + dither bucket (transform-
+independent — depends only on s->nearzi / texinfo / the per-face hysteresis
+state and r_framecount, none of which depend on the bmodel transform) and
+build/fetch its surface cache. Records the resolved miplevel on s->rmip for
+the draw pass's D_CalcGradients, and returns the cache so the caller can
+record s->rcache. The ONLY D_CacheSurface caller for solid surfaces.
+
+This is the verbatim logic that used to run inline in D_DrawSurfaces's
+solid-textured else branch, with the global `miplevel`/`bucket` made locals.
+==============
+*/
+static surfcache_t *D_ResolveSurfaceCache (surf_t *s)
+{
+	msurface_t	*pface = s->data;
+	int			miplevel, bucket;		// local, not the global
+
+	{
+		float mipscale = s->nearzi * scale_for_mip
+			* pface->texinfo->mipadjust;
+		int raw_mip = D_MipLevelForScale (mipscale);
+		int prev    = pface->last_miplevel;
+
+		bucket = 0;
+
+		// Existing mip-level hysteresis: hold prev mip while scale
+		// sits within a 15% deadband of the boundary.
+		if (prev >= 0 && prev != raw_mip)
+		{
+			int b = (prev < raw_mip) ? prev : raw_mip;
+			if (b >= 0 && b < MIPLEVELS - 1)
+			{
+				float t = d_scalemip[b];
+				if (mipscale > t * 0.85f
+				 && mipscale < t * 1.15f)
+					raw_mip = prev;
+			}
+		}
+
+		miplevel = raw_mip;
+
+		// Mip-dither bucket selection. Two boundary bands can apply:
+		// the one below raw_mip (between raw_mip and raw_mip+1) and
+		// the one above (between raw_mip-1 and raw_mip). They are
+		// independent `if` blocks because raw_mip+1 existing tells
+		// us nothing about raw_mip-1 existing - both can be true.
+		// At default cvar settings the mipscale bands themselves
+		// cannot overlap (thresholds are ~2x apart in mipscale,
+		// band is 2*r_mipdither_band = 0.6), so only one inner
+		// mipscale-in-band test fires. If a user dials the band
+		// width up enough to overlap, the upper-band assignment
+		// runs second and wins, biasing toward the sharper mip.
+		// Dlit surfaces rebuild cache every frame; skip dither to keep that
+		// path cheap. Coloured dlight intensity masks mip-step pop anyway.
+		if (r_mipdither.value
+			&& r_mipdither_band.value > 0.0f
+			&& pface->dlightframe != r_framecount)
+		{
+			float band = r_mipdither_band.value;
+
+			// Lower boundary: dither toward raw_mip+1 (coarser).
+			if (raw_mip + 1 <= MIPLEVELS - 1)
+			{
+				float t_lo = d_scalemip[raw_mip];
+				float hi   = t_lo * (1.0f + band);
+				float lo   = t_lo * (1.0f - band);
+				if (mipscale < hi && mipscale > lo)
+				{
+					float t   = (hi - mipscale) / (hi - lo);
+					float tn  = t * (NUM_DITHER_BUCKETS - 1);
+					int   q;
+					// Bucket hysteresis: hold prev_bucket while we're within 0.75 of it
+					// (vs. the natural round() boundary at 0.5). Only applies when the
+					// previous frame's surface was on the same (miplevel, raw_mip) pair.
+					if (pface->last_miplevel == raw_mip
+						&& pface->last_bucket   >= 0
+						&& pface->last_bucket   <= NUM_DITHER_BUCKETS - 1
+						&& fabsf(tn - (float)pface->last_bucket) < 0.75f)
+					{
+						q = pface->last_bucket;
+					}
+					else
+					{
+						q = (int)(tn + 0.5f);
+						if (q < 0) q = 0;
+						if (q > NUM_DITHER_BUCKETS - 1)
+							q = NUM_DITHER_BUCKETS - 1;
+					}
+					miplevel = raw_mip;
+					bucket   = q;
+				}
+			}
+
+			// Upper boundary: dither toward raw_mip-1 (sharper).
+			// d_minmip is the floor (higher number = stricter
+			// floor); raw_mip-1 must be at-or-above it AND >= 0.
+			if (raw_mip - 1 >= d_minmip && raw_mip >= 1)
+			{
+				float t_hi = d_scalemip[raw_mip - 1];
+				float hi   = t_hi * (1.0f + band);
+				float lo   = t_hi * (1.0f - band);
+				if (mipscale < hi && mipscale > lo)
+				{
+					float t   = (hi - mipscale) / (hi - lo);
+					float tn  = t * (NUM_DITHER_BUCKETS - 1);
+					int   q;
+					if (pface->last_miplevel == raw_mip - 1
+						&& pface->last_bucket   >= 0
+						&& pface->last_bucket   <= NUM_DITHER_BUCKETS - 1
+						&& fabsf(tn - (float)pface->last_bucket) < 0.75f)
+					{
+						q = pface->last_bucket;
+					}
+					else
+					{
+						q = (int)(tn + 0.5f);
+						if (q < 0) q = 0;
+						if (q > NUM_DITHER_BUCKETS - 1)
+							q = NUM_DITHER_BUCKETS - 1;
+					}
+					miplevel = raw_mip - 1;
+					bucket   = q;
+				}
+			}
+		}
+
+		pface->last_miplevel = (signed char)miplevel;
+		pface->last_bucket   = (signed char)bucket;
+	}
+
+	s->rmip = miplevel;
+	s->rbucket = bucket;
+	return D_CacheSurface (pface, miplevel, bucket);
+}
+
+
+/*
+==============
 D_DrawSurfaces
 ==============
 */
@@ -205,6 +344,27 @@ void D_DrawSurfaces (void)
 	}
 	else
 	{
+		// Phase 1: resolve+build all solid-surface caches up front so the draw
+		// pass only READS them (prerequisite for threading the fill). dlit
+		// re-lighting and the allocator thus run once, here, serially.
+		for (s = &surfaces[1] ; s<surface_p ; s++)
+		{
+			if (!s->spans)
+				continue;
+			if (s->flags & (SURF_DRAWSKY | SURF_DRAWBACKGROUND | SURF_DRAWTURB))
+			{
+				s->rcache = NULL;			// these branches don't use a surfcache
+				continue;
+			}
+			// D_CacheSurface -> R_TextureAnimation reads currententity->frame to
+			// pick alternate_anims (e.g. a pressed func_button's +a texture). The
+			// draw pass sets currententity = s->entity for insubmodel surfaces;
+			// match that here so the resolve builds the same (alternate) texture.
+			currententity = s->insubmodel ? s->entity : &cl_entities[0];
+			s->rcache = D_ResolveSurfaceCache (s);	// sets s->rmip
+		}
+		currententity = &cl_entities[0];	// restore for the draw pass's world surfaces
+
 		for (s = &surfaces[1] ; s<surface_p ; s++)
 		{
 			if (!s->spans)
@@ -320,119 +480,20 @@ void D_DrawSurfaces (void)
 				}
 
 				pface = s->data;
-				{
-					float mipscale = s->nearzi * scale_for_mip
-						* pface->texinfo->mipadjust;
-					int raw_mip = D_MipLevelForScale (mipscale);
-					int prev    = pface->last_miplevel;
-					int bucket  = 0;
-
-					// Existing mip-level hysteresis: hold prev mip while scale
-					// sits within a 15% deadband of the boundary.
-					if (prev >= 0 && prev != raw_mip)
-					{
-						int b = (prev < raw_mip) ? prev : raw_mip;
-						if (b >= 0 && b < MIPLEVELS - 1)
-						{
-							float t = d_scalemip[b];
-							if (mipscale > t * 0.85f
-							 && mipscale < t * 1.15f)
-								raw_mip = prev;
-						}
-					}
-
-					miplevel = raw_mip;
-
-					// Mip-dither bucket selection. Two boundary bands can apply:
-					// the one below raw_mip (between raw_mip and raw_mip+1) and
-					// the one above (between raw_mip-1 and raw_mip). They are
-					// independent `if` blocks because raw_mip+1 existing tells
-					// us nothing about raw_mip-1 existing - both can be true.
-					// At default cvar settings the mipscale bands themselves
-					// cannot overlap (thresholds are ~2x apart in mipscale,
-					// band is 2*r_mipdither_band = 0.6), so only one inner
-					// mipscale-in-band test fires. If a user dials the band
-					// width up enough to overlap, the upper-band assignment
-					// runs second and wins, biasing toward the sharper mip.
-					// Dlit surfaces rebuild cache every frame; skip dither to keep that
-					// path cheap. Coloured dlight intensity masks mip-step pop anyway.
-					if (r_mipdither.value
-						&& r_mipdither_band.value > 0.0f
-						&& pface->dlightframe != r_framecount)
-					{
-						float band = r_mipdither_band.value;
-
-						// Lower boundary: dither toward raw_mip+1 (coarser).
-						if (raw_mip + 1 <= MIPLEVELS - 1)
-						{
-							float t_lo = d_scalemip[raw_mip];
-							float hi   = t_lo * (1.0f + band);
-							float lo   = t_lo * (1.0f - band);
-							if (mipscale < hi && mipscale > lo)
-							{
-								float t   = (hi - mipscale) / (hi - lo);
-								float tn  = t * (NUM_DITHER_BUCKETS - 1);
-								int   q;
-								// Bucket hysteresis: hold prev_bucket while we're within 0.75 of it
-								// (vs. the natural round() boundary at 0.5). Only applies when the
-								// previous frame's surface was on the same (miplevel, raw_mip) pair.
-								if (pface->last_miplevel == raw_mip
-									&& pface->last_bucket   >= 0
-									&& pface->last_bucket   <= NUM_DITHER_BUCKETS - 1
-									&& fabsf(tn - (float)pface->last_bucket) < 0.75f)
-								{
-									q = pface->last_bucket;
-								}
-								else
-								{
-									q = (int)(tn + 0.5f);
-									if (q < 0) q = 0;
-									if (q > NUM_DITHER_BUCKETS - 1)
-										q = NUM_DITHER_BUCKETS - 1;
-								}
-								miplevel = raw_mip;
-								bucket   = q;
-							}
-						}
-
-						// Upper boundary: dither toward raw_mip-1 (sharper).
-						// d_minmip is the floor (higher number = stricter
-						// floor); raw_mip-1 must be at-or-above it AND >= 0.
-						if (raw_mip - 1 >= d_minmip && raw_mip >= 1)
-						{
-							float t_hi = d_scalemip[raw_mip - 1];
-							float hi   = t_hi * (1.0f + band);
-							float lo   = t_hi * (1.0f - band);
-							if (mipscale < hi && mipscale > lo)
-							{
-								float t   = (hi - mipscale) / (hi - lo);
-								float tn  = t * (NUM_DITHER_BUCKETS - 1);
-								int   q;
-								if (pface->last_miplevel == raw_mip - 1
-									&& pface->last_bucket   >= 0
-									&& pface->last_bucket   <= NUM_DITHER_BUCKETS - 1
-									&& fabsf(tn - (float)pface->last_bucket) < 0.75f)
-								{
-									q = pface->last_bucket;
-								}
-								else
-								{
-									q = (int)(tn + 0.5f);
-									if (q < 0) q = 0;
-									if (q > NUM_DITHER_BUCKETS - 1)
-										q = NUM_DITHER_BUCKETS - 1;
-								}
-								miplevel = raw_mip - 1;
-								bucket   = q;
-							}
-						}
-					}
-
-					pface->last_miplevel = (signed char)miplevel;
-					pface->last_bucket   = (signed char)bucket;
-
-					pcurrentcache = D_CacheSurface (pface, miplevel, bucket);
-				}
+				// Use the cache the resolve pass built. Guard against the rare
+				// case where cache thrash evicted it after we recorded it: the
+				// surface's cachespot slot lives in the (stable) msurface_t and is
+				// NULL'd on eviction, so it names our cache iff it is still live.
+				// Read the SLOT, never the recorded cache's own fields (those can
+				// be recycled into another cache's texel data). Normal play never
+				// re-resolves -> the draw stays allocator-free (the property
+				// Phase 3 threading needs). currententity is already s->entity
+				// here for insubmodel surfaces, so a re-resolve picks the right
+				// alternate-anim texture.
+				pcurrentcache = (surfcache_t *)s->rcache;
+				if (pface->cachespots[s->rmip][s->rbucket] != pcurrentcache)
+					pcurrentcache = D_ResolveSurfaceCache (s);
+				miplevel = s->rmip;
 
 				cacheblock = (pixel_t *)pcurrentcache->data;
 				cachewidth = pcurrentcache->width;
