@@ -143,6 +143,7 @@ cvar_t	r_aliasstats = {"r_polymodelstats","0"};
 cvar_t	r_dspeeds = {"r_dspeeds","0"};
 cvar_t	r_drawflat = {"r_drawflat", "0"};
 cvar_t	r_lightmap = {"r_lightmap", "0"};
+cvar_t	r_showdepth = {"r_showdepth", "0"};	// debug: visualize d_pzbuffer as grayscale depth
 cvar_t	r_lightmap_dither = {"r_lightmap_dither", "1", true};	// archived
 cvar_t	r_particle_wind_scale   = {"r_particle_wind_scale",   "1"};
 cvar_t	r_particle_wind_disable = {"r_particle_wind_disable", "0"};
@@ -260,6 +261,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_graphheight);
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_lightmap);
+	Cvar_RegisterVariable (&r_showdepth);
 	Cvar_RegisterVariable (&r_lightmap_dither);
 	Cvar_RegisterVariable (&r_particle_wind_scale);
 	Cvar_RegisterVariable (&r_particle_wind_disable);
@@ -1147,6 +1149,70 @@ R_RenderView
 r_refdef must be set before the first call
 ================
 */
+/*
+================
+R_ShowDepth
+
+Debug view: overwrite the framebuffer inside the 3D viewport with a grayscale
+visualization of d_pzbuffer -- the per-pixel reciprocal-depth buffer that the
+world span pass (D_DrawZSpans) plus the entity/viewmodel rasterizers populate.
+Near = bright, far / sky = black. Basepal indices 0..15 are the grayscale ramp.
+
+r_showdepth's value doubles as the far-distance normalizer in world units, so a
+plain `r_showdepth 1` just works (values < 16 fall back to a 2000u default) and
+`r_showdepth 4000` tunes the range. No-op (early out) unless it's on.
+================
+*/
+extern short        *d_pzbuffer;	// d_local.h (not in r_main's include chain)
+extern unsigned int  d_zwidth;
+
+static void R_ShowDepth (void)
+{
+	int		u, v;
+	float	fardist;
+
+	if (r_showdepth.value <= 0)
+		return;
+
+	fardist = r_showdepth.value;
+	if (fardist < 16.0f)
+		fardist = 2000.0f;	// a plain on/off toggle -> sensible default range
+
+	for (v = r_refdef.vrect.y ; v < r_refdef.vrectbottom ; v++)
+	{
+		byte	*dst = vid.buffer  + v * vid.rowbytes;
+		short	*zp  = d_pzbuffer  + v * d_zwidth;
+
+		for (u = r_refdef.vrect.x ; u < r_refdef.vrectright ; u++)
+		{
+			short	s = zp[u];
+			int		idx;
+
+			if (s <= 0)
+			{
+				idx = 0;		// sky / unwritten == infinitely far == black
+			}
+			else
+			{
+			// d_pzbuffer holds (1/z)*32768, so z ~= 32768/s. Shade by linear
+			// distance, not raw 1/z (which crushes everything past arm's
+			// length into the brightest bin).
+				float	z = 32768.0f / (float)s;
+				float	t = z / fardist;		// 0 near .. 1 far
+				int		level;
+				if (t > 1.0f)
+					t = 1.0f;
+				level = (int)((1.0f - t) * 15.0f + 0.5f);	// near -> 15, far -> 0
+				if (level < 0)  level = 0;
+				if (level > 15) level = 15;
+				idx = level;
+			}
+			dst[u] = (byte)idx;
+		}
+	}
+}
+
+
 void R_RenderView_ (void)
 {
 	byte	warpbuffer[WARP_WIDTH * WARP_HEIGHT];
@@ -1283,6 +1349,8 @@ SetVisibilityByPassages ();
 
 	if (r_dowarp)
 		D_WarpScreen ();
+
+	R_ShowDepth ();		// debug: paint d_pzbuffer as grayscale (no-op unless r_showdepth>0)
 
 	V_SetContentsColor (r_viewleaf->contents);
 
