@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d_local.h"
 #include "r_drawflat.h"
+#include "r_threadfill.h"
 
 static __thread int	miplevel;
 
@@ -400,13 +401,149 @@ static void D_SetupSurfaceFill (surf_t *s)
 
 /*
 ==============
+D_DrawSurfaceBody
+
+Phase 3b: the per-surface DRAW body, factored out so it can run from either
+the serial dispatch (allow_resetup = true, the regression oracle / thrash
+path) OR a fill worker thread (allow_resetup = false). It LOADS the surface's
+recorded s->fill into the (now __thread) span-drawer globals and draws — no
+transform, no D_CalcGradients, no allocator. The d_zi* / sadjust / tadjust /
+cacheblock / miplevel / etc. it writes are all __thread (Phase 3a), so two
+workers running this concurrently for two different surfaces never collide on
+the per-surface globals; their span writes are disjoint by construction (the
+edge sweep resolved occlusion before fill).
+
+The thrash re-setup (D_SetupSurfaceFill, which calls the allocator +
+R_RotateBmodel — NOT thread-safe) runs ONLY when allow_resetup is true, i.e.
+the serial path. The threaded path passes false, and without thrash the guard
+cannot fire anyway, so the threaded draw is allocator-free + transform-free.
+==============
+*/
+static void D_DrawSurfaceBody (surf_t *s, qboolean allow_resetup)
+{
+	msurface_t	*pface;
+
+	d_zistepu  = s->d_zistepu;		// __thread (Phase 3a)
+	d_zistepv  = s->d_zistepv;
+	d_ziorigin = s->d_ziorigin;
+
+	if (s->flags & SURF_DRAWSKY)
+	{
+		if (r_drawflat.value == 2)
+		{
+			// Flat-shaded sky: one solid colour instead of the
+			// scrolling sky panorama. Reads as "outside / out of
+			// bounds" in nav mode.
+			extern byte r_drawflat_src[][256 * 256];
+			int sky_color = r_drawflat_src[R_FLAT_CAT_SKY][0];
+			D_DrawSolidSurface (s, sky_color);
+			D_DrawZSpans (s->spans);
+		}
+		else
+		{
+			// R_MakeSky / r_skymade is a shared one-shot. In the threaded
+			// path D_DrawSurfaces builds the sky serially BEFORE the fork,
+			// so r_skymade is already set and this guard never fires on a
+			// worker. In the serial path this is the original lazy build.
+			if (!r_skymade)
+			{
+				R_MakeSky ();
+			}
+
+			D_DrawSkyScans8 (s->spans);
+			D_DrawZSpans (s->spans);
+		}
+	}
+	else if (s->flags & SURF_DRAWBACKGROUND)
+	{
+	// set up a gradient for the background surface that places it
+	// effectively at infinity distance from the viewpoint
+		d_zistepu = 0;
+		d_zistepv = 0;
+		d_ziorigin = -0.9;
+
+		D_DrawSolidSurface (s, (int)r_clearcolor.value & 0xFF);
+		D_DrawZSpans (s->spans);
+	}
+	else if (s->flags & SURF_DRAWTURB)
+	{
+		// Phase 2: load the recorded fill state (the resolve pass already
+		// ran the bmodel transform + D_CalcGradients) and draw.
+		cacheblock = (pixel_t *)s->fill.cacheblock;
+		cachewidth = s->fill.cachewidth;
+		miplevel   = s->fill.miplevel;
+		d_sdivzstepu = s->fill.sdivzstepu;  d_tdivzstepu = s->fill.tdivzstepu;
+		d_sdivzstepv = s->fill.sdivzstepv;  d_tdivzstepv = s->fill.tdivzstepv;
+		d_sdivzorigin = s->fill.sdivzorigin; d_tdivzorigin = s->fill.tdivzorigin;
+		sadjust = s->fill.sadjust;  tadjust = s->fill.tadjust;
+		bbextents = s->fill.bbextents;  bbextentt = s->fill.bbextentt;
+		Turbulent8 (s->spans);
+		D_DrawZSpans (s->spans);
+	}
+	else
+	{
+		pface = s->data;
+		// Phase 1 thrash guard (serial path ONLY — D_SetupSurfaceFill calls
+		// the allocator + R_RotateBmodel, neither thread-safe): if the
+		// recorded cache was evicted, re-run the full per-surface setup
+		// (re-resolves AND re-records s->fill, incl. the bmodel transform
+		// internally). The surface's cachespot slot lives in the (stable)
+		// msurface_t and is NULL'd on eviction, so it names our cache iff it
+		// is still live. Read the SLOT, never the recorded cache's own fields
+		// (those can be recycled into another cache's texel data). Normal play
+		// never re-resolves -> the draw stays allocator-free (the property the
+		// threaded path needs). The threaded path passes allow_resetup=false;
+		// because threading is disabled on thrash frames (r_cache_thrash gates
+		// the dispatch), the guard can never need to fire on a worker.
+		if (allow_resetup &&
+			pface->cachespots[s->rmip][s->rbucket] != (surfcache_t *)s->rcache)
+			D_SetupSurfaceFill (s);
+
+		// Phase 2: load the recorded fill state and draw (no transform, no
+		// D_CalcGradients — the resolve pass already produced these).
+		cacheblock = (pixel_t *)s->fill.cacheblock;
+		cachewidth = s->fill.cachewidth;
+		miplevel   = s->fill.miplevel;
+		d_sdivzstepu = s->fill.sdivzstepu;  d_tdivzstepu = s->fill.tdivzstepu;
+		d_sdivzstepv = s->fill.sdivzstepv;  d_tdivzstepv = s->fill.tdivzstepv;
+		d_sdivzorigin = s->fill.sdivzorigin; d_tdivzorigin = s->fill.tdivzorigin;
+		sadjust = s->fill.sadjust;  tadjust = s->fill.tadjust;
+		bbextents = s->fill.bbextents;  bbextentt = s->fill.bbextentt;
+		(*d_drawspans) (s->spans);
+		D_DrawZSpans (s->spans);
+	}
+}
+
+
+/*
+==============
+D_DrawSurfaceThreaded
+
+Phase 3b: fill-worker callback. Index i selects surfaces[i]; the work range
+[1, count) is dispatched by D_DrawSurfaces across the worker pool + caller.
+Surfaces without spans are skipped (sky/background already had s->rcache
+nulled in the resolve pass; non-spanned surfaces just have no work). Never
+re-sets up the cache (allow_resetup = false), so it is allocator-free and
+transform-free, as the threading correctness requires.
+==============
+*/
+static void D_DrawSurfaceThreaded (int i)
+{
+	surf_t	*s = &surfaces[i];
+	if (s->spans)
+		D_DrawSurfaceBody (s, false);
+}
+
+
+/*
+==============
 D_DrawSurfaces
 ==============
 */
 void D_DrawSurfaces (void)
 {
 	surf_t			*s;
-	msurface_t		*pface;
+	int				n_drawn, count;
 
 	currententity = &cl_entities[0];
 	// Establish the world value of transformed_modelorg; D_SetupSurfaceFill
@@ -432,116 +569,63 @@ void D_DrawSurfaces (void)
 			D_DrawSolidSurface (s, (int)((uintptr_t)s->data & 0xFF));
 			D_DrawZSpans (s->spans);
 		}
+		return;
+	}
+
+	// Phase 2: full per-surface setup up front (cacheblock + bmodel
+	// transform + D_CalcGradients) for SOLID and TURB surfaces, recording
+	// the gradient outputs + cacheblock on s->fill so the draw pass only
+	// LOADS them and calls the span drawer (no transform, no
+	// D_CalcGradients) — prerequisite for threading the fill. dlit
+	// re-lighting and the allocator thus run once, here, serially.
+	//
+	// r_drawnpolycount is counted HERE (in the serial resolve pass) rather
+	// than in the per-surface draw body, so the threaded draw never races on
+	// it. Every drawable surface (has spans) is counted, including sky/bg —
+	// matching the old per-surface r_drawnpolycount++ which ran before the
+	// sky/bg branches.
+	n_drawn = 0;
+	for (s = &surfaces[1] ; s<surface_p ; s++)
+	{
+		if (!s->spans)
+			continue;
+		n_drawn++;
+		if (s->flags & (SURF_DRAWSKY | SURF_DRAWBACKGROUND))
+		{
+			s->rcache = NULL;			// sky/background: no fill state
+			continue;
+		}
+		D_SetupSurfaceFill (s);			// solid + turb: full setup, records s->fill
+	}
+	currententity = &cl_entities[0];	// restore for the draw loop
+	r_drawnpolycount += n_drawn;
+
+	// surfaces drawn are indices [1, count); surface_p points one past the
+	// last allocated surface.
+	count = (int)(surface_p - surfaces);
+
+	if (r_cache_thrash || !R_ThreadFill_Enabled())
+	{
+		// Serial path (the regression oracle / cache-thrash frames): exact
+		// current behavior, with the thrash re-setup enabled.
+		for (s = &surfaces[1] ; s < surface_p ; s++)
+			if (s->spans)
+				D_DrawSurfaceBody (s, true);
 	}
 	else
 	{
-		// Phase 2: full per-surface setup up front (cacheblock + bmodel
-		// transform + D_CalcGradients) for SOLID and TURB surfaces, recording
-		// the gradient outputs + cacheblock on s->fill so the draw pass only
-		// LOADS them and calls the span drawer (no transform, no
-		// D_CalcGradients) — prerequisite for threading the fill. dlit
-		// re-lighting and the allocator thus run once, here, serially.
-		for (s = &surfaces[1] ; s<surface_p ; s++)
-		{
-			if (!s->spans)
-				continue;
-			if (s->flags & (SURF_DRAWSKY | SURF_DRAWBACKGROUND))
-			{
-				s->rcache = NULL;			// sky/background: no fill state
-				continue;
-			}
-			D_SetupSurfaceFill (s);			// solid + turb: full setup, records s->fill
-		}
-		currententity = &cl_entities[0];	// restore for the draw loop
+		// Lazy sky build must happen serially before the fork: R_MakeSky /
+		// r_skymade is a shared one-shot, so a worker race would double-build
+		// (or read a half-built newsky). After this the threaded sky path's
+		// own `if (!r_skymade)` guard never fires. Only relevant when a sky
+		// surface is actually present AND we're not in the r_drawflat==2
+		// flat-sky branch (which doesn't call R_MakeSky); building
+		// unconditionally is harmless (R_MakeSky early-outs when the shift
+		// hasn't changed) but only matters for sky maps.
+		if (!r_skymade)
+			R_MakeSky ();
 
-		for (s = &surfaces[1] ; s<surface_p ; s++)
-		{
-			if (!s->spans)
-				continue;
-
-			r_drawnpolycount++;
-
-			d_zistepu = s->d_zistepu;
-			d_zistepv = s->d_zistepv;
-			d_ziorigin = s->d_ziorigin;
-
-			if (s->flags & SURF_DRAWSKY)
-			{
-				if (r_drawflat.value == 2)
-				{
-					// Flat-shaded sky: one solid colour instead of the
-					// scrolling sky panorama. Reads as "outside / out of
-					// bounds" in nav mode.
-					extern byte r_drawflat_src[][256 * 256];
-					int sky_color = r_drawflat_src[R_FLAT_CAT_SKY][0];
-					D_DrawSolidSurface (s, sky_color);
-					D_DrawZSpans (s->spans);
-				}
-				else
-				{
-					if (!r_skymade)
-					{
-						R_MakeSky ();
-					}
-
-					D_DrawSkyScans8 (s->spans);
-					D_DrawZSpans (s->spans);
-				}
-			}
-			else if (s->flags & SURF_DRAWBACKGROUND)
-			{
-			// set up a gradient for the background surface that places it
-			// effectively at infinity distance from the viewpoint
-				d_zistepu = 0;
-				d_zistepv = 0;
-				d_ziorigin = -0.9;
-
-				D_DrawSolidSurface (s, (int)r_clearcolor.value & 0xFF);
-				D_DrawZSpans (s->spans);
-			}
-			else if (s->flags & SURF_DRAWTURB)
-			{
-				// Phase 2: load the recorded fill state (the resolve pass already
-				// ran the bmodel transform + D_CalcGradients) and draw.
-				cacheblock = (pixel_t *)s->fill.cacheblock;
-				cachewidth = s->fill.cachewidth;
-				miplevel   = s->fill.miplevel;
-				d_sdivzstepu = s->fill.sdivzstepu;  d_tdivzstepu = s->fill.tdivzstepu;
-				d_sdivzstepv = s->fill.sdivzstepv;  d_tdivzstepv = s->fill.tdivzstepv;
-				d_sdivzorigin = s->fill.sdivzorigin; d_tdivzorigin = s->fill.tdivzorigin;
-				sadjust = s->fill.sadjust;  tadjust = s->fill.tadjust;
-				bbextents = s->fill.bbextents;  bbextentt = s->fill.bbextentt;
-				Turbulent8 (s->spans);
-				D_DrawZSpans (s->spans);
-			}
-			else
-			{
-				pface = s->data;
-				// Phase 1 thrash guard: if the recorded cache was evicted, re-run
-				// the full per-surface setup (re-resolves AND re-records s->fill,
-				// incl. the bmodel transform internally). The surface's cachespot
-				// slot lives in the (stable) msurface_t and is NULL'd on eviction,
-				// so it names our cache iff it is still live. Read the SLOT, never
-				// the recorded cache's own fields (those can be recycled into
-				// another cache's texel data). Normal play never re-resolves -> the
-				// draw stays allocator-free (the property Phase 3 threading needs).
-				if (pface->cachespots[s->rmip][s->rbucket] != (surfcache_t *)s->rcache)
-					D_SetupSurfaceFill (s);
-
-				// Phase 2: load the recorded fill state and draw (no transform, no
-				// D_CalcGradients — the resolve pass already produced these).
-				cacheblock = (pixel_t *)s->fill.cacheblock;
-				cachewidth = s->fill.cachewidth;
-				miplevel   = s->fill.miplevel;
-				d_sdivzstepu = s->fill.sdivzstepu;  d_tdivzstepu = s->fill.tdivzstepu;
-				d_sdivzstepv = s->fill.sdivzstepv;  d_tdivzstepv = s->fill.tdivzstepv;
-				d_sdivzorigin = s->fill.sdivzorigin; d_tdivzorigin = s->fill.tdivzorigin;
-				sadjust = s->fill.sadjust;  tadjust = s->fill.tadjust;
-				bbextents = s->fill.bbextents;  bbextentt = s->fill.bbextentt;
-				(*d_drawspans) (s->spans);
-				D_DrawZSpans (s->spans);
-			}
-		}
+		R_ThreadFill_Run (D_DrawSurfaceThreaded, 1, count);
 	}
 }
 

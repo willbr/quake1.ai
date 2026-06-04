@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_caustics.h"
 #include "r_drawflat.h"
 #include "perf.h"
+#include "r_threadfill.h"
 
 //define	PASSAGES
 
@@ -344,6 +345,10 @@ void R_Init (void)
 	R_Fog_Init ();
 	R_Water_Init ();
 	R_Caustics_Init ();
+
+	// Phase 3b: spawn the persistent span-fill worker pool (registers
+	// the r_threads cvar). Idempotent.
+	R_ThreadFill_Init ();
 }
 
 /*
