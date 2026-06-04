@@ -66,12 +66,12 @@ extern qboolean		d_roverwrapped;
 extern surfcache_t	*sc_rover;
 extern surfcache_t	*d_initial_rover;
 
-extern float	d_sdivzstepu, d_tdivzstepu, d_zistepu;
-extern float	d_sdivzstepv, d_tdivzstepv, d_zistepv;
-extern float	d_sdivzorigin, d_tdivzorigin, d_ziorigin;
+extern __thread float	d_sdivzstepu, d_tdivzstepu, d_zistepu;
+extern __thread float	d_sdivzstepv, d_tdivzstepv, d_zistepv;
+extern __thread float	d_sdivzorigin, d_tdivzorigin, d_ziorigin;
 
-fixed16_t	sadjust, tadjust;
-fixed16_t	bbextents, bbextentt;
+extern __thread fixed16_t	sadjust, tadjust;
+extern __thread fixed16_t	bbextents, bbextentt;
 
 
 void D_DrawSpans8 (espan_t *pspans);

@@ -29,16 +29,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_caustics.h"
 #include <math.h>
 
-unsigned char	*r_turb_pbase, *r_turb_pdest;
-fixed16_t		r_turb_s, r_turb_t, r_turb_sstep, r_turb_tstep;
-int				*r_turb_turb;
-int				r_turb_spancount;
+__thread unsigned char	*r_turb_pbase, *r_turb_pdest;
+__thread fixed16_t		r_turb_s, r_turb_t, r_turb_sstep, r_turb_tstep;
+__thread int				*r_turb_turb;
+__thread int				r_turb_spancount;
 
 /* Per-water-span fog dither state, set in Turbulent8 before calling the inner. */
-unsigned char	*r_turb_fog_lo, *r_turb_fog_hi;
-int				r_turb_fog_thresh4;
+__thread unsigned char	*r_turb_fog_lo, *r_turb_fog_hi;
+__thread int				r_turb_fog_thresh4;
 
-int				r_turb_sheen_base, r_turb_sheen_thresh4;	/* sheen base row + Bayer thresh, set in Turbulent8 */
+__thread int				r_turb_sheen_base, r_turb_sheen_thresh4;	/* sheen base row + Bayer thresh, set in Turbulent8 */
 
 void D_DrawTurbulent8Span (void);
 
