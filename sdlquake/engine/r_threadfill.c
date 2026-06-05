@@ -44,6 +44,7 @@ static SDL_Semaphore    *s_done;                  /* signalled once per worker p
 static SDL_AtomicInt     s_quit;                  /* set at shutdown to retire workers */
 
 static cvar_t            r_threads = {"r_threads", "1", true};
+static cvar_t            r_threads_check = {"r_threads_check", "0"};  /* debug: assert disjoint spans */
 
 /*
  * Atomic grab-loop run by both the workers and the calling thread.
@@ -83,6 +84,7 @@ void R_ThreadFill_Init (void)
     s_inited = 1;
 
     Cvar_RegisterVariable (&r_threads);
+    Cvar_RegisterVariable (&r_threads_check);
 
     SDL_SetAtomicInt(&s_quit, 0);
     SDL_SetAtomicInt(&s_next, 0);
@@ -137,6 +139,11 @@ void R_ThreadFill_Init (void)
 int R_ThreadFill_Enabled (void)
 {
     return (s_n_workers > 0 && r_threads.value != 0.0f);
+}
+
+int R_ThreadFill_CheckEnabled (void)
+{
+    return (r_threads_check.value != 0.0f);
 }
 
 void R_ThreadFill_Run (void (*fn)(int idx), int begin, int end)

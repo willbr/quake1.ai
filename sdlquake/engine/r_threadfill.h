@@ -37,6 +37,13 @@ int  R_ThreadFill_Enabled (void);
  * barrier on return. Must be called from the main (render) thread. */
 void R_ThreadFill_Run (void (*fn)(int idx), int begin, int end);
 
+/* Nonzero iff the `r_threads_check` debug cvar is on. When set, D_DrawSurfaces
+ * runs a serial pass that asserts the disjoint-span invariant the threaded
+ * fill relies on (no screen pixel is covered by two surfaces' spans) and warns
+ * once if it is ever violated. Off by default; self-polices future edge-sweep
+ * changes that could silently break thread-safety. */
+int  R_ThreadFill_CheckEnabled (void);
+
 #ifdef __cplusplus
 }
 #endif

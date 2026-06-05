@@ -537,6 +537,57 @@ static void D_DrawSurfaceThreaded (int i)
 
 /*
 ==============
+D_CheckSpansDisjoint
+
+Debug (r_threads_check): the threaded fill's correctness rests on visible spans
+of DIFFERENT surfaces being disjoint in screen space — that is what lets workers
+write the framebuffer + z-buffer with no locks. The edge sweep structurally
+guarantees it (per-scanline active-surface stack + last_u handoff), but nothing
+runtime-enforces it, so a future sweep/transparency change could silently break
+thread-safety. This serial pass marks every span's pixels in a coverage buffer
+and warns once if any pixel is covered twice. Serial (no race on the buffer) and
+independent of whether the fill is actually threaded, so it validates the span
+generation itself. Coverage is a function-static BSS buffer — zero cost (untouched
+zero pages) while the cvar is off.
+==============
+*/
+static void D_CheckSpansDisjoint (void)
+{
+	static byte		cov[MAXWIDTH * MAXHEIGHT];
+	static qboolean	warned;
+	surf_t			*s;
+	espan_t			*span;
+
+	memset (cov, 0, (size_t)screenwidth * vid.height);
+
+	for (s = &surfaces[1] ; s < surface_p ; s++)
+	{
+		for (span = s->spans ; span ; span = span->pnext)
+		{
+			int	base = span->v * screenwidth + span->u;
+			int	u;
+			for (u = 0 ; u < span->count ; u++)
+			{
+				if (cov[base + u])
+				{
+					if (!warned)
+					{
+						Con_Printf ("r_threads_check: span overlap at (%d,%d) -- "
+							"disjoint-span invariant VIOLATED; the threaded fill "
+							"would race here\n", span->u + u, span->v);
+						warned = true;
+					}
+				}
+				else
+					cov[base + u] = 1;
+			}
+		}
+	}
+}
+
+
+/*
+==============
 D_DrawSurfaces
 ==============
 */
@@ -603,6 +654,10 @@ void D_DrawSurfaces (void)
 	// surfaces drawn are indices [1, count); surface_p points one past the
 	// last allocated surface.
 	count = (int)(surface_p - surfaces);
+
+	// Debug: assert the disjoint-span invariant the threaded fill depends on.
+	if (R_ThreadFill_CheckEnabled())
+		D_CheckSpansDisjoint ();
 
 	if (r_cache_thrash || !R_ThreadFill_Enabled())
 	{
