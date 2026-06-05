@@ -127,6 +127,55 @@ ss>1 selects the correct slab of the frozen framebuffer.
 Known migration TODOs: DXIL bytecode would let SDL_GPU pick D3D12 on
 Windows as an alternative to Vulkan; nothing else outstanding.
 
+### Threaded span fill (software rasterizer)
+
+The scene stays **100% software-rendered** (see the `keep-software-renderer-look`
+constraint); rendering perf comes from threading + SIMD the CPU rasterizer, not
+from GPU triangles. The dominant cost is the **span fill** (`D_DrawSurfaces`,
+~92% of `R_ScanEdges`), which is now parallelized across a worker pool.
+Design+results: `docs/superpowers/specs/2026-06-04-renderer-fill-threading-design.md`.
+
+`D_DrawSurfaces` (`d_edge.c`) is split into a serial **resolve** pass and a
+parallel **fill**:
+- **Resolve (serial):** `D_SetupSurfaceFill` runs per-surface setup — mip/dither
+  resolution + `D_CacheSurface` (the only allocator + dlit re-light, so the
+  non-thread-safe surface-cache pool is only ever touched here), the bmodel
+  transform, and `D_CalcGradients` — and **records** the gradient OUTPUTS +
+  cacheblock into `surf_t.fill`/`rcache`/`rmip`/`rbucket`. Recording the *outputs*
+  decouples the draw from the transform, so the fill is uniform for world and
+  bmodel surfaces.
+- **Fill (parallel):** `D_DrawSurfaceBody` just LOADS `s->fill` into the
+  per-surface span-drawer globals and draws — no transform, no `D_CalcGradients`,
+  no allocator. Those globals (`cacheblock`, `d_sdivz*`/`sadjust`/`bbextents`/…,
+  the `r_turb_*` scratch, `miplevel`) are `__thread` (`d_vars.c`/`d_scan.c`/
+  `d_edge.c`), so workers don't collide; the framebuffer/z-buffer base pointers
+  stay shared (read-only base, disjoint writes).
+
+**Correctness foundation:** the edge sweep resolves occlusion BEFORE fill, so
+visible spans of different surfaces are **disjoint** in screen space → workers
+write disjoint framebuffer + z pixels with no locks. Verified byte-identical
+serial-vs-threaded.
+
+`sdlquake/engine/r_threadfill.c` is the pool (pure C / SDL3, like
+`light_bake_thread.c`): persistent `min(cores,16)-1` workers parked on a
+semaphore; `R_ThreadFill_Run(fn, begin, end)` publishes the range, releases
+workers, runs the same atomic work-stealing grab-loop (`SDL_AddAtomicInt`) on
+the caller, then waits one done-signal per worker — the barrier (SDL semaphore
+signal/wait give the release/acquire fences). Dispatched from `D_DrawSurfaces`
+for indices `[1, surface_p-surfaces)`.
+
+Cvars: **`r_threads`** (default 1; **`0` = serial path**, the regression oracle —
+also auto-serial on 1-core hosts and on cache-thrash frames, since the rare
+thrash re-setup calls the allocator). **`r_threads_check`** (default 0, debug):
+runs a serial coverage pass (`D_CheckSpansDisjoint`) that warns once if any pixel
+is covered by two surfaces' spans — self-polices the disjoint-span invariant
+against future sweep/transparency changes. Result on a 10-core Mac (e1m1): fill
+3.14 ms → 0.75 ms (4.2×), `R_ScanEdges` 3.41 → 1.02 ms, frame 5.65 → 3.21 ms.
+Phasing was Phase 0 (single-pass fill) → 1 (cache pre-resolve) → 2 (gradient
+recording) → 3a (`__thread`) → 3b (fork), each bit-identical-verified. Next:
+SIMD the gather-free inner loops (`D_DrawZSpans`, the lightmap×texture combine)
+in 128-bit C intrinsics / simde for both ISAs (Deck x86-64, M4 aarch64).
+
 ### MCP server (Phase 2)
 
 `sdlquake/mcp/mcp_server.c` — JSON-RPC 2.0. A background thread reads requests and pushes to a mutex-protected queue; the main loop calls `MCP_Frame()` each frame to drain and respond, so all game-state access stays on the main thread.
