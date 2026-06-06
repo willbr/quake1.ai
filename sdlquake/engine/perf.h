@@ -72,6 +72,8 @@ const perf_scope_view_t *Perf_LastFrameNode(int i);
 // nonzero if already capturing or n_frames invalid.
 int  Perf_StartCapture(int n_frames);
 int  Perf_StartCaptureSeconds(float seconds);
+// Capture until the current level ends (map change / disconnect / intermission).
+int  Perf_StartCaptureLevel(void);
 // Finalize an in-progress capture early (the Profile panel's Stop button).
 void Perf_StopCapture(void);
 int  Perf_IsCapturing(void);

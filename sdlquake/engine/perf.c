@@ -70,12 +70,17 @@ static int          s_ft_head;          // next slot to write (newest is head-1)
 static int          s_ft_count;
 
 // Capture state. A capture can be bounded by frame count, wall-clock time,
-// or both — `s_capture_target` is the remaining frame budget (0 = no frame
-// cap) and `s_capture_deadline_s` is the absolute end time (0 = no time cap).
+// or run until the end of the current level — `s_capture_target` is the
+// remaining frame budget (0 = no frame cap), `s_capture_deadline_s` is the
+// absolute end time (0 = no time cap), and `s_capture_level_end` marks the
+// "profile level" mode (stops on map change / intermission / disconnect).
 // Whichever fires first wins.
 static int          s_capture_active;
 static int          s_capture_target;
 static double       s_capture_deadline_s;
+static int          s_capture_level_end;        // "profile level": run to level end
+static char         s_capture_level_name[64];   // snapshot of the level at start
+static int          s_capture_level_intermission; // snapshot of cl.intermission
 static int          s_capture_done;
 
 // When set, Perf_BeginFrame is a no-op so the live overlay stays frozen on
@@ -178,6 +183,16 @@ static void capture_reset(void) {
     s_capture_event_count = 0;
     s_capture_frames_seen = 0;
     s_capture_t0 = 0.0;
+}
+
+// Identity of the currently-loaded level, for the "profile level" mode. The
+// BSP name (e.g. "maps/e1m1.bsp") changes on every map load and goes empty on
+// disconnect, so it's a reliable end-of-level edge. Empty when not in a level.
+static void capture_level_name(char *out, size_t cap) {
+    if (cls.state == ca_connected && cl.worldmodel && cl.worldmodel->name[0])
+        snprintf(out, cap, "%s", cl.worldmodel->name);
+    else
+        out[0] = 0;
 }
 
 static void capture_add_frame(const perf_frame_t *f) {
@@ -485,6 +500,7 @@ void Perf_Init(void) {
     s_in_frame       = 0;
     s_capture_active = 0;
     s_capture_target = 0;
+    s_capture_level_end = 0;
     s_capture_done   = 0;
     capture_reset();
 }
@@ -550,6 +566,21 @@ void Perf_EndFrame(void) {
         int stop = 0;
         if (s_capture_target > 0 && --s_capture_target <= 0)  stop = 1;
         if (s_capture_deadline_s > 0 && f->frame_end_s >= s_capture_deadline_s) stop = 1;
+        if (s_capture_level_end) {
+            // Stop at the end of the level: the map changed / we disconnected,
+            // or the player reached intermission (level complete).
+            char now_name[64];
+            capture_level_name(now_name, sizeof(now_name));
+            if (strcmp(now_name, s_capture_level_name) != 0) stop = 1;
+            if (cl.intermission && !s_capture_level_intermission) stop = 1;
+            // Guard against the event buffer silently truncating on a very long
+            // level — flush what we have rather than dropping the tail unseen.
+            if (s_capture_event_count >= PERF_CAPTURE_MAX_EVENTS) {
+                Con_Printf("perf: capture buffer full (%d frames) — stopping early\n",
+                           s_capture_frames_seen);
+                stop = 1;
+            }
+        }
         if (stop) {
             s_capture_active = 0;
             s_capture_done   = 1;
@@ -951,6 +982,7 @@ int Perf_StartCapture(int n_frames) {
     capture_reset();
     s_capture_target     = n_frames;
     s_capture_deadline_s = 0.0;
+    s_capture_level_end  = 0;
     s_capture_active     = 1;
     s_capture_done       = 0;
     s_last_capture_path[0] = 0;
@@ -966,10 +998,34 @@ int Perf_StartCaptureSeconds(float seconds) {
     capture_reset();
     s_capture_target     = 0;   // no frame cap — time-bounded
     s_capture_deadline_s = now_seconds() + seconds;
+    s_capture_level_end  = 0;
     s_capture_active     = 1;
     s_capture_done       = 0;
     s_last_capture_path[0] = 0;
     Con_Printf("perf: capturing for %.1fs...\n", (double)seconds);
+    return 0;
+}
+
+// "profile level": capture from now until the current level ends — i.e. the
+// map changes, the player disconnects, or intermission begins. Unbounded by
+// frames or time (subject only to the event-buffer guard in Perf_EndFrame).
+int Perf_StartCaptureLevel(void) {
+    if (s_capture_active) return 1;
+    capture_alloc();
+    if (!s_capture_events) return 3;
+    capture_reset();
+    s_capture_target     = 0;   // no frame cap
+    s_capture_deadline_s = 0.0; // no time cap
+    s_capture_level_end  = 1;
+    capture_level_name(s_capture_level_name, sizeof(s_capture_level_name));
+    s_capture_level_intermission = cl.intermission;
+    s_capture_active     = 1;
+    s_capture_done       = 0;
+    s_last_capture_path[0] = 0;
+    if (s_capture_level_name[0])
+        Con_Printf("perf: capturing until end of %s...\n", s_capture_level_name);
+    else
+        Con_Printf("perf: capturing until end of level...\n");
     return 0;
 }
 
@@ -988,14 +1044,17 @@ void Perf_StopCapture(void) {
 int  Perf_IsCapturing(void)       { return s_capture_active; }
 const char *Perf_CaptureUnit(void) {
     if (!s_capture_active)        return "";
+    if (s_capture_level_end)      return "level";
     if (s_capture_target > 0)     return "frames";
     return "seconds";
 }
 int  Perf_CaptureRemaining(void)  {
     // For frame-bound captures this is the remaining count; for time-bound
     // it's the integer seconds remaining (rounded up so the UI shows a
-    // meaningful number even in the final second).
+    // meaningful number even in the final second). For the open-ended "level"
+    // mode there's no known end, so report frames captured so far instead.
     if (!s_capture_active) return 0;
+    if (s_capture_level_end) return s_capture_frames_seen;
     if (s_capture_target > 0) return s_capture_target;
     double remaining_s = s_capture_deadline_s - now_seconds();
     if (remaining_s < 0) remaining_s = 0;
@@ -1010,21 +1069,29 @@ const char *Perf_LastCapturePath(void) {
 // ---------------------------------------------------------------------------
 
 static void Perf_Profile_f(void) {
-    // Argument is either a frame count ("profile 120") or a wall-clock
-    // duration with an 's' suffix ("profile 10s" = 10 seconds, "profile
-    // 0.5s" = half a second). Default is 120 frames.
+    // Argument is one of:
+    //   profile           -> 120 frames (default)
+    //   profile 120       -> a frame count
+    //   profile 10s       -> a wall-clock duration ('s' suffix; "0.5s" ok)
+    //   profile level     -> run until the end of the current level
     int   rc;
-    int   is_time = 0;
-    float val     = 120.0f;
+    int   is_time  = 0;
+    int   is_level = 0;
+    float val      = 120.0f;
     if (Cmd_Argc() >= 2) {
         const char *a = Cmd_Argv(1);
         int len = (int)strlen(a);
-        is_time = (len > 0 && (a[len-1] == 's' || a[len-1] == 'S'));
-        val = (float)atof(a);
+        if (!Q_strcasecmp((char *)a, "level")) {
+            is_level = 1;
+        } else {
+            is_time = (len > 0 && (a[len-1] == 's' || a[len-1] == 'S'));
+            val = (float)atof(a);
+        }
     }
 
-    if (is_time) rc = Perf_StartCaptureSeconds(val);
-    else         rc = Perf_StartCapture((int)(val + 0.5f));
+    if      (is_level) rc = Perf_StartCaptureLevel();
+    else if (is_time)  rc = Perf_StartCaptureSeconds(val);
+    else               rc = Perf_StartCapture((int)(val + 0.5f));
 
     if (rc == 1) Con_Printf("perf: already capturing\n");
     else if (rc == 2) Con_Printf("perf: bad duration\n");

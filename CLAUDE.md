@@ -431,7 +431,11 @@ overlay graph and an offline capture format.
   flame graph of the most recent frame (hover for ms / start / depth).
 - Console: `profile <n>` captures `n` frames to `profiles/perf_<ts>.json`
   (Chrome trace, drop into chrome://tracing or speedscope.app) plus
-  `perf_<ts>_summary.json` (per-scope avg/p50/p95/max/calls).
+  `perf_<ts>_summary.json` (per-scope avg/p50/p95/max/calls). The argument
+  also accepts a wall-clock duration (`profile 10s` = 10 seconds) or
+  `profile level` to capture until the current level ends (map change /
+  disconnect / intermission, whichever comes first; auto-stops if the event
+  buffer fills on a very long level).
 - **Record button** (Profile panel): UI twin for `profile <n>` — Record/Stop
   + a frame-count combo. Starting forces the profiler live (`Perf_SetLive(1)`)
   and exits replay first, so it captures even from a paused state (a paused

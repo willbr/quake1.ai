@@ -299,8 +299,12 @@ static void draw_profile(void)
 
     // Capture-in-progress / last-saved status.
     if (Perf_IsCapturing()) {
-        snprintf(buf, sizeof(buf), "capturing... %d %s remaining",
-                 Perf_CaptureRemaining(), Perf_CaptureUnit());
+        if (strcmp(Perf_CaptureUnit(), "level") == 0)
+            snprintf(buf, sizeof(buf), "capturing until level end... (%d frames)",
+                     Perf_CaptureRemaining());
+        else
+            snprintf(buf, sizeof(buf), "capturing... %d %s remaining",
+                     Perf_CaptureRemaining(), Perf_CaptureUnit());
     } else if (Perf_IsReplaying()) {
         int idx = Perf_ReplayFrameIdx();
         int n   = Perf_ReplayFrameCount();
