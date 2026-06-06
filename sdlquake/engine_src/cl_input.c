@@ -165,7 +165,18 @@ void IN_GustUp (void) {KeyUp(&in_gust);}
 void IN_PourOilDown (void) {KeyDown(&in_pouroil);}
 void IN_PourOilUp (void) {KeyUp(&in_pouroil);}
 
-void IN_Impulse (void) {in_impulse=Q_atoi(Cmd_Argv(1));}
+void IN_Impulse (void) {
+	if (cls.state != ca_connected || cls.signon != SIGNONS)
+	{
+		// Not fully spawned yet (command line / startup config): in_impulse
+		// set now would be discarded with the leading move messages. Defer
+		// and replay "impulse N" once the player is in the level.
+		extern void Host_QueueForwardedCmd (void);
+		Host_QueueForwardedCmd ();
+		return;
+	}
+	in_impulse=Q_atoi(Cmd_Argv(1));
+}
 
 /*
 ===============

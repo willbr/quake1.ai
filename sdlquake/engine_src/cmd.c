@@ -758,12 +758,23 @@ Sends the entire command line over to the server
 */
 void Cmd_ForwardToServer (void)
 {
-	if (cls.state != ca_connected)
+	if (cls.state == ca_dedicated)
 	{
 		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv(0));
 		return;
 	}
-	
+
+	if (cls.state != ca_connected || cls.signon != SIGNONS)
+	{
+		// Client isn't fully spawned yet (command line / startup config
+		// racing the loopback signon, or issued at the menu). Defer the
+		// command and replay it once the player is in the level, rather than
+		// dropping it (the forward channel isn't ready before signon).
+		extern void Host_QueueForwardedCmd (void);
+		Host_QueueForwardedCmd ();
+		return;
+	}
+
 	if (cls.demoplayback)
 		return;		// not really connected
 

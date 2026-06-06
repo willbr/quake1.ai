@@ -17,6 +17,19 @@ On macOS, `build.zig` runs `install_name_tool` on the executable after install t
 
 No test suite exists yet. Build success and visual/audio correctness in-game are the verification methods.
 
+### Deferred command-line commands
+
+Server-forwarded client commands (`god`, `notarget`, `noclip`, `fly`, `give`,
+`kill`, `impulse`, …) and `profile level` issued from the command line or a
+startup config run before the loopback signon finishes, so they'd normally be
+dropped ("not connected", or — for `impulse` — eaten by a discarded move
+message). They now **defer**: a small queue in `host_cmd.c`
+(`Host_QueueForwardedCmd` / `Host_ApplyPendingClientCmds`, drained once
+`cls.signon == SIGNONS && cl.movemessages > 2`) replays them once the player is
+in the level. So `quake +map e1m1 +god +impulse 9` works. Hooked from
+`Cmd_ForwardToServer` (cmd.c, covers all forwarded cheats) and `IN_Impulse`
+(cl_input.c); `profile level` self-defers via its own latch in `perf.c`.
+
 ## Architecture
 
 This project is a port of the original WinQuake (1996 software renderer) from Win32/DirectX to SDL3, using Zig as the build system. The engine source has been forked into `sdlquake/engine_src/` so we can patch it as needed; the platform layer is fully replaced.

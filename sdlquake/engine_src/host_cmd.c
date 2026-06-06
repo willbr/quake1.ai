@@ -156,32 +156,57 @@ void Host_InfiniteAmmo_f (void)
 		SV_ClientPrintf ("infinite ammo ON\n");
 }
 
-// Set when +notarget is invoked from the command line before the local
-// client has connected. Host_ApplyPendingClientCmds (called once per
-// frame from _Host_Frame) flushes this once cls.state hits ca_active.
-static int s_pending_notarget;
+// --------------------------------------------------------------------------
+// Deferred client commands
+//
+// Server-forwarded client commands (god / give / kill / noclip / fly /
+// notarget / impulse / ...) issued before the local client has spawned —
+// typically from the command line or a startup config racing the loopback
+// signon — would otherwise hit Cmd_ForwardToServer's "not connected" path (or,
+// for impulse, be eaten by a discarded move message) and be dropped. Instead
+// we queue them here and replay them through Cbuf once the client is fully
+// active. Generalizes the original notarget-only deferral.
+// --------------------------------------------------------------------------
+#define MAX_PENDING_CLIENT_CMDS 32
+static char s_pending_cmds[MAX_PENDING_CLIENT_CMDS][128];
+static int  s_pending_count;
+
+// Queue the command currently being dispatched (reconstructed from the cmd
+// tokenizer) for replay once the client spawns. Called from
+// Cmd_ForwardToServer and IN_Impulse when the client isn't connected yet.
+void Host_QueueForwardedCmd (void)
+{
+	char *line;
+	if (s_pending_count >= MAX_PENDING_CLIENT_CMDS)
+		return;		// queue full — drop rather than overflow
+	line = s_pending_cmds[s_pending_count];
+	if (Cmd_Argc() > 1)
+		snprintf (line, 128, "%s %s\n", Cmd_Argv(0), Cmd_Args());
+	else
+		snprintf (line, 128, "%s\n", Cmd_Argv(0));
+	s_pending_count++;
+	Con_Printf ("deferred \"%s\" until level start\n", Cmd_Argv(0));
+}
 
 void Host_ApplyPendingClientCmds (void)
 {
-	if (s_pending_notarget && (cls.state == ca_connected && cls.signon == SIGNONS))
-	{
-		s_pending_notarget = 0;
-		Cbuf_AddText ("notarget\n");
-	}
+	int i;
+	if (!s_pending_count)
+		return;
+	// Wait until the player is fully spawned AND past the two leading move
+	// messages the client always discards (cl_input.c), so a deferred
+	// `impulse` isn't consumed by a dumped move before it can reach the server.
+	if (cls.state != ca_connected || cls.signon != SIGNONS || cl.movemessages <= 2)
+		return;
+	for (i = 0; i < s_pending_count; i++)
+		Cbuf_AddText (s_pending_cmds[i]);
+	s_pending_count = 0;
 }
 
 void Host_Notarget_f (void)
 {
 	if (cmd_source == src_command)
 	{
-		if (cls.state != ca_connected || cls.signon != SIGNONS)
-		{
-			// CLI / stuffcmds path: client isn't connected yet, so
-			// Cmd_ForwardToServer would print "not connected" and drop
-			// the command. Defer until the player has spawned.
-			s_pending_notarget = 1;
-			return;
-		}
 		Cmd_ForwardToServer ();
 		return;
 	}
