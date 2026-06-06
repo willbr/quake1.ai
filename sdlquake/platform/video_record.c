@@ -86,6 +86,13 @@ static size_t         s_rgbx_cap;
 static int            s_frames;        // frames written this session
 static char           s_path[256];
 
+// Auto-stop conditions (mirrors perf.c's `profile <n>` / `profile level`):
+static double         s_deadline;          // Sys_FloatTime() absolute stop time, 0 = none
+static int            s_until_level;       // "recordvideo level": stop when the level ends
+static int            s_level_pending;     // started before a level loaded; latch on load
+static char           s_level_name[64];    // BSP name snapshot — the end-of-level edge
+static int            s_level_intermission;
+
 static cvar_t record_fps = {"record_fps", "30"};
 
 // Palette-expand the current framebuffer into s_rgbx (RGBX). Returns 0 if the
@@ -118,6 +125,39 @@ static void vr_close(void)
     s_recording = 0;
 }
 
+static void vr_autostop(void)
+{
+    vr_close();
+    Con_Printf("recordvideo: finished, wrote %s (%d frames @ %d fps)\n",
+               s_path, s_frames, s_fps);
+}
+
+// Current level's BSP name — changes on map load, empty at menu/disconnect; a
+// reliable end-of-level edge (mirrors perf.c's capture_level_name).
+static void vr_level_name(char *out, size_t cap)
+{
+    if (cls.state == ca_connected && cl.worldmodel && cl.worldmodel->name[0])
+        snprintf(out, cap, "%s", cl.worldmodel->name);
+    else
+        out[0] = 0;
+}
+
+// Classify a `recordvideo` argument: 0 = filename, 1 = duration (seconds into
+// *out_secs), 2 = "level". A duration is `level`, or a number with an 's'
+// (seconds) / 'm' (minutes) suffix — the leading-digit requirement keeps
+// filenames like "boom" from reading as minutes.
+static int vr_parse_duration(const char *a, double *out_secs)
+{
+    int len = (int)strlen(a);
+    if (!Q_strcasecmp((char *)a, "level")) return 2;
+    if (len >= 2 && a[0] >= '0' && a[0] <= '9') {
+        char last = a[len-1];
+        if (last == 's' || last == 'S') { *out_secs = atof(a);        return 1; }
+        if (last == 'm' || last == 'M') { *out_secs = atof(a) * 60.0; return 1; }
+    }
+    return 0;
+}
+
 // videos/clip_NNNN.mpg, first free slot. Returns 0 if the dir is full.
 static int vr_auto_path(char *out, size_t outsz, const char *ext)
 {
@@ -140,6 +180,29 @@ void Video_Record_CaptureFrame(void)
     int    guard;
 
     if (!s_recording) return;
+
+    // "recordvideo level" issued before a level loaded — wait for one, latch
+    // onto it, then start the capture clock fresh so the deferral doesn't
+    // count as elapsed time.
+    if (s_until_level && s_level_pending) {
+        char now_name[64];
+        vr_level_name(now_name, sizeof(now_name));
+        if (!now_name[0]) return;   // no level yet; nothing to capture
+        snprintf(s_level_name, sizeof(s_level_name), "%s", now_name);
+        s_level_intermission = cl.intermission;
+        s_level_pending = 0;
+        s_next_capture = Sys_FloatTime();
+        Con_Printf("recordvideo: recording until %s ends\n", s_level_name);
+    }
+
+    // Auto-stop conditions.
+    if (s_deadline > 0.0 && Sys_FloatTime() >= s_deadline) { vr_autostop(); return; }
+    if (s_until_level && !s_level_pending) {
+        char now_name[64];
+        vr_level_name(now_name, sizeof(now_name));
+        if (strcmp(now_name, s_level_name) != 0)          { vr_autostop(); return; }
+        if (cl.intermission && !s_level_intermission)     { vr_autostop(); return; }
+    }
 
     now = Sys_FloatTime();
     dt  = 1.0 / (double)s_fps;
@@ -174,6 +237,8 @@ static void Video_Record_f(void)
 {
     int    w, h, fps;
     size_t need;
+    int    mode_time = 0, mode_level = 0;
+    double dur_secs = 0.0;
 
     if (s_recording) {
         Con_Printf("recordvideo: already recording %s (use stopvideo)\n", s_path);
@@ -190,17 +255,36 @@ static void Video_Record_f(void)
     fps = (int)record_fps.value;
     if (fps <= 0) fps = 30;
 
-    // Resolve output path.
-    if (Cmd_Argc() > 1) {
-        const char *name = Cmd_Argv(1);
-        (void)vr_mkdir("videos");
-        if (strchr(name, '.'))
-            snprintf(s_path, sizeof(s_path), "videos/%s", name);
-        else
-            snprintf(s_path, sizeof(s_path), "videos/%s.%s", name, s_enc->ext);
-    } else if (!vr_auto_path(s_path, sizeof(s_path), s_enc->ext)) {
-        Con_Printf("recordvideo: videos/ is full (10000 slots)\n");
-        return;
+    // Parse args: an optional name and an optional duration token (`30s`,
+    // `2m`, or `level`). e.g. `recordvideo`, `recordvideo myclip`,
+    // `recordvideo 30s`, `recordvideo myclip 2m`, `recordvideo level`.
+    {
+        int         i;
+        const char *name = NULL;
+        for (i = 1; i < Cmd_Argc(); i++) {
+            const char *a = Cmd_Argv(i);
+            double      secs = 0.0;
+            int         k = vr_parse_duration(a, &secs);
+            if      (k == 2) mode_level = 1;
+            else if (k == 1) { mode_time = 1; dur_secs = secs; }
+            else             name = a;
+        }
+        if (mode_time && dur_secs <= 0.0) {
+            Con_Printf("recordvideo: bad duration\n");
+            return;
+        }
+
+        // Resolve output path.
+        if (name) {
+            (void)vr_mkdir("videos");
+            if (strchr(name, '.'))
+                snprintf(s_path, sizeof(s_path), "videos/%s", name);
+            else
+                snprintf(s_path, sizeof(s_path), "videos/%s.%s", name, s_enc->ext);
+        } else if (!vr_auto_path(s_path, sizeof(s_path), s_enc->ext)) {
+            Con_Printf("recordvideo: videos/ is full (10000 slots)\n");
+            return;
+        }
     }
 
     // (Re)size the expand scratch to the locked dimensions.
@@ -223,11 +307,31 @@ static void Video_Record_f(void)
     s_next_capture = Sys_FloatTime();
     s_recording = 1;
 
+    // Stop-condition setup.
+    s_deadline = 0.0;
+    s_until_level = 0;
+    s_level_pending = 0;
+    if (mode_level) {
+        s_until_level = 1;
+        vr_level_name(s_level_name, sizeof(s_level_name));
+        s_level_intermission = cl.intermission;
+        s_level_pending = (s_level_name[0] == 0);   // defer until a level loads
+    } else if (mode_time) {
+        s_deadline = Sys_FloatTime() + dur_secs;
+    }
+
     if (s_fps != fps)
         Con_Printf("recordvideo: %dx%d @ %d fps (snapped from %d) -> %s\n", w, h, s_fps, fps, s_path);
     else
         Con_Printf("recordvideo: %dx%d @ %d fps -> %s\n", w, h, s_fps, s_path);
-    Con_Printf("  (stopvideo to finish)\n");
+    if (mode_level && s_level_pending)
+        Con_Printf("  (will record the next level until it ends; stopvideo to cancel)\n");
+    else if (mode_level)
+        Con_Printf("  (recording until %s ends; stopvideo to finish early)\n", s_level_name);
+    else if (mode_time)
+        Con_Printf("  (recording for %g s; stopvideo to finish early)\n", dur_secs);
+    else
+        Con_Printf("  (stopvideo to finish)\n");
 }
 
 static void Video_Stop_f(void)
