@@ -234,9 +234,11 @@ static void draw_profile(void)
     // completion the new trace auto-loads into replay below for immediate
     // inspection. Stop ends a capture early.
     {
-        static const char *rec_labels[] = { "60", "120", "240", "480", "600" };
-        static const int   rec_frames [] = {  60,  120,  240,  480,  600  };
-        static int rec_idx = 1;   // default 120 frames
+        // Duration choices: wall-clock seconds, or "level" (until the current
+        // level ends). A -1 sentinel marks the level entry.
+        static const char  *rec_labels [] = { "1s", "10s", "30s", "60s", "120s", "level" };
+        static const float  rec_seconds[] = { 1.f,  10.f,  30.f,  60.f,  120.f,  -1.f    };
+        static int rec_idx = 1;   // default 10s
 
         if (Perf_IsCapturing()) {
             if (IG_Button("Stop")) Perf_StopCapture();
@@ -244,11 +246,12 @@ static void draw_profile(void)
             if (IG_Button("Record")) {
                 if (Perf_IsReplaying()) Perf_UnloadCapture();
                 Perf_SetLive(1);                 // profiler ticks + sim runs
-                Perf_StartCapture(rec_frames[rec_idx]);
+                if (rec_seconds[rec_idx] < 0.f) Perf_StartCaptureLevel();
+                else                            Perf_StartCaptureSeconds(rec_seconds[rec_idx]);
             }
             IG_SameLine(0, -1);
             IG_SetNextItemWidth(80);
-            IG_Combo("frames", &rec_idx, rec_labels,
+            IG_Combo("duration", &rec_idx, rec_labels,
                      (int)(sizeof(rec_labels)/sizeof(rec_labels[0])));
         }
         IG_Spacing();

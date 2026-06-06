@@ -435,9 +435,11 @@ overlay graph and an offline capture format.
   also accepts a wall-clock duration (`profile 10s` = 10 seconds) or
   `profile level` to capture until the current level ends (map change /
   disconnect / intermission, whichever comes first; auto-stops if the event
-  buffer fills on a very long level).
-- **Record button** (Profile panel): UI twin for `profile <n>` — Record/Stop
-  + a frame-count combo. Starting forces the profiler live (`Perf_SetLive(1)`)
+  buffer fills on a very long level). `profile level` works from the command
+  line — `quake +map e1m1 +profile level` defers until the map finishes
+  loading, then captures a clean per-level trace.
+- **Record button** (Profile panel): UI twin for `profile` — Record/Stop
+  + a duration combo (`1s/10s/30s/60s/120s/level`). Starting forces the profiler live (`Perf_SetLive(1)`)
   and exits replay first, so it captures even from a paused state (a paused
   profiler records nothing — the bare console command stalls there). On
   completion the trace auto-loads into replay for immediate inspection.

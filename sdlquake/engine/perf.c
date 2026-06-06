@@ -79,6 +79,7 @@ static int          s_capture_active;
 static int          s_capture_target;
 static double       s_capture_deadline_s;
 static int          s_capture_level_end;        // "profile level": run to level end
+static int          s_capture_level_pending;    // started before a level loaded; latch on load
 static char         s_capture_level_name[64];   // snapshot of the level at start
 static int          s_capture_level_intermission; // snapshot of cl.intermission
 static int          s_capture_done;
@@ -501,6 +502,7 @@ void Perf_Init(void) {
     s_capture_active = 0;
     s_capture_target = 0;
     s_capture_level_end = 0;
+    s_capture_level_pending = 0;
     s_capture_done   = 0;
     capture_reset();
 }
@@ -561,7 +563,19 @@ void Perf_EndFrame(void) {
     s_ft_head = (s_ft_head + 1) % PERF_FRAME_HISTORY;
     if (s_ft_count < PERF_FRAME_HISTORY) s_ft_count++;
 
-    if (s_capture_active && f->valid) {
+    if (s_capture_active && s_capture_level_pending) {
+        // Deferred "profile level": don't record anything until a level loads.
+        // Once one does, latch it and begin a clean capture from this frame.
+        char now_name[64];
+        capture_level_name(now_name, sizeof(now_name));
+        if (now_name[0]) {
+            snprintf(s_capture_level_name, sizeof(s_capture_level_name), "%s", now_name);
+            s_capture_level_intermission = cl.intermission;
+            s_capture_level_pending = 0;
+            capture_reset();
+            Con_Printf("perf: capturing until end of %s...\n", s_capture_level_name);
+        }
+    } else if (s_capture_active && f->valid) {
         capture_add_frame(f);
         int stop = 0;
         if (s_capture_target > 0 && --s_capture_target <= 0)  stop = 1;
@@ -983,6 +997,7 @@ int Perf_StartCapture(int n_frames) {
     s_capture_target     = n_frames;
     s_capture_deadline_s = 0.0;
     s_capture_level_end  = 0;
+    s_capture_level_pending = 0;
     s_capture_active     = 1;
     s_capture_done       = 0;
     s_last_capture_path[0] = 0;
@@ -999,6 +1014,7 @@ int Perf_StartCaptureSeconds(float seconds) {
     s_capture_target     = 0;   // no frame cap — time-bounded
     s_capture_deadline_s = now_seconds() + seconds;
     s_capture_level_end  = 0;
+    s_capture_level_pending = 0;
     s_capture_active     = 1;
     s_capture_done       = 0;
     s_last_capture_path[0] = 0;
@@ -1019,13 +1035,17 @@ int Perf_StartCaptureLevel(void) {
     s_capture_level_end  = 1;
     capture_level_name(s_capture_level_name, sizeof(s_capture_level_name));
     s_capture_level_intermission = cl.intermission;
+    // If no level is loaded yet (e.g. started from the command line as
+    // `+profile level` before the map finishes loading), defer: wait for a
+    // level to load, latch it, and start a clean capture from there.
+    s_capture_level_pending = (s_capture_level_name[0] == 0);
     s_capture_active     = 1;
     s_capture_done       = 0;
     s_last_capture_path[0] = 0;
-    if (s_capture_level_name[0])
-        Con_Printf("perf: capturing until end of %s...\n", s_capture_level_name);
+    if (s_capture_level_pending)
+        Con_Printf("perf: will capture once a level loads...\n");
     else
-        Con_Printf("perf: capturing until end of level...\n");
+        Con_Printf("perf: capturing until end of %s...\n", s_capture_level_name);
     return 0;
 }
 
