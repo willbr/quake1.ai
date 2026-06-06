@@ -42,6 +42,7 @@ extern game_globals_t *g;
 #define RETROFIT_BFS_HOPS    14      // max graph hops from anchor when seeding candidates
 #define RETROFIT_MAX_NODES   8192    // matches sim_nav.c's MAX_NODES; scratch-buffer cap
 #define RETROFIT_CHAIN_MAX   32      // cap on path_corner chain length we'll follow
+#define RETROFIT_GAVE_UP     (-2)    // sentinel: tried, no navmesh nodes nearby — don't retry
 
 typedef struct sim_navmesh_s sim_navmesh_t;
 typedef struct { float pos[3]; int kind; } sim_nav_point_t;
@@ -207,9 +208,14 @@ static edict_t *spawn_synthetic_node(const float pos[3]) {
 void Sim_Retrofit_Frame(void) {
     // Run every frame: monsters call Sim_AI_RegisterMonster from their
     // deferred *_start_go thinks (fired 0–0.5 s after spawn), so a single
-    // pass at level-load would always see an empty brain table. Walking
-    // every frame is cheap because brains with patrol_route_id >= 0 short
-    // out before the inner edict walk.
+    // pass at level-load would always see an empty brain table. We only do
+    // real work for brains still at the fresh -1 state: a success sets
+    // patrol_route_id >= 0, and an unrecoverable failure (no nearby navmesh
+    // points) stamps RETROFIT_GAVE_UP so it isn't retried. Both short out at
+    // the != -1 test before the O(edicts) edict walk + navmesh BFS below.
+    // Without the gave-up stamp, an unassignable monster (spawned away from
+    // the navmesh) re-ran that full scan every frame forever — a flat
+    // ~0.23 ms/frame tax that never settled (measured in profiles/).
     if (!Sim_Nav_IsReady()) return;
     sim_navmesh_t *mesh = Sim_Nav_Get();
     if (!mesh || mesh->point_count < RETROFIT_NODES_MIN) return;
@@ -217,7 +223,7 @@ void Sim_Retrofit_Frame(void) {
     int assigned = 0;
     int from_bsp = 0;
     for (ai_brain_t *b = Sim_AI_IterFirst(); b; b = Sim_AI_IterNext(b)) {
-        if (b->patrol_route_id >= 0) continue;   // already has a route
+        if (b->patrol_route_id != -1) continue;  // assigned (>=0) or gave up (-2)
 
         // Walk the live edict list for this brain's edict_num.
         edict_t *me = 0;
@@ -264,7 +270,16 @@ void Sim_Retrofit_Frame(void) {
         // Fallback: synthesise a patrol from the navmesh.
         int chosen[RETROFIT_NODES_MAX];
         int n = score_spread_bfs(me->v.origin, mesh, chosen);
-        if (n < RETROFIT_NODES_MIN) continue;
+        if (n < RETROFIT_NODES_MIN) {
+            // No usable navmesh points near this monster's spawn. The result
+            // is position-deterministic for a stationary IDLE monster on a
+            // static mesh, so it'll fail identically every frame — stamp the
+            // gave-up sentinel so we stop re-scanning. (me-not-found above is
+            // left to retry: that edict is expected to appear once the
+            // monster finishes spawning.)
+            b->patrol_route_id = RETROFIT_GAVE_UP;
+            continue;
+        }
         order_cycle(mesh->points, chosen, n);
 
         for (int i = 0; i < n; i++) {
