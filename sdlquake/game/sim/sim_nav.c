@@ -175,6 +175,17 @@ struct sim_navmesh_s {
 static sim_navmesh_t *s_mesh;
 static int            s_ready;
 
+// A* connected-component labels (one per node), rebuilt by build_adjacency via
+// undirected union-find over ALL edges (item gates ignored — an optimistic
+// over-approximation of reachability). Two nodes in different components share
+// no edge path at all, gated or not, so Sim_Nav_PathTo rejects such goals in
+// O(1) instead of draining the whole reachable component before failing — the
+// dominant AI-tick spike in profiles/ (an orphan/unreachable goal cost ~14 ms).
+// Same-component goals still run the full A* (a purely gated-off goal is rarer
+// and falls through). NULL until the first mesh is ready.
+static int *s_component;
+static int  s_component_n;
+
 // ---------------------------------------------------------------------------
 // Spatial dedupe grid (xy hash; z checked per-candidate).
 //
@@ -303,6 +314,39 @@ static int add_edge(sim_navmesh_t *m, int *cap, int from, int to,
     return 1;
 }
 
+static int uf_find(int *parent, int x) {
+    while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+}
+
+// Label every node with the id of its undirected connected component (the
+// canonical root). Edges are unioned regardless of direction or item gates, so
+// the labeling over-approximates reachability: different labels ⇒ provably no
+// path; same label ⇒ maybe (A* decides). Rebuilt from scratch on each mesh
+// build; on any failure s_component is left NULL so Sim_Nav_PathTo skips the
+// fast-reject and just runs A* as before.
+static void build_components(sim_navmesh_t *m) {
+    free(s_component);
+    s_component   = NULL;
+    s_component_n = 0;
+    int N = m->point_count;
+    if (N <= 0) return;
+    int *parent = malloc(sizeof(int) * N);
+    if (!parent) return;
+    for (int i = 0; i < N; i++) parent[i] = i;
+    for (int i = 0; i < m->edge_count; i++) {
+        int a = m->edges[i].from, b = m->edges[i].to;
+        if (a < 0 || a >= N || b < 0 || b >= N) continue;
+        int ra = uf_find(parent, a), rb = uf_find(parent, b);
+        if (ra != rb) parent[ra] = rb;
+    }
+    s_component = malloc(sizeof(int) * N);
+    if (!s_component) { free(parent); return; }
+    for (int i = 0; i < N; i++) s_component[i] = uf_find(parent, i);
+    s_component_n = N;
+    free(parent);
+}
+
 static void build_adjacency(sim_navmesh_t *m) {
     m->adj_offsets = calloc(m->point_count + 1, sizeof(int));
     if (!m->adj_offsets) return;
@@ -320,6 +364,8 @@ static void build_adjacency(sim_navmesh_t *m) {
         m->adj[m->adj_offsets[from] + cursor[from]++] = i;
     }
     free(cursor);
+
+    build_components(m);
 }
 
 // ---------------------------------------------------------------------------
@@ -2409,6 +2455,7 @@ void Sim_Nav_Frame(void) {
 
 void Sim_Nav_LevelInit(const char *mapname) {
     if (s_mesh) { free_mesh(s_mesh); s_mesh = 0; }
+    free(s_component); s_component = NULL; s_component_n = 0;
     s_ready = 0;
     if (!mapname || !*mapname) return;
 
@@ -2542,6 +2589,49 @@ static pq_entry_t pq_pop(pq_entry_t *h, int *n) {
     return r;
 }
 
+// Persistent A* scratch, reused across calls so each Sim_Nav_PathTo no longer
+// mallocs + O(N)-initializes six arrays (a steady per-call tax that stacked
+// when several brains replanned on the same AI tick). Capacity grows on demand
+// (meshes are static per level, so this allocates once). "Visited this call" is
+// tracked by epoch stamps instead of clearing the arrays: a node is discovered
+// iff s_pf_disc[i] == epoch and closed iff s_pf_closed[i] == epoch, so the
+// "clear" is a single epoch bump. This is semantically identical to the old
+// fresh-zeroed arrays — reachable goals yield byte-identical paths.
+static float        *s_pf_g;       // gscore per node
+static int          *s_pf_came;    // predecessor per node
+static unsigned char *s_pf_kind;   // came-edge kind per node
+static unsigned int *s_pf_disc;    // discovered-epoch stamp
+static unsigned int *s_pf_closed;  // closed-epoch stamp
+static pq_entry_t   *s_pf_heap;
+static int           s_pf_cap_n;
+static int           s_pf_cap_heap;
+static unsigned int  s_pf_epoch;
+
+static int ensure_pf_scratch(int N, int heap_cap) {
+    if (N > s_pf_cap_n) {
+        free(s_pf_g); free(s_pf_came); free(s_pf_kind);
+        free(s_pf_disc); free(s_pf_closed);
+        s_pf_g      = malloc(sizeof(float)         * N);
+        s_pf_came   = malloc(sizeof(int)           * N);
+        s_pf_kind   = malloc(sizeof(unsigned char) * N);
+        s_pf_disc   = calloc(N, sizeof(unsigned int));
+        s_pf_closed = calloc(N, sizeof(unsigned int));
+        if (!s_pf_g || !s_pf_came || !s_pf_kind || !s_pf_disc || !s_pf_closed) {
+            s_pf_cap_n = 0;
+            return 0;
+        }
+        s_pf_cap_n = N;
+        s_pf_epoch = 0;   // disc/closed freshly zeroed; first call bumps to 1
+    }
+    if (heap_cap > s_pf_cap_heap) {
+        free(s_pf_heap);
+        s_pf_heap = malloc(sizeof(pq_entry_t) * heap_cap);
+        if (!s_pf_heap) { s_pf_cap_heap = 0; return 0; }
+        s_pf_cap_heap = heap_cap;
+    }
+    return 1;
+}
+
 int Sim_Nav_PathTo(const vec3_t from, const vec3_t to,
                    vec3_t *out, unsigned char *out_kinds,
                    unsigned int player_items, int max_out)
@@ -2563,32 +2653,42 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to,
     int    N      = s_mesh->point_count;
     int    E      = s_mesh->edge_count;
     int    heap_cap = E + 4;   // +slack so the initial seed always fits
-    float *gscore = malloc(sizeof(float) * N);
-    float *fscore = malloc(sizeof(float) * N);
-    int   *came   = malloc(sizeof(int)   * N);
-    unsigned char *came_kind = malloc(N);
-    char  *closed = calloc(N, 1);
-    pq_entry_t *heap = malloc(sizeof(pq_entry_t) * heap_cap);
-    int    heap_n = 0;
-    if (!gscore || !fscore || !came || !came_kind || !closed || !heap) {
-        free(gscore); free(fscore); free(came); free(came_kind); free(closed); free(heap);
+
+    // Fast-reject: if start and goal sit in different connected components,
+    // there is no edge path between them (gated or not), so A* would only
+    // drain the whole start component before failing. Skip the search.
+    if (s_component && s_component_n == N &&
+        start < N && goal < N &&
+        s_component[start] != s_component[goal])
         return 0;
-    }
-    for (int i = 0; i < N; i++) {
-        gscore[i] = 1e18f; fscore[i] = 1e18f; came[i] = -1; came_kind[i] = NAV_EDGE_WALK;
+
+    if (!ensure_pf_scratch(N, heap_cap)) return 0;
+
+    // Bump the epoch instead of clearing the arrays. A node counts as
+    // discovered/closed only when its stamp equals the current epoch.
+    unsigned int epoch = ++s_pf_epoch;
+    if (epoch == 0) {   // 32-bit wrap (after ~4e9 calls): one-time real clear
+        memset(s_pf_disc,   0, sizeof(unsigned int) * s_pf_cap_n);
+        memset(s_pf_closed, 0, sizeof(unsigned int) * s_pf_cap_n);
+        epoch = s_pf_epoch = 1;
     }
 
-    gscore[start] = 0;
-    fscore[start] = dist3(s_mesh->points[start].pos, s_mesh->points[goal].pos);
-    pq_push(heap, &heap_n, fscore[start], start);
+    int heap_n = 0;
+    s_pf_disc[start] = epoch;
+    s_pf_g[start]    = 0.0f;
+    s_pf_came[start] = -1;
+    s_pf_kind[start] = NAV_EDGE_WALK;
+    pq_push(s_pf_heap, &heap_n,
+            dist3(s_mesh->points[start].pos, s_mesh->points[goal].pos), start);
 
     int found = 0;
     while (heap_n > 0) {
-        pq_entry_t top = pq_pop(heap, &heap_n);
+        pq_entry_t top = pq_pop(s_pf_heap, &heap_n);
         int cur = top.i;
-        if (closed[cur]) continue;      // stale entry — better one was popped first
+        if (s_pf_closed[cur] == epoch) continue;  // stale entry — better one popped first
         if (cur == goal) { found = 1; break; }
-        closed[cur] = 1;
+        s_pf_closed[cur] = epoch;
+        float gcur = s_pf_g[cur];   // cur was discovered when pushed → valid
 
         int o0 = s_mesh->adj_offsets[cur];
         int o1 = s_mesh->adj_offsets[cur + 1];
@@ -2603,14 +2703,16 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to,
             if (e->forbids_items &&
                 (player_items & e->forbids_items) == e->forbids_items) continue;
             int nb = e->to;
-            if (closed[nb]) continue;
-            float tentative = gscore[cur] + e->weight;
-            if (tentative < gscore[nb]) {
-                came[nb]      = cur;
-                came_kind[nb] = e->kind;
-                gscore[nb] = tentative;
-                fscore[nb] = tentative + dist3(s_mesh->points[nb].pos, s_mesh->points[goal].pos);
-                pq_push(heap, &heap_n, fscore[nb], nb);
+            if (s_pf_closed[nb] == epoch) continue;
+            float tentative = gcur + e->weight;
+            float gnb = (s_pf_disc[nb] == epoch) ? s_pf_g[nb] : 1e18f;
+            if (tentative < gnb) {
+                s_pf_disc[nb] = epoch;
+                s_pf_came[nb] = cur;
+                s_pf_kind[nb] = e->kind;
+                s_pf_g[nb]    = tentative;
+                pq_push(s_pf_heap, &heap_n,
+                        tentative + dist3(s_mesh->points[nb].pos, s_mesh->points[goal].pos), nb);
             }
         }
     }
@@ -2620,22 +2722,21 @@ int Sim_Nav_PathTo(const vec3_t from, const vec3_t to,
         int tmp[1024];
         int tn = 0;
         int c  = goal;
-        while (c != -1 && tn < 1024) { tmp[tn++] = c; c = came[c]; }
+        while (c != -1 && tn < 1024) { tmp[tn++] = c; c = s_pf_came[c]; }
         for (int i = tn - 1; i >= 0 && written < max_out; i--) {
             out[written][0] = s_mesh->points[tmp[i]].pos[0];
             out[written][1] = s_mesh->points[tmp[i]].pos[1];
             out[written][2] = s_mesh->points[tmp[i]].pos[2];
-            // came_kind[node] is the kind of the edge that LED to that
+            // s_pf_kind[node] is the kind of the edge that LED to that
             // node. The first emitted waypoint (start) has no incoming
             // edge, so report WALK there.
             if (out_kinds) {
-                out_kinds[written] = (i == tn - 1) ? NAV_EDGE_WALK : came_kind[tmp[i]];
+                out_kinds[written] = (i == tn - 1) ? NAV_EDGE_WALK : s_pf_kind[tmp[i]];
             }
             written++;
         }
     }
 
-    free(gscore); free(fscore); free(came); free(came_kind); free(closed); free(heap);
     return written;
 }
 
