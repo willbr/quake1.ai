@@ -1,25 +1,26 @@
 // video_record.c -- MPEG-1 video capture of the software framebuffer.
 //
 // A development-only screen recorder (Mac / Windows desktop). Every rendered
-// frame's 8-bit framebuffer (vid.buffer) is palette-expanded to RGBX and fed
-// to a pluggable video_encoder_t; the shipped encoder wraps the vendored
-// single-file jo_mpeg MPEG-1 writer (each frame is an independent intra-coded
-// sequence — large files, but trivially seekable and zero-dependency).
+// frame's 8-bit framebuffer (vid.buffer) is palette-expanded to RGBX and
+// encoded as MPEG-1 with the vendored jo_mpeg writer (each frame is an
+// independent intra-coded sequence — large files, but trivially seekable and
+// zero-dependency).
 //
-// Threading: MPEG-1 DCT encoding is far too slow to run inline on the render
-// thread (it tanked the frame rate to ~1 fps, and the CFR catch-up loop
-// *amplified* it into a death spiral). So encoding runs on a dedicated worker
-// thread fed by a bounded SPSC frame queue: the render thread only does the
-// cheap palette-expand into a free slot and enqueues it. If the encoder can't
-// keep up the queue fills and frames are dropped (logged on stop) — the game
-// stays smooth either way.
+// Threading / parallel encode: the MPEG-1 DCT is far too slow to run inline on
+// the render thread (it tanked the game to ~1fps), and at the 4x framebuffer
+// (1280x800) a single encode thread only sustains ~15fps — so half the frames
+// were dropped and, since the stream is constant-frame-rate, the video played
+// ~2x too fast. Because the frames here are independent, we encode them in
+// PARALLEL: the render thread (single producer) palette-expands each sampled
+// frame into a free slot; a pool of encode workers turn slots into MPEG-1 byte
+// buffers concurrently; and one writer thread concatenates those buffers to the
+// file in capture order. The producer BLOCKS (never drops) when the in-flight
+// window is full, so no frame is lost and playback speed stays correct — with
+// enough workers the drain rate exceeds the capture rate, so it rarely blocks.
 //
-// The engine renders at a variable rate (host_frametime is clamped, not
-// fixed), so a wallclock sampler keyed off Sys_FloatTime() emits a *constant*
-// frame-rate stream: it duplicates the last frame when rendering lags and
-// drops extras when it races ahead, so playback runs at real-time speed. No
-// audio by design (yet) — the encoder boundary leaves room to add a muxing
-// encoder later without touching the capture path.
+// The engine renders at a variable rate, so a wallclock sampler keyed off
+// Sys_FloatTime() emits a constant-frame-rate stream (duplicating the last
+// frame when rendering lags, dropping extras when it races). No audio (yet).
 //
 // Console: `recordvideo [name] [30s|2m|level]` / `stopvideo`. Cvar: record_fps.
 // (`record` / `stop` already belong to Quake's demo system, hence the longer
@@ -31,6 +32,7 @@
 #include "../vendor/jo_mpeg/jo_mpeg.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #ifdef _WIN32
 #  include <direct.h>
@@ -40,19 +42,9 @@
 #  define vr_mkdir(p) mkdir((p), 0755)
 #endif
 
-// ---------------------------------------------------------------------------
-// Pluggable encoder interface. One concrete impl today (jo_mpeg); the seam
-// is here so a future H.264/MP4 (or audio-muxing) encoder slots in without
-// the recorder caring.
-// ---------------------------------------------------------------------------
-typedef struct video_encoder_s {
-    int  (*open)(struct video_encoder_s *e, const char *path, int w, int h, int fps);
-    void (*write_frame)(struct video_encoder_s *e, const unsigned char *rgbx, int w, int h);
-    void (*close)(struct video_encoder_s *e);
-    const char *ext;   // file extension, no dot
-    FILE       *fp;
-    int         fps;   // the rate the encoder actually committed to (may be snapped)
-} video_encoder_t;
+#define VR_EXT          "mpg"
+#define VR_MAX_WORKERS  6     // encode worker threads (clamped to cores-2)
+#define VR_BUFS         12    // in-flight frame window (must exceed worker count)
 
 // jo_mpeg only supports these frame rates; snap the requested one down.
 static int jo_snap_fps(int fps)
@@ -63,35 +55,17 @@ static int jo_snap_fps(int fps)
     if (fps <= 50) return 50;
     return 60;
 }
-static int jo_enc_open(video_encoder_t *e, const char *path, int w, int h, int fps)
-{
-    (void)w; (void)h;
-    e->fp = fopen(path, "wb");
-    if (!e->fp) return 0;
-    e->fps = jo_snap_fps(fps);
-    return 1;
-}
-static void jo_enc_write(video_encoder_t *e, const unsigned char *rgbx, int w, int h)
-{
-    if (e->fp) jo_write_mpeg(e->fp, rgbx, w, h, e->fps);
-}
-static void jo_enc_close(video_encoder_t *e)
-{
-    if (e->fp) { fclose(e->fp); e->fp = NULL; }
-}
-static video_encoder_t s_jo_encoder = { jo_enc_open, jo_enc_write, jo_enc_close, "mpg", NULL, 30 };
 
 // ---------------------------------------------------------------------------
 // Recorder state
 // ---------------------------------------------------------------------------
-static video_encoder_t *s_enc;
 static int            s_recording;
 static int            s_w, s_h;        // frame dims, locked for the session
-static int            s_fps;           // committed capture rate
+static int            s_fps;           // committed (snapped) capture rate
 static double         s_next_capture;  // Sys_FloatTime() of the next CFR sample
-static int            s_frames;        // frames enqueued (written) this session
-static int            s_dropped;       // frames dropped because the queue was full
+static int            s_frames;        // frames captured (== written; no drops)
 static char           s_path[256];
+static FILE          *s_fp;
 
 // Auto-stop conditions (mirrors perf.c's `profile <n>` / `profile level`):
 static double         s_deadline;          // Sys_FloatTime() absolute stop time, 0 = none
@@ -100,53 +74,119 @@ static int            s_level_pending;     // started before a level loaded; lat
 static char           s_level_name[64];    // BSP name snapshot — the end-of-level edge
 static int            s_level_intermission;
 
-// Encode worker + bounded SPSC frame queue. Render thread is the single
-// producer (head); worker is the single consumer (tail). The two semaphores
-// provide both flow control and the release/acquire fences across the slot
-// buffers, so no extra mutex is needed.
-#define VR_QUEUE_SLOTS 8
-static unsigned char *s_slot[VR_QUEUE_SLOTS];  // each holds one s_w*s_h*4 RGBX frame
-static size_t         s_slot_cap;              // bytes currently allocated per slot
-static int            s_head, s_tail;
-static SDL_Semaphore *s_free_sem;              // free slots available to the producer
-static SDL_Semaphore *s_ready_sem;             // queued frames (+ one quit wake token)
-static SDL_AtomicInt  s_pending;               // queued-but-not-yet-encoded count
-static SDL_AtomicInt  s_quit;                  // set on stop to retire the worker
-static SDL_Thread    *s_worker;
+// --- parallel encode pipeline ----------------------------------------------
+// A frame slot moves FREE -> FILLING (producer expands) -> READY (queued) ->
+// ENCODING (a worker) -> DONE (encoded, awaiting in-order write) -> FREE.
+enum { VR_FREE = 0, VR_FILLING, VR_READY, VR_ENCODING, VR_DONE };
+typedef struct {
+    unsigned char *rgbx;     // expand target, s_w*s_h*4 (persistent for the session)
+    unsigned char *enc;      // encoded MPEG bytes (malloc'd by a worker, freed by writer)
+    int            enc_len;
+    long long      seq;      // capture order of the frame currently in this slot
+    int            state;
+} vr_slot_t;
+
+static vr_slot_t      s_slots[VR_BUFS];
+static SDL_Mutex     *s_mtx;
+static SDL_Condition *s_cv_ready;     // a slot became READY (wake workers)
+static SDL_Condition *s_cv_free;      // a slot became FREE (wake producer)
+static SDL_Condition *s_cv_done;      // a slot became DONE (wake writer)
+static SDL_Condition *s_cv_progress;  // writer advanced s_write_seq (wake finisher)
+static SDL_Thread    *s_workers[VR_MAX_WORKERS];
+static int            s_nworkers;
+static SDL_Thread    *s_writer;
+static int            s_quit;
+static long long      s_seq_next;     // next capture seq to assign (producer)
+static long long      s_write_seq;    // next seq the writer must emit
+// FIFOs of slot indices (guarded by s_mtx):
+static int            s_free_q[VR_BUFS], s_free_head, s_free_tail, s_free_count;
+static int            s_ready_q[VR_BUFS], s_ready_head, s_ready_tail, s_ready_count;
 
 static cvar_t record_fps = {"record_fps", "30"};
 
-// Encode worker: pull queued frames in order and hand each to the encoder.
-// Wakes once per enqueued frame plus once on quit; drains everything pending
-// before exiting (so the tail of the recording isn't lost).
-static int SDLCALL vr_worker(void *unused)
+static void q_push(int *q, int *tail, int *count, int v)
+{ q[*tail] = v; *tail = (*tail + 1) % VR_BUFS; (*count)++; }
+static int q_pop(int *q, int *head, int *count)
+{ int v = q[*head]; *head = (*head + 1) % VR_BUFS; (*count)--; return v; }
+
+// Encode worker: claim READY slots and encode them to private byte buffers in
+// parallel; mark DONE for the writer to concatenate in order.
+static int SDLCALL vr_encode_worker(void *unused)
 {
     (void)unused;
     for (;;) {
-        SDL_WaitSemaphore(s_ready_sem);
-        if (SDL_GetAtomicInt(&s_pending) > 0) {
-            s_enc->write_frame(s_enc, s_slot[s_tail], s_w, s_h);
-            s_tail = (s_tail + 1) % VR_QUEUE_SLOTS;
-            SDL_AddAtomicInt(&s_pending, -1);
-            SDL_SignalSemaphore(s_free_sem);
-        } else {
-            break;   // woke with nothing pending => quit token, queue drained
-        }
+        int            idx, w, h, fps, len = 0;
+        unsigned char *rgbx, *enc;
+
+        SDL_LockMutex(s_mtx);
+        while (s_ready_count == 0 && !s_quit) SDL_WaitCondition(s_cv_ready, s_mtx);
+        if (s_ready_count == 0 && s_quit) { SDL_UnlockMutex(s_mtx); break; }
+        idx = q_pop(s_ready_q, &s_ready_head, &s_ready_count);
+        s_slots[idx].state = VR_ENCODING;
+        rgbx = s_slots[idx].rgbx; w = s_w; h = s_h; fps = s_fps;
+        SDL_UnlockMutex(s_mtx);
+
+        enc = jo_encode_mpeg_frame(rgbx, w, h, fps, &len);   // the expensive part, lock-free
+
+        SDL_LockMutex(s_mtx);
+        s_slots[idx].enc = enc; s_slots[idx].enc_len = len; s_slots[idx].state = VR_DONE;
+        SDL_BroadcastCondition(s_cv_done);
+        SDL_UnlockMutex(s_mtx);
     }
     return 0;
 }
 
-// Palette-expand the current framebuffer into a free queue slot and publish it.
-// Returns without enqueuing (counting a drop) if the encoder is saturated.
-// Caller guarantees vid dims still match the locked session dims.
+// Writer: emit encoded frames to the file strictly in capture order.
+static int SDLCALL vr_writer(void *unused)
+{
+    (void)unused;
+    for (;;) {
+        int            idx = -1, i, len;
+        unsigned char *enc;
+
+        SDL_LockMutex(s_mtx);
+        for (;;) {
+            idx = -1;
+            for (i = 0; i < VR_BUFS; i++)
+                if (s_slots[i].state == VR_DONE && s_slots[i].seq == s_write_seq) { idx = i; break; }
+            if (idx >= 0 || s_quit) break;
+            SDL_WaitCondition(s_cv_done, s_mtx);
+        }
+        if (idx < 0) { SDL_UnlockMutex(s_mtx); break; }   // quit + nothing left to write
+        enc = s_slots[idx].enc; len = s_slots[idx].enc_len;
+        SDL_UnlockMutex(s_mtx);
+
+        if (enc && len > 0 && s_fp) fwrite(enc, 1, (size_t)len, s_fp);
+        free(enc);
+
+        SDL_LockMutex(s_mtx);
+        s_slots[idx].enc = NULL; s_slots[idx].enc_len = 0; s_slots[idx].state = VR_FREE;
+        q_push(s_free_q, &s_free_tail, &s_free_count, idx);
+        s_write_seq++;
+        SDL_BroadcastCondition(s_cv_free);
+        SDL_BroadcastCondition(s_cv_progress);
+        SDL_UnlockMutex(s_mtx);
+    }
+    return 0;
+}
+
+// Producer (render thread): palette-expand the current framebuffer into a free
+// slot and queue it. Blocks if the in-flight window is full (backpressure)
+// rather than dropping, so the stream stays at the target rate.
 static void vr_enqueue_frame(void)
 {
-    int            w = s_w, h = s_h, rb = (int)vid.rowbytes, x, y;
+    int            idx, w = s_w, h = s_h, rb = (int)vid.rowbytes, x, y;
     unsigned char *base;
 
-    if (!SDL_TryWaitSemaphore(s_free_sem)) { s_dropped++; return; }  // queue full → drop
+    SDL_LockMutex(s_mtx);
+    while (s_free_count == 0 && !s_quit) SDL_WaitCondition(s_cv_free, s_mtx);
+    if (s_quit) { SDL_UnlockMutex(s_mtx); return; }
+    idx = q_pop(s_free_q, &s_free_head, &s_free_count);
+    s_slots[idx].seq = s_seq_next++;
+    s_slots[idx].state = VR_FILLING;
+    SDL_UnlockMutex(s_mtx);
 
-    base = s_slot[s_head];
+    base = s_slots[idx].rgbx;
     for (y = 0; y < h; y++) {
         const byte    *src = vid.buffer + (size_t)y * rb;
         unsigned char *dst = base       + (size_t)y * w * 4;
@@ -158,61 +198,96 @@ static void vr_enqueue_frame(void)
             dst[x*4 + 3] = 0;                         // X (ignored)
         }
     }
-    s_head = (s_head + 1) % VR_QUEUE_SLOTS;
-    SDL_AddAtomicInt(&s_pending, 1);
-    SDL_SignalSemaphore(s_ready_sem);
+
+    SDL_LockMutex(s_mtx);
+    s_slots[idx].state = VR_READY;
+    q_push(s_ready_q, &s_ready_tail, &s_ready_count, idx);
+    SDL_SignalCondition(s_cv_ready);
+    SDL_UnlockMutex(s_mtx);
     s_frames++;
 }
 
-// Spin up the encode worker + queue for a session. Returns 0 on failure.
+// Spin up the pipeline (buffers, sync, workers + writer). Returns 0 on failure.
 static int vr_session_start(void)
 {
     size_t need = (size_t)s_w * (size_t)s_h * 4;
-    int    i;
+    int    cores, i;
 
-    if (need > s_slot_cap) {
-        for (i = 0; i < VR_QUEUE_SLOTS; i++) {
-            unsigned char *p = (unsigned char *)realloc(s_slot[i], need);
-            if (!p) return 0;
-            s_slot[i] = p;
-        }
-        s_slot_cap = need;
+    for (i = 0; i < VR_BUFS; i++) {
+        s_slots[i].rgbx = (unsigned char *)malloc(need);
+        if (!s_slots[i].rgbx) return 0;
+        s_slots[i].enc = NULL; s_slots[i].enc_len = 0;
+        s_slots[i].seq = -1;   s_slots[i].state = VR_FREE;
     }
 
-    s_head = s_tail = 0;
-    s_frames = s_dropped = 0;
-    SDL_SetAtomicInt(&s_pending, 0);
-    SDL_SetAtomicInt(&s_quit, 0);
-    s_free_sem  = SDL_CreateSemaphore(VR_QUEUE_SLOTS);
-    s_ready_sem = SDL_CreateSemaphore(0);
-    if (!s_free_sem || !s_ready_sem) return 0;
-    s_worker = SDL_CreateThread(vr_worker, "video_encode", NULL);
-    return s_worker != NULL;
+    s_free_head = s_free_tail = s_free_count = 0;
+    for (i = 0; i < VR_BUFS; i++) q_push(s_free_q, &s_free_tail, &s_free_count, i);
+    s_ready_head = s_ready_tail = s_ready_count = 0;
+    s_seq_next = s_write_seq = 0;
+    s_quit = 0;
+    s_frames = 0;
+
+    s_mtx         = SDL_CreateMutex();
+    s_cv_ready    = SDL_CreateCondition();
+    s_cv_free     = SDL_CreateCondition();
+    s_cv_done     = SDL_CreateCondition();
+    s_cv_progress = SDL_CreateCondition();
+    if (!s_mtx || !s_cv_ready || !s_cv_free || !s_cv_done || !s_cv_progress) return 0;
+
+    cores = SDL_GetNumLogicalCPUCores();
+    s_nworkers = cores - 2;
+    if (s_nworkers < 2) s_nworkers = 2;
+    if (s_nworkers > VR_MAX_WORKERS) s_nworkers = VR_MAX_WORKERS;
+
+    s_writer = SDL_CreateThread(vr_writer, "video_write", NULL);
+    if (!s_writer) return 0;
+    for (i = 0; i < s_nworkers; i++) {
+        s_workers[i] = SDL_CreateThread(vr_encode_worker, "video_encode", NULL);
+        if (!s_workers[i]) return 0;
+    }
+    return 1;
 }
 
-// Drain the queue, retire the worker, close the file, tear down the queue.
+// Drain the pipeline, retire all threads, close the file, free everything.
 static void vr_session_finish(void)
 {
-    if (s_worker) {
-        SDL_SetAtomicInt(&s_quit, 1);
-        SDL_SignalSemaphore(s_ready_sem);   // wake the worker to observe quit + drain
-        SDL_WaitThread(s_worker, NULL);
-        s_worker = NULL;
+    int i;
+
+    if (s_mtx) {
+        SDL_LockMutex(s_mtx);
+        // Wait for the writer to emit every captured frame before we tear down,
+        // so the tail of the recording isn't lost. (Only meaningful if the
+        // writer is actually running.)
+        if (s_writer)
+            while (s_write_seq < s_seq_next) SDL_WaitCondition(s_cv_progress, s_mtx);
+        s_quit = 1;
+        SDL_BroadcastCondition(s_cv_ready);
+        SDL_BroadcastCondition(s_cv_done);
+        SDL_BroadcastCondition(s_cv_free);
+        SDL_UnlockMutex(s_mtx);
     }
-    if (s_enc) s_enc->close(s_enc);
-    if (s_ready_sem) { SDL_DestroySemaphore(s_ready_sem); s_ready_sem = NULL; }
-    if (s_free_sem)  { SDL_DestroySemaphore(s_free_sem);  s_free_sem  = NULL; }
+
+    for (i = 0; i < VR_MAX_WORKERS; i++)
+        if (s_workers[i]) { SDL_WaitThread(s_workers[i], NULL); s_workers[i] = NULL; }
+    if (s_writer) { SDL_WaitThread(s_writer, NULL); s_writer = NULL; }
+
+    if (s_fp) { fclose(s_fp); s_fp = NULL; }
+
+    for (i = 0; i < VR_BUFS; i++) {
+        free(s_slots[i].rgbx); s_slots[i].rgbx = NULL;
+        free(s_slots[i].enc);  s_slots[i].enc  = NULL;
+    }
+    if (s_cv_ready)    { SDL_DestroyCondition(s_cv_ready);    s_cv_ready = NULL; }
+    if (s_cv_free)     { SDL_DestroyCondition(s_cv_free);     s_cv_free = NULL; }
+    if (s_cv_done)     { SDL_DestroyCondition(s_cv_done);     s_cv_done = NULL; }
+    if (s_cv_progress) { SDL_DestroyCondition(s_cv_progress); s_cv_progress = NULL; }
+    if (s_mtx)         { SDL_DestroyMutex(s_mtx);             s_mtx = NULL; }
     s_recording = 0;
-    // s_slot[] kept allocated for reuse by the next session; freed at shutdown.
 }
 
 static void vr_report(const char *verb)
 {
-    if (s_dropped)
-        Con_Printf("%s: wrote %s (%d frames @ %d fps, %d dropped — encoder fell behind)\n",
-                   verb, s_path, s_frames, s_fps, s_dropped);
-    else
-        Con_Printf("%s: wrote %s (%d frames @ %d fps)\n", verb, s_path, s_frames, s_fps);
+    Con_Printf("%s wrote %s (%d frames @ %d fps)\n", verb, s_path, s_frames, s_fps);
 }
 
 static void vr_autostop(void)
@@ -248,21 +323,21 @@ static int vr_parse_duration(const char *a, double *out_secs)
 }
 
 // videos/clip_NNNN.mpg, first free slot. Returns 0 if the dir is full.
-static int vr_auto_path(char *out, size_t outsz, const char *ext)
+static int vr_auto_path(char *out, size_t outsz)
 {
     int i;
     (void)vr_mkdir("videos");
     for (i = 0; i <= 9999; i++) {
         struct stat st;
-        snprintf(out, outsz, "videos/clip_%04d.%s", i, ext);
+        snprintf(out, outsz, "videos/clip_%04d." VR_EXT, i);
         if (stat(out, &st) != 0) return 1;
     }
     return 0;
 }
 
 // ---------------------------------------------------------------------------
-// Per-frame capture (called from VID_Update). Wallclock CFR sampler — cheap:
-// just palette-expand + enqueue; the worker thread does the encoding.
+// Per-frame capture (called from VID_Update). Wallclock CFR sampler — the
+// render thread only palette-expands + enqueues; workers do the encoding.
 // ---------------------------------------------------------------------------
 void Video_Record_CaptureFrame(void)
 {
@@ -338,7 +413,6 @@ static void Video_Record_f(void)
         return;
     }
 
-    s_enc = &s_jo_encoder;
     w   = (int)vid.width;
     h   = (int)vid.height;
     fps = (int)record_fps.value;
@@ -369,23 +443,24 @@ static void Video_Record_f(void)
             if (strchr(name, '.'))
                 snprintf(s_path, sizeof(s_path), "videos/%s", name);
             else
-                snprintf(s_path, sizeof(s_path), "videos/%s.%s", name, s_enc->ext);
-        } else if (!vr_auto_path(s_path, sizeof(s_path), s_enc->ext)) {
+                snprintf(s_path, sizeof(s_path), "videos/%s." VR_EXT, name);
+        } else if (!vr_auto_path(s_path, sizeof(s_path))) {
             Con_Printf("recordvideo: videos/ is full (10000 slots)\n");
             return;
         }
     }
 
-    if (!s_enc->open(s_enc, s_path, w, h, fps)) {
+    s_fp = fopen(s_path, "wb");
+    if (!s_fp) {
         Con_Printf("recordvideo: cannot open %s for writing\n", s_path);
         return;
     }
 
     s_w = w; s_h = h;
-    s_fps = s_enc->fps;          // the rate the encoder actually committed to
+    s_fps = jo_snap_fps(fps);
 
     if (!vr_session_start()) {
-        Con_Printf("recordvideo: cannot start encode worker\n");
+        Con_Printf("recordvideo: cannot start encode pipeline\n");
         vr_session_finish();     // tears down whatever partially came up + closes file
         return;
     }
@@ -407,9 +482,11 @@ static void Video_Record_f(void)
     }
 
     if (s_fps != fps)
-        Con_Printf("recordvideo: %dx%d @ %d fps (snapped from %d) -> %s\n", w, h, s_fps, fps, s_path);
+        Con_Printf("recordvideo: %dx%d @ %d fps (snapped from %d), %d encode threads -> %s\n",
+                   w, h, s_fps, fps, s_nworkers, s_path);
     else
-        Con_Printf("recordvideo: %dx%d @ %d fps -> %s\n", w, h, s_fps, s_path);
+        Con_Printf("recordvideo: %dx%d @ %d fps, %d encode threads -> %s\n",
+                   w, h, s_fps, s_nworkers, s_path);
     if (mode_level && s_level_pending)
         Con_Printf("  (will record the next level until it ends; stopvideo to cancel)\n");
     else if (mode_level)
@@ -442,11 +519,5 @@ void Video_Record_Init(void)
 
 void Video_Record_Shutdown(void)
 {
-    int i;
     if (s_recording) vr_session_finish();   // drain + flush the file on quit-while-recording
-    for (i = 0; i < VR_QUEUE_SLOTS; i++) {
-        free(s_slot[i]);
-        s_slot[i] = NULL;
-    }
-    s_slot_cap = 0;
 }

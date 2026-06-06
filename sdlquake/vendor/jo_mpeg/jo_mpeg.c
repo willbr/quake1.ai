@@ -2,54 +2,52 @@
  *
  * Converted to C by Wladislav Artsimovich https://blog.frost.kiwi/jo-mpeg-in-c
  *
+ * Local modification (quake1.ai): the byte output was routed through a small
+ * growable in-memory sink (jo_buf_t) so frames can be encoded off-thread into
+ * private buffers and concatenated to the file in order by a single writer.
+ * `jo_encode_mpeg_frame` returns one frame's bytes (caller frees);
+ * `jo_write_mpeg(FILE*, ...)` is kept as a back-compat wrapper. The MPEG-1
+ * bitstream produced is byte-identical to the original FILE* path.
+ *
  * Latest revisions:
  * 	1.03 (15-08-2024) Reverted color space change from 1.02, as it resulted in
  *                    overscaled color vectors and thus oversaturated colors
- * 	1.02 (22-03-2017) Fixed AC encoding bug. 
+ * 	1.02 (22-03-2017) Fixed AC encoding bug.
  *                    Fixed color space bug (thx r- lyeh!)
  * 	1.01 (18-10-2016) warning fixes
  * 	1.00 (25-09-2016) initial release
  *
- * Basic usage:
- *	char *frame = new char[width*height*4]; // 4 component. RGBX format, where X is unused 
- *	FILE *fp = fopen("foo.mpg", "wb");
- *	jo_write_mpeg(fp, frame, width, height, 60);  // frame 0
- *	jo_write_mpeg(fp, frame, width, height, 60);  // frame 1
- *	jo_write_mpeg(fp, frame, width, height, 60);  // frame 2
- *	...
- *	fclose(fp);
- *
  * Notes:
  * 	Only supports 24, 25, 30, 50, or 60 fps
- *
- * 	I don't know if decoders support changing of fps, or dimensions for each frame. 
- * 	Movie players *should* support it as the spec allows it, but ...
- *
  * 	MPEG-1/2 currently has no active patents as far as I am aware.
- *  
- *	http://dvd.sourceforge.net/dvdinfo/mpeghdrs.html
- *	http://www.cs.cornell.edu/dali/api/mpegvideo-c.html
  * */
-
-#ifndef JO_INCLUDE_MPEG_H
-#define JO_INCLUDE_MPEG_H
-
-#include <stdio.h>
-
-// To get a header file for this, either cut and paste the header,
-// or create jo_mpeg.h, #define JO_MPEG_HEADER_FILE_ONLY, and
-// then include jo_mpeg.c from it.
-
-// Returns false on failure
-extern void jo_write_mpeg(FILE *fp, const unsigned char *rgbx, int width, int height, int fps);
-
-#endif // JO_INCLUDE_MPEG_H
-
-#ifndef JO_MPEG_HEADER_FILE_ONLY
 
 #include <stdio.h>
 #include <math.h>
-#include <memory.h>
+#include <string.h>
+#include <stdlib.h>
+
+// --- growable byte sink (local addition for threaded/parallel encoding) -----
+typedef struct {
+	unsigned char *data;
+	int            size, cap;
+} jo_buf_t;
+
+static void jo_buf_putc(jo_buf_t *b, int c) {
+	if (b->size >= b->cap) {
+		int nc = b->cap ? b->cap * 2 : (1 << 16);
+		unsigned char *p = (unsigned char *)realloc(b->data, (size_t)nc);
+		if (!p) return;   // OOM: stop appending; frame ends up short (caught by caller)
+		b->data = p;
+		b->cap  = nc;
+	}
+	b->data[b->size++] = (unsigned char)c;
+}
+static void jo_buf_write(jo_buf_t *b, const void *p, int n) {
+	int i;
+	const unsigned char *s = (const unsigned char *)p;
+	for (i = 0; i < n; i++) jo_buf_putc(b, s[i]);
+}
 
 // Huffman tables
 static const unsigned char s_jo_HTDC_Y[9][2] = {{4,3}, {0,2}, {1,2}, {5,3}, {6,3}, {14,4}, {30,5}, {62,6}, {126,7}};
@@ -76,7 +74,7 @@ static const float s_jo_quantTbl[64] = {
 static const unsigned char s_jo_ZigZag[] = { 0,1,5,6,14,15,27,28,2,4,7,13,16,26,29,42,3,8,12,17,25,30,41,43,9,11,18,24,31,40,44,53,10,19,23,32,39,45,52,54,20,22,33,38,46,51,55,60,21,34,37,47,50,56,59,61,35,36,48,49,57,58,62,63 };
 
 typedef struct {
-	FILE *fp;
+	jo_buf_t *out;
 	int buf, cnt;
 } jo_bits_t;
 
@@ -85,7 +83,7 @@ static void jo_writeBits(jo_bits_t *b, int value, int count) {
 	b->buf |= value << (24 - b->cnt);
 	while(b->cnt >= 8) {
 		unsigned char c = (b->buf >> 16) & 255;
-		putc(c, b->fp);
+		jo_buf_putc(b->out, c);
 		b->buf <<= 8;
 		b->cnt -= 8;
 	}
@@ -132,7 +130,7 @@ static void jo_DCT(float *d0, float *d1, float *d2, float *d3, float *d4, float 
 	*d3 = z13 - z2;
 	*d1 = z11 + z4;
 	*d7 = z11 - z4;
-} 
+}
 
 static int jo_processDU(jo_bits_t *bits, float A[64], const unsigned char htdc[9][2], int DC) {
 	for(int dataOff=0; dataOff<64; dataOff+=8) {
@@ -157,7 +155,7 @@ static int jo_processDU(jo_bits_t *bits, float A[64], const unsigned char htdc[9
 	}
 	jo_writeBits(bits, htdc[size][0], htdc[size][1]);
 	if(DC < 0) aDC ^= (1 << size) - 1;
-	jo_writeBits(bits, aDC, size); 
+	jo_writeBits(bits, aDC, size);
 
 	int endpos = 63;
 	for(; (endpos>0)&&(Q[endpos]==0); --endpos) { /* do nothing */ }
@@ -193,27 +191,28 @@ static int jo_processDU(jo_bits_t *bits, float A[64], const unsigned char htdc[9
 	return Q[0];
 }
 
-void jo_write_mpeg(FILE *fp, const unsigned char *rgbx, int width, int height, int fps) {
+// Encode one frame's MPEG-1 bitstream into the growable sink `out`.
+static void jo_mpeg_encode(jo_buf_t *out, const unsigned char *rgbx, int width, int height, int fps) {
 	int lastDCY = 128, lastDCCR = 128, lastDCCB = 128;
-	jo_bits_t bits = {fp};
+	jo_bits_t bits = {out};
 
 	// Sequence Header
-	fwrite("\x00\x00\x01\xB3", 4, 1, fp);
+	jo_buf_write(out, "\x00\x00\x01\xB3", 4);
 	// 12 bits for width, height
-	putc((width>>4)&0xFF, fp);
-	putc(((width&0xF)<<4) | ((height>>8) & 0xF), fp);
-	putc(height & 0xFF, fp); 
+	jo_buf_putc(out, (width>>4)&0xFF);
+	jo_buf_putc(out, ((width&0xF)<<4) | ((height>>8) & 0xF));
+	jo_buf_putc(out, height & 0xFF);
 	// aspect ratio, framerate
-	if(fps <= 24) putc(0x12, fp);
-	else if(fps <= 25) putc(0x13, fp);
-	else if(fps <= 30) putc(0x15, fp);
-	else if(fps <= 50) putc(0x16, fp);
-	else putc(0x18, fp); // 60fps
-	fwrite("\xFF\xFF\xE0\xA0", 4, 1, fp);
+	if(fps <= 24) jo_buf_putc(out, 0x12);
+	else if(fps <= 25) jo_buf_putc(out, 0x13);
+	else if(fps <= 30) jo_buf_putc(out, 0x15);
+	else if(fps <= 50) jo_buf_putc(out, 0x16);
+	else jo_buf_putc(out, 0x18); // 60fps
+	jo_buf_write(out, "\xFF\xFF\xE0\xA0", 4);
 
-	fwrite("\x00\x00\x01\xB8\x80\x08\x00\x40", 8, 1, fp); // GOP header
-	fwrite("\x00\x00\x01\x00\x00\x0C\x00\x00", 8, 1, fp); // PIC header
-	fwrite("\x00\x00\x01\x01", 4, 1, fp); // Slice header
+	jo_buf_write(out, "\x00\x00\x01\xB8\x80\x08\x00\x40", 8); // GOP header
+	jo_buf_write(out, "\x00\x00\x01\x00\x00\x0C\x00\x00", 8); // PIC header
+	jo_buf_write(out, "\x00\x00\x01\x01", 4); // Slice header
 	jo_writeBits(&bits, 0x10, 6);
 
 	for (int vblock=0; vblock<(height+15)/16; vblock++) {
@@ -256,7 +255,21 @@ void jo_write_mpeg(FILE *fp, const unsigned char *rgbx, int width, int height, i
 		}
 	}
 	jo_writeBits(&bits, 0, 7);
-	fwrite("\x00\x00\x01\xb7", 4, 1, fp); // End of Sequence
+	jo_buf_write(out, "\x00\x00\x01\xb7", 4); // End of Sequence
 }
-#endif
 
+// Encode one frame and return a malloc'd buffer of its MPEG-1 bytes. Caller
+// frees. *out_len receives the byte count (0 on allocation failure).
+unsigned char *jo_encode_mpeg_frame(const unsigned char *rgbx, int width, int height, int fps, int *out_len) {
+	jo_buf_t b = {0, 0, 0};
+	jo_mpeg_encode(&b, rgbx, width, height, fps);
+	if (out_len) *out_len = b.size;
+	return b.data;
+}
+
+// Back-compat: encode one frame straight to a FILE*.
+void jo_write_mpeg(FILE *fp, const unsigned char *rgbx, int width, int height, int fps) {
+	int len = 0;
+	unsigned char *b = jo_encode_mpeg_frame(rgbx, width, height, fps, &len);
+	if (b) { fwrite(b, 1, (size_t)len, fp); free(b); }
+}

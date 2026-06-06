@@ -12,6 +12,11 @@
 
 #include <stdio.h>
 
+// Encode one frame straight to a FILE*.
 extern void jo_write_mpeg(FILE *fp, const unsigned char *rgbx, int width, int height, int fps);
+
+// Encode one frame into a malloc'd byte buffer (caller frees); *out_len gets
+// the length. Lets frames be encoded off-thread and concatenated in order.
+extern unsigned char *jo_encode_mpeg_frame(const unsigned char *rgbx, int width, int height, int fps, int *out_len);
 
 #endif // JO_INCLUDE_MPEG_H
