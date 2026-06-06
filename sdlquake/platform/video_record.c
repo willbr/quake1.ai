@@ -43,8 +43,8 @@
 #endif
 
 #define VR_EXT          "mpg"
-#define VR_MAX_WORKERS  6     // encode worker threads (clamped to cores-2)
-#define VR_BUFS         12    // in-flight frame window (must exceed worker count)
+#define VR_MAX_WORKERS  8     // encode worker threads (clamped to cores-2)
+#define VR_BUFS         16    // in-flight frame window (must exceed worker count)
 
 // jo_mpeg only supports these frame rates; snap the requested one down.
 static int jo_snap_fps(int fps)
@@ -60,7 +60,9 @@ static int jo_snap_fps(int fps)
 // Recorder state
 // ---------------------------------------------------------------------------
 static int            s_recording;
-static int            s_w, s_h;        // frame dims, locked for the session
+static int            s_w, s_h;        // source framebuffer dims, locked for the session
+static int            s_ew, s_eh;      // encoded dims (after record_maxdim downscale)
+static int            s_scale;         // integer box-downscale factor (1 = none)
 static int            s_fps;           // committed (snapped) capture rate
 static double         s_next_capture;  // Sys_FloatTime() of the next CFR sample
 static int            s_frames;        // frames captured (== written; no drops)
@@ -102,7 +104,13 @@ static long long      s_write_seq;    // next seq the writer must emit
 static int            s_free_q[VR_BUFS], s_free_head, s_free_tail, s_free_count;
 static int            s_ready_q[VR_BUFS], s_ready_head, s_ready_tail, s_ready_count;
 
-static cvar_t record_fps = {"record_fps", "30"};
+static cvar_t record_fps    = {"record_fps", "60"};
+// Long-edge cap on the *encoded* frame; the source framebuffer is box-
+// downscaled by the smallest integer factor that fits. Keeps the per-frame
+// encode cost low enough to sustain high frame rates (60fps at the 4x
+// framebuffer needs more encode throughput than a single machine has at full
+// res). 0 = no cap (encode at full framebuffer resolution).
+static cvar_t record_maxdim = {"record_maxdim", "960"};
 
 static void q_push(int *q, int *tail, int *count, int v)
 { q[*tail] = v; *tail = (*tail + 1) % VR_BUFS; (*count)++; }
@@ -123,7 +131,7 @@ static int SDLCALL vr_encode_worker(void *unused)
         if (s_ready_count == 0 && s_quit) { SDL_UnlockMutex(s_mtx); break; }
         idx = q_pop(s_ready_q, &s_ready_head, &s_ready_count);
         s_slots[idx].state = VR_ENCODING;
-        rgbx = s_slots[idx].rgbx; w = s_w; h = s_h; fps = s_fps;
+        rgbx = s_slots[idx].rgbx; w = s_ew; h = s_eh; fps = s_fps;
         SDL_UnlockMutex(s_mtx);
 
         enc = jo_encode_mpeg_frame(rgbx, w, h, fps, &len);   // the expensive part, lock-free
@@ -170,13 +178,58 @@ static int SDLCALL vr_writer(void *unused)
     return 0;
 }
 
-// Producer (render thread): palette-expand the current framebuffer into a free
-// slot and queue it. Blocks if the in-flight window is full (backpressure)
-// rather than dropping, so the stream stays at the target rate.
+// Palette-expand vid.buffer into `dst` as RGBX, box-downscaling by s_scale.
+// Reads the full source either way; output is s_ew x s_eh.
+static void vr_expand_downscale(unsigned char *dst)
+{
+    int rb = (int)vid.rowbytes, f = s_scale, ox, oy, dx, dy;
+
+    if (f <= 1) {   // fast path: direct expand, no averaging
+        for (oy = 0; oy < s_eh; oy++) {
+            const byte    *src = vid.buffer + (size_t)oy * rb;
+            unsigned char *d   = dst        + (size_t)oy * s_ew * 4;
+            for (ox = 0; ox < s_ew; ox++) {
+                unsigned c = d_8to24table[src[ox]];
+                d[ox*4 + 0] = (unsigned char)(c >> 16);
+                d[ox*4 + 1] = (unsigned char)(c >>  8);
+                d[ox*4 + 2] = (unsigned char)(c >>  0);
+                d[ox*4 + 3] = 0;
+            }
+        }
+        return;
+    }
+
+    for (oy = 0; oy < s_eh; oy++) {
+        int            sy0 = oy * f, sy1 = sy0 + f;
+        unsigned char *d   = dst + (size_t)oy * s_ew * 4;
+        if (sy1 > s_h) sy1 = s_h;
+        for (ox = 0; ox < s_ew; ox++) {
+            int sx0 = ox * f, sx1 = sx0 + f;
+            unsigned r = 0, g = 0, b = 0, n = 0;
+            if (sx1 > s_w) sx1 = s_w;
+            for (dy = sy0; dy < sy1; dy++) {
+                const byte *src = vid.buffer + (size_t)dy * rb;
+                for (dx = sx0; dx < sx1; dx++) {
+                    unsigned c = d_8to24table[src[dx]];
+                    r += (c >> 16) & 0xFF; g += (c >> 8) & 0xFF; b += c & 0xFF; n++;
+                }
+            }
+            if (n) { r /= n; g /= n; b /= n; }
+            d[ox*4 + 0] = (unsigned char)r;
+            d[ox*4 + 1] = (unsigned char)g;
+            d[ox*4 + 2] = (unsigned char)b;
+            d[ox*4 + 3] = 0;
+        }
+    }
+}
+
+// Producer (render thread): expand (and optionally downscale) the current
+// framebuffer into a free slot and queue it. Blocks if the in-flight window is
+// full (backpressure) rather than dropping, so the stream stays at the target
+// rate.
 static void vr_enqueue_frame(void)
 {
-    int            idx, w = s_w, h = s_h, rb = (int)vid.rowbytes, x, y;
-    unsigned char *base;
+    int idx;
 
     SDL_LockMutex(s_mtx);
     while (s_free_count == 0 && !s_quit) SDL_WaitCondition(s_cv_free, s_mtx);
@@ -186,18 +239,7 @@ static void vr_enqueue_frame(void)
     s_slots[idx].state = VR_FILLING;
     SDL_UnlockMutex(s_mtx);
 
-    base = s_slots[idx].rgbx;
-    for (y = 0; y < h; y++) {
-        const byte    *src = vid.buffer + (size_t)y * rb;
-        unsigned char *dst = base       + (size_t)y * w * 4;
-        for (x = 0; x < w; x++) {
-            unsigned c = d_8to24table[src[x]];   // 0xAARRGGBB
-            dst[x*4 + 0] = (unsigned char)(c >> 16); // R
-            dst[x*4 + 1] = (unsigned char)(c >>  8); // G
-            dst[x*4 + 2] = (unsigned char)(c >>  0); // B
-            dst[x*4 + 3] = 0;                         // X (ignored)
-        }
-    }
+    vr_expand_downscale(s_slots[idx].rgbx);
 
     SDL_LockMutex(s_mtx);
     s_slots[idx].state = VR_READY;
@@ -210,7 +252,7 @@ static void vr_enqueue_frame(void)
 // Spin up the pipeline (buffers, sync, workers + writer). Returns 0 on failure.
 static int vr_session_start(void)
 {
-    size_t need = (size_t)s_w * (size_t)s_h * 4;
+    size_t need = (size_t)s_ew * (size_t)s_eh * 4;
     int    cores, i;
 
     for (i = 0; i < VR_BUFS; i++) {
@@ -459,6 +501,18 @@ static void Video_Record_f(void)
     s_w = w; s_h = h;
     s_fps = jo_snap_fps(fps);
 
+    // Resolve the encode downscale: smallest integer factor whose encoded long
+    // edge fits record_maxdim (so 60fps stays within the encoder's budget).
+    {
+        int maxdim   = (int)record_maxdim.value;
+        int longedge = s_w > s_h ? s_w : s_h;
+        s_scale = 1;
+        if (maxdim > 0)
+            while ((longedge + s_scale - 1) / s_scale > maxdim) s_scale++;
+        s_ew = (s_w + s_scale - 1) / s_scale;
+        s_eh = (s_h + s_scale - 1) / s_scale;
+    }
+
     if (!vr_session_start()) {
         Con_Printf("recordvideo: cannot start encode pipeline\n");
         vr_session_finish();     // tears down whatever partially came up + closes file
@@ -481,12 +535,17 @@ static void Video_Record_f(void)
         s_deadline = Sys_FloatTime() + dur_secs;
     }
 
-    if (s_fps != fps)
-        Con_Printf("recordvideo: %dx%d @ %d fps (snapped from %d), %d encode threads -> %s\n",
-                   w, h, s_fps, fps, s_nworkers, s_path);
-    else
-        Con_Printf("recordvideo: %dx%d @ %d fps, %d encode threads -> %s\n",
-                   w, h, s_fps, s_nworkers, s_path);
+    {
+        char dims[48];
+        if (s_scale > 1) snprintf(dims, sizeof(dims), "%dx%d->%dx%d", s_w, s_h, s_ew, s_eh);
+        else             snprintf(dims, sizeof(dims), "%dx%d", s_w, s_h);
+        if (s_fps != fps)
+            Con_Printf("recordvideo: %s @ %d fps (snapped from %d), %d encode threads -> %s\n",
+                       dims, s_fps, fps, s_nworkers, s_path);
+        else
+            Con_Printf("recordvideo: %s @ %d fps, %d encode threads -> %s\n",
+                       dims, s_fps, s_nworkers, s_path);
+    }
     if (mode_level && s_level_pending)
         Con_Printf("  (will record the next level until it ends; stopvideo to cancel)\n");
     else if (mode_level)
@@ -513,6 +572,7 @@ static void Video_Stop_f(void)
 void Video_Record_Init(void)
 {
     Cvar_RegisterVariable(&record_fps);
+    Cvar_RegisterVariable(&record_maxdim);
     Cmd_AddCommand("recordvideo", Video_Record_f);
     Cmd_AddCommand("stopvideo", Video_Stop_f);
 }

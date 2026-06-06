@@ -199,12 +199,21 @@ sampler keyed off `Sys_FloatTime()` palette-expands the 8-bit framebuffer to
 RGBX (via `d_8to24table`, same as the screenshot path) at the engine's current
 `vid_scale` resolution. Output goes to gitignored `videos/`.
 
-- Console: **`recordvideo [name] [dur]`** / **`stopvideo`**; cvar **`record_fps`**
-  (default 30, snapped to jo_mpeg's legal 24/25/30/50/60). `dur` mirrors the
-  `profile` command — `30s`, `2m`, or `level` (record until the level ends:
-  map change / intermission / disconnect, with the same pending-latch so
-  `recordvideo level` from the command line defers until a map loads). Command
-  names avoid Quake's existing demo `record`/`stop`. No audio (yet).
+- Console: **`recordvideo [name] [dur]`** / **`stopvideo`**; cvars
+  **`record_fps`** (default 60, snapped to jo_mpeg's legal 24/25/30/50/60) and
+  **`record_maxdim`** (default 960; long-edge cap on the *encoded* frame, 0 =
+  full res). `dur` mirrors the `profile` command — `30s`, `2m`, or `level`
+  (record until the level ends: map change / intermission / disconnect, with the
+  same pending-latch so `recordvideo level` from the command line defers until a
+  map loads). Command names avoid Quake's existing demo `record`/`stop`. No
+  audio (yet).
+- **Encode downscale (`record_maxdim`)**: correct-speed CFR needs the encoder to
+  actually sustain `record_fps`, and at the 4× framebuffer (1280×800) it tops
+  out at ~55fps — so 60fps full-res played ~1.1× fast. The source is box-
+  downscaled by the smallest integer factor whose long edge fits `record_maxdim`
+  (1280×800 → 640×400 at the 960 default; vid_scale 3's 960×600 stays native),
+  cutting per-frame encode cost ~4× so 60fps fits with headroom. The downscale
+  is in the producer's expand pass (`vr_expand_downscale`).
 - **Encoding is parallel** — the MPEG-1 DCT is far slower than a frame
   (inline it tanked the game to ~1fps; a single worker only sustained ~15fps at
   1280×800, dropping half the frames so a CFR stream played ~2× too fast). Since
