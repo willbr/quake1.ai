@@ -34,6 +34,9 @@ id1/maps/*.lit
 id1/rgbtable.lmp
 screenshots/
 
+# Recorded videos (from the `recordvideo` console command)
+videos/
+
 # Perf captures (from the `profile <n>` console command)
 profiles/
 

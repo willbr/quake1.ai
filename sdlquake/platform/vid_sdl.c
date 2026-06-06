@@ -19,6 +19,7 @@
 #include "vid_palette.h"
 #include "debug_lines.h"
 #include "crop_screenshot.h"
+#include "video_record.h"
 #include "perf.h"
 #include "editor.h"     // Editor_IsOpen() — game vs editor in the window title
 
@@ -1090,6 +1091,8 @@ void VID_Init(unsigned char *palette)
     Cvar_RegisterVariable(&vid_scanline_intensity);
     Cvar_RegisterVariable(&vid_scanline_size);
 
+    Video_Record_Init();
+
     vid_preload_cvars_from_config();
 
     {
@@ -1222,6 +1225,7 @@ void VID_Init(unsigned char *palette)
 
 void VID_Shutdown(void)
 {
+    Video_Record_Shutdown();
     ImguiLayer_Shutdown();
     gpu_shutdown();
     if (sdl_window) { SDL_DestroyWindow(sdl_window); sdl_window = NULL; }
@@ -1276,6 +1280,10 @@ void VID_Update(vrect_t *rects)
     // stay here — they're meant to sit on top of entities.
 
     gpu_render_frame();
+
+    // Capture this frame to a video if recording. vid.buffer still holds the
+    // 8-bit indices gpu_render_frame just consumed.
+    Video_Record_CaptureFrame();
 
     // Reset palette tags so the next frame's renderer starts clean. Runs
     // unconditionally (even if SDL_LockTexture failed) to preserve the
