@@ -258,4 +258,4 @@ per-scope table below it. `devoverlay` is the console twin for the F3 toggle.
 - `id1/particles/` — data-driven particle-effect presets (`*.pcl`, Quake KV-block); all `*.pcl` here load at startup (globbed via `COM_EnumMatchingFiles`, no index file). Authored in the in-game Particle editor mode (`edit_particle.c`); runtime in `r_emitter.c`.
 - `ref/doom-data/` — Doom 1.9 shareware WAD (read by `zig build extract`)
 - `ref/Quake-master/` — pristine upstream WinQuake (id-Software/Quake), kept as a diff baseline against `sdlquake/engine_src/`
-- `ref/Quake-2-master/`, `ref/Quake-Tools-master/`, `ref/TrenchBroom-master/`, `ref/fteqw-master/`, `ref/DOOM-master/`, `ref/quake106/`, `ref/quake_map_source-master/`, `ref/Quake-2-Tools-master/` — upstream references, do not modify
+- `ref/Quake-2-master/`, `ref/Quake-Tools-master/`, `ref/TrenchBroom-master/`, `ref/fteqw-master/`, `ref/quake106/`, `ref/quake_map_source-master/`, `ref/Quake-2-Tools-master/` — upstream references, do not modify
