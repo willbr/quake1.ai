@@ -454,7 +454,11 @@ you specifically want to keep as a fallback or as a reference implementation.
 | `Quake-master/` | 12 MB | **Yes** — diff baseline for `engine_src/` patches. Keep. |
 | `Quake-Tools-master/` | 5.3 MB | **Yes** — diff baseline for vendored qbsp/light/vis. Keep. |
 | `quake_map_source-master/` | **136 MB** | Reference id1 `.map` sources. Useful for the editor; massive. Consider moving outside the repo or git-LFS'ing. |
-| `TrenchBroom-master/` | 40 MB | Reference for editor design. Was it ever actually grepped? If not, delete. |
+_Removed 2026-06-07: `TrenchBroom-master/` (40 MB) — the most advanced idTech
+brush editor, reviewed for in-game-editor ideas. C++/Qt, so concepts only;
+salvaged to `docs/trenchbroom-ideas-to-steal.md` (DrawShapeTool primitives, the
+validator/issue-browser framework, linked groups + layers, FGD typed entity
+props, in-editor model display, half-edge polyhedron) before removal._
 _Removed 2026-06-07: `fteqw-master/` (30 MB) — modern QuakeWorld engine, mostly
 GL/Vulkan/D3D and so irrelevant to a software-only fork. Salvaged the genuine
 deltas to `docs/fteqw-ideas-to-steal.md` first: headline is FTE's scriptable
