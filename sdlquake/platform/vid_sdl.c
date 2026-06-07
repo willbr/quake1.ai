@@ -4,11 +4,10 @@
 // graphics pipeline running palette.frag.glsl -> swapchain present.
 //
 // The CPU side of the rasterizer is unchanged from the SDL_Renderer path:
-// engine code writes palette indices into vid.buffer and palette-slot ids
-// into vid_palette_id at vid_super_w stride. VID_Update uploads both as R8
-// GPU textures, plus the 3×256 RGBA8 palette LUT, and the fragment shader
-// does the dependent lookup that used to run on the CPU. ImGui composites
-// on top via the SDL_GPU3 backend in the same render pass.
+// engine code writes palette indices into vid.buffer at vid_super_w stride.
+// VID_Update uploads it as an R8 GPU texture, plus the 256×1 RGBA8 palette
+// LUT, and the fragment shader does the lookup that used to run on the CPU.
+// ImGui composites on top via the SDL_GPU3 backend in the same render pass.
 
 #include <SDL3/SDL.h>
 #include "quakedef.h"
@@ -16,7 +15,6 @@
 #include "imgui_layer.h"
 #include "r_bbox.h"
 #include "r_paths.h"
-#include "vid_palette.h"
 #include "debug_lines.h"
 #include "crop_screenshot.h"
 #include "video_record.h"
@@ -65,9 +63,8 @@ viddef_t vid;
 unsigned    d_8to24table[256];
 unsigned short d_8to16table[256]; // unused in software but declared in vid.h
 
-// Multi-palette LUT used only by VID_Update.
-// vid_lut[VID_PAL_QUAKE] mirrors d_8to24table[]; slots 1+ are filled on demand.
-static unsigned vid_lut[VID_NUM_PALETTES][256];
+// Palette LUT used only by VID_Update. Mirrors d_8to24table[].
+static unsigned vid_lut[256];
 
 void (*vid_menudrawfn)(void) = NULL;
 void (*vid_menukeyfn)(int key) = NULL;
@@ -80,24 +77,22 @@ static SDL_Window    *sdl_window  = NULL;
 //
 // Per-frame textures:
 //   gpu_fb_tex        R8       (render_w x render_h)   -- palette indices
-//   gpu_palette_id_tex R8      (render_w x render_h)   -- per-pixel slot (0..N-1)
-//   gpu_palette_tex   RGBA8    (256 x VID_NUM_PALETTES) -- the LUT itself
+//   gpu_palette_tex   RGBA8    (256 x 1)                -- the LUT itself
 //
-// All three are sampled via a single nearest-clamp sampler. The pipeline
+// Both are sampled via a single nearest-clamp sampler. The pipeline
 // renders one fullscreen triangle (no vertex buffer needed; gl_VertexIndex
 // drives positions in palette.vert.glsl).
 //
-// The framebuffer + palette-id textures are re-uploaded every frame via a
-// dynamic transfer buffer. The palette LUT is uploaded only when a palette
-// slot changes (vid_load_aux_palette / build_palette_slot mark gpu_lut_dirty).
+// The framebuffer texture is re-uploaded every frame via a dynamic transfer
+// buffer. The palette LUT is uploaded only when it changes
+// (build_palette_slot marks gpu_lut_dirty).
 static SDL_GPUDevice           *gpu_device        = NULL;
 static SDL_GPUGraphicsPipeline *gpu_pipeline      = NULL;
 static SDL_GPUGraphicsPipeline *gpu_rect_pipeline = NULL;  // crop-screenshot overlay
 static SDL_GPUSampler          *gpu_sampler       = NULL;
 static SDL_GPUTexture          *gpu_fb_tex        = NULL;
-static SDL_GPUTexture          *gpu_palette_id_tex = NULL;
 static SDL_GPUTexture          *gpu_palette_tex   = NULL;
-static SDL_GPUTransferBuffer   *gpu_frame_xfer    = NULL; // sized to fb+palette_id
+static SDL_GPUTransferBuffer   *gpu_frame_xfer    = NULL; // sized to fb
 static SDL_GPUTransferBuffer   *gpu_palette_xfer  = NULL; // 256 * N * 4 bytes
 static int                      gpu_fb_tex_w      = 0;
 static int                      gpu_fb_tex_h      = 0;
@@ -179,7 +174,6 @@ static int vid_super_w  = VID_WIDTH;   /* = vid_render_w * vid_supersample_activ
 static int vid_super_h  = VID_HEIGHT;
 
 static byte vid_buffer[VID_RENDER_MAX_W * VID_RENDER_MAX_H];
-byte vid_palette_id[VID_RENDER_MAX_W * VID_RENDER_MAX_H];  /* declared in vid_palette.h */
 
 // ---------------------------------------------------------------------------
 // Palette helpers
@@ -193,41 +187,24 @@ static void build_palette_slot(int slot, unsigned char *palette) {
 }
 static void build_palette_slot_impl(int slot, unsigned char *palette)
 {
-    unsigned *lut = vid_lut[slot];
+    (void)slot;
     for (int i = 0; i < 256; i++)
     {
         unsigned r = palette[i*3 + 0];
         unsigned g = palette[i*3 + 1];
         unsigned b = palette[i*3 + 2];
         // SDL_PIXELFORMAT_ARGB8888: 0xAARRGGBB as uint32 (LE stored as B,G,R,A)
-        lut[i] = 0xFF000000u | (r << 16) | (g << 8) | b;
+        vid_lut[i] = 0xFF000000u | (r << 16) | (g << 8) | b;
     }
-    // 255 is transparent in every palette slot
-    lut[255] = 0;
-    // Slot 0 also backs the engine-visible d_8to24table[256].
-    if (slot == VID_PAL_QUAKE)
-        memcpy(d_8to24table, lut, 256 * sizeof(unsigned));
+    // 255 is transparent.
+    vid_lut[255] = 0;
+    // vid_lut also backs the engine-visible d_8to24table[256].
+    memcpy(d_8to24table, vid_lut, 256 * sizeof(unsigned));
 }
 
 static void build_palette(unsigned char *palette)
 {
-    build_palette_slot(VID_PAL_QUAKE, palette);
-}
-
-// Load an auxiliary palette from a .lmp file (768 bytes: 256 * RGB) into the
-// given vid_lut slot. Tolerates a missing file — slot stays zero-filled and a
-// warning is printed. COM_LoadHunkFile is declared in common.h (via quakedef.h).
-static void vid_load_aux_palette(int slot, const char *qpath)
-{
-    byte *data = COM_LoadHunkFile((char *)qpath);
-    if (!data)
-    {
-        Con_Printf("vid_load_aux_palette: %s missing; slot %d zero-filled\n",
-                   qpath, slot);
-        return;
-    }
-    build_palette_slot(slot, data);
-    // COM_LoadHunkFile data is owned by the hunk; nothing to free here.
+    build_palette_slot(0, palette);
 }
 
 void VID_SetPalette(unsigned char *palette)   { build_palette(palette); }
@@ -247,20 +224,18 @@ void VID_ShiftPalette(unsigned char *palette) { build_palette(palette); }
 
 static void gpu_upload_palette(SDL_GPUCommandBuffer *cmd) {
     if (!gpu_lut_dirty || !gpu_device) return;
-    // Pack vid_lut (ARGB8888, 3 slots × 256) into RGBA8 byte order for the
+    // Pack vid_lut (ARGB8888, 256) into RGBA8 byte order for the
     // R8G8B8A8_UNORM LUT texture.
     void *mapped = SDL_MapGPUTransferBuffer(gpu_device, gpu_palette_xfer, true);
     if (mapped) {
         uint8_t *dst = (uint8_t *)mapped;
-        for (int slot = 0; slot < VID_NUM_PALETTES; slot++) {
-            for (int idx = 0; idx < 256; idx++) {
-                unsigned c = vid_lut[slot][idx];
-                dst[0] = (uint8_t)(c >> 16);
-                dst[1] = (uint8_t)(c >>  8);
-                dst[2] = (uint8_t)(c >>  0);
-                dst[3] = 0xff;
-                dst += 4;
-            }
+        for (int idx = 0; idx < 256; idx++) {
+            unsigned c = vid_lut[idx];
+            dst[0] = (uint8_t)(c >> 16);
+            dst[1] = (uint8_t)(c >>  8);
+            dst[2] = (uint8_t)(c >>  0);
+            dst[3] = 0xff;
+            dst += 4;
         }
         SDL_UnmapGPUTransferBuffer(gpu_device, gpu_palette_xfer);
     }
@@ -270,10 +245,10 @@ static void gpu_upload_palette(SDL_GPUCommandBuffer *cmd) {
     src_info.transfer_buffer = gpu_palette_xfer;
     src_info.offset          = 0;
     src_info.pixels_per_row  = 256;
-    src_info.rows_per_layer  = VID_NUM_PALETTES;
+    src_info.rows_per_layer  = 1;
     SDL_GPUTextureRegion dst_region = {0};
     dst_region.texture = gpu_palette_tex;
-    dst_region.w = 256; dst_region.h = VID_NUM_PALETTES; dst_region.d = 1;
+    dst_region.w = 256; dst_region.h = 1; dst_region.d = 1;
     SDL_UploadToGPUTexture(copy, &src_info, &dst_region, false);
     SDL_EndGPUCopyPass(copy);
     gpu_lut_dirty = 0;
@@ -281,7 +256,6 @@ static void gpu_upload_palette(SDL_GPUCommandBuffer *cmd) {
 
 static void gpu_create_frame_textures(int w, int h) {
     if (gpu_fb_tex)         SDL_ReleaseGPUTexture       (gpu_device, gpu_fb_tex);
-    if (gpu_palette_id_tex) SDL_ReleaseGPUTexture       (gpu_device, gpu_palette_id_tex);
     if (gpu_frame_xfer)     SDL_ReleaseGPUTransferBuffer(gpu_device, gpu_frame_xfer);
 
     SDL_GPUTextureCreateInfo tex_info = {0};
@@ -294,11 +268,10 @@ static void gpu_create_frame_textures(int w, int h) {
     tex_info.num_levels           = 1;
     tex_info.sample_count         = SDL_GPU_SAMPLECOUNT_1;
     gpu_fb_tex         = SDL_CreateGPUTexture(gpu_device, &tex_info);
-    gpu_palette_id_tex = SDL_CreateGPUTexture(gpu_device, &tex_info);
 
     SDL_GPUTransferBufferCreateInfo xfer_info = {0};
     xfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    xfer_info.size  = (Uint32)(w * h * 2);   // fb + palette_id back-to-back
+    xfer_info.size  = (Uint32)(w * h);   // framebuffer indices
     gpu_frame_xfer = SDL_CreateGPUTransferBuffer(gpu_device, &xfer_info);
 
     gpu_fb_tex_w = w;
@@ -348,7 +321,7 @@ static int gpu_init(SDL_Window *win) {
     SDL_GPUShaderCreateInfo fs_info = {0};
     vs_info.stage = SDL_GPU_SHADERSTAGE_VERTEX;
     fs_info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fs_info.num_samplers         = 3;
+    fs_info.num_samplers         = 2;
     fs_info.num_uniform_buffers  = 1;   // scanline params
 
     if (active & SDL_GPU_SHADERFORMAT_MSL) {
@@ -472,7 +445,7 @@ static int gpu_init(SDL_Window *win) {
     pal_info.format               = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     pal_info.usage                = SDL_GPU_TEXTUREUSAGE_SAMPLER;
     pal_info.width                = 256;
-    pal_info.height               = VID_NUM_PALETTES;
+    pal_info.height               = 1;
     pal_info.layer_count_or_depth = 1;
     pal_info.num_levels           = 1;
     pal_info.sample_count         = SDL_GPU_SAMPLECOUNT_1;
@@ -480,7 +453,7 @@ static int gpu_init(SDL_Window *win) {
 
     SDL_GPUTransferBufferCreateInfo pal_xfer_info = {0};
     pal_xfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    pal_xfer_info.size  = 256 * VID_NUM_PALETTES * 4;
+    pal_xfer_info.size  = 256 * 4;
     gpu_palette_xfer = SDL_CreateGPUTransferBuffer(gpu_device, &pal_xfer_info);
 
     gpu_create_frame_textures(vid_super_w, vid_super_h);
@@ -493,7 +466,6 @@ static void gpu_shutdown(void) {
     if (gpu_rect_pipeline)  SDL_ReleaseGPUGraphicsPipeline(gpu_device, gpu_rect_pipeline);
     if (gpu_sampler)        SDL_ReleaseGPUSampler         (gpu_device, gpu_sampler);
     if (gpu_fb_tex)         SDL_ReleaseGPUTexture         (gpu_device, gpu_fb_tex);
-    if (gpu_palette_id_tex) SDL_ReleaseGPUTexture         (gpu_device, gpu_palette_id_tex);
     if (gpu_palette_tex)    SDL_ReleaseGPUTexture         (gpu_device, gpu_palette_tex);
     if (gpu_frame_xfer)     SDL_ReleaseGPUTransferBuffer  (gpu_device, gpu_frame_xfer);
     if (gpu_palette_xfer)   SDL_ReleaseGPUTransferBuffer  (gpu_device, gpu_palette_xfer);
@@ -501,7 +473,7 @@ static void gpu_shutdown(void) {
     SDL_DestroyGPUDevice(gpu_device);
     gpu_device = NULL; gpu_pipeline = NULL; gpu_rect_pipeline = NULL;
     gpu_sampler = NULL;
-    gpu_fb_tex = NULL; gpu_palette_id_tex = NULL; gpu_palette_tex = NULL;
+    gpu_fb_tex = NULL; gpu_palette_tex = NULL;
     gpu_frame_xfer = NULL; gpu_palette_xfer = NULL;
 }
 
@@ -534,9 +506,6 @@ static void gpu_render_frame(void) {
         int src_stride = (int)vid.rowbytes;   // = vid_super_w
         for (int y = 0; y < tex_h; y++)
             memcpy(dst + y * tex_w, vid.buffer + y * src_stride, tex_w);
-        uint8_t *dst_pid = dst + tex_w * tex_h;
-        for (int y = 0; y < tex_h; y++)
-            memcpy(dst_pid + y * tex_w, vid_palette_id + y * src_stride, tex_w);
         SDL_UnmapGPUTransferBuffer(gpu_device, gpu_frame_xfer);
     }
     SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
@@ -547,17 +516,6 @@ static void gpu_render_frame(void) {
         src.rows_per_layer  = (Uint32)tex_h;
         SDL_GPUTextureRegion dst = {0};
         dst.texture = gpu_fb_tex;
-        dst.w = (Uint32)tex_w; dst.h = (Uint32)tex_h; dst.d = 1;
-        SDL_UploadToGPUTexture(copy, &src, &dst, true);
-    }
-    {
-        SDL_GPUTextureTransferInfo src = {0};
-        src.transfer_buffer = gpu_frame_xfer;
-        src.offset          = (Uint32)(tex_w * tex_h);
-        src.pixels_per_row  = (Uint32)tex_w;
-        src.rows_per_layer  = (Uint32)tex_h;
-        SDL_GPUTextureRegion dst = {0};
-        dst.texture = gpu_palette_id_tex;
         dst.w = (Uint32)tex_w; dst.h = (Uint32)tex_h; dst.d = 1;
         SDL_UploadToGPUTexture(copy, &src, &dst, true);
     }
@@ -579,11 +537,10 @@ static void gpu_render_frame(void) {
         SDL_GPUViewport svp = {0};
         svp.w = (float)vid_render_w; svp.h = (float)vid_render_h; svp.max_depth = 1.0f;
         SDL_SetGPUViewport(spass, &svp);
-        SDL_GPUTextureSamplerBinding sb[3];
-        sb[0].texture = gpu_fb_tex;         sb[0].sampler = gpu_sampler;
-        sb[1].texture = gpu_palette_id_tex; sb[1].sampler = gpu_sampler;
-        sb[2].texture = gpu_palette_tex;    sb[2].sampler = gpu_sampler;
-        SDL_BindGPUFragmentSamplers(spass, 0, sb, 3);
+        SDL_GPUTextureSamplerBinding sb[2];
+        sb[0].texture = gpu_fb_tex;      sb[0].sampler = gpu_sampler;
+        sb[1].texture = gpu_palette_tex; sb[1].sampler = gpu_sampler;
+        SDL_BindGPUFragmentSamplers(spass, 0, sb, 2);
         struct { float intensity, size, supersample, pad1; } sp =
             { 0.0f, 1.0f, (float)vid_supersample_active, 0.0f };   // no scanlines in the editor
         SDL_PushGPUFragmentUniformData(cmd, 0, &sp, sizeof(sp));
@@ -646,11 +603,10 @@ static void gpu_render_frame(void) {
         vp.max_depth = 1.0f;
         SDL_SetGPUViewport(pass, &vp);
 
-        SDL_GPUTextureSamplerBinding bindings[3];
-        bindings[0].texture = gpu_fb_tex;         bindings[0].sampler = gpu_sampler;
-        bindings[1].texture = gpu_palette_id_tex; bindings[1].sampler = gpu_sampler;
-        bindings[2].texture = gpu_palette_tex;    bindings[2].sampler = gpu_sampler;
-        SDL_BindGPUFragmentSamplers(pass, 0, bindings, 3);
+        SDL_GPUTextureSamplerBinding bindings[2];
+        bindings[0].texture = gpu_fb_tex;      bindings[0].sampler = gpu_sampler;
+        bindings[1].texture = gpu_palette_tex; bindings[1].sampler = gpu_sampler;
+        SDL_BindGPUFragmentSamplers(pass, 0, bindings, 2);
 
         // Fragment params: scanline overlay + supersample factor. Layout matches
         // the std140 UBO in palette.frag.glsl (four floats = 16 bytes). The shader
@@ -1192,7 +1148,6 @@ void VID_Init(unsigned char *palette)
     vid.recalc_refdef = 1;
 
     build_palette(palette);
-    vid_load_aux_palette(VID_PAL_DOOM, "gfx/palette_doom.lmp");
 
     if (!sys_headless)
     {
@@ -1284,14 +1239,6 @@ void VID_Update(vrect_t *rects)
     // Capture this frame to a video if recording. vid.buffer still holds the
     // 8-bit indices gpu_render_frame just consumed.
     Video_Record_CaptureFrame();
-
-    // Reset palette tags so the next frame's renderer starts clean. Runs
-    // unconditionally (even if SDL_LockTexture failed) to preserve the
-    // invariant: palette_id is always zero at the start of every frame's
-    // renderer pipeline. Must run AFTER the expand step (above) which
-    // reads the tags this frame's renderer wrote — clearing earlier
-    // would wipe those tags before expand sees them.
-    memset(vid_palette_id, 0, vid_super_w * vid_super_h);
 
     // Force the sbar to redraw on the next SCR_UpdateScreen. Stock Quake
     // uses sb_updates / vid.numpages to skip Sbar_Draw once each VRAM page

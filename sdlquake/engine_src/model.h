@@ -402,11 +402,6 @@ typedef struct model_s
 
 	struct lm_iqm_s	*iqmdata;	// mod_iqm: parsed IQM, hunk-allocated (R1)
 
-// PHASE 6: source palette for paletted sprite rendering. 0 = Quake (default),
-// 1 = Doom, 2 = Wolf3D (reserved). Set by Mod_LoadSpriteModel via filename
-// prefix; consumed by R_BlitSpriteScreen to tag vid_palette_id pixels.
-	byte		palette_id;
-
 } model_t;
 
 //============================================================================

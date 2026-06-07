@@ -5,7 +5,6 @@
 #include <stdio.h>
 
 #include "../engine_src/quakedef.h"   /* cl.paused, vid, byte, d_8to24table */
-#include "vid_palette.h"              /* extern byte vid_palette_id[] */
 #include "../vendor/stb/stb_image_write.h"   /* prototypes only; impl in vid_sdl.c */
 
 extern int    Clipboard_SetPNG(const void *bytes, size_t size);
@@ -16,7 +15,6 @@ extern float  scr_con_current;   /* defined in screen.c, no header */
 
 typedef struct {
     unsigned char *frozen;       /* w*h bytes */
-    unsigned char *frozen_pal;   /* w*h bytes */
     int            w, h;
     int            x0, y0, x1, y1;
     int            dragging;
@@ -69,10 +67,7 @@ static int crop_do_snapshot(void)
     if (w <= 0 || h <= 0 || rowbytes < w) return 0;
 
     g.frozen     = (unsigned char *)malloc((size_t)w * (size_t)h);
-    g.frozen_pal = (unsigned char *)malloc((size_t)w * (size_t)h);
-    if (!g.frozen || !g.frozen_pal) {
-        free(g.frozen);     g.frozen     = NULL;
-        free(g.frozen_pal); g.frozen_pal = NULL;
+    if (!g.frozen) {
         return 0;
     }
 
@@ -82,7 +77,6 @@ static int crop_do_snapshot(void)
                vid.buffer + (size_t)y * rowbytes,
                (size_t)w);
     }
-    memcpy(g.frozen_pal, vid_palette_id, (size_t)w * (size_t)h);
     D_DisableBackBufferAccess();
 
     g.w  = w;  g.h  = h;
@@ -108,7 +102,6 @@ void Crop_Exit(void)
     if (!g.active && !g.pending) return;
     cl.paused = g.prev_paused;
     free(g.frozen);     g.frozen     = NULL;
-    free(g.frozen_pal); g.frozen_pal = NULL;
     g.active   = 0;
     g.dragging = 0;
     g.pending  = 0;
@@ -277,11 +270,6 @@ const unsigned char *Crop_FrozenBuffer(int *w, int *h)
     if (w) *w = g.w;
     if (h) *h = g.h;
     return g.frozen;
-}
-
-const unsigned char *Crop_FrozenPalette(void)
-{
-    return g.active ? g.frozen_pal : NULL;
 }
 
 void Crop_GetRect(int *x0, int *y0, int *x1, int *y1)

@@ -51,11 +51,9 @@ int  Crop_HandleEvent(const SDL_Event *ev);
    clamp before use. Any of the out-params may be NULL. */
 void Crop_GetRect(int *x0, int *y0, int *x1, int *y1);
 
-/* Returns the cached frozen 8-bit framebuffer + matching palette-id
-   plane so VID_Update can expand them instead of vid.buffer. Returns
-   NULL if not active. */
+/* Returns the cached frozen 8-bit framebuffer so VID_Update can expand it
+   instead of vid.buffer. Returns NULL if not active. */
 const unsigned char *Crop_FrozenBuffer (int *w, int *h);
-const unsigned char *Crop_FrozenPalette(void);
 
 #ifdef __cplusplus
 }
