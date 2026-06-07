@@ -2,6 +2,10 @@
 
 ## Next
 
+replace malloc and free with areanas game -> level -> frame
+design a memory budget
+design a frametime budget to hit our targets
+
 * plants and forna
     * grass
     * trees
