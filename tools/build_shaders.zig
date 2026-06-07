@@ -156,11 +156,13 @@ fn mustRun(a: Allocator, io: Io, argv: []const []const u8) !void {
     }
 }
 
-/// True if a command spawns and exits cleanly (used to probe for spirv-cross).
+/// True if a command can be spawned at all (used to probe for spirv-cross).
+/// Deliberately ignores the exit code: some spirv-cross builds treat the probe
+/// flag (`--version`) as unknown and exit non-zero while printing usage — that
+/// must NOT be read as "absent", or the MSL strings get stubbed empty and the
+/// Metal backend fails with "Creating MTLFunction failed". A spawn error
+/// (command not found) is the only real signal of absence.
 fn toolAvailable(a: Allocator, io: Io, argv: []const []const u8) bool {
-    const res = std.process.run(a, io, .{ .argv = argv }) catch return false;
-    return switch (res.term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
+    _ = std.process.run(a, io, .{ .argv = argv }) catch return false;
+    return true;
 }
