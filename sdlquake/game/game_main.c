@@ -160,6 +160,23 @@ static int game_ai_inspect(edict_t *e,
     return 1;
 }
 
+// Savegame function-pointer relocation — see game_api.h::func_to_token.
+// A dedicated anchor whose address is never stored in any entvars callback
+// field, so a token of 0 unambiguously means NULL. Every game function lives
+// at a fixed byte offset from this anchor within the loaded module, so the
+// offset is stable across an ASLR rebase (different load address, same build).
+static void game_save_reloc_anchor(void) {}
+
+static intptr_t game_func_to_token(void *fn) {
+    if (!fn) return 0;
+    return (intptr_t)((char *)fn - (char *)&game_save_reloc_anchor);
+}
+
+static void *game_token_to_func(intptr_t token) {
+    if (token == 0) return (void *)0;
+    return (void *)((char *)&game_save_reloc_anchor + token);
+}
+
 static game_api_t s_api = {
     GAME_API_VERSION,
     game_init,
@@ -187,6 +204,8 @@ static game_api_t s_api = {
     game_nav_edges_near,
     game_nav_rebake,
     game_nav_test_path,
+    game_func_to_token,
+    game_token_to_func,
 };
 
 #ifdef _WIN32

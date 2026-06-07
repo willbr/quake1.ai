@@ -4,7 +4,9 @@
 #ifndef GAME_API_H
 #define GAME_API_H
 
-#define GAME_API_VERSION 37
+#include <stdint.h>
+
+#define GAME_API_VERSION 38
 
 // Forward declarations (full definitions in game_types.h)
 typedef struct edict_s edict_t;
@@ -364,6 +366,16 @@ typedef struct game_api_s {
     // Dev/test: run a path query from->to using the live serverflags sigil
     // set; returns waypoint count (0 = no path). Console: `nav_testpath`.
     int   (*nav_test_path)(const float *from, const float *to);
+
+    // Savegame function-pointer relocation. Encode an entvars callback
+    // (think/touch/use/blocked/th_*) as a build-stable token — a signed byte
+    // offset from a fixed in-DLL anchor — for serialization, then decode it
+    // back after the DLL is reloaded at a different base. NULL <-> 0. The
+    // round-trip is correct only within the SAME game.dll build: a recompile
+    // can reorder functions, so saves are not expected to survive a rebuild
+    // (same guarantee Quake 2's g_save.c makes). Implemented in game_main.c.
+    intptr_t (*func_to_token)(void *fn);
+    void    *(*token_to_func)(intptr_t token);
 } game_api_t;
 
 typedef game_api_t *(*Game_GetAPI_fn)(void);

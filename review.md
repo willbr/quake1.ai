@@ -29,6 +29,15 @@ real problems.
 
 ### 1. `game.dll` hot-reload dangles 217+ function pointers stored in live edicts
 
+**RESOLVED 2026-06-07** on two fronts. (a) Live hot-reload: reloads now defer
+while `svb_active()` (hotreload.c:1201) — the DLL is only swapped at the main
+menu / between maps, so no live edict ever holds a pointer into an unloaded
+module. (Note: Q2's offset-rebase would *not* be safe here — a recompile
+reorders functions, so per-edict offsets shift between builds; deferring is the
+correct fix.) (b) Savegames: the dangling-across-serialization case is fixed by
+the relocation-token mechanism described in #11. See the **Savegames** section
+in CLAUDE.md.
+
 Verified:
 - 217 assignments of the form `e->v.think = …`, `e->v.touch = …`,
   `e->v.use = …`, `e->v.blocked = …` in `sdlquake/game/` (grep count).
@@ -168,7 +177,17 @@ fine.
 
 ### 11. Savegames silently break when entvars layout shifts
 
-Verified: `Host_Savegame_f` exists and `ED_Write` walks fields. Phase 8
+**RESOLVED 2026-06-07.** The native-mode `ED_Write`/`ED_WriteGlobals` stubs are
+now real (`pr_edict.c`): a field table (`s_nfields[]`) drives field-by-field
+serialization, `entvars_t` callbacks survive via `func_to_token`/`token_to_func`
+relocation (GAME_API_VERSION 38), edict refs serialize as numbers, and
+`SAVEGAME_VERSION` is bumped 6→7 so the loader rejects the old stub format.
+Verified: save→load round-trips on e1m1 in-process *and* cold-start (proving the
+relocation survives an ASLR rebase). Was the Q2 `g_save.c` salvage
+(`docs/quake2-ideas-to-steal.md` #1). Remaining gap: a save still does not
+survive a `game.dll` *recompile* (offsets move) — documented, acceptable.
+
+Original report — verified: `Host_Savegame_f` exists and `ED_Write` walks fields. Phase 8
 added `button3`, `button4`, `decal_on_bounce` to `entvars_t`. Loading a
 pre-Phase-8 save into a current binary: missing fields default to zero on
 the new side (usually OK). The reverse (load a current save into an older

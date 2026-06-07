@@ -21,7 +21,15 @@ already have or don't need.
 
 ## Top pick — fixes a real open bug
 
-### 1. Function pointers stored as segment-relative offsets (`game/g_save.c`)
+### 1. Function pointers stored as segment-relative offsets (`game/g_save.c`)  ✅ DONE 2026-06-07
+
+**Implemented.** Native-mode savegame entity serialization now uses this exact
+pattern: the game DLL exposes `func_to_token`/`token_to_func` (offset from a
+fixed in-DLL anchor; GAME_API_VERSION 38), and `pr_edict.c`'s `ED_Write` /
+`ED_ParseEdict` serialize `entvars_t` callbacks as relocation tokens (+ edict
+refs as numbers, + a field table). `SAVEGAME_VERSION` 6→7. Verified save→load
+in-process and cold-start (ASLR rebase). Retired `review.md` findings #1 and
+#11. See the **Savegames** section in CLAUDE.md. Notes below kept for context.
 
 This is the one to internalize. Q2's game DLL has the *exact same problem* our
 hot-reload has — raw C function pointers (`think`/`touch`/`use`/etc.) and
@@ -206,5 +214,5 @@ descending order of worth:
 
 ---
 
-_When acting on #1, cross-link the fix back to `review.md` findings #1 and #11
-and strike them from the open list._
+_#1 was implemented 2026-06-07 (see its ✅ note above); `review.md` findings #1
+and #11 are marked RESOLVED. The remaining items are still open ideas._

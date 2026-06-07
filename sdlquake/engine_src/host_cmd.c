@@ -574,7 +574,11 @@ LOAD / SAVE GAME
 // stubs). Today saves don't store edicts, so bumping is mostly defensive —
 // it invalidates any pre-bump .sav files instead of silently restoring
 // partial state.
-#define	SAVEGAME_VERSION	6
+// Bumped 6 -> 7 when NATIVE_GAME ED_Write/ED_ParseEdict began recording full
+// entity state (callbacks via relocation tokens, edict refs as numbers). A
+// version-6 .sav is a stub that holds no entity state, so the formats are
+// incompatible and the loader rejects mismatches.
+#define	SAVEGAME_VERSION	7
 
 /*
 ===============
@@ -659,9 +663,6 @@ void Host_Savegame_f (void)
 	COM_DefaultExtension (name, ".sav");
 
 	Con_Printf ("Saving game to %s...\n", name);
-	// ED_Write is a NATIVE_GAME stub (see pr_edict.c), so the resulting .sav
-	// records skill / map / lightstyles / spawn_parms only — no entity state.
-	Con_Printf ("WARNING: NATIVE_GAME saves do not record entity state yet.\n");
 	f = fopen (name, "w");
 	if (!f)
 	{

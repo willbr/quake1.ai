@@ -56,6 +56,25 @@ This project is a port of the original WinQuake (1996 software renderer) from Wi
 
 `sdlquake/platform/` is on the include path **before** `sdlquake/engine_src/`, so our `winquake.h` shadows the original.
 
+### Savegames (NATIVE_GAME entity serialization)
+
+`save`/`load` record full entity state. In NATIVE_GAME mode `entvars_t`
+callback fields (`think`/`touch`/`use`/`blocked`/`th_*`/`think1`) hold raw C
+function pointers into `game.dll`, which would dangle when the DLL is reloaded
+at a different base. They round-trip through a relocation token: the game DLL
+exposes `func_to_token`/`token_to_func` (`game_main.c`) that encode a pointer as
+a signed byte offset from a fixed in-DLL anchor; the engine's `ED_Write` writes
+the token and `ED_ParseEdict` decodes it against the freshly-loaded DLL (the
+Quake 2 `g_save.c` pattern). Edict references (`enemy`/`owner`/…) serialize as
+edict numbers. The native field table + writer/parser live in `pr_edict.c`
+(`s_nfields[]`, `FT_FUNC`/`FT_EDICT`); cross-level globals in
+`ED_WriteGlobals`/`ED_ParseGlobals`. `SAVEGAME_VERSION` is **7** (6 was a stub
+that held no entity state — incompatible). **Caveat:** the offset round-trip is
+correct only within the *same* `game.dll` build; a recompile reorders functions,
+so a save does not survive a DLL rebuild (same guarantee Q2 makes). This retired
+`review.md` findings #1 (hot-reload dangling pointers) and #11 (savegame
+versioning); salvaged from `docs/quake2-ideas-to-steal.md`.
+
 ### Build flags
 
 Engine files (`sdlquake/engine_src/*.c`) are compiled with `-std=gnu89 -fcommon -fno-sanitize=undefined`. The `-fno-sanitize=undefined` is intentional — the original engine relies on float→int truncation UB that is well-defined on x86.
@@ -191,7 +210,7 @@ All Phase 8 sim systems live inside the hot-reloadable `game.dll` and share `sim
 - `sim_arena.c` — bump arena for per-tick allocations (paths, candidate lists); cleared each frame.
 - `sim_stimulus.c` — M1 stimulus bus (sound/sight/damage events).
 - `sim_ai.c` — M2/M2.5 FSM brains, path-following SEARCHING.
-- `sim_nav.c` — navmesh bake from BSP, A* pathfinder, in-game debug overlay (`sim_nav_debug` cvar). On `start.bsp` it bakes a **conditional-gate union mesh**: edges carry `requires_items`/`forbids_items` predicates gated on the four episode sigils (item bits 28–31, `IT_SIGIL1..4` in `game_defs.h`), so one cached mesh serves every `serverflags` state. The `func_bossgate` slab is kept solid for the primary flood (slab-top edges `forbids=ALL_SIGILS`) and a supplemental non-solid flood adds the shaft-descent edges (`requires=ALL_SIGILS`); `func_episodegate` entry passages are tagged `forbids=rune_bit`. Dev/test: `serverflags <n>` (engine console) sets the sigils; `nav_testpath x1 y1 z1 x2 y2 z2` prints the A* waypoint count under the live sigils. `nav_edges_near` (MCP) reports each edge's `requires`/`forbids`. `NAV_VERSION` is 22; `GAME_API_VERSION` 37 (33 added `nav_test_path`; 34 added `SV_Fire` for M8 fire; 35 added `button5`/`+pouroil` for M8/F2 hold-to-paint oil; 36 added `SV_Decal` for M8/F2 oil + scorch floor decals; 37 added `SpawnParticleEffect` for the data-driven particle editor (`r_emitter.c`)).
+- `sim_nav.c` — navmesh bake from BSP, A* pathfinder, in-game debug overlay (`sim_nav_debug` cvar). On `start.bsp` it bakes a **conditional-gate union mesh**: edges carry `requires_items`/`forbids_items` predicates gated on the four episode sigils (item bits 28–31, `IT_SIGIL1..4` in `game_defs.h`), so one cached mesh serves every `serverflags` state. The `func_bossgate` slab is kept solid for the primary flood (slab-top edges `forbids=ALL_SIGILS`) and a supplemental non-solid flood adds the shaft-descent edges (`requires=ALL_SIGILS`); `func_episodegate` entry passages are tagged `forbids=rune_bit`. Dev/test: `serverflags <n>` (engine console) sets the sigils; `nav_testpath x1 y1 z1 x2 y2 z2` prints the A* waypoint count under the live sigils. `nav_edges_near` (MCP) reports each edge's `requires`/`forbids`. `NAV_VERSION` is 22; `GAME_API_VERSION` 38 (33 added `nav_test_path`; 34 added `SV_Fire` for M8 fire; 35 added `button5`/`+pouroil` for M8/F2 hold-to-paint oil; 36 added `SV_Decal` for M8/F2 oil + scorch floor decals; 37 added `SpawnParticleEffect` for the data-driven particle editor (`r_emitter.c`); 38 added `func_to_token`/`token_to_func` so savegames can relocate entvars callback pointers across an ASLR rebase — see **Savegames** below).
 - `sim_wind.c` — M4 voxel wind grid + smoke advection; `Wind_PathOcclusion` feeds AI LOS.
 - `sim_light.c` — M5 light-tier sampling via `engine_api->Sample_Lightmap`; Gust-extinguishable lights table.
 - `sim_retrofit.c` — M6 patrol-route auto-wiring for id1 maps.

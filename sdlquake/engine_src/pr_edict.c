@@ -169,12 +169,18 @@ ed should be a properly initialized empty edict.
 Used for initial level load and for savegames.
 ====================
 */
-/* Native field table: maps keyname string → offset+type in entvars_t */
-typedef enum { FT_FLOAT, FT_VECTOR, FT_STRING } native_ftype_t;
+/* Native field table: maps keyname string → offset+type in entvars_t.
+ * FT_FUNC  fields hold C function pointers into game.dll; they round-trip
+ *          through the game's func_to_token/token_to_func relocation so saves
+ *          survive an ASLR rebase (see game_api.h).
+ * FT_EDICT fields hold edict_t*; serialized as the edict number. */
+typedef enum { FT_FLOAT, FT_VECTOR, FT_STRING, FT_FUNC, FT_EDICT } native_ftype_t;
 typedef struct { const char *name; size_t off; native_ftype_t type; } native_field_t;
 #define NF_FLOAT(nm)  { #nm, offsetof(entvars_t, nm), FT_FLOAT }
 #define NF_VEC(nm)    { #nm, offsetof(entvars_t, nm), FT_VECTOR }
 #define NF_STR(nm)    { #nm, offsetof(entvars_t, nm), FT_STRING }
+#define NF_FUNC(nm)   { #nm, offsetof(entvars_t, nm), FT_FUNC }
+#define NF_EDICT(nm)  { #nm, offsetof(entvars_t, nm), FT_EDICT }
 static const native_field_t s_nfields[] = {
 	NF_STR(classname), NF_STR(model), NF_STR(netname), NF_STR(message),
 	NF_STR(target), NF_STR(targetname), NF_STR(killtarget),
@@ -213,6 +219,14 @@ static const native_field_t s_nfields[] = {
 	NF_FLOAT(distance), NF_FLOAT(waitmin), NF_FLOAT(waitmax),
 	NF_FLOAT(dmgtime), NF_FLOAT(healamount), NF_FLOAT(healtype), NF_FLOAT(hit_z),
 	NF_FLOAT(decal_on_bounce),
+	// Callback function pointers (savegame-only keys; relocated via tokens).
+	NF_FUNC(think), NF_FUNC(touch), NF_FUNC(use), NF_FUNC(blocked),
+	NF_FUNC(th_stand), NF_FUNC(th_walk), NF_FUNC(th_run), NF_FUNC(th_missile),
+	NF_FUNC(th_melee), NF_FUNC(th_pain), NF_FUNC(th_die), NF_FUNC(think1),
+	// Edict references (savegame-only keys; serialized as edict numbers).
+	NF_EDICT(groundentity), NF_EDICT(chain), NF_EDICT(enemy), NF_EDICT(aiment),
+	NF_EDICT(goalentity), NF_EDICT(owner), NF_EDICT(dmg_inflictor),
+	NF_EDICT(movetarget), NF_EDICT(oldenemy), NF_EDICT(trigger_field),
 	{NULL, 0, FT_FLOAT}
 };
 
@@ -286,6 +300,15 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 			((float*)d)[2] = v[2];
 			break;
 		}
+		case FT_FUNC:
+			// Decode the relocation token against the freshly-loaded DLL.
+			*(void **)d = g_game_api
+				? g_game_api->token_to_func((intptr_t)strtoll(com_token, NULL, 10))
+				: NULL;
+			break;
+		case FT_EDICT:
+			*(edict_t **)d = EDICT_NUM(atoi(com_token));
+			break;
 		}
 	}
 
@@ -458,7 +481,6 @@ int NUM_FOR_EDICT(edict_t *e)
 /* ---------------------------------------------------------------------------
  * Stubs for VM-era functions that are compiled away with NATIVE_GAME=1 but
  * still referenced from engine code that we haven't fully guarded yet.
- * Savegame support for NATIVE_GAME is not implemented.
  * --------------------------------------------------------------------------- */
 void ED_Print (edict_t *ed)
 {
@@ -468,8 +490,110 @@ void ED_Print (edict_t *ed)
 		ed->v.classname ? ed->v.classname : "(null)");
 }
 void ED_PrintEdicts (void) { Con_Printf ("<ED_PrintEdicts: NATIVE_GAME stub>\n"); }
-void ED_WriteGlobals (FILE *f) { (void)f; }
-void ED_Write (FILE *f, edict_t *ed) { (void)f; (void)ed; }
-void ED_ParseGlobals (char *data) { (void)data; }
+
+/*
+=============
+ED_Write
+
+Serialize one edict's entvars to a savegame block. Walks the native field
+table and writes only non-default values (matching the QuakeC ED_Write).
+Function pointers are written as relocation tokens; edict references as edict
+numbers. Mirrors ED_ParseEdict, which reads this back.
+=============
+*/
+void ED_Write (FILE *f, edict_t *ed)
+{
+	int i;
+
+	fprintf (f, "{\n");
+	if (ed->free)
+	{
+		fprintf (f, "}\n");
+		return;
+	}
+
+	for (i = 0; s_nfields[i].name; i++)
+	{
+		const native_field_t *fl = &s_nfields[i];
+		char *p = (char *)&ed->v + fl->off;
+
+		switch (fl->type)
+		{
+		case FT_FLOAT: {
+			float v = *(float *)p;
+			if (v == 0) continue;
+			fprintf (f, "\"%s\" \"%f\"\n", fl->name, v);
+			break;
+		}
+		case FT_VECTOR: {
+			float *v = (float *)p;
+			if (v[0] == 0 && v[1] == 0 && v[2] == 0) continue;
+			fprintf (f, "\"%s\" \"%f %f %f\"\n", fl->name, v[0], v[1], v[2]);
+			break;
+		}
+		case FT_STRING: {
+			const char *s = *(const char **)p;
+			if (!s || !s[0]) continue;
+			fprintf (f, "\"%s\" \"%s\"\n", fl->name, s);
+			break;
+		}
+		case FT_FUNC: {
+			void *fn = *(void **)p;
+			intptr_t tok;
+			if (!fn || !g_game_api) continue;
+			tok = g_game_api->func_to_token (fn);
+			fprintf (f, "\"%s\" \"%lld\"\n", fl->name, (long long)tok);
+			break;
+		}
+		case FT_EDICT: {
+			edict_t *e = *(edict_t **)p;
+			if (!e) continue;
+			fprintf (f, "\"%s\" \"%d\"\n", fl->name, NUM_FOR_EDICT(e));
+			break;
+		}
+		}
+	}
+
+	fprintf (f, "}\n");
+}
+
+/* Campaign-progress globals persisted across a save/load. Kept deliberately
+ * small — only the cross-level state the gameplay reads back. */
+void ED_WriteGlobals (FILE *f)
+{
+	fprintf (f, "{\n");
+	fprintf (f, "\"serverflags\" \"%f\"\n",     game_globals.serverflags);
+	fprintf (f, "\"total_secrets\" \"%f\"\n",   game_globals.total_secrets);
+	fprintf (f, "\"found_secrets\" \"%f\"\n",   game_globals.found_secrets);
+	fprintf (f, "\"total_monsters\" \"%f\"\n",  game_globals.total_monsters);
+	fprintf (f, "\"killed_monsters\" \"%f\"\n", game_globals.killed_monsters);
+	fprintf (f, "}\n");
+}
+
+void ED_ParseGlobals (char *data)
+{
+	char keyname[64];
+	float v;
+
+	while (1)
+	{
+		data = COM_Parse (data);
+		if (com_token[0] == '}') break;
+		if (!data) Sys_Error ("ED_ParseGlobals: EOF without closing brace");
+		strcpy (keyname, com_token);
+
+		data = COM_Parse (data);
+		if (!data) Sys_Error ("ED_ParseGlobals: EOF without closing brace");
+		if (com_token[0] == '}') Sys_Error ("ED_ParseGlobals: closing brace without data");
+
+		v = (float)atof (com_token);
+		if      (!strcmp (keyname, "serverflags"))     { game_globals.serverflags = v; svs.serverflags = (int)v; }
+		else if (!strcmp (keyname, "total_secrets"))     game_globals.total_secrets = v;
+		else if (!strcmp (keyname, "found_secrets"))     game_globals.found_secrets = v;
+		else if (!strcmp (keyname, "total_monsters"))    game_globals.total_monsters = v;
+		else if (!strcmp (keyname, "killed_monsters"))   game_globals.killed_monsters = v;
+		else Con_DPrintf ("ED_ParseGlobals: unknown global '%s'\n", keyname);
+	}
+}
 void PR_Profile_f (void) { Con_Printf ("<PR_Profile_f: no VM in NATIVE_GAME=1>\n"); }
 void PR_RunError (char *error, ...) { Sys_Error(error); }
