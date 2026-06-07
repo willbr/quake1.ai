@@ -435,15 +435,18 @@ you specifically want to keep as a fallback or as a reference implementation.
 | `Quake-master/` | 12 MB | **Yes** — diff baseline for `engine_src/` patches. Keep. |
 | `Quake-Tools-master/` | 5.3 MB | **Yes** — diff baseline for vendored qbsp/light/vis. Keep. |
 | `doom-data/` | 7.6 MB | **Yes** — DOOM1.WAD for Phase 6 sprite extraction. Keep. |
-| `wolf3d-data/` | 1.4 MB | **Yes** — VSWAP.WL1 for Phase 6 sprite extraction. Keep. |
 | `quake_map_source-master/` | **136 MB** | Reference id1 `.map` sources. Useful for the editor; massive. Consider moving outside the repo or git-LFS'ing. |
 | `TrenchBroom-master/` | 40 MB | Reference for editor design. Was it ever actually grepped? If not, delete. |
 | `fteqw-master/` | 30 MB | Reference engine. Same question. |
 | `Quake-2-master/` | 6.5 MB | Q2 reference. Likely never consulted. |
 | `quake106/` | 8.7 MB | Quake 1.06 source release. Probably superseded by `Quake-master/`. |
-| `DOOM-master/` | 1.7 MB | Doom source. Only needed if porting more Doom code. |
-| `wolf3d-master/` | 2.5 MB | Wolf3D source. Same. |
 | `Quake-2-Tools-master/` | 1.5 MB | Q2 tools. Likely never consulted. |
+
+_Removed 2026-06-07: `wolf3d-data/`, `wolf3d-master/`, and `DOOM-master/` —
+the Wolf3D guns were dropped entirely and the Doom-gun port is finished, so the
+source trees (diff baselines) were deleted. Mechanics worth salvaging live in
+`docs/wolf3d-ideas-to-steal.md` and `docs/doom-ideas-to-steal.md`. The
+`doom-data/DOOM1.WAD` build input stays._
 
 **Recommendation**: audit your actual grep/Read history for these dirs.
 The ones you never touch are 70+ MB of dead weight that bloats git
