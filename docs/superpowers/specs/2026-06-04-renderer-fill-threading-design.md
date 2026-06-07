@@ -74,6 +74,20 @@ later per-loop SIMD.
   ~150k–600k cycles (lightmap×texture combine in `R_DrawSurface`); a **hit** is
   ~20 cycles. Dynamic lightmaps (fire/oil) call `D_FlushCaches` which nukes the
   whole pool, forcing rebuilds.
+  - **Post-ship correction (2026-06-07).** Keeping the allocator single-threaded
+    is necessary but **not sufficient**: the resolve pass records each surface's
+    cacheblock *pointer*, and a *later* `D_CacheSurface` in the same pass can
+    evict an *earlier-resolved* surface's block (the rover laps a prior-frame
+    cache-hit block ahead of it). `r_cache_thrash` only trips on a full
+    intra-frame *wrap*, so this ordinary forward eviction slipped through →
+    workers drew stale cacheblocks → wrong-texture/lightmap flicker on random
+    surfaces under movement/dlights. Fix: a **pre-fork eviction-recovery**
+    fixpoint in `D_DrawSurfaces` re-resolves any surface whose
+    `cachespots[rmip][rbucket] != s->rcache` before forking (mirroring the
+    serial draw body's self-heal), serial-fallback if it won't settle. The
+    original "`r_cache_thrash` gates the dispatch → eviction forces serial"
+    assumption was the gap; the byte-identical verification ran on static frames
+    with no eviction, so it never exercised the window.
 
 ## Locked decisions
 

@@ -169,6 +169,25 @@ visible spans of different surfaces are **disjoint** in screen space → workers
 write disjoint framebuffer + z pixels with no locks. Verified byte-identical
 serial-vs-threaded.
 
+**Pre-fork cache-eviction recovery** (`D_DrawSurfaces`, the second hazard the
+resolve/fill split introduced): the resolve pass records each solid surface's
+cacheblock *pointer* (`s->fill.cacheblock`), but a *later* surface's
+`D_CacheSurface` in the same pass can **evict an earlier-resolved surface's
+block** — the surfcache bump allocator's rover, advancing on each (re)build (dlit
+surfaces rebuild every frame: muzzle flashes, rockets, torches), laps a
+prior-frame cache-*hit* block sitting ahead of it and reuses the memory.
+`r_cache_thrash` does **not** catch this (it only trips on a full intra-frame
+*wrap*, not ordinary forward eviction), so the recorded pointer ends up aimed at
+another surface's texels+lightmap → **wrong texture AND lightmap on random
+surfaces** (the classic threaded-fill flicker bug, fixed 2026-06-07). The serial
+draw self-heals via its per-surface `cachespots` re-check (`allow_resetup=true`);
+the lock-free worker can't allocate, so before the fork we re-resolve any
+surface whose `cachespots[rmip][rbucket] != s->rcache`, iterating to a fixpoint
+(each re-resolve can evict another), and fall back to the serial path if it
+won't settle. The validation scan is an O(surfaces) pointer compare — ~free in
+the steady state; on e1m1 with the bot it fires on a few surfaces on hundreds of
+frames yet always converges (never falls back to serial).
+
 `sdlquake/engine/r_threadfill.c` is the pool (pure C / SDL3, like
 `light_bake_thread.c`): persistent `min(cores,16)-1` workers parked on a
 semaphore; `R_ThreadFill_Run(fn, begin, end)` publishes the range, releases

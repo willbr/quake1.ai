@@ -659,6 +659,69 @@ void D_DrawSurfaces (void)
 	if (R_ThreadFill_CheckEnabled())
 		D_CheckSpansDisjoint ();
 
+	// ----------------------------------------------------------------------
+	// Pre-fork cache-eviction recovery (threaded path only).
+	//
+	// The resolve pass above records each solid surface's cacheblock POINTER
+	// (s->fill.cacheblock = c->data). But D_CacheSurface for a surface LATER
+	// in the pass can EVICT an EARLIER-resolved surface's block: the circular
+	// bump allocator's rover, advancing on each (re)build — dlit surfaces
+	// (dynamic lights: muzzle flashes, rockets, torches) rebuild every frame —
+	// laps a prior-frame "cache hit" block that sits ahead of it, nulls its
+	// owner, and reuses the memory. r_cache_thrash does NOT catch this: it only
+	// trips on a full intra-frame wrap (d_surf.c), not ordinary forward
+	// eviction of a prior-frame block. The earlier surface's recorded
+	// cacheblock then points at another surface's texels+lightmap -> wrong
+	// texture AND wrong lightmap on random surfaces.
+	//
+	// The serial draw body self-heals (its per-surface cachespot re-check at
+	// allow_resetup=true re-resolves on the spot, in BSP draw order — see
+	// below). The lock-free threaded draw cannot call the allocator on a
+	// worker, so re-resolve any evicted surface HERE, before the fork. A
+	// re-resolve advances the rover and can evict another hit block, so iterate
+	// to a fixpoint; if it can't settle in a few passes (or a re-resolve wraps
+	// -> r_cache_thrash) fall through to the serial path, which handles it.
+	// Each pass is an O(surfaces) pointer compare; in the steady state nothing
+	// is dirty (no fresh allocs lap a visible block) so this is ~free, and the
+	// dlit case rebuilds only the handful of surfaces whose block actually
+	// moved.
+	// ----------------------------------------------------------------------
+	if (R_ThreadFill_Enabled() && !r_cache_thrash)
+	{
+		int			pass, reresolved = 0;
+		qboolean	dirty = false;
+
+		for (pass = 0 ; pass < 4 ; pass++)
+		{
+			dirty = false;
+			for (s = &surfaces[1] ; s < surface_p ; s++)
+			{
+				msurface_t	*pf;
+				if (!s->spans)
+					continue;
+				if (s->flags & (SURF_DRAWSKY | SURF_DRAWBACKGROUND | SURF_DRAWTURB))
+					continue;			// no surfcache to evict
+				pf = s->data;
+				if (pf->cachespots[s->rmip][s->rbucket] != (surfcache_t *)s->rcache)
+				{
+					D_SetupSurfaceFill (s);		// rebuild + re-record s->fill
+					reresolved++;
+					dirty = true;
+				}
+			}
+			if (!dirty || r_cache_thrash)
+				break;
+		}
+		currententity = &cl_entities[0];		// D_SetupSurfaceFill may have moved it
+		if (dirty)
+		{
+			r_cache_thrash = true;				// didn't converge -> serial path below
+			if (developer.value)
+				Con_DPrintf ("D_DrawSurfaces: cache evictions unsettled after %d "
+					"re-resolves -> serial fill this frame\n", reresolved);
+		}
+	}
+
 	if (r_cache_thrash || !R_ThreadFill_Enabled())
 	{
 		// Serial path (the regression oracle / cache-thrash frames): exact
