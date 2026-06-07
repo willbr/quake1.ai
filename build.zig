@@ -349,33 +349,34 @@ pub fn build(b: *std.Build) void {
     // qbsp .c versions are compiled; light/vis link against them. If one
     // header copy drifts, the light/vis TUs see different struct layouts
     // than the linker target -- silent ABI mismatch with no compiler
-    // diagnostic. Fail the build at the start of a drift.
-    const vendor_check = b.addSystemCommand(&.{
-        "scripts/check_vendor_headers.sh",
-    });
-    vendor_check.addFileInput(b.path("scripts/check_vendor_headers.sh"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/qbsp/bspfile.h"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/qbsp/cmdlib.h"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/qbsp/mathlib.h"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/light/bspfile.h"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/light/cmdlib.h"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/light/mathlib.h"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/vis/bspfile.h"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/vis/cmdlib.h"));
-    vendor_check.addFileInput(b.path("sdlquake/vendor/vis/mathlib.h"));
+    // diagnostic. Done inline in Zig (no process spawn -> cross-platform);
+    // panics the configure with a fix-it message on drift.
+    checkVendorHeaders(b);
 
-    const shader_step = b.addSystemCommand(&.{
-        "scripts/build_shaders.sh",
-        "shaders",
+    // Shader codegen: GLSL -> SPIR-V (+ MSL) -> C header. A host Zig tool
+    // (tools/build_shaders.zig) replaces the old build_shaders.sh so the
+    // build needs no /bin/sh. It spawns glslangValidator (and spirv-cross
+    // when present); see that file's header for the MSL-stub fallback.
+    const shadergen_mod = b.createModule(.{
+        .root_source_file = b.path("tools/build_shaders.zig"),
+        .target           = b.graph.host,
+        .optimize         = optimize,
     });
-    shader_step.step.dependOn(&vendor_check.step);
+    const shadergen_exe = b.addExecutable(.{
+        .name        = "build_shaders",
+        .root_module = shadergen_mod,
+    });
+    const shader_step = b.addRunArtifact(shadergen_exe);
+    shader_step.setCwd(b.path(""));
+    shader_step.addArg("shaders");
+    const shader_header = shader_step.addOutputFileArg("palette_shaders.h");
+    shader_step.addArg("palette");
+    shader_step.addArg("rect_overlay");
     // Declare input files so Zig invalidates the cache when shaders change.
-    shader_step.addFileInput(b.path("scripts/build_shaders.sh"));
     shader_step.addFileInput(b.path("shaders/palette.vert.glsl"));
     shader_step.addFileInput(b.path("shaders/palette.frag.glsl"));
     shader_step.addFileInput(b.path("shaders/rect_overlay.vert.glsl"));
     shader_step.addFileInput(b.path("shaders/rect_overlay.frag.glsl"));
-    const shader_header = shader_step.addOutputFileArg("palette_shaders.h");
     mod.addIncludePath(shader_header.dirname());
 
     // Platform stubs come first so our winquake.h / mgraph.h shadow the originals.
@@ -733,4 +734,39 @@ pub fn build(b: *std.Build) void {
     mapc_run.setCwd(b.path(""));
     if (b.args) |args| mapc_run.addArgs(args);
     b.step("mapcompile", "Compile a .map -> .bsp+.lit (args: <basedir> <mapname>)").dependOn(&mapc_run.step);
+}
+
+/// Verify the per-tool copies of bspfile.h / cmdlib.h / mathlib.h under
+/// vendor/{qbsp,light,vis} are byte-identical (only the qbsp .c versions are
+/// compiled; light/vis link against them -- a drift is a silent ABI mismatch).
+/// Pure Zig file compare so there's no /bin/sh dependency; panics on drift.
+fn checkVendorHeaders(b: *std.Build) void {
+    const headers = [_][]const u8{ "bspfile.h", "cmdlib.h", "mathlib.h" };
+    for (headers) |h| {
+        const qpath = b.fmt("sdlquake/vendor/qbsp/{s}", .{h});
+        const q = readBuildFile(b, qpath);
+        inline for (.{ "light", "vis" }) |dir| {
+            const opath = b.fmt("sdlquake/vendor/{s}/{s}", .{ dir, h });
+            if (!std.mem.eql(u8, q, readBuildFile(b, opath))) {
+                std.debug.panic(
+                    "vendored header drift: {s} differs from {s}\n" ++
+                        "Fix: edit only sdlquake/vendor/qbsp/<header>, then copy it into vendor/light/ and vendor/vis/ so all three match.\n",
+                    .{ opath, qpath },
+                );
+            }
+        }
+    }
+}
+
+fn readBuildFile(b: *std.Build, sub: []const u8) []u8 {
+    const io = b.graph.io;
+    const f = std.Io.Dir.cwd().openFile(io, sub, .{}) catch |e|
+        std.debug.panic("vendor check: cannot open {s}: {s}", .{ sub, @errorName(e) });
+    defer f.close(io);
+    const st = f.stat(io) catch |e|
+        std.debug.panic("vendor check: cannot stat {s}: {s}", .{ sub, @errorName(e) });
+    const data = b.allocator.alloc(u8, @intCast(st.size)) catch @panic("vendor check: OOM");
+    _ = f.readPositionalAll(io, data, 0) catch |e|
+        std.debug.panic("vendor check: cannot read {s}: {s}", .{ sub, @errorName(e) });
+    return data;
 }

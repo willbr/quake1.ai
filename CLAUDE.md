@@ -67,10 +67,18 @@ does the per-pixel `dst = palette[palette_id[px] * 256 + framebuffer[px]]`
 lookup on the GPU. The CPU-side `palette_expand` loop (≈5 ms/frame at
 3x scale) is gone.
 
-Shaders compile at build time via `scripts/build_shaders.sh`
-(glslangValidator GLSL → SPIR-V, then spirv-cross SPIR-V → MSL with
-`--flip-vert-y`), embedded as C arrays in a generated
-`palette_shaders.h`. SPIR-V serves Vulkan on Linux *and* Windows
+Shaders compile at build time via `tools/build_shaders.zig` (a host Zig
+tool run from `build.zig` — replaced the old `build_shaders.sh` so the
+build needs no `/bin/sh`; on Windows `glslang` is scoop-installable):
+glslangValidator GLSL → SPIR-V, then spirv-cross SPIR-V → MSL with
+`--flip-vert-y`, embedded as C arrays in a generated `palette_shaders.h`.
+When `spirv-cross` is absent (e.g. a Windows-only checkout) the MSL
+strings are emitted empty — the Vulkan/SPIR-V path is unaffected;
+regenerate on a macOS checkout (`brew install spirv-cross`) to fill in
+the Metal path. The vendored-header drift guard (`bspfile.h`/`cmdlib.h`/
+`mathlib.h` across vendor/{qbsp,light,vis}) is likewise pure Zig now —
+`checkVendorHeaders` inline in `build.zig`, no shell script.
+SPIR-V serves Vulkan on Linux *and* Windows
 (SDL_GPU picks the Vulkan backend when the requested shader formats
 are SPIRV|MSL and the system has Vulkan drivers — true for any
 Intel HD 4th gen / NVIDIA Kepler / AMD GCN or later, i.e. effectively

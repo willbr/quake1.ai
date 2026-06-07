@@ -26,7 +26,7 @@ everything:
 
 The two pieces of **cross-cutting infrastructure** that unlock the most are (A) a tiny
 `SDL_Thread` job/worker system generalizing the existing `light_bake_thread.c` pattern,
-and (B) the **first `SDL_GPU` compute pipeline** wired into `vid_sdl.c` + `build_shaders.sh`.
+and (B) the **first `SDL_GPU` compute pipeline** wired into `vid_sdl.c` + `tools/build_shaders.zig`.
 
 ## Ranked recommendations
 
@@ -65,14 +65,15 @@ in one place.
 
 There is no compute shader anywhere today, but SDL3's compute API is fully present in the
 vendored header and the device is already up in `vid_sdl.c`. The mechanical recipe
-(verified against `SDL_gpu.h` and `build_shaders.sh`):
+(verified against `SDL_gpu.h` and `tools/build_shaders.zig`):
 
 1. Author `shaders/<name>.comp.glsl` (`layout(local_size_x=8, local_size_y=8) in;`).
    **Compute binding sets differ from fragment:** set 0 = sampled + read-only storage,
    set 1 = read-write storage, set 2 = uniforms.
-2. `build_shaders.sh` — add a `comp_stems` list; `glslangValidator -V -S comp`; for MSL
-   drop `--flip-vert-y` (meaningless for compute); emit `<stem>_comp_spv`/`_msl` like the
-   existing graphics stems. Add the `.comp.glsl` as a `build.zig` `addFileInput`.
+2. `tools/build_shaders.zig` — extend it to emit a `comp` stage (`glslangValidator -V
+   -S comp`; for MSL drop `--flip-vert-y`, meaningless for compute) producing
+   `<stem>_comp_spv`/`_msl` like the existing graphics stems, and pass the new stem +
+   `.comp.glsl` `addFileInput` from `build.zig`.
 3. Create with **`SDL_GPUComputePipelineCreateInfo`** (not `SDL_CreateGPUShader`) +
    `SDL_CreateGPUComputePipeline`; `threadcount_*` must match the shader's `local_size`.
 4. Output target needs `SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE`.
