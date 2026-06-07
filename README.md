@@ -8,19 +8,6 @@ gameplay systems (reactive AI + navmesh, player abilities, wind/smoke, fire
 propagation), savegames, a dev MPEG-1 recorder, a per-frame profiler, and an MCP
 server for Claude Code integration.
 
-## Phases
-
-| Phase | Status | Goal |
-|---|---|---|
-| 1 | done | SDL3 port + Zig build |
-| 2 | done | MCP server |
-| 3 | done | Hot-reload (`game_api_t` ABI, `game.dll`) |
-| 4 | done | Dear ImGui dev overlay (F3) |
-| 5 | done | QuakeC → C (progs ported to hot-reloadable game.dll) |
-| 6 | done (guns removed) | Doom1 + Wolf3D guns ported here; both rosters removed 2026-06-07 (the `weapon2` selector remains for the immersive-sim fire weapons) |
-| 7 | done | In-game 3D map editor (F2) |
-| 8 | M3–M6, M8 done; M7 stub | Immersive-sim systems (stimulus bus, FSM AI + navmesh, Blink + Gust, wind/smoke, light tier, Fire & Oil) |
-
 ## Systems
 
 | System | What it is | Detail |
