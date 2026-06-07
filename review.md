@@ -455,7 +455,12 @@ you specifically want to keep as a fallback or as a reference implementation.
 | `Quake-Tools-master/` | 5.3 MB | **Yes** — diff baseline for vendored qbsp/light/vis. Keep. |
 | `quake_map_source-master/` | **136 MB** | Reference id1 `.map` sources. Useful for the editor; massive. Consider moving outside the repo or git-LFS'ing. |
 | `TrenchBroom-master/` | 40 MB | Reference for editor design. Was it ever actually grepped? If not, delete. |
-| `fteqw-master/` | 30 MB | Reference engine. Same question. |
+_Removed 2026-06-07: `fteqw-master/` (30 MB) — modern QuakeWorld engine, mostly
+GL/Vulkan/D3D and so irrelevant to a software-only fork. Salvaged the genuine
+deltas to `docs/fteqw-ideas-to-steal.md` first: headline is FTE's scriptable
+particle grammar (`client/r_part.c` + `partcfgs/*.cfg`); plus skeletal animation
+blending/events. Its software renderer is a 32-bit RGBA compatibility fallback
+with nothing to steal._
 
 _Removed 2026-06-07: `Quake-2-master/` (6.5 MB) + `Quake-2-Tools-master/`
 (1.5 MB) — Q2 is a sibling engine, ~90% structurally identical to our Q1 base,
