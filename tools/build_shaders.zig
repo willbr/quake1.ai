@@ -7,6 +7,10 @@
 //!   For each stem, reads <shader_dir>/<stem>.{vert,frag}.glsl and writes
 //!   <stem>_{vert,frag}_{spv,msl} symbols into <out_header>.
 //!
+//! Vertex shaders bake the SDL_GPU Y-up-NDC / Y-down-texcoord handling into
+//! v_uv directly, so MSL is generated WITHOUT --flip-vert-y (a per-backend flip
+//! would re-invert Metal). See shaders/palette.vert.glsl.
+//!
 //! External tools (resolved on PATH):
 //!   glslangValidator  -- GLSL -> SPIR-V (required).
 //!   spirv-cross       -- SPIR-V -> MSL (optional). When absent the MSL strings
@@ -61,12 +65,14 @@ pub fn main(init: std.process.Init) !void {
             const sym = try std.fmt.allocPrint(a, "{s}_{s}_spv", .{ stem, stage });
             try emitByteArray(&out, a, sym, spv);
 
-            // SPIR-V -> MSL (optional). --flip-vert-y: Metal NDC has Y up, so
-            // spirv-cross flips gl_Position.y to match the Vulkan (Y-down) source.
+            // SPIR-V -> MSL (optional). No --flip-vert-y: SDL_GPU exposes a
+            // uniform Y-up NDC across backends, so the vertex shaders bake the
+            // Y handling into v_uv directly (see palette.vert.glsl). A
+            // per-backend flip here would re-invert the Metal path.
             const msl_sym = try std.fmt.allocPrint(a, "{s}_{s}_msl", .{ stem, stage });
             if (have_msl) {
                 const msl_path = try std.fmt.allocPrint(a, "{s}/{s}.{s}.msl", .{ scratch, stem, stage });
-                try mustRun(a, io, &.{ "spirv-cross", "--msl", "--msl-version", "30000", "--flip-vert-y", spv_path, "--output", msl_path });
+                try mustRun(a, io, &.{ "spirv-cross", "--msl", "--msl-version", "30000", spv_path, "--output", msl_path });
                 try emitString(&out, a, msl_sym, try readFile(a, io, msl_path));
             } else {
                 try emitString(&out, a, msl_sym, "");
