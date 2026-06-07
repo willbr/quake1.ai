@@ -242,6 +242,68 @@ void W_FireFlamethrower(void) {
 }
 
 // ---------------------------------------------------------------------------
+// weapon2 selector — dispatch, ammo/model setup, weapon switching, give-all.
+// (Folded in from the retired Phase 6 module; Doom weapons removed, only the
+// fire weapons remain.)
+// ---------------------------------------------------------------------------
+
+// Top-level fire dispatch — called from weapons.c W_Attack when weapon2 != 0.
+void W_Attack_Weapon2(void) {
+    int it2 = (int)g->self->v.weapon2;
+    switch (it2) {
+        case IT2_OILGUN:       W_FireOilGun();       break;
+        case IT2_FLAMETHROWER: W_FireFlamethrower(); break;
+        default: /* unknown — silently noop */       break;
+    }
+}
+
+// Sets weaponmodel + currentammo for the active weapon2 selection.
+void W_SetCurrentAmmo_Weapon2(int it2) {
+    edict_t *self = g->self;
+    self->v.weaponframe = 0;
+    switch (it2) {
+        case IT2_OILGUN:
+            self->v.weaponmodel = "progs/v_rock.mdl";
+            self->v.currentammo = self->v.ammo_cells;
+            break;
+        case IT2_FLAMETHROWER:
+            self->v.weaponmodel = "progs/v_light.mdl";
+            self->v.currentammo = self->v.ammo_cells;
+            break;
+        default:
+            self->v.weaponmodel = "";
+            self->v.currentammo = 0;
+            break;
+    }
+}
+
+// Impulse 40/41: switch to a fire weapon (if owned).
+void Weapon2_ChangeWeapon(int impulse) {
+    edict_t *self = g->self;
+    int flag = 0;
+    switch (impulse) {
+        case 40: flag = IT2_OILGUN;       break;
+        case 41: flag = IT2_FLAMETHROWER; break;
+        default: return;
+    }
+    if (!((int)self->v.items2 & flag)) {
+        eng->Con_Print("no weapon\n");
+        return;
+    }
+    self->v.weapon  = 0;
+    self->v.weapon2 = (float)flag;
+    W_SetCurrentAmmo_Weapon2(flag);
+}
+
+// Impulse-100 cheat path: grant both fire weapons + cells.
+void Weapon2_GiveAll(void) {
+    edict_t *self = g->self;
+    self->v.items2 = (float)(IT2_OILGUN | IT2_FLAMETHROWER);
+    if (self->v.ammo_cells < 200) self->v.ammo_cells = 200;
+    eng->Con_Print("weapon2: fire weapons granted\n");
+}
+
+// ---------------------------------------------------------------------------
 // M8 / F3: World pickup spawn functions.
 // ---------------------------------------------------------------------------
 extern void StartItem(edict_t *e);

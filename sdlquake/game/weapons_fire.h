@@ -9,10 +9,16 @@
 
 void WeaponsFire_Init(void);        // register cvars; call once from W_Precache
 
-void W_FireOilGun(void);            // dispatched from W_Attack_Phase6 (weapon2 == IT2_OILGUN)
-void W_FireFlamethrower(void);      // dispatched from W_Attack_Phase6 (weapon2 == IT2_FLAMETHROWER)
+void W_FireOilGun(void);            // dispatched from W_Attack_Weapon2 (weapon2 == IT2_OILGUN)
+void W_FireFlamethrower(void);      // dispatched from W_Attack_Weapon2 (weapon2 == IT2_FLAMETHROWER)
 
 void Fire_GiveWeapons(edict_t *self);   // impulse 212 cheat: grant both + cells, select oil gun
+
+// weapon2 selector (folded in from the retired Phase 6 module; Doom removed).
+void W_Attack_Weapon2(void);            // active weapon = self->v.weapon2
+void W_SetCurrentAmmo_Weapon2(int it2_flag);  // sets weaponmodel + currentammo
+void Weapon2_ChangeWeapon(int impulse); // impulse 40/41 -> select a fire weapon
+void Weapon2_GiveAll(void);             // impulse-100 cheat: grant fire weapons
 
 // World pickups (Task 5) -- registered in spawn.c's s_spawns[] table.
 void spawn_weapon_oilgun(edict_t *e);

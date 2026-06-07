@@ -88,20 +88,14 @@
 #define IT_SIGIL4           (1u<<31)
 #define IT_ALL_SIGILS       (IT_SIGIL1|IT_SIGIL2|IT_SIGIL3|IT_SIGIL4)  /* == 15<<28 */
 
-// Phase 6 weapons live in a separate items2 bitfield + weapon2 selector,
-// so the existing 8-weapon Quake roster stays untouched. See
-// docs/superpowers/plans/2026-05-04-immersive-sim-m1-m2-ai-substrate.md
-// (the *Phase 6* plan, despite the file name) for the full spec.
-#define IT2_DOOM_FIST       (1 << 0)
-#define IT2_DOOM_PISTOL     (1 << 1)
-#define IT2_DOOM_SHOTGUN    (1 << 2)
-#define IT2_DOOM_CHAINGUN   (1 << 3)
-#define IT2_DOOM_ROCKET     (1 << 4)
-#define IT2_DOOM_CHAINSAW   (1 << 5)
-// Bits 6-9 are retired (formerly the Wolf3D knife/pistol/MG/chaingun roster,
-// removed 2026-06-07); left as a gap so the surviving bit assignments below
-// don't shift.
-// M8 / F3 fire weapons (continue the items2 parallel roster).
+// Second-weapon roster: a separate items2 bitfield + weapon2 selector, so the
+// existing 8-weapon Quake roster stays untouched. weapon2 != 0 routes firing /
+// ammo / model setup through the weapon2 dispatch (weapons_fire.c).
+// Bits 0-5 are retired (formerly the Doom1 fist/pistol/shotgun/chaingun/rocket/
+// chainsaw roster, removed 2026-06-07) and bits 6-9 too (formerly the Wolf3D
+// roster, removed 2026-06-07); left as a gap so the surviving bit assignments
+// below don't shift.
+// M8 / F3 fire weapons (the live items2 roster).
 #define IT2_OILGUN          (1 << 10)
 #define IT2_FLAMETHROWER    (1 << 11)
 

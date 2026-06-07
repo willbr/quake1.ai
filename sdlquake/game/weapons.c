@@ -3,7 +3,6 @@
 #include "game_api.h"
 #include "game_types.h"
 #include "game_defs.h"
-#include "weapons_phase6.h"
 #include "weapons_fire.h"
 #include "flammables.h"
 #include "actor_test.h"
@@ -312,8 +311,6 @@ void W_Precache(void) {
     eng->PrecacheSound("ambience/fire1.wav");   // flamethrower loop (M8/F3)
     WeaponsFire_Init();
     Flammables_Init();
-
-    Phase6_PrecacheCommon();
 }
 
 static float crandom(void) {
@@ -1351,7 +1348,7 @@ void W_SetCurrentAmmo(void) {
     // Phase 6 takes precedence: when weapon2 is set, set the sprite viewmodel
     // and skip the rest of Quake's IT_* / ammo-icon logic.
     if (self->v.weapon2 != 0) {
-        W_SetCurrentAmmo_Phase6((int)self->v.weapon2);
+        W_SetCurrentAmmo_Weapon2((int)self->v.weapon2);
         return;
     }
 
@@ -1456,7 +1453,7 @@ static void W_Attack(void) {
         eng->MakeVectors(self->v.v_angle);
         self->v.show_hostile = g->time + 1;
         W_FireGust();
-        W_Attack_Phase6();
+        W_Attack_Weapon2();
         return;
     }
 
@@ -1563,10 +1560,9 @@ void W_InfiniteAmmoRefill(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
-// Unified weapon cycle (impulse 10 / 12) — covers stock Quake + Phase 6.
-// Order: 8 stock Quake, 6 Doom. Cycler walks forward/back through
-// the array, skipping slots the player doesn't own or doesn't have enough
-// ammo for, and wraps at either end.
+// Unified weapon cycle (impulse 10 / 12) — stock Quake's 8 weapons. The
+// fire weapons (weapon2) are selected directly via impulse 40/41, not folded
+// into this cycler.
 // ---------------------------------------------------------------------------
 typedef struct { int is_phase6; int flag; } weapon_slot_t;
 static const weapon_slot_t WCYCLE[] = {
@@ -1578,19 +1574,12 @@ static const weapon_slot_t WCYCLE[] = {
     {0, IT_GRENADE_LAUNCHER},
     {0, IT_ROCKET_LAUNCHER},
     {0, IT_LIGHTNING},
-    {1, IT2_DOOM_FIST},
-    {1, IT2_DOOM_PISTOL},
-    {1, IT2_DOOM_SHOTGUN},
-    {1, IT2_DOOM_CHAINGUN},
-    {1, IT2_DOOM_ROCKET},
-    {1, IT2_DOOM_CHAINSAW},
 };
 #define WCYCLE_COUNT ((int)(sizeof(WCYCLE) / sizeof(WCYCLE[0])))
 
 static int wcycle_usable(int idx) {
     edict_t *self = g->self;
     int items  = (int)self->v.items;
-    int items2 = (int)self->v.items2;
     switch (idx) {
         case 0:  return  (items  & IT_AXE) != 0;
         case 1:  return ((items  & IT_SHOTGUN)          != 0) && self->v.ammo_shells  >= 1;
@@ -1600,12 +1589,6 @@ static int wcycle_usable(int idx) {
         case 5:  return ((items  & IT_GRENADE_LAUNCHER) != 0) && self->v.ammo_rockets >= 1;
         case 6:  return ((items  & IT_ROCKET_LAUNCHER)  != 0) && self->v.ammo_rockets >= 1;
         case 7:  return ((items  & IT_LIGHTNING)        != 0) && self->v.ammo_cells   >= 1;
-        case 8:  return  (items2 & IT2_DOOM_FIST)       != 0;
-        case 9:  return ((items2 & IT2_DOOM_PISTOL)     != 0) && self->v.ammo_bullets >= 1;
-        case 10: return ((items2 & IT2_DOOM_SHOTGUN)    != 0) && self->v.ammo_shells  >= 1;
-        case 11: return ((items2 & IT2_DOOM_CHAINGUN)   != 0) && self->v.ammo_bullets >= 1;
-        case 12: return ((items2 & IT2_DOOM_ROCKET)     != 0) && self->v.ammo_rockets >= 1;
-        case 13: return  (items2 & IT2_DOOM_CHAINSAW)   != 0;
         default: return 0;
     }
 }
@@ -1678,8 +1661,8 @@ static void ImpulseCommands(void) {
     if (imp == 10)  CycleWeaponCommand();
     if (imp == 11)  ServerflagsCommand();
     if (imp == 12)  CycleWeaponReverseCommand();
-    if (imp >= 30 && imp <= 41) Phase6_ChangeWeapon(imp);   // Doom1 roster (30-35) + F3 fire weapons (40,41)
-    if (imp == 100) Phase6_CheatGiveAll();
+    if (imp >= 40 && imp <= 41) Weapon2_ChangeWeapon(imp);   // F3 fire weapons (40,41)
+    if (imp == 100) Weapon2_GiveAll();
     if (imp == 210) Fire_IgniteTraced(self);   // debug: ignite entity under crosshair
     if (imp == 211) Fire_OilTraced(self);      // debug: deposit oil at crosshair
     if (imp == 212) Fire_GiveWeapons(self);    // M8/F3: grant fire weapons + cells
