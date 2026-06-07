@@ -23,6 +23,7 @@
 * increase decal resolution
 * .dem editor mode
 * snow and footsteps
+* replace zig with build.c script
 
 * 3 clicks to add a cluck, draw the plane then add height
 remove other old code, directx
