@@ -1,6 +1,12 @@
 # quake1.ai
 
-WinQuake (1996 software renderer) ported to SDL3 + Zig, with a hot-reloading game layer, in-game 3D map editor, immersive-sim gameplay systems (reactive AI, player abilities, fire propagation), and an MCP server for Claude Code integration.
+WinQuake (1996 software renderer) ported to SDL3 + Zig. The scene is still
+**100% software-rendered** — the GPU only does an 8-bit→RGBA palette-LUT present
+— but everything around it is new: a hot-reloading game layer, a threaded/SIMD
+rasterizer, an in-game 3D editor (maps, particles, skeletal actors), immersive-sim
+gameplay systems (reactive AI + navmesh, player abilities, wind/smoke, fire
+propagation), savegames, a dev MPEG-1 recorder, a per-frame profiler, and an MCP
+server for Claude Code integration.
 
 ## Phases
 
@@ -14,6 +20,20 @@ WinQuake (1996 software renderer) ported to SDL3 + Zig, with a hot-reloading gam
 | 6 | done (guns removed) | Doom1 + Wolf3D guns ported here; both rosters removed 2026-06-07 (the `weapon2` selector remains for the immersive-sim fire weapons) |
 | 7 | done | In-game 3D map editor (F2) |
 | 8 | M3–M6, M8 done; M7 stub | Immersive-sim systems (stimulus bus, FSM AI + navmesh, Blink + Gust, wind/smoke, light tier, Fire & Oil) |
+
+## Systems
+
+| System | What it is | Detail |
+|---|---|---|
+| Render pipeline | 100% software renderer; GPU only does an 8-bit→RGBA palette-LUT present (SDL_GPU shader), plus CRT scanlines and ImGui compositing | [docs/render-pipeline.md](docs/render-pipeline.md) |
+| Threaded span fill | The CPU rasterizer's span fill is parallelised across a worker pool (3.14→0.75 ms on a 10-core Mac); `r_threads` cvar | [docs/renderer-threaded-fill.md](docs/renderer-threaded-fill.md) |
+| Immersive-sim (Phase 8) | Stimulus bus + FSM AI + navmesh A*, Blink/Gust abilities, voxel wind/smoke, light tiers, Fire & Oil propagation — all in the hot-reloadable `game.dll` | [docs/phase8-fire-oil.md](docs/phase8-fire-oil.md) |
+| In-game 3D editor (F2) | ImGui-docked editor with Map, Particle, and Actor authoring modes | [docs/editor-modules.md](docs/editor-modules.md) |
+| Skeletal actors | IQM characters authored in-engine (cubes-first), with runtime procedural face / ponytail / clip layers | [docs/skeletal-actors.md](docs/skeletal-actors.md) |
+| Particles | Data-driven particle presets (`id1/particles/*.pcl`) authored in the Particle editor mode | [docs/editor-modules.md](docs/editor-modules.md) |
+| Savegames | Full entity-state `save`/`load`; entvars callback pointers relocate across a DLL reload (Quake 2 `g_save` pattern), `SAVEGAME_VERSION` 7 | — |
+| Perf instrumentation | Per-frame scoped timers, live overlay graph (`showperf`), Chrome-trace capture (`profile`), and replay | [docs/perf-instrumentation.md](docs/perf-instrumentation.md) |
+| Video recording | Dev MPEG-1 screen recorder (`recordvideo`/`stopvideo`), parallel encode | [docs/video-recording.md](docs/video-recording.md) |
 
 ## Build
 
