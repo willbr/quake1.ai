@@ -1,18 +1,14 @@
 // manifest.zig -- Declarative table of Phase 6 extraction targets + driver.
 //
-// 10 weapons × N frames each = 10 .spr files.
-// 9 sounds (3 Wolf + 6 Doom) = 9 .wav files.
-// Wolf knife has no digital sound in shareware (Adlib-only) — silent for now.
+// 6 Doom weapons × N frames each = 6 .spr files.
+// 7 Doom sounds = 7 .wav files.
 
 const std = @import("std");
 const Io = std.Io;
 const Dir = std.Io.Dir;
 const Allocator = std.mem.Allocator;
 
-const palette_mod = @import("quake_palette.zig");
 const palette_png = @import("quake_palette_png.zig");
-const wolf_vswap  = @import("wolf_vswap.zig");
-const wolf_digi   = @import("wolf_digi.zig");
 const doom_wad    = @import("doom_wad.zig");
 const quake_spr   = @import("quake_spr.zig");
 const quake_wav   = @import("quake_wav.zig");
@@ -20,11 +16,6 @@ const quake_wav   = @import("quake_wav.zig");
 // ---------------------------------------------------------------------------
 // Sprite manifest entries.
 // ---------------------------------------------------------------------------
-const WolfSpriteSet = struct {
-    out_path: []const u8,
-    base_idx: u16,    // first sprite chunk in VSWAP
-    frame_count: u8,  // sequential
-};
 
 // A Doom viewmodel frame is either a bare gun lump, or a gun lump with a
 // flash lump composited on top (positioned via Doom's per-sprite leftoffset
@@ -37,13 +28,6 @@ const DoomFrameSpec = struct {
 const DoomSpriteSet = struct {
     out_path: []const u8,
     frames: []const DoomFrameSpec,
-};
-
-const wolf_sprite_sets = [_]WolfSpriteSet{
-    .{ .out_path = "id1/progs/v_wolfknife.spr",     .base_idx = 522, .frame_count = 5 },
-    .{ .out_path = "id1/progs/v_wolfpistol.spr",    .base_idx = 527, .frame_count = 5 },
-    .{ .out_path = "id1/progs/v_wolfmg.spr",        .base_idx = 532, .frame_count = 5 },
-    .{ .out_path = "id1/progs/v_wolfchaingun.spr",  .base_idx = 537, .frame_count = 5 },
 };
 
 // Frame manifests confirmed by enumerating DOOM1.WAD via -doom_info.
@@ -102,20 +86,9 @@ const doom_sprite_sets = [_]DoomSpriteSet{
 // ---------------------------------------------------------------------------
 // Sound manifest entries.
 // ---------------------------------------------------------------------------
-const WolfSoundSet = struct {
-    out_path: []const u8,
-    digi_idx: u16,  // index into DigiList (per WL1 wolfdigimap)
-};
-
 const DoomSoundSet = struct {
     out_path: []const u8,
     lump:     []const u8,
-};
-
-const wolf_sound_sets = [_]WolfSoundSet{
-    .{ .out_path = "id1/sound/phase6/wolf_pistol.wav",   .digi_idx = 5 },
-    .{ .out_path = "id1/sound/phase6/wolf_mg.wav",       .digi_idx = 4 },
-    .{ .out_path = "id1/sound/phase6/wolf_chaingun.wav", .digi_idx = 6 },
 };
 
 const doom_sound_sets = [_]DoomSoundSet{
@@ -132,61 +105,27 @@ const doom_sound_sets = [_]DoomSoundSet{
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build a 256-entry remap from a source 8-bit palette to Quake palette
-/// indices (0..254), via Euclidean-distance nearest match. Source index 0xFF
-/// stays 0xFF (reserved transparency).
-fn buildRemap8(src: [256][3]u8, dst: palette_mod.Palette) [256]u8 {
-    var rmap: [256]u8 = undefined;
+/// Linear-resample 8-bit unsigned PCM from `src_rate` to `dst_rate`. Used by
+/// the Doom sound path for any lump that isn't already 11025 Hz.
+fn resampleU8(allocator: Allocator, in: []const u8, src_rate: u32, dst_rate: u32) ![]u8 {
+    if (src_rate == dst_rate) return allocator.dupe(u8, in);
+    const out_len: usize = (in.len * dst_rate) / src_rate;
+    var out = try allocator.alloc(u8, out_len);
+    errdefer allocator.free(out);
+
     var i: usize = 0;
-    while (i < 256) : (i += 1) {
-        if (i == 0xFF) { rmap[i] = 0xFF; continue; }
-        const r: i32 = @as(i32, src[i][0]);
-        const g: i32 = @as(i32, src[i][1]);
-        const b: i32 = @as(i32, src[i][2]);
-        var best_idx: u8 = 0;
-        var best_d2: i64 = std.math.maxInt(i64);
-        var k: u16 = 0;
-        while (k < 255) : (k += 1) {
-            const dr: i64 = r - @as(i32, dst[k][0]);
-            const dg: i64 = g - @as(i32, dst[k][1]);
-            const db: i64 = b - @as(i32, dst[k][2]);
-            const d2 = dr * dr + dg * dg + db * db;
-            if (d2 < best_d2) { best_d2 = d2; best_idx = @intCast(k); }
+    while (i < out_len) : (i += 1) {
+        const src_pos_q16: u64 = (@as(u64, i) * @as(u64, src_rate) * 65536) / @as(u64, dst_rate);
+        const src_idx: usize = @intCast(src_pos_q16 >> 16);
+        const frac: u32 = @intCast(src_pos_q16 & 0xFFFF);
+        if (src_idx + 1 >= in.len) {
+            out[i] = in[in.len - 1];
+        } else {
+            const a: u32 = in[src_idx];
+            const b: u32 = in[src_idx + 1];
+            const interp = (a * (65536 - frac) + b * frac) >> 16;
+            out[i] = @intCast(interp & 0xFF);
         }
-        rmap[i] = best_idx;
-    }
-    return rmap;
-}
-
-fn applyRemap(rmap: [256]u8, pixels: []u8) void {
-    for (pixels) |*p| p.* = rmap[p.*];
-}
-
-/// Nearest-neighbor resample. Handles both upscale and downscale at any
-/// ratio (need not be an integer multiple). Used for Wolf 3x upscale and
-/// the Doom 3/4 downscale.
-fn resampleNearest(
-    src: []const u8, src_w: u32, src_h: u32,
-    dst: []u8,       dst_w: u32, dst_h: u32,
-) void {
-    var y: u32 = 0;
-    while (y < dst_h) : (y += 1) {
-        const sy = y * src_h / dst_h;
-        var x: u32 = 0;
-        while (x < dst_w) : (x += 1) {
-            const sx = x * src_w / dst_w;
-            dst[y * dst_w + x] = src[sy * src_w + sx];
-        }
-    }
-}
-
-fn convertWolfPalette() [256][3]u8 {
-    var out: [256][3]u8 = undefined;
-    var i: usize = 0;
-    while (i < 256) : (i += 1) {
-        out[i][0] = wolf_vswap.channel6to8(wolf_vswap.wolf_palette_6bit[i * 3 + 0]);
-        out[i][1] = wolf_vswap.channel6to8(wolf_vswap.wolf_palette_6bit[i * 3 + 1]);
-        out[i][2] = wolf_vswap.channel6to8(wolf_vswap.wolf_palette_6bit[i * 3 + 2]);
     }
     return out;
 }
@@ -321,13 +260,11 @@ fn blitPixels(
 // ---------------------------------------------------------------------------
 
 /// Stat every output file the extractor would produce. Returns true iff
-/// they all already exist on disk — extractor inputs (DOOM1.WAD, VSWAP.WL1,
-/// pak0.pak) are committed reference data that doesn't change in practice,
-/// so existence alone is a sufficient freshness check. `rm` any output to
-/// force re-extraction.
+/// they all already exist on disk — extractor inputs (DOOM1.WAD, pak0.pak)
+/// are committed reference data that doesn't change in practice, so existence
+/// alone is a sufficient freshness check. `rm` any output to force
+/// re-extraction.
 fn allOutputsExist(io: Io) bool {
-    for (wolf_sprite_sets) |s| if (!pathExists(io, s.out_path)) return false;
-    for (wolf_sound_sets)  |s| if (!pathExists(io, s.out_path)) return false;
     for (doom_sprite_sets) |s| if (!pathExists(io, s.out_path)) return false;
     for (doom_sound_sets)  |s| if (!pathExists(io, s.out_path)) return false;
     if (!pathExists(io, "id1/gfx/palette_doom.lmp")) return false;
@@ -351,59 +288,6 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
 
     if (allOutputsExist(io)) return;
     std.debug.print("extracting Phase 6 assets...\n", .{});
-    const quake_pal = try palette_mod.loadPalette(io, allocator);
-
-    // ----- Wolf sources -----
-    var v = try wolf_vswap.VSwap.open(io, allocator, "ref/wolf3d-data/VSWAP.WL1");
-    defer v.deinit(allocator);
-
-    const wolf_pal_8bit = convertWolfPalette();
-    const wolf_remap = buildRemap8(wolf_pal_8bit, quake_pal);
-
-    // Wolf3D drew the viewmodel via SimpleScaleShape, scaling the 64x64 cell
-    // to viewheight (~144 px) at 320x200. Quake's R_DrawViewModelSprite
-    // renders SPR pixels 1:1. 3x (192 cell) overshot Wolf's actual ~144 px
-    // and made the gun feel oversized -- the chaingun's gun pixels alone
-    // covered the upper half of the viewport. 2x (128 cell) brings the cell
-    // closer to Wolf's intended visual size; the actual gun pixels (which
-    // sit in the lower portion of the 64x64 cell with substantial transparent
-    // padding above) end up roughly 60-70 px tall after upscale -- comparable
-    // to Doom's tightly-cropped sprites post-downscale.
-    const WOLF_VIEW_SCALE = 2;
-    const WOLF_VIEW_DIM   = wolf_vswap.SPRITE_DIM * WOLF_VIEW_SCALE;
-    for (wolf_sprite_sets) |set| {
-        var frames_storage: [16]quake_spr.Frame = undefined;
-        var decode_buf: [wolf_vswap.SPRITE_DIM * wolf_vswap.SPRITE_DIM]u8 = undefined;
-        var pixel_storage: [16][WOLF_VIEW_DIM * WOLF_VIEW_DIM]u8 = undefined;
-
-        var fi: u8 = 0;
-        while (fi < set.frame_count) : (fi += 1) {
-            try v.decodeSprite(set.base_idx + fi, &decode_buf);
-            applyRemap(wolf_remap, &decode_buf);
-            resampleNearest(
-                &decode_buf, wolf_vswap.SPRITE_DIM, wolf_vswap.SPRITE_DIM,
-                &pixel_storage[fi], WOLF_VIEW_DIM, WOLF_VIEW_DIM,
-            );
-            frames_storage[fi] = .{
-                .width    = WOLF_VIEW_DIM,
-                .height   = WOLF_VIEW_DIM,
-                .pixels   = &pixel_storage[fi],
-                .origin_x = -@divTrunc(@as(i32, WOLF_VIEW_DIM), 2),
-                .origin_y = WOLF_VIEW_DIM,
-            };
-        }
-        try quake_spr.writeSprite(io, allocator, set.out_path, frames_storage[0..set.frame_count]);
-        std.debug.print("  wrote {s} ({d} frames)\n", .{ set.out_path, set.frame_count });
-    }
-
-    for (wolf_sound_sets) |set| {
-        const raw = try wolf_digi.extractDigiSound(allocator, &v, set.digi_idx);
-        defer allocator.free(raw);
-        const resampled = try wolf_digi.resampleU8(allocator, raw, wolf_digi.SourceRate, 11025);
-        defer allocator.free(resampled);
-        try quake_wav.writeWavU8(io, allocator, set.out_path, 11025, resampled);
-        std.debug.print("  wrote {s} ({d} samples @ 11025 Hz)\n", .{ set.out_path, resampled.len });
-    }
 
     // ----- Doom sources -----
     var w = try doom_wad.Wad.open(io, allocator, "ref/doom-data/DOOM1.WAD");
@@ -510,7 +394,7 @@ pub fn extractAll(io: Io, allocator: Allocator) !void {
         if (sb.rate == 11025) {
             try quake_wav.writeWavU8(io, allocator, set.out_path, 11025, sb.pcm);
         } else {
-            const resampled = try wolf_digi.resampleU8(allocator, sb.pcm, sb.rate, 11025);
+            const resampled = try resampleU8(allocator, sb.pcm, sb.rate, 11025);
             defer allocator.free(resampled);
             try quake_wav.writeWavU8(io, allocator, set.out_path, 11025, resampled);
         }

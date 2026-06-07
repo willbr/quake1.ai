@@ -1419,7 +1419,7 @@ int COM_FindFile (char *filename, int *handle, FILE **file)
 			// loose-file lookups containing '/' when running on shareware
 			// PAK0 only. The restriction was 1996 copy-protection; we need
 			// loose-file subdirs (id1/sound/phase6/*.wav, id1/progs/v_*.spr)
-			// to work for the build-time-extracted Wolf3D + Doom1 assets.
+			// to work for the build-time-extracted Doom1 assets.
 
 			sprintf (netpath, "%s/%s",search->filename, filename);
 			

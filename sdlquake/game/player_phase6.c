@@ -3,7 +3,7 @@
 // Each chain advances `weaponframe` through its attack poses, then returns to
 // player_run (which resets `weaponframe` to 0 = idle sprite frame). Body-frame
 // animation reuses Quake's shotgun-attack stance (FR_SHOTATT1) since we don't
-// have Doom/Wolf-specific body poses. The held-sprite-frame index is what
+// have Doom-specific body poses. The held-sprite-frame index is what
 // matters — that drives R_DrawViewModelSprite's frame selection.
 //
 // Tic timing: Doom runs at 35 Hz, so 1 tic ≈ 0.0286 s. Per-chain timings are
@@ -13,14 +13,12 @@
 #include "weapons_phase6.h"
 
 // ---------------------------------------------------------------------------
-// Tic-time conversions. Doom runs at 35 Hz, Wolf3D at 70 Hz. Per-step
-// chain timings come straight from p_pspr.c info.c state durations or
-// WL_AGENT.C's attackinfo[] tic counts -- prefer the named constants
+// Tic-time conversions. Doom runs at 35 Hz. Per-step chain timings come
+// straight from p_pspr.c info.c state durations -- prefer the named constants
 // over bare floats so a future eyeball-check against the source matches
 // the symbol, not a 3-decimal magic number.
 // ---------------------------------------------------------------------------
 #define DOOM_TIC_S    (1.0f / 35.0f)
-#define WOLF_TIC_S    (1.0f / 70.0f)
 
 #define DOOM_3_TIC    (3 * DOOM_TIC_S)   // 0.086 -- shotgun S_SGUN1 / S_SGUN8
 #define DOOM_4_TIC    (4 * DOOM_TIC_S)   // 0.114 -- pistol S_PISTOL1, fist S_PUNCH1/2/4, etc.
@@ -29,8 +27,6 @@
 #define DOOM_7_TIC    (7 * DOOM_TIC_S)   // 0.200 -- shotgun S_SGUN2 fire
 #define DOOM_8_TIC    (8 * DOOM_TIC_S)   // 0.229 -- rocket S_MISSILE1 flash hold
 #define DOOM_12_TIC   (12 * DOOM_TIC_S)  // 0.343 -- rocket S_MISSILE2 fire
-
-#define WOLF_6_TIC    (6 * WOLF_TIC_S)   // 0.086 -- all Wolf weapons step duration
 
 extern engine_api_t   *eng;
 extern game_globals_t *g;
@@ -317,150 +313,4 @@ static void player_doomrocket4_think(edict_t *self) {
 
 void player_doomrocket1(edict_t *self) {
     player_doomrocket1_think(self);
-}
-
-// ---------------------------------------------------------------------------
-// Wolf3D knife -- attackinfo {6,0,1},{6,2,2},{6,0,3},{6,-1,4}
-// 4 steps x 6 tics at 70 Hz = 0.343 s total. Hit on step 2 (attack=2).
-// Frame layout in v_wolfknife.spr (5 frames, indices 0..4):
-//   0 = idle pose (not used in attack chain)
-//   1 = pre-swing
-//   2 = swing through (hit lands here)
-//   3 = follow-through
-//   4 = recover
-// ---------------------------------------------------------------------------
-
-static void player_wolfknife2_think(edict_t *self);
-static void player_wolfknife3_think(edict_t *self);
-static void player_wolfknife4_think(edict_t *self);
-static void player_wolfknife5_think(edict_t *self);
-
-static void player_wolfknife1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     1, WOLF_6_TIC, player_wolfknife2_think);
-}
-static void player_wolfknife2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, WOLF_6_TIC, player_wolfknife3_think);
-    WolfKnife_DoHit(self);
-}
-static void player_wolfknife3_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 3, WOLF_6_TIC, player_wolfknife4_think);
-}
-static void player_wolfknife4_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 4, WOLF_6_TIC, player_wolfknife5_think);
-}
-static void player_wolfknife5_think(edict_t *self) {
-    g->self = self;
-    g->self->v.weaponframe = 0;
-    player_run(self);
-}
-
-void player_wolfknife1(edict_t *self) {
-    player_wolfknife1_think(self);
-}
-
-// ---------------------------------------------------------------------------
-// Wolf3D pistol -- attackinfo {6,0,1},{6,1,2},{6,0,3},{6,-1,4}.
-// 4 steps x 6 tics @ 70 Hz = 0.343 s. Fires on step 2 (attack=1).
-// Frame layout in v_wolfpistol.spr (5 frames, indices 0..4):
-//   0 = idle (not used in attack chain)
-//   1 = pre-fire pose
-//   2 = fire pose with flash
-//   3 = post-fire pose
-//   4 = recover
-// ---------------------------------------------------------------------------
-
-static void player_wolfpistol2_think(edict_t *self);
-static void player_wolfpistol3_think(edict_t *self);
-static void player_wolfpistol4_think(edict_t *self);
-static void player_wolfpistol5_think(edict_t *self);
-
-static void player_wolfpistol1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     1, WOLF_6_TIC, player_wolfpistol2_think);
-}
-static void player_wolfpistol2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 2, WOLF_6_TIC, player_wolfpistol3_think);
-    WolfPistol_DoFire(self);
-}
-static void player_wolfpistol3_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 2, 3, WOLF_6_TIC, player_wolfpistol4_think);
-}
-static void player_wolfpistol4_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 3, 4, WOLF_6_TIC, player_wolfpistol5_think);
-}
-static void player_wolfpistol5_think(edict_t *self) {
-    g->self = self;
-    g->self->v.weaponframe = 0;
-    player_run(self);
-}
-
-void player_wolfpistol1(edict_t *self) {
-    player_wolfpistol1_think(self);
-}
-
-// ---------------------------------------------------------------------------
-// Wolf3D MG -- 12-tic per-shot loop, 2-step chain (fire frame + post-fire).
-// Wolf3D's 4-step attackinfo collapses to a 2-step here that reloops via
-// attack_finished while button0 held.
-// Frame layout in v_wolfmg.spr:
-//   0 = idle (not used)
-//   1 = pre-fire (only on first press)
-//   2 = fire pose with flash
-//   3 = post-fire
-//   4 = recover (only on release)
-// ---------------------------------------------------------------------------
-
-static void player_wolfmg2_think(edict_t *self);
-static void player_wolfmg3_think(edict_t *self);
-
-static void player_wolfmg1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     2, WOLF_6_TIC, player_wolfmg2_think);
-    WolfMG_DoFire(self);
-}
-static void player_wolfmg2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 3, WOLF_6_TIC, player_wolfmg3_think);
-}
-static void player_wolfmg3_think(edict_t *self) {
-    g->self = self;
-    g->self->v.weaponframe = 0;
-    player_run(self);
-}
-
-void player_wolfmg1(edict_t *self) {
-    player_wolfmg1_think(self);
-}
-
-// ---------------------------------------------------------------------------
-// Wolf3D chaingun -- 2-step 12-tic chain (same rate as the MG, matching
-// Wolf3D's actual chaingun cadence). Wolf's attackinfo for the chaingun is
-// {6,0,1},{6,1,2},{6,4,3},{6,-1,4}: held-fire bounces between step 2 (fires)
-// and step 3 (attack=4 refire branch), 12 tics per shot ~= 5.8 Hz. Both
-// steps show fire-pose frames in Wolf, so we mirror that here -- step 1
-// uses frame 2, step 2 uses frame 3, and consecutive shots produce the
-// 2,3,2,3 spinning-barrel sequence without needing a static toggle.
-// Frame layout in v_wolfchaingun.spr:
-//   0 = idle (not used in attack chain)
-//   1 = pre-fire (unused -- skipped same as MG's pre-fire)
-//   2 = fire pose A with flash -- step 1 (fires)
-//   3 = fire pose B with flash -- step 2
-//   4 = recover (unused)
-// ---------------------------------------------------------------------------
-
-static void player_wolfchaingun2_think(edict_t *self);
-static void player_wolfchaingun3_think(edict_t *self);
-
-static void player_wolfchaingun1_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY,     2, WOLF_6_TIC, player_wolfchaingun2_think);
-    WolfChaingun_DoFire(self);
-}
-static void player_wolfchaingun2_think(edict_t *self) {
-    P6_FRAME_STEP(FR_PHASE6_BODY + 1, 3, WOLF_6_TIC, player_wolfchaingun3_think);
-}
-static void player_wolfchaingun3_think(edict_t *self) {
-    g->self = self;
-    g->self->v.weaponframe = 0;
-    player_run(self);
-}
-
-void player_wolfchaingun1(edict_t *self) {
-    player_wolfchaingun1_think(self);
 }

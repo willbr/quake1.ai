@@ -1,4 +1,4 @@
-// weapons_phase6.c -- Wolf3D + Doom1 weapon fire functions + dispatch.
+// weapons_phase6.c -- Doom1 weapon fire functions + dispatch.
 //
 // All Phase 6 weapons live behind the (self->v.weapon2 != 0) guard. The main
 // W_Attack and W_SetCurrentAmmo in weapons.c branch to W_Attack_Phase6 and
@@ -9,7 +9,6 @@
 #include "weapons_fire.h"
 #include "game_defs.h"
 
-#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -144,169 +143,6 @@ static int p6_doom_melee_hit(int damage, float angle_jitter_radians) {
         return 1;
     }
     return 0;
-}
-
-// Wolf3D damage falloff -- DO NOT change without re-checking WL_AGENT.C:1227-1240.
-// US_RndT() returns 0..255 (modeled as rand_byte() & 0xFF here, same range).
-#define WOLF_TILE_QU            64.0f   // 1 Wolf tile = 64 Quake units
-#define WOLF_NEAR_TILES         2.0f    // dist < NEAR  -> rnd / NEAR_DIVISOR (max 63 dmg)
-#define WOLF_MID_TILES          4.0f    // dist < MID   -> rnd / MID_DIVISOR  (max 42 dmg)
-#define WOLF_NEAR_DIVISOR       4
-#define WOLF_MID_DIVISOR        6
-#define WOLF_FAR_MISS_DIVISOR   12      // (rnd / FAR_MISS_DIVISOR) < (int)dist -> miss
-
-// ---------------------------------------------------------------------------
-// Wolf3D hitscan — closest-visible-target front-cone + tile-distance damage
-// falloff. Models WL_AGENT.C:1168-1243 (GunAttack).
-//
-// Algorithm:
-//   1. ED_FindRadius enumerates all edicts within ~4096 units (plenty for any
-//      Quake combat range). Walk the chain via head->v.chain.
-//   2. For each candidate: must have health>0, takedamage!=DAMAGE_NO, must be
-//      in front of the player (forward dot-product > 0), and within the cone
-//      (lateral / forward < tan(cone)).
-//   3. Pick the closest by squared distance.
-//   4. SV_Traceline to that closest target's bbox centre — if obstructed by
-//      world geometry, render a TE_GUNSHOT puff and return miss.
-//   5. Apply Wolf's per-tile damage falloff (1 tile = 64 map units):
-//        dist<2 -> rnd/4 (0..63), dist<4 -> rnd/6 (0..42),
-//        else (rnd/12 < dist) miss, otherwise rnd/6.
-//
-// Returns 1 on hit, 0 on miss/whiff. Caller plays the sound regardless and
-// owns animation; we just resolve the damage.
-//
-// Deviations from Wolf3D's GunAttack (intentional simplifications):
-//   - Single-trace: if the closest in-cone target has world-blocked LOS,
-//     we whiff and return 0. Wolf3D iterates to the next-closest target;
-//     we don't. Acceptable because the player still gets visual feedback
-//     (TE_GUNSHOT puff at the obstacle).
-//   - Distance metric: Euclidean / 64 instead of Wolf's Chebyshev tile
-//     distance (max(|dx|,|dy|)). Difference is at most ~40% on diagonals;
-//     "Wolf-ish feel" rather than byte-for-byte parity is the goal.
-// ---------------------------------------------------------------------------
-static int p6_wolf_hitscan(float shoot_cone_radians) {
-    edict_t *self = g->self;
-    eng->MakeVectors(self->v.v_angle);
-
-    // Pass 1: direct traceline. The player can intentionally shoot a brush
-    // entity (func_button, func_breakable, ...) by aiming at it; the cone
-    // auto-aim below would reject anything more than a few degrees off-axis
-    // and miss small / vertical targets entirely. Doom-style traceline first
-    // matches modern FPS expectation and fixes the "Wolf weapons can't shoot
-    // map buttons" bug.
-    {
-        vec3_t src;
-        src[0] = self->v.origin[0];
-        src[1] = self->v.origin[1];
-        src[2] = self->v.absmin[2] + self->v.size[2]*0.7f;
-        vec3_t end;
-        end[0] = src[0] + g->v_forward[0]*8192.0f;
-        end[1] = src[1] + g->v_forward[1]*8192.0f;
-        end[2] = src[2] + g->v_forward[2]*8192.0f;
-        eng->SV_Traceline(src, end, 0, self);
-        Corpse_BulletTrace(src, end, self);
-        if (g->trace_ent && g->trace_ent != self &&
-            g->trace_ent->v.takedamage != DAMAGE_NO &&
-            g->trace_ent->v.health > 0)
-        {
-            float dx = g->trace_endpos[0] - self->v.origin[0];
-            float dy = g->trace_endpos[1] - self->v.origin[1];
-            float dz = g->trace_endpos[2] - self->v.origin[2];
-            float dist = sqrtf(dx*dx + dy*dy + dz*dz) / WOLF_TILE_QU;
-            int rnd = rand_byte();
-            int damage;
-            if (dist < WOLF_NEAR_TILES)      damage = rnd / WOLF_NEAR_DIVISOR;
-            else if (dist < WOLF_MID_TILES)  damage = rnd / WOLF_MID_DIVISOR;
-            else {
-                if ((rnd / WOLF_FAR_MISS_DIVISOR) < (int)dist) damage = 0;
-                else damage = rnd / WOLF_MID_DIVISOR;
-            }
-            if (damage <= 0) return 0;
-            vec3_t blood_vel = {0, 0, 0};
-            SpawnBlood(g->trace_endpos, blood_vel, (float)damage);
-            if (p6_is_gib(g->trace_ent))
-                gib_apply_hit_impulse(g->trace_ent, g->v_forward, (float)damage);
-            T_Damage(g->trace_ent, self, self, (float)damage);
-            return 1;
-        }
-    }
-
-    // Pass 2: Wolf3D-style cone auto-aim — picks the closest visible monster
-    // within a tight front cone. Only reached if the direct traceline above
-    // didn't find a damageable target.
-    edict_t *closest = NULL;
-    float    closest_d2 = 1e18f;
-
-    edict_t *head = eng->ED_FindRadius(self->v.origin, 4096.0f);
-    while (head) {
-        edict_t *e = head;
-        head = head->v.chain;  // grab next before continuing — defensive, in case anything mutates
-        if (e == self) continue;
-        if (e->v.health <= 0) continue;
-        if (e->v.takedamage == DAMAGE_NO) continue;
-
-        // Use bbox centre, not v.origin: brush entities (func_button,
-        // func_breakable, etc.) often have v.origin == (0,0,0) and only
-        // describe their actual position via absmin/absmax. Using v.origin
-        // for the cone test would misplace the entity at the world origin
-        // and they'd never qualify as "in front of the player".
-        vec3_t to;
-        to[0] = (e->v.absmin[0] + e->v.absmax[0]) * 0.5f - self->v.origin[0];
-        to[1] = (e->v.absmin[1] + e->v.absmax[1]) * 0.5f - self->v.origin[1];
-        to[2] = (e->v.absmin[2] + e->v.absmax[2]) * 0.5f - self->v.origin[2];
-        float fwd = to[0]*g->v_forward[0] + to[1]*g->v_forward[1] + to[2]*g->v_forward[2];
-        if (fwd <= 0) continue;
-
-        float lat_x = to[0] - fwd*g->v_forward[0];
-        float lat_y = to[1] - fwd*g->v_forward[1];
-        float lat_z = to[2] - fwd*g->v_forward[2];
-        float lat   = sqrtf(lat_x*lat_x + lat_y*lat_y + lat_z*lat_z);
-        if (lat / fwd > tanf(shoot_cone_radians)) continue;
-
-        float d2 = to[0]*to[0] + to[1]*to[1] + to[2]*to[2];
-        if (d2 < closest_d2) { closest_d2 = d2; closest = e; }
-    }
-
-    if (!closest) return 0;
-
-    vec3_t src;
-    src[0] = self->v.origin[0];
-    src[1] = self->v.origin[1];
-    src[2] = self->v.absmin[2] + self->v.size[2]*0.7f;
-    vec3_t tgt;
-    tgt[0] = (closest->v.absmin[0] + closest->v.absmax[0]) * 0.5f;
-    tgt[1] = (closest->v.absmin[1] + closest->v.absmax[1]) * 0.5f;
-    tgt[2] = (closest->v.absmin[2] + closest->v.absmax[2]) * 0.5f;
-    // World-LOS check only -- nomonsters=1 skips every monster including the
-    // target, matching Wolf3D's CheckLine semantics. The trace can still hit
-    // non-monster takedamage entities (buttons, breakables); the
-    // g->trace_ent != closest guard below covers the case where such an entity
-    // is between us and the target.
-    eng->SV_Traceline(src, tgt, 1, self);
-    if (g->trace_fraction < 1.0f && g->trace_ent != closest) {
-        eng->MSG_WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
-        eng->MSG_WriteByte (MSG_BROADCAST, TE_GUNSHOT);
-        eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[0]);
-        eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[1]);
-        eng->MSG_WriteCoord(MSG_BROADCAST, g->trace_endpos[2]);
-        return 0;
-    }
-
-    float dist = sqrtf(closest_d2) / WOLF_TILE_QU;
-    int rnd = rand_byte();
-    int damage;
-    if (dist < WOLF_NEAR_TILES)      damage = rnd / WOLF_NEAR_DIVISOR;
-    else if (dist < WOLF_MID_TILES)  damage = rnd / WOLF_MID_DIVISOR;
-    else {
-        if ((rnd / WOLF_FAR_MISS_DIVISOR) < (int)dist) return 0;
-        damage = rnd / WOLF_MID_DIVISOR;
-    }
-    if (damage <= 0) return 0;
-
-    vec3_t blood_vel = {0, 0, 0};
-    SpawnBlood(tgt, blood_vel, (float)damage);
-    T_Damage(closest, self, self, (float)damage);
-    return 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -580,114 +416,6 @@ void DoomRocket_DoFire(edict_t *self) {
 }
 
 // ---------------------------------------------------------------------------
-// Wolf3D knife -- KnifeAttack from WL_AGENT.C:1133-1164
-//   damage  = US_RndT() >> 4 = 0..15
-//   range   = MELEERANGE_QU = 64 map units (Wolf used 0x18000l ~= 96 units;
-//             64 is fine because Quake combat distances are larger anyway)
-//   refire  = 4 steps x 6 tics @ 70 Hz = 24 tics ~= 0.343 s
-//   sound   = none -- shareware Wolf3D's knife is Adlib-only; manifest skips it
-// ---------------------------------------------------------------------------
-#define WOLFKNIFE_CHAIN_S  (24.0f * (1.0f / 70.0f))
-
-void W_FirePhase6_WolfKnife(void) {
-    edict_t *self = g->self;
-    self->v.attack_finished = g->time + WOLFKNIFE_CHAIN_S;
-    player_wolfknife1(self);
-}
-
-void WolfKnife_DoHit(edict_t *self) {
-    int dmg = rand_byte() >> 4;  // 0..15
-    if (dmg <= 0) return;
-    // No sound -- shareware Wolf3D's knife is Adlib-only; no PCM extracted.
-    p6_doom_melee_hit(dmg, 0.02f);
-}
-
-// ---------------------------------------------------------------------------
-// Wolf3D pistol -- GunAttack from WL_AGENT.C:1168-1243
-//   damage  = p6_wolf_hitscan tile-falloff (0..63 close, 0..42 mid, far chance to whiff)
-//   ammo    = 1 bullet per shot; single-shot per press semantics
-//   refire  = 24 chain tics + 7 tap-not-hold buffer = 31 tics @ 70 Hz ~= 0.443 s
-//   sound   = phase6/wolf_pistol.wav
-//   cone    = 0.05 rad ~= 2.9 deg (tighter than MG/chaingun)
-// ---------------------------------------------------------------------------
-#define WOLFPISTOL_CHAIN_S  (31.0f * (1.0f / 70.0f))
-
-void W_FirePhase6_WolfPistol(void) {
-    edict_t *self = g->self;
-    if (self->v.ammo_bullets < 1) return;  // silent stay
-    self->v.attack_finished = g->time + WOLFPISTOL_CHAIN_S;
-    player_wolfpistol1(self);
-}
-
-void WolfPistol_DoFire(edict_t *self) {
-    if (self->v.ammo_bullets < 1) return;
-    eng->SV_StartSound(self, CHAN_WEAPON, "phase6/wolf_pistol.wav", 1, ATTN_NORM);
-    self->v.punchangle[0] = -1;
-    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
-    self->v.ammo_bullets -= 1;
-    self->v.currentammo   = self->v.ammo_bullets;
-    p6_wolf_hitscan(0.05f);
-}
-
-// ---------------------------------------------------------------------------
-// Wolf3D MG -- attackinfo {6,0,1},{6,1,2},{6,3,3},{6,-1,4} folded
-//   damage  = p6_wolf_hitscan tile-falloff
-//   ammo    = 1 bullet per shot
-//   refire  = 12 tics @ 70 Hz ~= 0.171s -> ~5.8 Hz sustained
-//   sound   = phase6/wolf_mg.wav
-//   cone    = 0.07 rad ~= 4 deg (slightly wider than pistol)
-// ---------------------------------------------------------------------------
-#define WOLFMG_CHAIN_S  (12.0f * (1.0f / 70.0f))
-
-void W_FirePhase6_WolfMG(void) {
-    edict_t *self = g->self;
-    if (self->v.ammo_bullets < 1) return;
-    self->v.attack_finished = g->time + WOLFMG_CHAIN_S;
-    player_wolfmg1(self);
-}
-
-void WolfMG_DoFire(edict_t *self) {
-    if (self->v.ammo_bullets < 1) return;
-    eng->SV_StartSound(self, CHAN_WEAPON, "phase6/wolf_mg.wav", 1, ATTN_NORM);
-    self->v.punchangle[0] = -1;
-    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
-    self->v.ammo_bullets -= 1;
-    self->v.currentammo   = self->v.ammo_bullets;
-    p6_wolf_hitscan(0.07f);
-}
-
-// ---------------------------------------------------------------------------
-// Wolf3D chaingun -- 12-tic per-shot loop matching Wolf3D's actual cadence
-//   damage  = p6_wolf_hitscan tile-falloff
-//   ammo    = 1 bullet per shot
-//   refire  = 12 tics @ 70 Hz ~= 0.171s -> ~5.8 Hz sustained
-//             (Wolf's attackinfo loops between fire step (attack=1) and
-//              refire-branch step (attack=4), 6+6 = 12 tics per shot --
-//              same rate as the MG; the chaingun differs only in keeping
-//              the spin running with no ammo, which we don't model)
-//   sound   = phase6/wolf_chaingun.wav
-//   cone    = 0.09 rad ~= 5.2 deg (widest of the three Wolf hitscans)
-// ---------------------------------------------------------------------------
-#define WOLFCG_CHAIN_S  (12.0f * (1.0f / 70.0f))
-
-void W_FirePhase6_WolfChaingun(void) {
-    edict_t *self = g->self;
-    if (self->v.ammo_bullets < 1) return;
-    self->v.attack_finished = g->time + WOLFCG_CHAIN_S;
-    player_wolfchaingun1(self);
-}
-
-void WolfChaingun_DoFire(edict_t *self) {
-    if (self->v.ammo_bullets < 1) return;
-    eng->SV_StartSound(self, CHAN_WEAPON, "phase6/wolf_chaingun.wav", 1, ATTN_NORM);
-    self->v.punchangle[0] = -1;
-    self->v.effects = (float)((int)self->v.effects | EF_MUZZLEFLASH);
-    self->v.ammo_bullets -= 1;
-    self->v.currentammo   = self->v.ammo_bullets;
-    p6_wolf_hitscan(0.09f);
-}
-
-// ---------------------------------------------------------------------------
 // Doom chainsaw idle animation. Doom info.c states S_SAW (SAWGC, 4 tics) and
 // S_SAWB (SAWGD, 4 tics) alternate while the chainsaw is up and idle, with
 // A_WeaponReady playing sfx_sawidl every time the state machine enters S_SAW.
@@ -741,10 +469,6 @@ void W_Attack_Phase6(void) {
         case IT2_DOOM_CHAINGUN:  W_FirePhase6_DoomChaingun(); break;
         case IT2_DOOM_ROCKET:    W_FirePhase6_DoomRocket();   break;
         case IT2_DOOM_CHAINSAW:  W_FirePhase6_DoomChainsaw(); break;
-        case IT2_WOLF_KNIFE:     W_FirePhase6_WolfKnife();    break;
-        case IT2_WOLF_PISTOL:    W_FirePhase6_WolfPistol();   break;
-        case IT2_WOLF_MACHINEGUN: W_FirePhase6_WolfMG();      break;
-        case IT2_WOLF_CHAINGUN:  W_FirePhase6_WolfChaingun(); break;
         case IT2_OILGUN:       W_FireOilGun();       break;
         case IT2_FLAMETHROWER: W_FireFlamethrower(); break;
         default: /* unknown — silently noop */                break;
@@ -779,22 +503,6 @@ void W_SetCurrentAmmo_Phase6(int it2) {
             self->v.weaponmodel = "progs/v_doomchainsaw.spr";
             self->v.currentammo = 0;
             break;
-        case IT2_WOLF_KNIFE:
-            self->v.weaponmodel = "progs/v_wolfknife.spr";
-            self->v.currentammo = 0;
-            break;
-        case IT2_WOLF_PISTOL:
-            self->v.weaponmodel = "progs/v_wolfpistol.spr";
-            self->v.currentammo = self->v.ammo_bullets;
-            break;
-        case IT2_WOLF_MACHINEGUN:
-            self->v.weaponmodel = "progs/v_wolfmg.spr";
-            self->v.currentammo = self->v.ammo_bullets;
-            break;
-        case IT2_WOLF_CHAINGUN:
-            self->v.weaponmodel = "progs/v_wolfchaingun.spr";
-            self->v.currentammo = self->v.ammo_bullets;
-            break;
         case IT2_OILGUN:
             self->v.weaponmodel = "progs/v_rock.mdl";    // grenade launcher model = oil sprayer
             self->v.currentammo = self->v.ammo_cells;
@@ -820,10 +528,6 @@ void Phase6_PrecacheCommon(void) {
     eng->PrecacheModel("progs/v_doomchaingun.spr");
     eng->PrecacheModel("progs/v_doomrocket.spr");
     eng->PrecacheModel("progs/v_doomchainsaw.spr");
-    eng->PrecacheModel("progs/v_wolfknife.spr");
-    eng->PrecacheModel("progs/v_wolfpistol.spr");
-    eng->PrecacheModel("progs/v_wolfmg.spr");
-    eng->PrecacheModel("progs/v_wolfchaingun.spr");
 
     eng->PrecacheSound("phase6/doom_pistol.wav");
     eng->PrecacheSound("phase6/doom_shotgn.wav");
@@ -832,9 +536,6 @@ void Phase6_PrecacheCommon(void) {
     eng->PrecacheSound("phase6/doom_sawhit.wav");
     eng->PrecacheSound("phase6/doom_sawful.wav");
     eng->PrecacheSound("phase6/doom_sawidl.wav");
-    eng->PrecacheSound("phase6/wolf_pistol.wav");
-    eng->PrecacheSound("phase6/wolf_mg.wav");
-    eng->PrecacheSound("phase6/wolf_chaingun.wav");
 }
 
 // ---------------------------------------------------------------------------
@@ -852,10 +553,6 @@ void Phase6_ChangeWeapon(int impulse) {
         case 33: flag = IT2_DOOM_CHAINGUN;  break;
         case 34: flag = IT2_DOOM_ROCKET;    break;
         case 35: flag = IT2_DOOM_CHAINSAW;  break;
-        case 36: flag = IT2_WOLF_KNIFE;     break;
-        case 37: flag = IT2_WOLF_PISTOL;    break;
-        case 38: flag = IT2_WOLF_MACHINEGUN;break;
-        case 39: flag = IT2_WOLF_CHAINGUN;  break;
         case 40: flag = IT2_OILGUN;       break;
         case 41: flag = IT2_FLAMETHROWER; break;
         default: return;
@@ -876,7 +573,6 @@ void Phase6_CheatGiveAll(void) {
     self->v.items2 = (float)(
         IT2_DOOM_FIST | IT2_DOOM_PISTOL | IT2_DOOM_SHOTGUN |
         IT2_DOOM_CHAINGUN | IT2_DOOM_ROCKET | IT2_DOOM_CHAINSAW |
-        IT2_WOLF_KNIFE | IT2_WOLF_PISTOL | IT2_WOLF_MACHINEGUN | IT2_WOLF_CHAINGUN |
         IT2_OILGUN | IT2_FLAMETHROWER
     );
     if (self->v.ammo_bullets < 200) self->v.ammo_bullets = 200;

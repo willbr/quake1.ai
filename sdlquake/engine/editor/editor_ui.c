@@ -1047,7 +1047,7 @@ static void format_bitmask(int mask,
 }
 
 // Active-weapon names: v.weapon holds a single IT_* bit when the player has
-// a Quake weapon out; v.weapon2 holds a Doom/Wolf IT2_* bit when a Phase 6
+// a Quake weapon out; v.weapon2 holds a Doom IT2_* bit when a Phase 6
 // gun is selected (and v.weapon is then forced to 0). NULL = no match.
 static const char *quake_weapon_name(int w)
 {
@@ -1074,10 +1074,6 @@ static const char *quake_weapon_name(int w)
 #define ED_IT2_DOOM_CHAINGUN   (1 << 3)
 #define ED_IT2_DOOM_ROCKET     (1 << 4)
 #define ED_IT2_DOOM_CHAINSAW   (1 << 5)
-#define ED_IT2_WOLF_KNIFE      (1 << 6)
-#define ED_IT2_WOLF_PISTOL     (1 << 7)
-#define ED_IT2_WOLF_MACHINEGUN (1 << 8)
-#define ED_IT2_WOLF_CHAINGUN   (1 << 9)
 
 static const char *bonus_weapon_name(int w)
 {
@@ -1089,10 +1085,6 @@ static const char *bonus_weapon_name(int w)
     case ED_IT2_DOOM_CHAINGUN:   return "Doom Chaingun";
     case ED_IT2_DOOM_ROCKET:     return "Doom Rocket";
     case ED_IT2_DOOM_CHAINSAW:   return "Doom Chainsaw";
-    case ED_IT2_WOLF_KNIFE:      return "Wolf Knife";
-    case ED_IT2_WOLF_PISTOL:     return "Wolf Pistol";
-    case ED_IT2_WOLF_MACHINEGUN: return "Wolf MG";
-    case ED_IT2_WOLF_CHAINGUN:   return "Wolf Chaingun";
     default:                     return NULL;
     }
 }
@@ -1423,7 +1415,7 @@ static void draw_live_state(edit_entity_t *e)
     if (en == cl.viewentity)
     {
         // v.weapon = active Quake gun (single IT_* bit). v.weapon2 = active
-        // Doom/Wolf gun (single IT2_* bit, Phase 6). If both are zero the
+        // Doom gun (single IT2_* bit, Phase 6). If both are zero the
         // player isn't holding anything (in_blink / clamp during teleport).
         int w  = (int)ed->v.weapon;
         int w2 = (int)ed->v.weapon2;
@@ -1459,7 +1451,7 @@ static void draw_live_state(edit_entity_t *e)
             IG_TextUnformatted(buf);
         }
 
-        // v.items2 — Phase 6 Doom/Wolf3D bonus roster. Only show if any
+        // v.items2 — Phase 6 Doom bonus roster. Only show if any
         // bit is set to avoid clutter on vanilla play.
         if (ed->v.items2 != 0)
         {
@@ -1470,10 +1462,6 @@ static void draw_live_state(edit_entity_t *e)
                 { ED_IT2_DOOM_CHAINGUN,   "DCHAIN" },
                 { ED_IT2_DOOM_ROCKET,     "DROCK" },
                 { ED_IT2_DOOM_CHAINSAW,   "DSAW" },
-                { ED_IT2_WOLF_KNIFE,      "WKNF" },
-                { ED_IT2_WOLF_PISTOL,     "WPIST" },
-                { ED_IT2_WOLF_MACHINEGUN, "WMG" },
-                { ED_IT2_WOLF_CHAINGUN,   "WCHN" },
             };
             char itbuf[160];
             format_bitmask((int)ed->v.items2, i2tab,

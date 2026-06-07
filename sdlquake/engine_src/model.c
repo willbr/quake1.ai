@@ -1894,10 +1894,9 @@ void Mod_LoadSpriteModel (model_t *mod, void *buffer)
 	// blit knows which entry of vid_lut[][] to render through.
 	// Filenames are produced by the Phase 6 extractor:
 	//   progs/v_doom*.spr  -> Doom palette (vid_lut[VID_PAL_DOOM])
-	//   progs/v_wolf*.spr  -> Quake palette (already remapped by the
-	//                         extractor's wolf_remap; the dedicated
-	//                         VID_PAL_WOLF3D slot is reserved but unwired)
 	//   everything else    -> Quake palette
+	// (palette_id slot 2 / VID_PAL_WOLF3D stays reserved-but-unused; the
+	//  Phase 6 Wolf3D guns that would have used it were removed 2026-06-07.)
 	if (!strncmp(mod->name, "progs/v_doom", 12))
 		mod->palette_id = 1;	// VID_PAL_DOOM
 	else

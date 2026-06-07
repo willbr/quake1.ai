@@ -117,10 +117,10 @@ typedef struct entvars_s {
     float   healamount, healtype; // item_health fields (items.qc)
     float   hit_z;                // spike projectile hit z-offset (weapons.qc)
 
-    // Phase 6 — coexisting Wolf3D + Doom1 weapon roster. items2 holds IT2_*
-    // flags. weapon2 is the active selector when nonzero (and self->v.weapon
+    // Phase 6 — Doom1 weapon roster (parallel to stock Quake). items2 holds
+    // IT2_* flags. weapon2 is the active selector when nonzero (and self->v.weapon
     // is forced to 0 to keep Quake's W_BestWeapon logic out of the way).
-    // ammo_bullets feeds Wolf guns + Doom pistol/chaingun. _phase6_pad keeps
+    // ammo_bullets feeds the Doom pistol/chaingun. _phase6_pad keeps
     // sizeof(entvars_t) a multiple of 8 for edict_t alignment (the engine's
     // sv.edicts[] is base + i*pr_edict_size, so any non-mult-of-8 size makes
     // odd-indexed edicts misaligned and crashes UBSan-enabled DLL builds).

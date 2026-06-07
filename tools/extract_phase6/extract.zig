@@ -1,7 +1,6 @@
 // extract.zig -- Phase 6 asset extractor.
 //
-// Reads:   ref/wolf3d-data/VSWAP.WL1 + AUDIOHED.WL1 + AUDIOT.WL1
-//          ref/doom-data/DOOM1.WAD
+// Reads:   ref/doom-data/DOOM1.WAD
 // Writes:  id1/progs/v_*.spr   (Quake SP1 viewmodel sprites)
 //          id1/sound/phase6/*.wav (11025 Hz mono u8 PCM)
 //
@@ -13,8 +12,6 @@ const std = @import("std");
 const Io = std.Io;
 const Dir = std.Io.Dir;
 const palette_mod = @import("quake_palette.zig");
-const wolf_vswap  = @import("wolf_vswap.zig");
-const wolf_digi   = @import("wolf_digi.zig");
 const doom_wad    = @import("doom_wad.zig");
 const quake_spr   = @import("quake_spr.zig");
 const quake_wav   = @import("quake_wav.zig");
@@ -30,18 +27,6 @@ pub fn main(init: std.process.Init) !void {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "-test_palette")) {
             try testPalette(io, arena);
-            return;
-        } else if (std.mem.eql(u8, arg, "-dump_sprite")) {
-            i += 1;
-            if (i >= args.len) {
-                std.debug.print("-dump_sprite: missing chunk index\n", .{});
-                return error.BadArg;
-            }
-            const idx = try std.fmt.parseInt(u16, args[i], 10);
-            try dumpSprite(io, arena, idx);
-            return;
-        } else if (std.mem.eql(u8, arg, "-vswap_info")) {
-            try vswapInfo(io, arena);
             return;
         } else if (std.mem.eql(u8, arg, "-test_wav")) {
             try testWav(io, arena);
@@ -61,15 +46,6 @@ pub fn main(init: std.process.Init) !void {
             i += 1;
             if (i >= args.len) return error.BadArg;
             try dumpDoomSound(io, arena, args[i]);
-            return;
-        } else if (std.mem.eql(u8, arg, "-dump_digi")) {
-            i += 1;
-            if (i >= args.len) {
-                std.debug.print("-dump_digi: missing digi index\n", .{});
-                return error.BadArg;
-            }
-            const idx = try std.fmt.parseInt(u16, args[i], 10);
-            try dumpDigi(io, arena, idx);
             return;
         } else {
             std.debug.print("extract: unknown arg '{s}'\n", .{arg});
@@ -115,33 +91,6 @@ fn testPalette(io: Io, allocator: std.mem.Allocator) !void {
         }
     }
     std.debug.print("LUT ok: never produces reserved index 255\n", .{});
-}
-
-fn vswapInfo(io: Io, allocator: std.mem.Allocator) !void {
-    var v = try wolf_vswap.VSwap.open(io, allocator, "ref/wolf3d-data/VSWAP.WL1");
-    defer v.deinit(allocator);
-    std.debug.print(
-        "VSWAP: {d} chunks, sprite_start={d}, sound_start={d}\n",
-        .{ v.chunk_count, v.sprite_start, v.sound_start },
-    );
-    std.debug.print("First 5 sprite chunks (idx, ofs, len):\n", .{});
-    var i: u16 = v.sprite_start;
-    var n: u16 = 0;
-    while (i < v.sound_start and n < 5) : ({ i += 1; n += 1; }) {
-        std.debug.print("  {d}: ofs={d} len={d}\n", .{ i, v.chunkOffset(i), v.chunkLength(i) });
-    }
-}
-
-fn dumpSprite(io: Io, allocator: std.mem.Allocator, idx: u16) !void {
-    var v = try wolf_vswap.VSwap.open(io, allocator, "ref/wolf3d-data/VSWAP.WL1");
-    defer v.deinit(allocator);
-
-    var pixels: [wolf_vswap.SPRITE_DIM * wolf_vswap.SPRITE_DIM]u8 = undefined;
-    try v.decodeSprite(idx, &pixels);
-
-    const out_path = try std.fmt.allocPrint(allocator, "wolf_sprite_{d}.ppm", .{idx});
-    try wolf_vswap.writeSpritePpm(io, allocator, out_path, &pixels);
-    std.debug.print("wrote {s}\n", .{out_path});
 }
 
 fn testWav(io: Io, allocator: std.mem.Allocator) !void {
@@ -252,21 +201,4 @@ fn dumpDoomSound(io: Io, allocator: std.mem.Allocator, name: []const u8) !void {
     defer f.close(io);
     try f.writePositionalAll(io, sb.pcm, 0);
     std.debug.print("wrote {s} ({d} samples @ {d} Hz)\n", .{ out_path, sb.pcm.len, sb.rate });
-}
-
-fn dumpDigi(io: Io, allocator: std.mem.Allocator, digi_idx: u16) !void {
-    var v = try wolf_vswap.VSwap.open(io, allocator, "ref/wolf3d-data/VSWAP.WL1");
-    defer v.deinit(allocator);
-
-    const raw = try wolf_digi.extractDigiSound(allocator, &v, digi_idx);
-    const resampled = try wolf_digi.resampleU8(allocator, raw, wolf_digi.SourceRate, 11025);
-
-    const out_path = try std.fmt.allocPrint(allocator, "wolf_digi_{d}.raw", .{digi_idx});
-    const f = try Dir.cwd().createFile(io, out_path, .{});
-    defer f.close(io);
-    try f.writePositionalAll(io, resampled, 0);
-    std.debug.print(
-        "wrote {s} ({d} bytes raw -> {d} bytes @ 11025 Hz)\n",
-        .{ out_path, raw.len, resampled.len },
-    );
 }

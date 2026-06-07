@@ -98,10 +98,9 @@
 #define IT2_DOOM_CHAINGUN   (1 << 3)
 #define IT2_DOOM_ROCKET     (1 << 4)
 #define IT2_DOOM_CHAINSAW   (1 << 5)
-#define IT2_WOLF_KNIFE      (1 << 6)
-#define IT2_WOLF_PISTOL     (1 << 7)
-#define IT2_WOLF_MACHINEGUN (1 << 8)
-#define IT2_WOLF_CHAINGUN   (1 << 9)
+// Bits 6-9 are retired (formerly the Wolf3D knife/pistol/MG/chaingun roster,
+// removed 2026-06-07); left as a gap so the surviving bit assignments below
+// don't shift.
 // M8 / F3 fire weapons (continue the items2 parallel roster).
 #define IT2_OILGUN          (1 << 10)
 #define IT2_FLAMETHROWER    (1 << 11)

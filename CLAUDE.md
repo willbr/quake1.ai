@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Requires Zig (tested on 0.14.1 and 0.16). Shareware assets are committed loose under `id1/` (originally extracted from the freely-redistributable `pak0.pak`, which is no longer shipped); registered episodes 2–4 are not — if you have a `pak1.pak`, drop it alongside and the engine will pick it up. `COM_AddGameDirectory` is patched so the loose directory sits at the head of the searchpath LIFO, i.e. loose files shadow same-named entries in any pak. SDL3 is vendored per-OS — no system install needed. Phase 6 Doom/Wolf3D guns extract automatically from committed reference WADs (`ref/doom-data/DOOM1.WAD`, `ref/wolf3d-data/VSWAP.WL1`) on first build; outputs are gitignored and regenerated as needed (`rm id1/progs/v_doom*.spr` to force re-extraction).
+Requires Zig (tested on 0.14.1 and 0.16). Shareware assets are committed loose under `id1/` (originally extracted from the freely-redistributable `pak0.pak`, which is no longer shipped); registered episodes 2–4 are not — if you have a `pak1.pak`, drop it alongside and the engine will pick it up. `COM_AddGameDirectory` is patched so the loose directory sits at the head of the searchpath LIFO, i.e. loose files shadow same-named entries in any pak. SDL3 is vendored per-OS — no system install needed. Phase 6 Doom guns extract automatically from the committed reference WAD (`ref/doom-data/DOOM1.WAD`) on first build; outputs are gitignored and regenerated as needed (`rm id1/progs/v_doom*.spr` to force re-extraction). (The Phase 6 Wolf3D guns and their `ref/wolf3d-*` reference trees were removed 2026-06-07; mechanics worth salvaging are noted in `docs/wolf3d-ideas-to-steal.md`.)
 
 Supported hosts: **Windows x64** (vendored `SDL3.dll` + `.lib` under `sdlquake/vendor/SDL3-3.4.8/lib/x64/`) and **macOS arm64** (vendored `libSDL3.0.dylib` under `…/lib/macos/`). Linux is untested but the build paths in `build.zig` fall through to system SDL3 via `linkSystemLibrary`.
 
@@ -72,7 +72,7 @@ Platform files (`sdlquake/platform/*.c`) omit `-std=gnu89` (they're written in m
 ### Render pipeline (SDL_GPU palette-LUT shader)
 
 Quake's software renderer writes 8-bit palette indices into `vid.buffer`
-and per-pixel palette-slot ids into `vid_palette_id` (for Doom/Wolf3D
+and per-pixel palette-slot ids into `vid_palette_id` (for Doom
 weapon overlays). Every frame `vid_sdl.c::gpu_render_frame` uploads both
 buffers as `R8_UINT` GPU textures, plus a 3×256 RGBA8 LUT, and a
 fullscreen-triangle pipeline running `shaders/palette.{vert,frag}.glsl`
@@ -285,7 +285,7 @@ zig build game                           # rebuild only game.dll (fast hot-reloa
 | 3 | ✅ done | Hot-reload (`game_api_t` ABI, `game.dll`) |
 | 4 | ✅ done | Dear ImGui dev overlay |
 | 5 | ✅ done | QuakeC → C (port progs to hot-reloadable game.dll) |
-| 6 | ✅ done | Port Wolf3D & Doom1 guns into Quake (sprites, sounds, behaviour) |
+| 6 | ✅ done | Port Doom1 guns into Quake (sprites, sounds, behaviour). (Wolf3D guns were also ported here, then removed 2026-06-07.) |
 | 7 | ✅ done | In-game 3D map editor |
 | 8 | M3–M6 done; M7 stub; M8 done | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust, Fire & Oil) |
 
@@ -539,6 +539,5 @@ wouldn't stand out in any single frame's flame graph).
 - `id1/` — Quake PAK files at repo root (required at runtime)
 - `id1/particles/` — data-driven particle-effect presets (`*.pcl`, Quake KV-block); all `*.pcl` here load at startup (globbed via `COM_EnumMatchingFiles`, no index file). Authored in the in-game Particle editor mode (`edit_particle.c`); runtime in `r_emitter.c`.
 - `ref/doom-data/` — Doom 1.9 shareware WAD (read by `zig build extract`)
-- `ref/wolf3d-data/` — Wolf3D shareware data files (read by `zig build extract`)
 - `ref/Quake-master/` — pristine upstream WinQuake (id-Software/Quake), kept as a diff baseline against `sdlquake/engine_src/`
-- `ref/Quake-2-master/`, `ref/Quake-Tools-master/`, `ref/TrenchBroom-master/`, `ref/fteqw-master/`, `ref/DOOM-master/`, `ref/wolf3d-master/`, `ref/quake106/`, `ref/quake_map_source-master/`, `ref/Quake-2-Tools-master/` — upstream references, do not modify
+- `ref/Quake-2-master/`, `ref/Quake-Tools-master/`, `ref/TrenchBroom-master/`, `ref/fteqw-master/`, `ref/DOOM-master/`, `ref/quake106/`, `ref/quake_map_source-master/`, `ref/Quake-2-Tools-master/` — upstream references, do not modify

@@ -1,4 +1,4 @@
-// weapons_phase6.h -- Wolf3D + Doom1 weapon module declarations.
+// weapons_phase6.h -- Doom1 weapon module declarations.
 //
 // All Phase 6 fire functions, dispatch helpers, animation chain entry points,
 // pickup/precache routines, and impulse mapping live in weapons_phase6.c,
@@ -32,13 +32,9 @@ void W_FirePhase6_DoomShotgun   (void);
 void W_FirePhase6_DoomChaingun  (void);
 void W_FirePhase6_DoomRocket    (void);
 void W_FirePhase6_DoomChainsaw  (void);
-void W_FirePhase6_WolfKnife     (void);
-void W_FirePhase6_WolfPistol    (void);
-void W_FirePhase6_WolfMG        (void);
-void W_FirePhase6_WolfChaingun  (void);
 
 // ---------------------------------------------------------------------------
-// Impulse mapping (30..39 → IT2_*) + give-all cheat (impulse 100)
+// Impulse mapping (30..35, 40..41 → IT2_*) + give-all cheat (impulse 100)
 // ---------------------------------------------------------------------------
 void Phase6_ChangeWeapon (int impulse);
 void Phase6_CheatGiveAll (void);
@@ -62,10 +58,6 @@ void player_doomsaw1      (edict_t *self);
 void player_doomchaingun1 (edict_t *self);
 void player_doomshotgun1  (edict_t *self);
 void player_doomrocket1   (edict_t *self);
-void player_wolfknife1    (edict_t *self);
-void player_wolfpistol1   (edict_t *self);
-void player_wolfmg1       (edict_t *self);
-void player_wolfchaingun1 (edict_t *self);
 
 // ---------------------------------------------------------------------------
 // Deferred-fire callbacks. Heavy actions (sound, damage, EF_MUZZLEFLASH,
@@ -79,9 +71,5 @@ void DoomSaw_DoFire       (edict_t *self);
 void DoomChaingun_DoFire  (edict_t *self);
 void DoomShotgun_DoFire   (edict_t *self);
 void DoomRocket_DoFire    (edict_t *self);
-void WolfKnife_DoHit      (edict_t *self);
-void WolfPistol_DoFire    (edict_t *self);
-void WolfMG_DoFire        (edict_t *self);
-void WolfChaingun_DoFire  (edict_t *self);
 
 #endif // WEAPONS_PHASE6_H

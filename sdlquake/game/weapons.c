@@ -1549,7 +1549,7 @@ static void CheatCommand(void) {
 // ---------------------------------------------------------------------------
 // W_InfiniteAmmoRefill -- called every frame from PlayerPreThink while the
 // player has FL_INFINITE_AMMO set (the `infinite-ammo` console cheat). Tops up
-// every ammo pool (stock + Doom/Wolf bullets + cells for the fire weapons) so
+// every ammo pool (stock + Doom bullets + cells for the fire weapons) so
 // currentammo never reaches 0 and the active weapon never auto-switches. Pools
 // only -- no W_SetCurrentAmmo() call, so the viewmodel/fire animation is left
 // untouched; the fire functions already resync currentammo from the pool.
@@ -1564,7 +1564,7 @@ void W_InfiniteAmmoRefill(edict_t *self) {
 
 // ---------------------------------------------------------------------------
 // Unified weapon cycle (impulse 10 / 12) — covers stock Quake + Phase 6.
-// Order: 8 stock Quake, 6 Doom, 4 Wolf3D. Cycler walks forward/back through
+// Order: 8 stock Quake, 6 Doom. Cycler walks forward/back through
 // the array, skipping slots the player doesn't own or doesn't have enough
 // ammo for, and wraps at either end.
 // ---------------------------------------------------------------------------
@@ -1584,10 +1584,6 @@ static const weapon_slot_t WCYCLE[] = {
     {1, IT2_DOOM_CHAINGUN},
     {1, IT2_DOOM_ROCKET},
     {1, IT2_DOOM_CHAINSAW},
-    {1, IT2_WOLF_KNIFE},
-    {1, IT2_WOLF_PISTOL},
-    {1, IT2_WOLF_MACHINEGUN},
-    {1, IT2_WOLF_CHAINGUN},
 };
 #define WCYCLE_COUNT ((int)(sizeof(WCYCLE) / sizeof(WCYCLE[0])))
 
@@ -1610,10 +1606,6 @@ static int wcycle_usable(int idx) {
         case 11: return ((items2 & IT2_DOOM_CHAINGUN)   != 0) && self->v.ammo_bullets >= 1;
         case 12: return ((items2 & IT2_DOOM_ROCKET)     != 0) && self->v.ammo_rockets >= 1;
         case 13: return  (items2 & IT2_DOOM_CHAINSAW)   != 0;
-        case 14: return  (items2 & IT2_WOLF_KNIFE)      != 0;
-        case 15: return ((items2 & IT2_WOLF_PISTOL)     != 0) && self->v.ammo_bullets >= 1;
-        case 16: return ((items2 & IT2_WOLF_MACHINEGUN) != 0) && self->v.ammo_bullets >= 1;
-        case 17: return ((items2 & IT2_WOLF_CHAINGUN)   != 0) && self->v.ammo_bullets >= 1;
         default: return 0;
     }
 }
@@ -1686,7 +1678,7 @@ static void ImpulseCommands(void) {
     if (imp == 10)  CycleWeaponCommand();
     if (imp == 11)  ServerflagsCommand();
     if (imp == 12)  CycleWeaponReverseCommand();
-    if (imp >= 30 && imp <= 41) Phase6_ChangeWeapon(imp);   // Wolf3D + Doom1 roster + F3 fire weapons (40,41)
+    if (imp >= 30 && imp <= 41) Phase6_ChangeWeapon(imp);   // Doom1 roster (30-35) + F3 fire weapons (40,41)
     if (imp == 100) Phase6_CheatGiveAll();
     if (imp == 210) Fire_IgniteTraced(self);   // debug: ignite entity under crosshair
     if (imp == 211) Fire_OilTraced(self);      // debug: deposit oil at crosshair

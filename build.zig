@@ -594,7 +594,7 @@ pub fn build(b: *std.Build) void {
 
     // ---------------------------------------------------------------------------
     // Phase 6 asset extractor: zig build extract
-    //   Reads ref/wolf3d-data/ and ref/doom-data/, writes loose .spr/.wav into id1/.
+    //   Reads ref/doom-data/, writes loose .spr/.wav into id1/.
     // ---------------------------------------------------------------------------
     const extract_mod = b.createModule(.{
         .root_source_file = b.path("tools/extract_phase6/extract.zig"),
@@ -610,11 +610,11 @@ pub fn build(b: *std.Build) void {
     const extract_run = b.addRunArtifact(extract_exe);
     extract_run.setCwd(b.path(""));
     if (b.args) |args| extract_run.addArgs(args);
-    b.step("extract", "Extract Wolf3D + Doom1 weapon assets into id1/").dependOn(&extract_run.step);
+    b.step("extract", "Extract Doom1 weapon assets into id1/").dependOn(&extract_run.step);
 
     // Auto-extract on every `zig build` — the extractor stat-skips when all
     // outputs are present (see manifest.allOutputsExist), so the steady-state
-    // cost is one process launch. Inputs (DOOM1.WAD, VSWAP.WL1, pak0.pak)
+    // cost is one process launch. Inputs (DOOM1.WAD, pak0.pak)
     // are committed reference data; `rm id1/progs/v_doom*.spr` to force a
     // re-extract. No args passed here so the no-args extract-everything path
     // is taken regardless of what's after `--` on the build command.
