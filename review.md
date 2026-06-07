@@ -437,8 +437,15 @@ you specifically want to keep as a fallback or as a reference implementation.
 | `quake_map_source-master/` | **136 MB** | Reference id1 `.map` sources. Useful for the editor; massive. Consider moving outside the repo or git-LFS'ing. |
 | `TrenchBroom-master/` | 40 MB | Reference for editor design. Was it ever actually grepped? If not, delete. |
 | `fteqw-master/` | 30 MB | Reference engine. Same question. |
-| `Quake-2-master/` | 6.5 MB | Q2 reference. Likely never consulted. |
-| `Quake-2-Tools-master/` | 1.5 MB | Q2 tools. Likely never consulted. |
+
+_Removed 2026-06-07: `Quake-2-master/` (6.5 MB) + `Quake-2-Tools-master/`
+(1.5 MB) — Q2 is a sibling engine, ~90% structurally identical to our Q1 base,
+so its reference value was thin. Salvaged the genuine deltas to
+`docs/quake2-ideas-to-steal.md` first: the headline being Q2's reload-safe
+function-pointer serialization (`game/g_save.c` segment-relative offsets), which
+is the durable fix for open findings #1 (hot-reload dangling pointers) and #11
+(savegame versioning); plus detail brushes (`CONTENTS_DETAIL`), qrad3 radiosity
+bounce, and PHS for the in-process compile/relight/AI-sound chain._
 
 _Removed 2026-06-07: `quake106/` (8.7 MB) — NOT a source release; it was the
 Quake Shareware v1.06 DOS binary distribution (a `deice.exe` extractor + a 9 MB
