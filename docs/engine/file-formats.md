@@ -204,8 +204,9 @@ animation by string match.
 
 ### `.spr` — Sprite
 
-Billboards for particles, flames, explosions, also the Wolf3D/Doom
-weapons in Phase 6. `spritegn.h`:
+Billboards for particles, flames, explosions. (Phase 6 also rendered the
+Doom/Wolf3D weapon viewmodels as `.spr`s; those guns were removed 2026-06-07.)
+`spritegn.h`:
 
 ```c
 struct dsprite_t {            // ident = "IDSP"

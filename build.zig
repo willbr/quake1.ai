@@ -592,36 +592,6 @@ pub fn build(b: *std.Build) void {
     b.step("run", "Build and run Quake").dependOn(&run.step);
 
     // ---------------------------------------------------------------------------
-    // Phase 6 asset extractor: zig build extract
-    //   Reads ref/doom-data/, writes loose .spr/.wav into id1/.
-    // ---------------------------------------------------------------------------
-    const extract_mod = b.createModule(.{
-        .root_source_file = b.path("tools/extract_phase6/extract.zig"),
-        .target           = b.graph.host,
-        .optimize         = optimize,
-    });
-    const extract_exe = b.addExecutable(.{
-        .name        = "extract_phase6",
-        .root_module = extract_mod,
-    });
-    // User-facing `zig build extract [-- args]` — preserves the dump/test
-    // sub-modes (-test_palette etc.).
-    const extract_run = b.addRunArtifact(extract_exe);
-    extract_run.setCwd(b.path(""));
-    if (b.args) |args| extract_run.addArgs(args);
-    b.step("extract", "Extract Doom1 weapon assets into id1/").dependOn(&extract_run.step);
-
-    // Auto-extract on every `zig build` — the extractor stat-skips when all
-    // outputs are present (see manifest.allOutputsExist), so the steady-state
-    // cost is one process launch. Inputs (DOOM1.WAD, pak0.pak)
-    // are committed reference data; `rm id1/progs/v_doom*.spr` to force a
-    // re-extract. No args passed here so the no-args extract-everything path
-    // is taken regardless of what's after `--` on the build command.
-    const extract_auto = b.addRunArtifact(extract_exe);
-    extract_auto.setCwd(b.path(""));
-    b.getInstallStep().dependOn(&extract_auto.step);
-
-    // ---------------------------------------------------------------------------
     // mapcompile CLI: zig build mapcompile -- <basedir> <mapname>
     //   Stand-alone driver for the vendored qbsp/vis/light libs. Same
     //   pipeline editor_compile_export runs in-process inside the engine,

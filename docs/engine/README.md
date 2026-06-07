@@ -39,7 +39,6 @@ zig build run -- --hot-reload +map e1m1  # same, with game.dll auto-reload polli
 zig build game                           # rebuild only game.dll (fast iteration)
 zig build run -- --mcp-stdio             # stdio MCP transport (Claude Code spawns the game)
 zig build run -- --mcp-http 7777 +map e1m1
-zig build extract                        # extract Wolf3D + Doom1 shareware assets into id1/
 ```
 
 Prerequisites: Zig 0.16, original Quake `id1/pak0.pak` + `id1/pak1.pak` at the

@@ -4,14 +4,14 @@ _Extracted from CLAUDE.md (reference detail; CLAUDE.md keeps a summary + pointer
 
 ### Render pipeline (SDL_GPU palette-LUT shader)
 
-Quake's software renderer writes 8-bit palette indices into `vid.buffer`
-and per-pixel palette-slot ids into `vid_palette_id` (for Doom
-weapon overlays). Every frame `vid_sdl.c::gpu_render_frame` uploads both
-buffers as `R8_UINT` GPU textures, plus a 3×256 RGBA8 LUT, and a
-fullscreen-triangle pipeline running `shaders/palette.{vert,frag}.glsl`
-does the per-pixel `dst = palette[palette_id[px] * 256 + framebuffer[px]]`
-lookup on the GPU. The CPU-side `palette_expand` loop (≈5 ms/frame at
-3x scale) is gone.
+Quake's software renderer writes 8-bit palette indices into `vid.buffer`.
+Every frame `vid_sdl.c::gpu_render_frame` uploads it as an `R8_UINT` GPU
+texture, plus a 256-entry RGBA8 LUT, and a fullscreen-triangle pipeline
+running `shaders/palette.{vert,frag}.glsl` does the per-pixel
+`dst = palette[framebuffer[px]]` lookup on the GPU. The CPU-side
+`palette_expand` loop (≈5 ms/frame at 3x scale) is gone. (A former
+multi-palette path — a `vid_palette_id` slot map + 3×256 LUT for the
+Doom-gun viewmodel overlays — was removed 2026-06-07 with the Doom guns.)
 
 Shaders compile at build time via `tools/build_shaders.zig` (a host Zig
 tool run from `build.zig` — replaced the old `build_shaders.sh` so the

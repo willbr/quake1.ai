@@ -68,7 +68,6 @@ A single `build.zig` at the repo root drives the entire build. Steps:
 | `zig build` | Compiles `quake.exe` and `game.dll` into `zig-out/bin/`. Installs `SDL3.dll` next to the exe. |
 | `zig build run -- [args]` | Build, then run with `args` forwarded to Quake. Working dir pinned to repo root so `id1/` resolves. |
 | `zig build game` | Rebuild **only** `game.dll`. Pair with `--hot-reload` in the engine for fast iteration. |
-| `zig build extract` | Run `tools/extract_phase6/extract.zig`: reads `ref/wolf3d-data/` + `ref/doom-data/` and writes loose `.spr`/`.wav` into `id1/`. |
 
 Build-time option:
 

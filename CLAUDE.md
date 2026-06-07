@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Requires Zig (tested on 0.14.1 and 0.16). Shareware assets are committed loose under `id1/` (originally extracted from the freely-redistributable `pak0.pak`, which is no longer shipped); registered episodes 2–4 are not — if you have a `pak1.pak`, drop it alongside and the engine will pick it up. `COM_AddGameDirectory` is patched so the loose directory sits at the head of the searchpath LIFO, i.e. loose files shadow same-named entries in any pak. SDL3 is vendored per-OS — no system install needed. Phase 6 Doom guns extract automatically from the committed reference WAD (`ref/doom-data/DOOM1.WAD`) on first build; outputs are gitignored and regenerated as needed (`rm id1/progs/v_doom*.spr` to force re-extraction). (The Phase 6 Wolf3D guns and their `ref/wolf3d-*` reference trees were removed 2026-06-07; mechanics worth salvaging are noted in `docs/wolf3d-ideas-to-steal.md`.) (The `ref/DOOM-master/` source tree — the diff baseline for the now-finished Doom-gun port — was removed 2026-06-07; the `ref/doom-data/DOOM1.WAD` build input stays. Systemic Doom mechanics worth porting (infighting, sound propagation, deterministic RNG, …) are noted in `docs/doom-ideas-to-steal.md`.)
+Requires Zig (tested on 0.14.1 and 0.16). Shareware assets are committed loose under `id1/` (originally extracted from the freely-redistributable `pak0.pak`, which is no longer shipped); registered episodes 2–4 are not — if you have a `pak1.pak`, drop it alongside and the engine will pick it up. `COM_AddGameDirectory` is patched so the loose directory sits at the head of the searchpath LIFO, i.e. loose files shadow same-named entries in any pak. SDL3 is vendored per-OS — no system install needed. (The Phase 6 Doom **and** Wolf3D guns were removed 2026-06-07, along with their reference data/source trees (`ref/doom-data/`, `ref/DOOM-master/`, `ref/wolf3d-*`) and the `tools/extract_phase6/` asset extractor; the `weapon2`/`items2` second-weapon selector they introduced survives and now hosts only the M8 oil-gun/flamethrower. Mechanics worth salvaging from each are noted in `docs/doom-ideas-to-steal.md` and `docs/wolf3d-ideas-to-steal.md`.)
 
 Supported hosts: **Windows x64** (vendored `SDL3.dll` + `.lib` under `sdlquake/vendor/SDL3-3.4.8/lib/x64/`) and **macOS arm64** (vendored `libSDL3.0.dylib` under `…/lib/macos/`). Linux is untested but the build paths in `build.zig` fall through to system SDL3 via `linkSystemLibrary`.
 
@@ -73,9 +73,8 @@ Platform files (`sdlquake/platform/*.c`) omit `-std=gnu89` (they're written in m
 
 The scene is **100% software-rendered**; the GPU only does present + an 8-bit→
 RGBA **palette-LUT** lookup (and ImGui compositing). The software renderer writes
-palette indices to `vid.buffer` + per-pixel palette-slot ids to `vid_palette_id`
-(Doom gun overlays); `vid_sdl.c::gpu_render_frame` uploads both as `R8_UINT`
-textures + a 3×256 LUT, and a fullscreen-triangle pass
+palette indices to `vid.buffer`; `vid_sdl.c::gpu_render_frame` uploads it as an
+`R8_UINT` texture + a 256-entry LUT, and a fullscreen-triangle pass
 (`shaders/palette.{vert,frag}.glsl`) does the per-pixel lookup. Shaders compile
 at build time (`tools/build_shaders.zig`: glslang→SPIR-V→spirv-cross MSL,
 embedded in a generated `palette_shaders.h`); SPIR-V serves Vulkan (Linux +
@@ -159,7 +158,7 @@ zig build game                           # rebuild only game.dll (fast hot-reloa
 | 3 | ✅ done | Hot-reload (`game_api_t` ABI, `game.dll`) |
 | 4 | ✅ done | Dear ImGui dev overlay |
 | 5 | ✅ done | QuakeC → C (port progs to hot-reloadable game.dll) |
-| 6 | ✅ done | Port Doom1 guns into Quake (sprites, sounds, behaviour). (Wolf3D guns were also ported here, then removed 2026-06-07.) |
+| 6 | ✅ done (guns removed) | Ported Doom1 + Wolf3D guns into Quake (sprites, sounds, behaviour). Both rosters removed 2026-06-07; the `weapon2` selector remains for M8 fire weapons. See `docs/{doom,wolf3d}-ideas-to-steal.md`. |
 | 7 | ✅ done | In-game 3D map editor |
 | 8 | M3–M6 done; M7 stub; M8 done | Immersive-sim systems (physics, reactive AI, wind/smoke, light tier, Blink + Gust, Fire & Oil) |
 
@@ -256,6 +255,5 @@ per-scope table below it. `devoverlay` is the console twin for the F3 toggle.
 
 - `id1/` — Quake PAK files at repo root (required at runtime)
 - `id1/particles/` — data-driven particle-effect presets (`*.pcl`, Quake KV-block); all `*.pcl` here load at startup (globbed via `COM_EnumMatchingFiles`, no index file). Authored in the in-game Particle editor mode (`edit_particle.c`); runtime in `r_emitter.c`.
-- `ref/doom-data/` — Doom 1.9 shareware WAD (read by `zig build extract`)
 - `ref/Quake-master/` — pristine upstream WinQuake (id-Software/Quake), kept as a diff baseline against `sdlquake/engine_src/`
 - `ref/Quake-2-master/`, `ref/Quake-Tools-master/`, `ref/TrenchBroom-master/`, `ref/fteqw-master/`, `ref/quake106/`, `ref/quake_map_source-master/`, `ref/Quake-2-Tools-master/` — upstream references, do not modify
