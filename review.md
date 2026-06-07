@@ -438,8 +438,15 @@ you specifically want to keep as a fallback or as a reference implementation.
 | `TrenchBroom-master/` | 40 MB | Reference for editor design. Was it ever actually grepped? If not, delete. |
 | `fteqw-master/` | 30 MB | Reference engine. Same question. |
 | `Quake-2-master/` | 6.5 MB | Q2 reference. Likely never consulted. |
-| `quake106/` | 8.7 MB | Quake 1.06 source release. Probably superseded by `Quake-master/`. |
 | `Quake-2-Tools-master/` | 1.5 MB | Q2 tools. Likely never consulted. |
+
+_Removed 2026-06-07: `quake106/` (8.7 MB) — NOT a source release; it was the
+Quake Shareware v1.06 DOS binary distribution (a `deice.exe` extractor + a 9 MB
+LHa self-extracting `resource.1` archive of PAK assets + the DOS game binary).
+Useless as a diff/reference baseline (no readable source, won't run on modern
+hosts), and its only content — the shareware assets — is already committed loose
+under `id1/`. Not superseded by `Quake-master/`; they're different kinds of thing
+(source vs. packed installer)._
 
 _Removed 2026-06-07: `wolf3d-data/`, `wolf3d-master/`, `DOOM-master/`, and
 `doom-data/` — both the Wolf3D and Doom gun rosters were dropped, so their
