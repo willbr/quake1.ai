@@ -2,9 +2,13 @@
 //
 // A development-only screen recorder (Mac / Windows desktop). Every rendered
 // frame's 8-bit framebuffer (vid.buffer) is palette-expanded to RGBX and
-// encoded as MPEG-1 with the vendored jo_mpeg writer (each frame is an
-// independent intra-coded sequence — large files, but trivially seekable and
-// zero-dependency).
+// encoded as MPEG-1 with the vendored jo_mpeg writer. Each frame is its own
+// self-contained intra-coded GOP (so frames stay independently encodable for
+// the parallel pipeline below), but the frames form one continuous stream: each
+// GOP carries an incrementing timecode (from its capture index) and a single
+// sequence-end code terminates the file. That makes the clock advance and
+// seeking work in players, and lets strict demuxers (QuickTime) parse past the
+// first frame. Large files, but zero-dependency.
 //
 // Threading / parallel encode: the MPEG-1 DCT is far too slow to run inline on
 // the render thread (it tanked the game to ~1fps), and at the 4x framebuffer
@@ -123,7 +127,7 @@ static int SDLCALL vr_encode_worker(void *unused)
 {
     (void)unused;
     for (;;) {
-        int            idx, w, h, fps, len = 0;
+        int            idx, w, h, fps, fidx, len = 0;
         unsigned char *rgbx, *enc;
 
         SDL_LockMutex(s_mtx);
@@ -132,9 +136,10 @@ static int SDLCALL vr_encode_worker(void *unused)
         idx = q_pop(s_ready_q, &s_ready_head, &s_ready_count);
         s_slots[idx].state = VR_ENCODING;
         rgbx = s_slots[idx].rgbx; w = s_ew; h = s_eh; fps = s_fps;
+        fidx = (int)s_slots[idx].seq;   // capture order -> GOP timecode
         SDL_UnlockMutex(s_mtx);
 
-        enc = jo_encode_mpeg_frame(rgbx, w, h, fps, &len);   // the expensive part, lock-free
+        enc = jo_encode_mpeg_frame(rgbx, w, h, fps, fidx, &len);   // the expensive part, lock-free
 
         SDL_LockMutex(s_mtx);
         s_slots[idx].enc = enc; s_slots[idx].enc_len = len; s_slots[idx].state = VR_DONE;
@@ -160,7 +165,12 @@ static int SDLCALL vr_writer(void *unused)
             if (idx >= 0 || s_quit) break;
             SDL_WaitCondition(s_cv_done, s_mtx);
         }
-        if (idx < 0) { SDL_UnlockMutex(s_mtx); break; }   // quit + nothing left to write
+        if (idx < 0) {   // quit + nothing left to write: terminate the stream
+            SDL_UnlockMutex(s_mtx);
+            if (s_write_seq > 0 && s_fp)   // wrote >=1 frame -> one trailing end-of-sequence
+                jo_mpeg_end_sequence(s_fp);
+            break;
+        }
         enc = s_slots[idx].enc; len = s_slots[idx].enc_len;
         SDL_UnlockMutex(s_mtx);
 

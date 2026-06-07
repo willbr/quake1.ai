@@ -192,7 +192,9 @@ static int jo_processDU(jo_bits_t *bits, float A[64], const unsigned char htdc[9
 }
 
 // Encode one frame's MPEG-1 bitstream into the growable sink `out`.
-static void jo_mpeg_encode(jo_buf_t *out, const unsigned char *rgbx, int width, int height, int fps) {
+// `frame_index` is the frame's 0-based position in the stream; it sets the GOP
+// timecode so players show a progressing clock and can build a seek index.
+static void jo_mpeg_encode(jo_buf_t *out, const unsigned char *rgbx, int width, int height, int fps, int frame_index) {
 	int lastDCY = 128, lastDCCR = 128, lastDCCB = 128;
 	jo_bits_t bits = {out};
 
@@ -210,7 +212,31 @@ static void jo_mpeg_encode(jo_buf_t *out, const unsigned char *rgbx, int width, 
 	else jo_buf_putc(out, 0x18); // 60fps
 	jo_buf_write(out, "\xFF\xFF\xE0\xA0", 4);
 
-	jo_buf_write(out, "\x00\x00\x01\xB8\x80\x08\x00\x40", 8); // GOP header
+	// GOP header. Each frame is its own closed GOP; the timecode is computed
+	// from frame_index so it advances across the stream (a static 00:00:00:00 —
+	// the old behaviour — left every player's clock pinned to 0 and seeking
+	// dead). Layout after the start code (big-endian, 25-bit time_code +
+	// closed_gop + broken_link): drop_frame(1) hours(5) minutes(6) marker(1)
+	// seconds(6) pictures(6) closed_gop(1) broken_link(1) + 5 pad bits.
+	jo_buf_write(out, "\x00\x00\x01\xB8", 4);
+	{
+		int totalsec = frame_index / fps;
+		int pics     = frame_index % fps;          // frame within the second
+		int secs     = totalsec % 60;
+		int mins     = (totalsec / 60) % 60;
+		int hours    = (totalsec / 3600) % 24;
+		unsigned tc  = 0;
+		tc |= (unsigned)(hours & 0x1F) << 26;
+		tc |= (unsigned)(mins  & 0x3F) << 20;
+		tc |= 1u << 19;                            // marker bit (must be 1)
+		tc |= (unsigned)(secs  & 0x3F) << 13;
+		tc |= (unsigned)(pics  & 0x3F) << 7;
+		tc |= 1u << 6;                             // closed_gop
+		jo_buf_putc(out, (tc >> 24) & 0xFF);
+		jo_buf_putc(out, (tc >> 16) & 0xFF);
+		jo_buf_putc(out, (tc >>  8) & 0xFF);
+		jo_buf_putc(out, (tc      ) & 0xFF);
+	}
 	jo_buf_write(out, "\x00\x00\x01\x00\x00\x0C\x00\x00", 8); // PIC header
 	jo_buf_write(out, "\x00\x00\x01\x01", 4); // Slice header
 	jo_writeBits(&bits, 0x10, 6);
@@ -254,22 +280,32 @@ static void jo_mpeg_encode(jo_buf_t *out, const unsigned char *rgbx, int width, 
 			lastDCCR = jo_processDU(&bits, CR, s_jo_HTDC_C, lastDCCR);
 		}
 	}
-	jo_writeBits(&bits, 0, 7);
-	jo_buf_write(out, "\x00\x00\x01\xb7", 4); // End of Sequence
+	jo_writeBits(&bits, 0, 7);   // flush the slice data to a byte boundary so the
+	                             // next frame's start code stays aligned.
+	// NOTE: no per-frame sequence-end code (00 00 01 B7) here. Emitting one after
+	// every frame turned the file into N independent terminated sequences, which
+	// strict demuxers (QuickTime) reject after frame 1. The single trailing
+	// end-of-sequence is written once by jo_mpeg_end_sequence() after the last frame.
 }
 
 // Encode one frame and return a malloc'd buffer of its MPEG-1 bytes. Caller
 // frees. *out_len receives the byte count (0 on allocation failure).
-unsigned char *jo_encode_mpeg_frame(const unsigned char *rgbx, int width, int height, int fps, int *out_len) {
+unsigned char *jo_encode_mpeg_frame(const unsigned char *rgbx, int width, int height, int fps, int frame_index, int *out_len) {
 	jo_buf_t b = {0, 0, 0};
-	jo_mpeg_encode(&b, rgbx, width, height, fps);
+	jo_mpeg_encode(&b, rgbx, width, height, fps, frame_index);
 	if (out_len) *out_len = b.size;
 	return b.data;
 }
 
 // Back-compat: encode one frame straight to a FILE*.
-void jo_write_mpeg(FILE *fp, const unsigned char *rgbx, int width, int height, int fps) {
+void jo_write_mpeg(FILE *fp, const unsigned char *rgbx, int width, int height, int fps, int frame_index) {
 	int len = 0;
-	unsigned char *b = jo_encode_mpeg_frame(rgbx, width, height, fps, &len);
+	unsigned char *b = jo_encode_mpeg_frame(rgbx, width, height, fps, frame_index, &len);
 	if (b) { fwrite(b, 1, (size_t)len, fp); free(b); }
+}
+
+// Write the single MPEG-1 sequence-end code. Call once, after the last frame,
+// to terminate the stream (the per-frame path deliberately omits it).
+void jo_mpeg_end_sequence(FILE *fp) {
+	if (fp) fwrite("\x00\x00\x01\xB7", 1, 4, fp);
 }
